@@ -491,12 +491,12 @@ function props(head) {
   };
   out.push(box('phone', REGION.phone, add(at, mul(side, 0.015)), 0.075, 0.15, 0.012, [0.08, 0.08, 0.09], B.hand_r, [fwd, down, side]));
   out.push(cyl('cup', REGION.cup, add(add(at, mul(side, 0.03)), mul(down, 0.05)), mul(down, -1), 0.032, 0.04, 0.11, [0.93, 0.92, 0.88], B.hand_r));
-  out.push(box('bag', REGION.bag, add(hand, mul(down, 0.26)), 0.34, 0.3, 0.1, [0.8, 0.8, 0.8], B.hand_r, [fwd, down, side]));
+  out.push(box('bag', REGION.bag, add(hand, mul(down, 0.2)), 0.3, 0.26, 0.09, [0.8, 0.8, 0.8], B.hand_r, [fwd, down, side]));
   out.push(box('paper', REGION.paper, add(at, mul(side, 0.02)), 0.3, 0.36, 0.01, [0.86, 0.85, 0.8], B.hand_r, [fwd, down, side]));
   // umbrella: a pole up from the fist, a canopy cone above the head
   const up = mul(down, -1);
-  out.push(cyl('pole', REGION.umbrella, add(at, mul(down, 0.05)), up, 0.012, 0.012, 0.95, [0.15, 0.15, 0.15], B.hand_r, 5, false));
-  out.push(cyl('canopy', REGION.umbrella, add(at, mul(up, 0.68)), up, 0.55, 0.02, 0.28, [0.15, 0.17, 0.25], B.hand_r, 10, false));
+  out.push(cyl('pole', REGION.umbrella, add(at, mul(down, 0.05)), up, 0.012, 0.012, 1.02, [0.15, 0.15, 0.15], B.hand_r, 5, false));
+  out.push(cyl('canopy', REGION.umbrella, add(at, mul(up, 0.8)), up, 0.52, 0.02, 0.24, [0.15, 0.17, 0.25], B.hand_r, 10, false));
   // bike helmet on the head
   const hd = head[B.head];
   out.push(cyl('helmet', REGION.helmet, add(hd, [0, 0.19, -0.01]), [0, 1, 0], 0.135, 0.06, 0.11, [0.9, 0.9, 0.9], B.head, 10, false));
@@ -685,7 +685,8 @@ function clipFrames(cap, body, name) {
     case 'drink': return lock(seg('drink'));
     case 'walkUmbrella': return lock(withArm(walk, held('umbrella'), cap));
     case 'umbrella': return lock(seg('umbrella'));
-    case 'walkCarry': return lock(withArm(walk, { q: (b) => cap.walk.q(0, b), pelvis: cap.walk.pelvis(0) }, cap));
+    // the bag's arm hangs still at the side, as standing (it does not swing with a weight in the hand)
+    case 'walkCarry': return lock(withArm(walk, { q: (b) => cap.lib.idle.q(0, b), pelvis: cap.lib.idle.pelvis(0) }, cap));
     case 'pedal': return Array.from({ length: 30 }, (_, k) => pedalFrame(body, (k / 30) * Math.PI * 2));
   }
   throw new Error(name);
