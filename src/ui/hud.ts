@@ -9,7 +9,7 @@ import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
 import { button, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
-import { LANGUAGES, fmtCount, fmtDec, fmtInt, lang, loose, money, plural, setLang, t } from './i18n.ts';
+import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
 import { mountCompass, type Compass } from './compass.ts';
 import {
   CATS, ShellState, categoriesOf, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
@@ -553,6 +553,7 @@ export class Hud {
       const c = this.current;
       const own = TOOL_KEYS[c] ?? (categoriesOf(c)[0] === 'roads' ? TOOL_KEYS.roads : categoriesOf(c)[0] === 'landscape' ? TOOL_KEYS.terrain : undefined);
       if (own) body.append(keyList(`${t('help.section.tool')}: ${t(`ui.toolName.${c}`)}`, own));
+      if (isTouch()) body.append(keyList(t('ui.touch.title'), [['ui.touch.tapKey', 'ui.touch.tapDo'], ['ui.touch.dragKey', 'ui.touch.dragDo'], ['ui.touch.compassKey', 'ui.touch.compassDo']]));
       body.append(keyList(t('help.section.camera'), CAMERA_KEYS), keyList(t('v2.help.global'), GLOBAL_KEYS));
     }
     const key = titles[id];
@@ -690,7 +691,7 @@ export class Hud {
   setCompass(yaw: number): void { this.compass.point(yaw); }
 
   setHint(text: string): void {
-    const shown = loose(text);
+    const shown = forTouch(loose(text));
     if (this.hint.textContent !== shown) this.hint.textContent = shown;
     this.hint.hidden = !shown;
   }
@@ -703,7 +704,7 @@ export class Hud {
   setView(mode: 'persp' | 'iso'): void { this.view = mode; if (this.popId === 'camera') this.fillPop('camera'); }
 
   toast(text: string): void {
-    this.toastEl.textContent = loose(text);
+    this.toastEl.textContent = forTouch(loose(text));
     this.toastEl.hidden = false;
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => { this.toastEl.hidden = true; }, 2600);

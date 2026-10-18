@@ -110,3 +110,13 @@ export function followLanguage(el: HTMLElement): void {
     }
   }).observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title', 'placeholder', 'aria-label'] });
 }
+
+/** A touch screen (a finger, not a mouse): the hints say "tap" where they say "click". */
+export const isTouch = (): boolean => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+
+/** A hint as a touch player reads it. */
+export function forTouch(s: string): string {
+  if (!isTouch()) return s;
+  const from = t('ui.touch.click'), to = t('ui.touch.tap');
+  return s.split(from).join(to).split(from.toLowerCase()).join(to.toLowerCase());
+}

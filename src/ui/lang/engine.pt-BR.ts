@@ -210,4 +210,13 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.insp.split': "Via dividida em duas.",
   'ui.insp.street': "Nome e numeração da rua",
   'ui.insp.uturn': "Retorno no canteiro",
+  'ui.touch.click': "Clique",
+  'ui.touch.tap': "Toque",
+  'ui.touch.title': "Na tela de toque",
+  'ui.touch.tapKey': "Tocar",
+  'ui.touch.tapDo': "O mesmo que o clique: pôr, escolher, construir",
+  'ui.touch.dragKey': "Arrastar um dedo",
+  'ui.touch.dragDo': "Mover o mapa (com a câmera) ou pincelar (com a ferramenta)",
+  'ui.touch.compassKey': "Arrastar a bússola",
+  'ui.touch.compassDo': "Girar e inclinar a câmera; tocar nela põe o norte para cima",
 };

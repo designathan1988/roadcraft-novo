@@ -48,6 +48,7 @@ import { arrowCode } from './roads/laneLinks.ts';
 import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
+import { installKeys } from './ui/keys.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
@@ -490,6 +491,7 @@ export class Game {
     this.transitView.showPaths = false;
 
     this.bindInput();
+    this.bindResize();
     this.hud.hideLoading();
     if (params.has('grande')) this.hud.toast('Sua placa de vídeo não comporta aquele tamanho de mapa: abri no maior que cabe.');
     if (!this.parts.isWebGPU) this.hud.toast('WebGPU indisponível: rodando no modo de compatibilidade (WebGL 2).');
@@ -930,78 +932,73 @@ export class Game {
       this.rig.zoomAt(Math.exp(delta * 0.0012), this.ndcX(), this.ndcY());
     }, { passive: false });
 
-    window.addEventListener('keydown', (e) => {
-      this.ambient.start();
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && e.code === 'KeyZ') { e.preventDefault(); this.history(e.shiftKey); return; }
-      if (ctrl && e.code === 'KeyY') { e.preventDefault(); this.history(true); return; }
-      if (ctrl && e.code === 'KeyS') { e.preventDefault(); void this.save(); return; }
-      if (ctrl) return;
-      const tools: Record<string, Tool> = {
-        Digit1: 'camera', Digit2: 'road', Digit3: 'curve', Digit4: 'roundabout', Digit5: 'upgrade', Digit6: 'bulldoze',
-        Digit7: 'raise', Digit8: 'lower', Digit9: 'smooth', Digit0: 'flatten',
-      };
-      if (tools[e.code]) { this.setTool(tools[e.code]); return; }
-      if (e.code === 'KeyZ') { this.setTool('zone'); return; }
-      if (e.code === 'KeyY') { this.setTool('move'); return; }
-      if (e.code === 'KeyX') { this.setTool('split'); return; }
-      if (e.code === 'KeyH') { this.setTool('building'); return; }
-      if (e.code === 'KeyB') { this.setTool('bulldoze'); return; }
-      if (e.code === 'KeyO') { this.setTool('transit'); return; }
-      if (e.code === 'KeyT') { this.setTool('raise'); return; }
-      if (e.code === 'KeyL') { this.setTool('transit'); return; }
-      if (this.tool === 'building' && this.selected >= 0) {
-        if (e.code === 'Delete') { this.demolishSelected(); return; }
-        if (e.code === 'PageUp') { e.preventDefault(); this.editSelected(1); return; }
-        if (e.code === 'PageDown') { e.preventDefault(); this.editSelected(-1); return; }
-      }
-      if (e.code === 'F1') { e.preventDefault(); this.hud.toggleHelp(); return; }
-      if (e.code === 'F9') { e.preventDefault(); this.health.toggle(); return; }
-      if (e.code === 'Escape' && this.hud.escape()) return;
-      if (e.code === 'KeyC') { this.toggleFollow(); return; }
-      if (e.code === 'KeyV') { this.setView(this.rig.mode === 'iso' ? 'persp' : 'iso'); return; }
-      if (e.code === 'KeyP') { this.cycleClock(); return; }
-      if (e.code === 'Space') { e.preventDefault(); this.togglePause(); return; }
-      if (e.code === 'KeyK') { this.toggleTrafficView(); return; }
-      if (e.code === (this.settings.roadUp ?? 'PageUp')) { e.preventDefault(); this.setElevation(this.roadTool.elevation + 4); return; }
-      if (e.code === (this.settings.roadDown ?? 'PageDown')) { e.preventDefault(); this.setElevation(this.roadTool.elevation - 4); return; }
-      if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
-        const f = e.code === 'BracketLeft' ? 1 / 1.2 : 1.2;
-        if (this.tool === 'roundabout') this.roadTool.ringBy(f); else this.setRadius(this.brush.radius * f);
-        return;
-      }
-      if (e.code === 'KeyI') { this.setTool('inspect'); return; }
-      if (e.code === 'KeyJ') { this.setTool('streetscape'); return; }
-      if (e.code === 'KeyM') { this.setTool('barrier'); return; }
-      if (this.tool === 'barrier' && e.code === 'Backspace') { this.itemTool.back(); return; }
-      if (this.tool === 'river' && e.code === 'Enter') { this.finishRiver(); return; }
-      if (this.tool === 'building' && this.lotMode === 'poly' && e.code === 'Enter') { this.finishPoly(); return; }
-      if (this.tool === 'building' && this.lotMode === 'poly' && e.code === 'Backspace') { this.polyPts.pop(); return; }
-      if (this.tool === 'river' && e.code === 'Backspace') { this.riverPts.pop(); return; }
-      if (e.code === 'KeyU') { this.setTool('paint'); return; }
-      if (e.code === 'KeyG') { this.setTool('forest'); return; }
-      if (e.code === 'KeyN') { this.setTool('river'); return; }
-      if (this.tool === 'barrier' && e.code === 'Enter') { this.itemTool.cancel(); return; }
-      if (this.tool === 'inspect' && e.code === 'Delete' && this.inspector.seg >= 0) {
-        const j = demolishSeg(this.world, this.inspector.seg);
-        if (j.settle()) this.commands.push(j);
-        return;
-      }
-      if (e.code === 'Escape' && this.vehicles.follow) { this.vehicles.follow = null; return; }
-      if (e.code === 'Escape') {
-        if (this.tool === 'inspect' && (this.inspector.node >= 0 || this.inspector.seg >= 0)) { this.inspector.close(); return; }
-        if (this.tool === 'barrier') { this.itemTool.cancel(); return; }
-        if (this.tool === 'building' && (this.lotPts?.length || this.polyPts.length || this.joinFirst >= 0)) { if (this.lotPts) this.lotPts.length = 0; this.polyPts.length = 0; this.joinFirst = -1; this.preview.hideAll(); return; }
-        if (this.tool === 'river' && this.riverPts.length) { this.riverPts.length = 0; this.preview.hideAll(); return; }
-        if (ROAD_TOOLS.includes(this.tool) && this.roadTool.busy) this.roadTool.cancel();
-        else this.setTool('camera');
-        return;
-      }
-      this.rig.keyDown(e.code);
+    // every key in one table (src/ui/keys.ts); the tool reads its own keys in toolKey
+    installKeys({
+      tool: () => this.tool,
+      setTool: (t) => this.setTool(t),
+      openCategory: (c) => this.hud.openCategory(c),
+      closeMenu: () => this.hud.escape(),
+      closePanel: () => {
+        if (this.optionsPanel.isOpen) { this.optionsPanel.close(); return true; }
+        if (this.health.close()) return true;
+        if (this.hud.catalog.editor.isOpen) { this.hud.catalog.editor.close(); return true; }
+        if (this.inspector.isOpen) { this.inspector.close(); return true; }
+        return false;
+      },
+      cancelStroke: () => {
+        if (this.vehicles.follow) { this.vehicles.follow = null; return true; }
+        if (this.tool === 'barrier') this.itemTool.cancel(); // ItemTool does not say whether a line is being traced: Esc ends it and puts the tool down
+        if (this.tool === 'building' && (this.lotPts?.length || this.polyPts.length || this.joinFirst >= 0)) { if (this.lotPts) this.lotPts.length = 0; this.polyPts.length = 0; this.joinFirst = -1; this.preview.hideAll(); return true; }
+        if (this.tool === 'river' && this.riverPts.length) { this.riverPts.length = 0; this.preview.hideAll(); return true; }
+        if (ROAD_TOOLS.includes(this.tool) && this.roadTool.busy) { this.roadTool.cancel(); return true; }
+        return false;
+      },
+      toolKey: (e) => this.toolKey(e),
+      undo: () => this.history(false),
+      redo: () => this.history(true),
+      save: () => void this.save(),
+      help: () => this.hud.toggleHelp(),
+      health: () => this.health.toggle(),
+      pause: () => this.setSpeed(this.paused ? this.simSpeed : 0),
+      nextSpeed: () => this.setSpeed(this.paused ? this.simSpeed : this.simSpeed === 1 ? 2 : this.simSpeed === 2 ? 4 : 1),
+      toggleIso: () => this.setView(this.rig.mode === 'iso' ? 'persp' : 'iso'),
+      congestion: () => this.toggleTrafficView(),
+      follow: () => this.toggleFollow(),
+      wake: () => this.ambient.start(),
+      camera: this.rig,
     });
-    window.addEventListener('keyup', (e) => this.rig.keyUp(e.code));
-    window.addEventListener('blur', () => this.rig.clearKeys());
+  }
+
+  /** The keys the tool in hand reads itself; false: not one of its keys (the table goes on). */
+  private toolKey(e: KeyboardEvent): boolean {
+    const t = this.tool, c = e.code;
+    if (t === 'building' && this.selected >= 0) {
+      if (c === 'Delete') { this.demolishSelected(); return true; }
+      if (c === 'PageUp' || c === 'PageDown') { this.editSelected(c === 'PageUp' ? 1 : -1); return true; }
+    }
+    if (t === 'building' && this.lotMode === 'poly' && c === 'Enter') { this.finishPoly(); return true; }
+    if (t === 'building' && this.lotMode === 'poly' && c === 'Backspace') { this.polyPts.pop(); return true; }
+    if (t === 'barrier' && c === 'Backspace') { this.itemTool.back(); return true; }
+    if (t === 'barrier' && c === 'Enter') { this.itemTool.cancel(); return true; }
+    if (t === 'river' && c === 'Enter') { this.finishRiver(); return true; }
+    if (t === 'river' && c === 'Backspace') { this.riverPts.pop(); return true; }
+    if (t === 'inspect' && (c === 'Delete' || c === 'Backspace') && this.inspector.seg >= 0) {
+      const j = demolishSeg(this.world, this.inspector.seg);
+      if (j.settle()) this.commands.push(j);
+      return true;
+    }
+    const road = ROAD_TOOLS.includes(t) && t !== 'bulldoze';
+    if (road && c === (this.settings.roadUp ?? 'PageUp')) { this.setElevation(this.roadTool.elevation + 4); return true; }
+    if (road && c === (this.settings.roadDown ?? 'PageDown')) { this.setElevation(this.roadTool.elevation - 4); return true; }
+    if (c === 'BracketLeft' || c === 'BracketRight') {
+      const f = c === 'BracketLeft' ? 1 / 1.2 : 1.2;
+      if (t === 'roundabout') { this.roadTool.ringBy(f); return true; }
+      if (TERRAIN_TOOLS.includes(t) || GROUND_TOOLS.includes(t) || t === 'sky' || t === 'zone') { this.setRadius(this.brush.radius * f); return true; }
+    }
+    return false;
+  }
+
+  private bindResize(): void {
     window.addEventListener('resize', () => {
       this.parts.renderer.setSize(window.innerWidth, window.innerHeight, false);
       this.rig.resize(window.innerWidth, window.innerHeight);

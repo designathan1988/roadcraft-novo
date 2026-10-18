@@ -43,6 +43,7 @@ export const SCENES = {
   'inspetor-cruzamento': scene(`click('[data-cat=info]');await W(200);const n=g.world.roads,c=n.nodes.cols;let best=-1,bd=1e9;for(let i=0;i<n.nodes.alive.length;i++){if(!n.nodes.alive[i]||c.deg[i]<3)continue;const d=Math.hypot(c.x[i]-g.rig.target.x,c.z[i]-g.rig.target.z);if(d<bd){bd=d;best=i;}}g.inspector.pick(c.x[best],c.z[best]);await W(1500)`),
   'editor-secao': scene(`click('[data-cat=roads]');await W(300);click('.rc-card.on .rc-custom.edit');await W(300);Q('.section-canvas').dispatchEvent(new MouseEvent('click',{clientX:Q('.section-canvas').getBoundingClientRect().left+Q('.section-canvas').getBoundingClientRect().width*0.5,clientY:Q('.section-canvas').getBoundingClientRect().top+40,bubbles:true}))`),
   'construir-predio': scene(`click('[data-cat=build]');await W(200);const b=g.world.buildings,c=b.cols;let best=-1,bd=1e9;for(let i=0;i<b.alive.length;i++){if(!b.alive[i]||c.floors[i]<3)continue;const d=Math.hypot(c.x[i]-g.rig.target.x,c.z[i]-g.rig.target.z);if(d<bd){bd=d;best=i;}}g.select(best)`),
+  'teclas': scene(`const key=(c)=>window.dispatchEvent(new KeyboardEvent('keydown',{code:c,key:c,bubbles:true}));key('KeyT');await W(200);key('F1');await W(200);click('[data-pop=menu]');await W(200);key('Escape');await W(200);key('F1')`),
   'ingles': scene(`click('[data-cat=roads]')`),
 };
 

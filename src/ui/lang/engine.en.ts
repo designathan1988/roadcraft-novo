@@ -210,4 +210,13 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.insp.split': "Road split in two.",
   'ui.insp.street': "Street name and numbering",
   'ui.insp.uturn': "U-turn in the median",
+  'ui.touch.click': "Click",
+  'ui.touch.tap': "Tap",
+  'ui.touch.title': "On a touch screen",
+  'ui.touch.tapKey': "Tap",
+  'ui.touch.tapDo': "Same as a click: place, pick, build",
+  'ui.touch.dragKey': "Drag one finger",
+  'ui.touch.dragDo': "Move the map (camera) or brush (with a tool)",
+  'ui.touch.compassKey': "Drag the compass",
+  'ui.touch.compassDo': "Turn and tilt the camera; tap it to face north",
 };
