@@ -1729,6 +1729,9 @@ export class Game {
       mapPaint: (style) => { this.settings.paint = style; setPaintStyle(style); this.unsaved = true; },
       lineColor: (color) => { const c = this.transit.setColor(this.lineSel, color); if (c) this.commands.run(c); },
       lineLoop: (loop) => { const c = this.transit.setLoop(this.lineSel, loop); if (c) this.commands.run(c); },
+      impossibleNodes: () => this.world.impossible.count,
+      impossibleAngle: (n) => this.world.impossible.angleAt(n),
+      impossibleList: () => { const nc = this.world.roads.nodes.cols, out: number[] = []; for (const [n, a] of this.world.impossible.nodes) out.push(n, nc.x[n], nc.z[n], a); return out; },
     };
   }
 

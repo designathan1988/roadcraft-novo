@@ -165,6 +165,8 @@ export class RoadNetwork {
 
   /** Controle do cruzamento escolhido pelo jogador (null = automático). */
   setJunction(id: number, spec: JunctionSpec | null): void {
+    // a missing node (−1 from a search that found nothing, or one already removed) is refused clearly
+    if (!(id >= 0) || !this.nodes.alive[id]) throw new Error(`setJunction: node ${id} does not exist`);
     if (spec) this.junctions.set(id, spec); else this.junctions.delete(id);
     // escolha nova: a simulação mede de novo
     this.flow.delete(id);

@@ -10,6 +10,7 @@ import { SHAPE_MAX, SHAPE_SCALE, SHAPE_STRIDE, emptyBoxes, type BoxColumns } fro
 import { MinuteHeap, decayTenths, nextTenthAt } from './decay.ts';
 import { RoadNetwork } from '../roads/network.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
+import { ImpossibleNodes } from '../roads/impossible.ts';
 
 /** Prédios. No marco 1 só caixas genéricas; o gerador procedural entra no marco 4. */
 export const buildingSchema = {
@@ -89,6 +90,8 @@ export class World {
   readonly cellBuildings = new Uint32Array(CELL_COUNT);
 
   readonly roads: RoadNetwork;
+  /** Nodes where two neighbouring roads meet under 25° (the top bar's warning), kept from the network's changes. */
+  readonly impossible: ImpossibleNodes;
   /** Itens de rua postos pelo jogador. */
   readonly items: StreetItems;
   /** Polygon lot corners, SHAPE_STRIDE int16 (decimetres, lot frame) per building id. */
@@ -102,6 +105,7 @@ export class World {
 
   constructor() {
     this.roads = new RoadNetwork(this);
+    this.impossible = new ImpossibleNodes(this.roads);
     this.items = new StreetItems(this);
     this.heightsSab = createHeightBuffer();
     this.heights = new Float32Array(this.heightsSab);
