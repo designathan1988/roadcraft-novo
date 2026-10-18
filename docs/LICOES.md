@@ -67,3 +67,36 @@ documentos da 2.0 registram item atrás de item "feito" e depois "desfeito (regr
 - Geometria de cruzamento: um corte por ponta alimentando boca, zebra, linha de parada e calçada; fases de semáforo
   pela matriz de conflito; amarelo pelo ITE; regras do CTB; números de via com fonte (`roads/tuning.ts`).
 - Testes de escala por contagem de trabalho (N contra 4N) e o analisador de "laço do mapa dentro de laço do mapa".
+
+## D. Da auditoria de 2026-10-18 do Roadcraft 4.0 (794 KB, 601 achados, nenhum medido em jogo): o que ainda vale aqui
+O relatório é sobre o código abandonado; 90 % dele não se aplica a este motor. Estes padrões sim, porque qualquer um
+pode repeti-los no motor novo, e cada um foi visto lá linha a linha:
+1. **Cache de sombra invalidado pela matriz da câmera** em vez de pelo conjunto de projetores; vegetação que balança
+   tratada como "sempre em movimento" mesmo sem vento; um efeito (`fx.busy`) forçando redesenho total por 12-50 s
+   depois de acabar. Aqui: cascata só redesenha quando um projetor dela mudou; vento zero = estático.
+2. **Peças pequenas instanciadas uma a uma** (caixas de 4-24 vértices, um `InstancedMesh` por tipo × banda × trecho,
+   ~28 materiais; veículos com centenas de lotes por estilo × peça × nível; multidão com um material por classe ×
+   item × nível). Medido pelo jogador: 2,6 ms instanciadas contra 0,6 ms unidas. Aqui: peça pequena vai unida na
+   malha da célula; só o que é grande e repetido vai no pool de props.
+3. **Um upload de textura por entidade por quadro** (`texSubImage2D` por pessoa, por linha, por lote). Aqui: um
+   upload por textura e quadro, por bloco ou inteira.
+4. **Custo por pixel ignorado:** o quadro era limitado por pixels (22,9 ms tanto a 3 M quanto a 13 M de triângulos);
+   MSAA 8× em RGBA16F com SMAA por cima, ruído de desgaste com 40-48 `sin` por pixel, vidro e terreno desenhados
+   antes do que os cobre (sem early-Z), passes de tela cheia não fundidos, névoa em raymarch de 36 passos. Aqui:
+   opacos baratos primeiro, vidro e água por último; ruído assado em textura; um passe de saída.
+5. **LOD recalculado todo quadro sem dirty flag** (olho, frustum, escala iguais → devia pular). Aqui: `CellLayer`
+   compara antes de refazer.
+6. **Laço de quadro em taxa cheia parado e minimizado** (40-124 quadros/s sem nada se mover; 4-16 ms/quadro com a
+   janela minimizada no Electron). Aqui: desenha quando algo visível muda; minimizado não desenha.
+7. **Invalidação errada refazendo o mapa** (uma pincelada de terreno zerava a região e refazia tudo; um bloco de via
+   reconstruía 15 tiles vizinhos; a folha de placas repintada inteira; desgaste re-assando a célula inteira). Aqui:
+   teste de escala por contagem: uma edição custa o mesmo numa cidade de N e de 4N.
+8. **Trabalho de abertura em série e na página** (renderer e worker um depois do outro, zstd no main, "nova cidade"
+   gerada no main por 1-8 s, cache derivado apagado a cada release). Aqui: geração e descompressão em worker;
+   renderer e simulação sobem em paralelo.
+9. **Qualidade "auto" que nunca agia** e **ferramentas de medição que mediam errado** (profiler congelava a
+   simulação, orçamento somava os draws de aquecimento, VRAM sem mips/alvos/canvas: 200-750 MB invisíveis). Aqui:
+   `game.stats()` conta tudo o que está vivo; nenhum governador automático de qualidade (ele muda a cena no meio da
+   medição).
+10. **Texturas RGBA8 sem compressão e pacote com assets duplicados** (300-370 MB a mais). Aqui: formato por
+    conteúdo (R8, RG8), KTX2/BC7 quando entrar textura de arquivo, `cooked/` uma vez só.

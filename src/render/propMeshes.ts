@@ -7,7 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
 
-export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Impostor: 30, Paint: 31 } as const;
+export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, Impostor: 30, Paint: 31 } as const;
 /** Faces por variante: Sign0 … Sign0 + 15. */
 export const FACE_LAST = PMAT.Sign0 + 15;
 /** Partes de placa: acabamento Sign0 + variante (o shader some com as das outras variantes). */
@@ -106,13 +106,29 @@ function lamp(double: boolean): PropDef {
   return { lods: [near, mid, far], dist: [220, 750, 2200], radius: 5 };
 }
 
-function signalHead(x: number, y: number, z: number, big: boolean): THREE.BufferGeometry[] {
+/**
+ * Signal head as Roadcraft's (`signals.ts`): housing, lenses with a hood over each on BOTH faces (seen from the
+ * approach and from across the junction), and on the front a black backplate with a white border.
+ */
+function signalHead(x: number, y: number, z: number, big: boolean, detail = true): THREE.BufferGeometry[] {
   const k = big ? 1 : 0.8;
   const out = [part(box(0.36 * k, 1.0 * k, 0.28 * k), 0x23262a, PMAT.Metal, x, y, z)];
+  if (detail) {
+    out.push(part(box(0.62 * k, 1.22 * k, 0.02), 0xe8e8e4, PMAT.Plain, x, y - 0.11 * k, z - 0.155 * k));
+    out.push(part(box(0.56 * k, 1.16 * k, 0.02), 0x15171a, PMAT.Plain, x, y - 0.08 * k, z - 0.14 * k));
+  }
   const bulbs: Array<[number, number]> = [[PMAT.Red, 0.78], [PMAT.Yellow, 0.5], [PMAT.Green, 0.22]];
-  for (const [mat, h] of bulbs) {
-    const color = mat === PMAT.Red ? 0xd03a2a : mat === PMAT.Yellow ? 0xe0a020 : 0x2fbf5a;
-    out.push(part(new THREE.CylinderGeometry(0.11 * k, 0.11 * k, 0.06, 10).rotateX(Math.PI / 2), color, mat, x, y + h * k, z + 0.15 * k));
+  for (const face of detail ? [1, -1] : [1]) {
+    for (const [mat, h] of bulbs) {
+      const color = mat === PMAT.Red ? 0xd03a2a : mat === PMAT.Yellow ? 0xe0a020 : 0x2fbf5a;
+      const lz = z + face * 0.15 * k;
+      out.push(part(new THREE.CylinderGeometry(0.11 * k, 0.11 * k, 0.06, 10).rotateX(Math.PI / 2), color, mat, x, y + h * k, lz));
+      if (detail) {
+        // hood: half a tube over the lens
+        const hood = new THREE.CylinderGeometry(0.135 * k, 0.135 * k, 0.2 * k, 10, 1, true, -Math.PI / 2, Math.PI).rotateX(Math.PI / 2);
+        out.push(part(hood, 0x1b1d20, PMAT.Metal, x, y + h * k, lz + face * 0.1 * k));
+      }
+    }
   }
   return out;
 }
@@ -128,7 +144,7 @@ function signal(): PropDef {
   const mid = merge([
     part(box(0.2, 5.8, 0.2), 0x3a3e42, PMAT.Metal),
     part(box(3.6, 0.15, 0.15), 0x3a3e42, PMAT.Metal, -1.8, 5.5, 0),
-    ...signalHead(-3.2, 4.6, 0.05, true),
+    ...signalHead(-3.2, 4.6, 0.05, true, false),
   ]);
   return { lods: [near, mid, null], dist: [260, 1100, 0], radius: 5 };
 }
@@ -159,54 +175,114 @@ function wire(): PropDef {
   return { lods: [near, null, null], dist: [90, 0, 0], radius: 40 };
 }
 
-/** Placa: poste e as faces de todas as variantes (cada vértice sabe a sua; o shader mostra só a da instância). */
+/** Sign atlas: COLS × ROWS cells of CELL px, drawn once at load (`buildSignAtlas`). */
+export const SIGN_ATLAS = { COLS: 8, ROWS: 3, CELL: 128 } as const;
+/** Atlas cells: speed limits 20…120 km/h in cells 0…10, then the other faces. */
+export const ATLAS_CELL = { Stop: 11, Yield: 12, NoParking: 13, NoEntry: 14, Pedestrian: 15, School: 16, Direction: 17, Info: 18, OneWay: 19 } as const;
+/**
+ * Face of each sign variant (by SIGN): half width, half height, centre height (m) and atlas cell (−1 = speed, from
+ * the key; −2 = no atlas face, the street-name blades are geometry). The face is one quad cut by the atlas' alpha.
+ */
+export const SIGN_FACES: Array<[number, number, number, number]> = (() => {
+  const f: Array<[number, number, number, number]> = Array.from({ length: 16 }, () => [0, 0, 0, -2]);
+  f[SIGN.Speed] = [0.36, 0.36, 2.25, -1];
+  f[SIGN.Yield] = [0.44, 0.44, 2.2, ATLAS_CELL.Yield];
+  f[SIGN.Stop] = [0.38, 0.38, 2.2, ATLAS_CELL.Stop];
+  f[SIGN.NoParking] = [0.36, 0.36, 2.25, ATLAS_CELL.NoParking];
+  f[SIGN.NoEntry] = [0.36, 0.36, 2.25, ATLAS_CELL.NoEntry];
+  f[SIGN.Pedestrian] = [0.4, 0.4, 2.0, ATLAS_CELL.Pedestrian];
+  f[SIGN.School] = [0.4, 0.4, 2.0, ATLAS_CELL.School];
+  f[SIGN.Direction] = [0.66, 0.3, 2.25, ATLAS_CELL.Direction];
+  f[SIGN.Info] = [0.32, 0.32, 2.05, ATLAS_CELL.Info];
+  f[SIGN.OneWay] = [0.42, 0.14, 2.2, ATLAS_CELL.OneWay];
+  return f;
+})();
+
+/** Draws the sign faces (Brazilian CTB look: R-1 stop, R-2 yield, R-19 speed…), alpha = the sign's outline. */
+export function buildSignAtlas(): THREE.Texture {
+  const { COLS, ROWS, CELL } = SIGN_ATLAS;
+  const cv = document.createElement('canvas');
+  cv.width = COLS * CELL; cv.height = ROWS * CELL;
+  const g = cv.getContext('2d')!;
+  const RED = '#c8241c', WHITE = '#f4f4f0', BLACK = '#161616', YELLOW = '#f2c21a', BLUE = '#1f4f9a', GREEN = '#1d6b3a';
+  const cell = (k: number, aspect: number, draw: (w: number, h: number) => void) => {
+    const x = (k % COLS) * CELL, y = Math.floor(k / COLS) * CELL;
+    g.save();
+    // the quad shows the whole cell: a wide sign is drawn squeezed and stretched back on the quad
+    g.translate(x + CELL / 2, y + CELL / 2);
+    g.scale(1, aspect);
+    draw(CELL, CELL);
+    g.restore();
+  };
+  const disc = (r: number, fill: string) => { g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fillStyle = fill; g.fill(); };
+  const poly = (n: number, r: number, rot: number, fill: string) => {
+    g.beginPath();
+    for (let i = 0; i < n; i++) { const a = rot + i * Math.PI * 2 / n; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+    g.closePath(); g.fillStyle = fill; g.fill();
+  };
+  const text = (s: string, size: number, fill: string, dy = 0) => {
+    g.fillStyle = fill; g.font = `bold ${size}px Arial, Helvetica, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(s, 0, dy);
+  };
+  const walker = (s: number, fill: string, dx = 0) => {
+    g.fillStyle = fill; g.strokeStyle = fill; g.lineWidth = 5 * s; g.lineCap = 'round';
+    g.beginPath(); g.arc(dx, -22 * s, 6 * s, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.moveTo(dx, -14 * s); g.lineTo(dx - 2 * s, 6 * s);
+    g.moveTo(dx - 2 * s, 6 * s); g.lineTo(dx - 10 * s, 24 * s); g.moveTo(dx - 2 * s, 6 * s); g.lineTo(dx + 8 * s, 24 * s);
+    g.moveTo(dx - 12 * s, -2 * s); g.lineTo(dx, -10 * s); g.lineTo(dx + 12 * s, -4 * s); g.stroke();
+  };
+  for (let i = 0; i <= 10; i++) cell(i, 1, () => { disc(62, RED); disc(48, WHITE); text(String(20 + i * 10), i >= 8 ? 40 : 50, BLACK, 2); });
+  cell(ATLAS_CELL.Stop, 1, () => { poly(8, 62, Math.PI / 8, WHITE); poly(8, 56, Math.PI / 8, RED); text('PARE', 34, WHITE, 2); });
+  cell(ATLAS_CELL.Yield, 1, () => {
+    // R-2: inverted triangle, red border, white inside
+    g.translate(0, -8); poly(3, 70, Math.PI / 2, RED); poly(3, 44, Math.PI / 2, WHITE);
+  });
+  cell(ATLAS_CELL.NoParking, 1, () => {
+    disc(62, RED); disc(48, WHITE); text('E', 58, BLACK, 3);
+    g.strokeStyle = RED; g.lineWidth = 11; g.beginPath(); g.moveTo(-34, -34); g.lineTo(34, 34); g.stroke();
+  });
+  cell(ATLAS_CELL.NoEntry, 1, () => { disc(62, RED); g.fillStyle = WHITE; g.fillRect(-44, -11, 88, 22); });
+  cell(ATLAS_CELL.Pedestrian, 1, () => { g.rotate(Math.PI / 4); g.fillStyle = BLACK; g.fillRect(-45, -45, 90, 90); g.fillStyle = YELLOW; g.fillRect(-41, -41, 82, 82); g.rotate(-Math.PI / 4); walker(1.3, BLACK); });
+  cell(ATLAS_CELL.School, 1, () => { g.rotate(Math.PI / 4); g.fillStyle = BLACK; g.fillRect(-45, -45, 90, 90); g.fillStyle = YELLOW; g.fillRect(-41, -41, 82, 82); g.rotate(-Math.PI / 4); walker(1.0, BLACK, -14); walker(0.8, BLACK, 16); });
+  cell(ATLAS_CELL.Direction, 0.45, () => {
+    g.fillStyle = WHITE; g.fillRect(-64, -64, 128, 128); g.fillStyle = GREEN; g.fillRect(-60, -60, 120, 120);
+    text('Centro', 30, WHITE, -18);
+    g.fillStyle = WHITE; g.fillRect(-30, 18, 50, 12); poly(3, 18, 0, WHITE); g.translate(28, 24); poly(3, 16, 0, WHITE);
+  });
+  cell(ATLAS_CELL.Info, 1, () => { g.fillStyle = BLUE; g.fillRect(-60, -60, 120, 120); g.fillStyle = WHITE; g.fillRect(-56, -56, 112, 112); g.fillStyle = BLUE; g.fillRect(-52, -52, 104, 104); text('i', 80, WHITE, 6); });
+  cell(ATLAS_CELL.OneWay, 0.34, () => {
+    g.fillStyle = WHITE; g.fillRect(-64, -64, 128, 128); g.fillStyle = BLACK; g.fillRect(-60, -58, 120, 116);
+    g.fillStyle = WHITE; g.fillRect(-44, -14, 70, 28); g.translate(34, 0); poly(3, 34, 0, WHITE);
+  });
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  return t;
+}
+
+/**
+ * Sign: post, the face as one quad per side (front from the atlas, back the same outline in grey metal: the shader
+ * sizes it per variant from SIGN_FACES and hides it for the street-name blades), and the street-name blades.
+ */
 function sign(): PropDef {
+  const quad = (back: boolean) => {
+    const g = new THREE.PlaneGeometry(2, 2);
+    if (back) g.rotateY(Math.PI);
+    g.translate(0, 0, back ? 0.03 : 0.045);
+    return part(g, back ? 0x7d8287 : 0xffffff, PMAT.Atlas);
+  };
   const v = (k: number) => PMAT.Sign0 + k;
-  const disk = (r: number) => new THREE.CylinderGeometry(r, r, 0.02, 20).rotateX(Math.PI / 2);
-  const tri = (r: number) => new THREE.CylinderGeometry(r, r, 0.02, 3).rotateX(Math.PI / 2).rotateZ(Math.PI);
   const parts = [
     part(cyl(0.04, 0.04, 2.6, 6), 0x8a8e92, PMAT.Metal),
-    // velocidade: disco vermelho, miolo branco, "60" em barras
-    part(disk(0.34), 0xc8241c, v(SIGN.Speed), 0, 2.25, 0.03),
-    part(disk(0.27), 0xf2f2ee, v(SIGN.Speed), 0, 2.25, 0.045),
-    part(box(0.05, 0.24, 0.01), 0x1a1a1a, v(SIGN.Speed), -0.08, 2.13, 0.056),
-    part(box(0.07, 0.24, 0.01), 0x1a1a1a, v(SIGN.Speed), 0.08, 2.13, 0.056),
-    // dê a preferência: triângulo vermelho, miolo branco
-    part(tri(0.42), 0xc8241c, v(SIGN.Yield), 0, 2.2, 0.03),
-    part(tri(0.3), 0xf2f2ee, v(SIGN.Yield), 0, 2.2, 0.045),
-    // pare: octógono vermelho com faixa branca
-    part(new THREE.CylinderGeometry(0.36, 0.36, 0.02, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8), 0xc8241c, v(SIGN.Stop), 0, 2.2, 0.03),
-    part(box(0.44, 0.1, 0.01), 0xf2f2ee, v(SIGN.Stop), 0, 2.2, 0.046),
-    // proibido estacionar: disco azul com aro e faixa vermelhos
-    part(disk(0.34), 0xc8241c, v(SIGN.NoParking), 0, 2.25, 0.03),
-    part(disk(0.27), 0x1f4f9a, v(SIGN.NoParking), 0, 2.25, 0.045),
-    part(box(0.5, 0.06, 0.01).rotateZ(Math.PI / 4), 0xc8241c, v(SIGN.NoParking), 0, 2.15, 0.056),
-    // sentido proibido: disco vermelho com barra branca
-    part(disk(0.34), 0xc8241c, v(SIGN.NoEntry), 0, 2.25, 0.03),
-    part(box(0.46, 0.1, 0.01), 0xf2f2ee, v(SIGN.NoEntry), 0, 2.2, 0.046),
-    // pedestres e escola: losango amarelo com figura preta
-    part(box(0.5, 0.5, 0.02).rotateZ(Math.PI / 4), 0xf2c21a, v(SIGN.Pedestrian), 0, 1.9, 0.03),
-    part(box(0.06, 0.24, 0.01), 0x161616, v(SIGN.Pedestrian), 0, 2.13, 0.045),
-    part(box(0.5, 0.5, 0.02).rotateZ(Math.PI / 4), 0xf2c21a, v(SIGN.School), 0, 1.9, 0.03),
-    part(box(0.06, 0.2, 0.01), 0x161616, v(SIGN.School), -0.07, 2.15, 0.045),
-    part(box(0.06, 0.16, 0.01), 0x161616, v(SIGN.School), 0.08, 2.15, 0.045),
-    // direção: placa verde larga
-    part(box(1.2, 0.5, 0.03), 0x1d6b3a, v(SIGN.Direction), 0, 2.2, 0.03),
-    part(box(0.9, 0.05, 0.01), 0xf2f2ee, v(SIGN.Direction), 0, 2.5, 0.05),
-    part(box(0.7, 0.05, 0.01), 0xf2f2ee, v(SIGN.Direction), -0.1, 2.35, 0.05),
-    // informação: placa azul
-    part(box(0.6, 0.6, 0.03), 0x1f4f9a, v(SIGN.Info), 0, 2.0, 0.03),
-    part(box(0.12, 0.3, 0.01), 0xf2f2ee, v(SIGN.Info), 0, 2.05, 0.05),
-    // nome da rua: duas lâminas azuis cruzadas
+    quad(false), quad(true),
+    // street name: two crossed blue blades with a white rule (geometry, only on that variant)
     part(box(1.1, 0.22, 0.03), 0x1f4f9a, v(SIGN.Name), 0, 2.45, 0),
     part(box(0.03, 0.22, 1.1), 0x1f4f9a, v(SIGN.Name), 0, 2.2, 0),
     part(box(0.9, 0.05, 0.035), 0xf2f2ee, v(SIGN.Name), 0, 2.53, 0),
-    // mão única: preta com seta branca
-    part(box(0.75, 0.25, 0.02), 0x161616, v(SIGN.OneWay), 0, 2.2, 0.03),
-    part(box(0.45, 0.06, 0.01), 0xf2f2ee, v(SIGN.OneWay), -0.04, 2.3, 0.042),
-    part(new THREE.CylinderGeometry(0.1, 0.1, 0.01, 3).rotateX(Math.PI / 2).rotateZ(-Math.PI / 2), 0xf2f2ee, v(SIGN.OneWay), 0.22, 2.325, 0.042),
   ];
-  return { lods: [merge(parts), null, null], dist: [120, 0, 0], radius: 1.5 };
+  return { lods: [merge(parts), null, null], dist: [140, 0, 0], radius: 1.5 };
 }
 
 /** Poste de rede elétrica sem luminária (linhas desenhadas pelo jogador). */
