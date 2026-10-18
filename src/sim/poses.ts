@@ -4,7 +4,10 @@
 //
 // Cada registro guarda a pose anterior e a atual, para a página interpolar.
 
-export const POSE_STRIDE = 10; // px, py, pz, pyaw, x, y, z, yaw, tipo*256+cor, opacidade
+/** px, py, pz, pyaw, x, y, z, yaw, type*256+colour, opacity, look. The 11th number (index 10, added at the end) is a
+ * 16-bit appearance id (0..65535): stable per pedestrian (drawn when it is born), the vehicle id for vehicles and
+ * a hash for people waiting at stops. The people renderer picks body, clothes and hair from it. */
+export const POSE_STRIDE = 11;
 export const MAX_AGENTS = 1 << 17; // 131 072 carros + pessoas na janela micro
 
 const STATE = 0; // bits 0-1: índice do meio; bit 2: novo

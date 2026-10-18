@@ -53,6 +53,8 @@ const schema = {
   // nó para onde anda (lista da janela)
   node: Int32Array, next: Int32Array, prev: Int32Array,
   speed: Float32Array, color: Uint8Array,
+  // appearance id (16 bits) for the people renderer: drawn when the pedestrian is born, published at pose index 10
+  look: Uint16Array,
   // última posição publicada (para interpolar)
   px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array,
   // viagem de ônibus: linha (-1 = só a pé), parada de embarque e de descida
@@ -292,7 +294,7 @@ export class Peds {
     if (len < 1 || this.routes[r + len] !== b) { this.t.release(p); return false; }
     c.rLen[p] = len + 1; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = 1.1 + this.rng.next() * 0.55;
-    c.color[p] = this.rng.int(0, 16);
+    c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = side;
     c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0;
     c.bike[p] = 0;
@@ -346,7 +348,7 @@ export class Peds {
     if (len < 2 || !nc.deg[a]) { this.t.release(p); return false; }
     c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = 4 + this.rng.next() * 1.6;
-    c.color[p] = this.rng.int(0, 16);
+    c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = 1;
     c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0;
     c.bike[p] = 1; c.enter[p] = 0;
@@ -377,7 +379,7 @@ export class Peds {
     if (len < 2 || this.routes[p * ROUTE + len - 1] !== b) { this.t.release(p); return; }
     c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = 1.1 + this.rng.next() * 0.55;
-    c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16);
+    c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = this.rng.next() < 0.5 ? 1 : -1;
     c.tLine[p] = li; c.tFrom[p] = from; c.tTo[p] = to;
     c.bike[p] = 0; c.enter[p] = 0;
@@ -676,6 +678,7 @@ export class Peds {
         data[o + 4] = q[0]; data[o + 5] = q[1]; data[o + 6] = q[2]; data[o + 7] = q[3];
         data[o + 8] = (c.bike[p] ? 5 : 3) * 256 + c.color[p];
         data[o + 9] = 1;
+        data[o + 10] = c.look[p];
         c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.pyaw[p] = q[3];
         n++;
       }

@@ -2056,6 +2056,7 @@ export class Traffic {
           data[o + 4] = px; data[o + 5] = ln.stopY[i]; data[o + 6] = pz; data[o + 7] = fy;
           data[o + 8] = 3 * 256 + ((k * 5 + i) % 16);
           data[o + 9] = 1;
+          data[o + 10] = (Math.imul(ln.id * 131 + i * 31 + k, 2654435761) >>> 16) & 0xffff;
           n++;
         }
       }
@@ -2149,6 +2150,7 @@ export class Traffic {
       data[o] = prev[q]; data[o + 1] = prev[q + 1]; data[o + 2] = prev[q + 2]; data[o + 3] = prev[q + 3];
       data[o + 4] = fx; data[o + 5] = p[1]; data[o + 6] = fz; data[o + 7] = yaw;
       data[o + 8] = 4 * 256 + c.color[v] + (k === 0 ? 128 : 0);
+      data[o + 10] = v & 0xffff;
       data[o + 9] = Math.max(0, Math.min(1, c.fade[v]));
       prev[q] = fx; prev[q + 1] = p[1]; prev[q + 2] = fz; prev[q + 3] = yaw;
       n++;
@@ -2232,6 +2234,7 @@ export class Traffic {
       const seats = c.kind[v] === 1 ? Math.min(7, Math.ceil(c.load[v] / BUS_CAP * 7)) : c.kind[v] === 3 ? 0 : 1;
       data[o + 8] = c.kind[v] * 256 + c.color[v] + (this.lightBits(v, lights) + seats * 8) * 65536;
       data[o + 9] = Math.max(0, Math.min(1, c.fade[v]));
+      data[o + 10] = v & 0xffff;
       c.px[v] = p[0]; c.py[v] = p[1]; c.pz[v] = p[2]; c.pyaw[v] = p[3];
       n++;
     }
