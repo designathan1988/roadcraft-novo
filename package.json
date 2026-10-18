@@ -1,0 +1,34 @@
+{
+  "name": "roadcraft",
+  "private": true,
+  "version": "5.0.0",
+  "description": "Roadcraft: jogo de construir cidades grandes no navegador",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc",
+    "start": "vite build && node tools/serve.mjs",
+    "test": "node --test test/*.test.ts",
+    "shaders": "node tools/shadercheck/check.mjs ./mats.mjs && WHICH=glsl node tools/shadercheck/check.mjs ./mats.mjs",
+    "electron": "vite build && electron .",
+    "shot": "vite build && tools/shot.sh",
+    "package:win": "vite build && node tools/package.mjs win32",
+    "package:linux": "vite build && node tools/package.mjs linux"
+  },
+  "dependencies": {
+    "steamworks.js": "^0.4.0",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.186.0",
+    "electron": "^44.7.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4"
+  },
+  "author": "Roadcraft",
+  "productName": "Roadcraft"
+}

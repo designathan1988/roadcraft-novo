@@ -1,0 +1,2034 @@
+// Junta tudo: mundo, workers, câmera, desenho, ferramentas, salvar e carregar.
+// A página só faz entrada, interface, escolha do que desenhar e desenho.
+
+import * as THREE from 'three/webgpu';
+import { CELLS_PER_TILE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
+
+/** Troca o tamanho do mapa: os arrays do mundo são do tamanho dele, então a página recarrega. */
+const FLASH_COLOR = new THREE.Color(0xdde6ff);
+
+function reloadWithMap(tiles: number, then: string): void {
+  try { localStorage.setItem('cidade.mapa', String(tiles)); } catch { /* sem armazenamento: vai pela URL */ }
+  location.href = `${location.pathname}?mapa=${tiles}&${then}`;
+}
+import { CommandStack } from './core/commands.ts';
+import { CELL_COUNT, Dirty, TILE_COUNT, cellId, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
+import { JobPool } from './jobs/pool.ts';
+import { packTileHeights } from './jobs/storage.ts';
+import { boxTransfer, roadGraphTransfer, type BoxColumns, type RoadSave } from './jobs/protocol.ts';
+import { CameraRig } from './render/cameraRig.ts';
+import { createCity, createCityDetail } from './render/city.ts';
+import { createRoads, createTrafficLook, setPaintStyle, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
+import type { CellLayer } from './render/cellLayer.ts';
+import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
+import { TerrainRenderer, gridU } from './render/terrain.ts';
+import { MapSizeError, decodeMeta, encodeMeta } from './save.ts';
+import { createPoseBuffers, PoseReader, viewPoseBuffers } from './sim/poses.ts';
+import { encodeOps } from './sim/lanes.ts';
+import { VehicleRenderer } from './render/vehicles.ts';
+import { PropRenderer } from './render/props.ts';
+import { TransitRenderer } from './render/transit.ts';
+import { Post } from './render/post.ts';
+import { achieve } from './steam.ts';
+import { OptionsPanel, loadSettings, type Settings } from './ui/options.ts';
+import { StartMenu } from './ui/menu.ts';
+import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
+import { Ambient } from './audio.ts';
+import { Particles } from './render/particles.ts';
+import { HelpPanel } from './ui/help.ts';
+import { HealthPanel } from './ui/health.ts';
+import { Creator } from './ui/creator.ts';
+import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
+import { currentU, fogLevel, foamU, nightU, waveU } from './render/scene.ts';
+import { Transit } from './world/transit.ts';
+import type { JunctionSpec } from './roads/control.ts';
+import { PROFILES, PROFILE_INFO, customProfiles, onProfileAdded, setCustomProfiles, type Profile } from './roads/profiles.ts';
+import { bez, bezD } from './roads/geometry.ts';
+import { arrowCode } from './roads/laneLinks.ts';
+import type { NetOp } from './roads/network.ts';
+import type { FromSim, ToSim } from './sim/worker.ts';
+import { Inspector } from './ui/inspector.ts';
+import { FN_NAMES } from './world/arch.ts';
+import { ItemTool } from './tools/itemTool.ts';
+import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
+import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
+import { InsideView } from './render/inside.ts';
+import { Blast } from './render/blast.ts';
+import { TextSigns, signKey } from './render/textSigns.ts';
+import { demolishBox } from './tools/demolish.ts';
+import { deleteLot, joinLots, lotAt, lotToWorld, moveLotCorner, nearestCorner, polygonRect, setLotFront, splitLot } from './world/lotEdit.ts';
+import { Ground, GroundStroke, RiverCommand } from './world/ground.ts';
+import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
+import { RoadTool } from './tools/roadTool.ts';
+import { ZoneTool } from './tools/zoneTool.ts';
+import { Growth, floorsFor } from './world/growth.ts';
+import { Rng } from './core/rng.ts';
+import { RoadJournal, addCrossing, addUTurn, buildRoad, streetChain, demolishSeg, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, segPreview, snap, splitAt, bulbAt } from './roads/build.ts';
+import { BULB_R, BULB_WALK } from './roads/junction.ts';
+import { ZONE_NAMES, Zone } from './roads/zones.ts';
+import { RoadPreview } from './render/preview.ts';
+import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParams } from './world/brush.ts';
+import { START_MONEY, World } from './world/world.ts';
+import { heightAt } from './world/heights.ts';
+import { lineProfile } from './jobs/debugCity.ts';
+import { packSlot, unpackToSlot } from './mapFile.ts';
+
+const SLOT = 'cidade-1';
+/** Trechos cabíveis no mapa de ocupação (2 sentidos por trecho). */
+export const OCCUPANCY_SEGS = 1 << 17;
+
+/** Estado exposto para a casca (fotos automáticas). */
+export const status = { value: 'carregando' };
+const debug: { status: string; game: unknown } = { get status() { return status.value; }, game: null };
+(globalThis as { __cidade?: unknown }).__cidade = debug;
+
+function cellsOfTile(t: number): number[] {
+  const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
+  const out: number[] = [];
+  for (let j = 0; j < CELLS_PER_TILE; j++) for (let i = 0; i < CELLS_PER_TILE; i++) out.push(cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j));
+  return out;
+}
+
+export class Game {
+  readonly world = new World();
+  readonly pool: JobPool;
+  readonly commands = new CommandStack();
+  readonly hud: Hud;
+  /** As ações dos botões do painel (os roteiros de teste chamam o mesmo que o botão). */
+  hudActions!: HudActions;
+  /** Medição (?perf): onde foi o tempo dos quadros lentos. */
+  perfLog: string[] | null = null;
+  private parts!: SceneParts;
+  private rig: CameraRig;
+  private terrain: TerrainRenderer;
+  private city: CellLayer;
+  private cityDetail: CellLayer;
+  private roads: CellLayer;
+  private layers: CellLayer[];
+  private sim: Worker;
+  private poses: PoseReader;
+  private vehicles: VehicleRenderer;
+  private props!: PropRenderer;
+  private signalsSab = new SharedArrayBuffer(1 << 17);
+  private simStats: FromSim | null = null;
+  readonly transit = new Transit();
+  private transitView = new TransitRenderer();
+  private post: Post | null = null;
+  private weather = new Weather();
+  private ambient = new Ambient();
+  private particles!: Particles;
+  private settings!: Settings;
+  private optionsPanel!: OptionsPanel;
+  private help!: HelpPanel;
+  private health!: HealthPanel;
+  private creator!: Creator;
+  private lineSel = 0;
+  private linesSent = -1;
+  private roadsVersion = 0;
+  private occupancySab: SharedArrayBuffer;
+  private trafficLook: TrafficLook;
+  private occSent = 0;
+  private netOps: NetOp[] = [];
+  /** Nós cujas setas ajustadas à mão precisam ser recalculadas. */
+  private arrowNodes = new Set<number>();
+  private camSent = 0;
+  /** Portas mandadas à simulação: quando, e de onde (a câmera andou ou a cidade cresceu manda de novo). */
+  private doorsSent = 0;
+  private doorsAt = { x: Infinity, z: Infinity, count: -1 };
+  private demandSent = 0;
+  private canvas: HTMLCanvasElement;
+
+  private tool: Tool = 'camera';
+  private brush: BrushParams = { mode: 'raise', radius: 60, strength: 0.4 };
+  private stroke: BrushStroke | GroundStroke | null = null;
+  /** Relevo pronto escolhido e a rocha pintada junto com ele. */
+  private landformMode: BrushMode = 'mesa';
+  private rockStroke: GroundStroke | null = null;
+  /** Pincel de elementos do chão. */
+  private elem = { kind: 30, mode: 'lay' as 'lay' | 'eraseKind' | 'eraseAll', density: 8, size: 7 };
+  private elemStroke: ElementStroke | null = null;
+  private groundKind: number = Ground.Sand;
+  private forestCut = false;
+  private forestSpecies = 0;
+  /** Árvores: uma por clique em vez do pincel. */
+  private forestOne = false;
+  private riverWidth = 14;
+  private riverPts: Array<[number, number]> = [];
+  private pointer = { x: 0, y: 0, inside: false };
+  private drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' = 'none';
+  /** Demolir por retângulo: canto onde o arrasto começou. */
+  private boxStart: THREE.Vector3 | null = null;
+  private roadTool: RoadTool;
+  private inspector!: Inspector;
+  private itemTool!: ItemTool;
+  private zoneTool: ZoneTool;
+  private growth: Growth;
+  private selected = -1;
+  /** Lote desenhado à mão: pontos já clicados (null = fora do modo). */
+  private lotPts: Array<[number, number]> | null = null;
+  /** Ferramenta de lote e seus estados (polígono, primeiro lote do juntar, canto arrastado). */
+  private lotMode: LotMode = 'edit';
+  private polyPts: Array<[number, number]> = [];
+  private joinFirst = -1;
+  private cornerDrag: { id: number; k: number } | null = null;
+  private splitKind: 'side' | 'depth' = 'side';
+  private splitParts = 2;
+  private zoneBlock = false;
+  private lotUse = 1;
+  private newArch = -1;
+  private newFn = 0;
+  private preview = new RoadPreview();
+  private last = 0;
+  private busy = false;
+  /** Gerando a cidade: os lotes esperam o relevo assentar. */
+  private generating = false;
+  /** Hora do dia e velocidade do relógio (horas de jogo por minuto real). */
+  private hour = 10;
+  private clockSpeed = 1;
+  /** Céu escolhido e clima ajustado pelo jogador (vão no salvamento). */
+  private skyMode: SkyMode = 'ciclo';
+  private weatherCtl: WeatherCtl | null = null;
+  private waterCtl = { waves: 0.3, foam: 0.4, current: 0.5 };
+  /** Nuvens postas pelo jogador e o estado da ferramenta Céu. */
+  private clouds: Cloud[] = [];
+  private cloudView = new CloudPuffs();
+  private skyTool: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
+  private cloudGrab = -1;
+  /** Ver por dentro: o prédio e o andar mostrados. */
+  private inside = new InsideView();
+  private textSigns!: TextSigns;
+  private blast = new Blast();
+  /** Pessoas do criador e força da bomba. */
+  private personSpec = { color: 3, height: 7, walk: false, count: 1 };
+  private bombForce = 3;
+  private hitKind: 'pistol' | 'bomb' | null = null;
+  private insideId = -1;
+  private insideFloor = 0;
+  /** Algo mudou desde o último salvamento (salvamento automático a cada 2 min). */
+  private unsaved = false;
+  private autosaveAt = 0;
+  /** Pausa (Espaço): relógio e simulação parados. */
+  private paused = false;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    debug.game = this;
+    this.pool = new JobPool({ heights: this.world.heightsSab, ground: this.world.groundSab, water: this.world.waterSab });
+    this.rig = new CameraRig(this.world.heights);
+    // a câmera nunca entra num prédio (roadcraft): miolo do lote (70% × 60%) até o topo pelos andares
+    this.rig.solid = (x, z) => {
+      const col = this.world.buildings.cols;
+      let top = -Infinity;
+      this.world.buildingIndex.query(x - 40, z - 40, x + 40, z + 40, (id) => {
+        const dx = x - col.x[id], dz = z - col.z[id];
+        const s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
+        const lx = dx * c - dz * s, lz = dx * s + dz * c;
+        if (Math.abs(lx) <= col.w[id] * 0.35 && Math.abs(lz) <= col.d[id] * 0.3) top = Math.max(top, heightAt(this.world.heights, col.x[id], col.z[id]) + 1.5 + col.floors[id] * 3.2);
+      });
+      return top;
+    };
+    this.terrain = new TerrainRenderer(this.world);
+    this.city = createCity(this.world, this.pool);
+    this.cityDetail = createCityDetail(this.world, this.pool, this.city.material);
+    // por trecho: ocupação a→b, b→a, desgaste do asfalto (simulação), livre
+    this.occupancySab = new SharedArrayBuffer(OCCUPANCY_SEGS * 4);
+    this.trafficLook = createTrafficLook(this.occupancySab);
+    this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook);
+    this.layers = [this.roads, this.city, this.cityDetail];
+
+    const posesSab = createPoseBuffers();
+    this.poses = new PoseReader(viewPoseBuffers(posesSab));
+    this.sim = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module', name: `sim ${MAP_TAG}` });
+    this.sim.onmessage = (e: MessageEvent<FromSim>) => {
+      if (e.data.type === 'stats') this.trackTrips(e.data);
+      else if (e.data.type === 'probe') this.inspector?.showProbe(e.data);
+      else if (e.data.type === 'probeNode') this.inspector?.showNodeProbe(e.data);
+      else if (e.data.type === 'hit') this.onHit(e.data.people, e.data.vehicles);
+      else if (e.data.type === 'autoControl') this.world.roads.setFlow(e.data.node, e.data.flow);
+      else { console.error('simulação:', e.data.message); this.health?.add('erro', `simulação: ${e.data.message.split(String.fromCharCode(10))[0]}`); }
+    };
+    this.sim.postMessage({ type: 'init', poses: posesSab, heights: this.world.heightsSab, occupancy: this.occupancySab, signals: this.signalsSab, tickHz: 20 } satisfies ToSim);
+    this.vehicles = new VehicleRenderer(this.poses);
+    // perfis feitos no editor: os workers precisam deles antes dos trechos que os usam
+    onProfileAdded(() => {
+      const list = customProfiles();
+      this.pool.broadcast({ type: 'profiles', list });
+      this.sim.postMessage({ type: 'profiles', list } satisfies ToSim);
+    });
+    // a simulação espelha a rede: as mudanças vão em lote a cada quadro
+    this.world.roads.listeners.push((op) => this.netOps.push(op));
+    // setas ajustadas à mão: nós a refazer quando o controle ou os trechos mudam
+    this.world.roads.listeners.push((op) => {
+      const arr = this.trafficLook.arrows.image.data as Float32Array;
+      if (op.t === 'junction') this.arrowNodes.add(op.id);
+      else if (op.t === 'addNode' && op.rec.j) this.arrowNodes.add(op.rec.id);
+      else if (op.t === 'addSeg') { this.arrowNodes.add(op.rec.a); this.arrowNodes.add(op.rec.b); }
+      else if (op.t === 'remSeg') { if (op.id * 2 + 1 < arr.length && (arr[op.id * 2] || arr[op.id * 2 + 1])) { arr[op.id * 2] = arr[op.id * 2 + 1] = 0; this.trafficLook.arrows.needsUpdate = true; } }
+      else if (op.t === 'clear') { arr.fill(0); this.trafficLook.arrows.needsUpdate = true; }
+    });
+
+    this.hud = new Hud(this.hudActions = {
+      tool: (t) => this.setTool(t),
+      item: (k) => { this.itemTool.item = k; },
+      signType: (k) => { this.itemTool.sign = k; },
+      signText: (t) => { this.itemTool.signText = t; },
+      barrierKind: (k) => { this.itemTool.barrier = k; },
+      groundKind: (k) => { this.groundKind = k; },
+      forestMode: (cut) => { this.forestCut = cut; },
+      forestSpecies: (s) => { this.forestSpecies = s; },
+      forestOne: (one) => { this.forestOne = one; this.hud.setHint(one ? 'Clique para plantar uma árvore da espécie escolhida.' : 'Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.'); },
+      poleLights: (m) => { this.itemTool.poleLights = m; },
+      biome: (b) => this.setBiome(b),
+      riverWidth: (w) => { this.riverWidth = w; },
+      elements: (e) => { this.elem = e; },
+      landform: (m) => { this.landformMode = m as BrushMode; if (this.tool === 'landform') this.brush.mode = this.landformMode; },
+      flattenMap: () => {
+        if (!window.confirm('Aplainar todo o terreno? Dá para desfazer com Ctrl+Z.')) return;
+        this.commands.run(new FlattenMap(this.world, heightAt(this.world.heights, this.rig.target.x, this.rig.target.z)));
+        this.hud.toast('Mapa aplainado.');
+      },
+      weather: (w) => this.setWeather(w),
+      sky: (m) => { this.skyMode = m; this.unsaved = true; },
+      personSpec: (p) => { this.personSpec = p; },
+      bombForce: (f) => { this.bombForce = f; },
+      water: (w) => this.setWater(w),
+      skyTool: (s) => { this.skyTool = s; this.skyHint(); },
+      scatterClouds: (n, v) => this.scatterClouds(n, v),
+      clearClouds: () => this.setClouds([], 'apagar nuvens'),
+      fogLevel: (v) => { fogLevel.value = v; this.unsaved = true; },
+      radius: (r) => { this.brush.radius = r; },
+      strength: (s) => { this.brush.strength = s; },
+      undo: () => this.history(false),
+      redo: () => this.history(true),
+      view: (v) => this.setView(v),
+      save: () => void this.save(),
+      load: () => void this.load(),
+      exportMap: () => void this.exportMap(),
+      importMap: (f) => void this.importMap(f),
+      newMap: () => void this.newMap(),
+      testCity: () => void this.testCity(),
+      generate: () => void this.generatedCity(),
+      options: () => this.optionsPanel?.open(),
+      help: () => this.help.toggle(),
+      trafficView: () => this.toggleTrafficView(),
+      follow: () => this.toggleFollow(),
+      grid: () => { gridU.value = gridU.value > 0.5 ? 0 : 1; this.hud.setGrid(gridU.value > 0.5); },
+      north: () => this.rig.turnTo(0),
+      timeSpeed: () => this.cycleClock(),
+      pause: () => this.togglePause(),
+      line: (id) => { this.lineSel = id; },
+      newLine: () => this.newLine(),
+      lineMode: (m) => { this.lineMode = m; },
+      buses: (d) => { const l = this.transit.line(this.lineSel); const c = l && this.transit.setBuses(l.id, l.buses + d); if (c) this.commands.run(c); },
+      deleteLine: () => { const c = this.transit.removeLine(this.lineSel); if (c) { this.commands.run(c); this.lineSel = this.transit.lines[0]?.id ?? 0; } },
+      profile: (p) => { this.roadTool.setProfile(p); },
+      zone: (z) => { this.zoneTool.zone = z; },
+      zoneRadius: (r) => { this.zoneTool.radius = r; },
+      floors: (d) => this.editSelected(d),
+      style: (a) => { if (this.selected >= 0) this.editSelected(0, a); else this.newArch = a; },
+      buildingFn: (f) => { if (this.selected >= 0) this.editSelected(0, undefined, f); else this.newFn = f; },
+      lotMode: (m) => this.setLotMode(m),
+      lotSplit: (k, n) => { this.splitKind = k; this.splitParts = n; },
+      zoneFill: (b) => { this.zoneBlock = b; this.hud.setHint(b ? 'Clique dentro de uma quadra: todas as vias em volta dela recebem a zona.' : 'Arraste para pintar a zona dos lados das vias.'); },
+      lotUse: (z) => { this.lotUse = z; },
+      demolishBuilding: () => this.demolishSelected(),
+      inside: (c) => this.insideCmd(c),
+      elevation: (d) => this.setElevation(this.roadTool.elevation + d),
+      roadSnap: (m) => { this.roadTool.snapMode = m; },
+      cutWalls: (on) => { this.roadTool.cutWalls = on; },
+      blocks: (b) => { this.roadTool.blocks = b; },
+    });
+    this.roadTool = new RoadTool(this.world, this.commands, this.preview, this.hud);
+    this.itemTool = new ItemTool(this.world, this.commands, this.preview, this.hud);
+    this.zoneTool = new ZoneTool(this.world, this.commands);
+    this.growth = new Growth(this.world, this.pool);
+    this.inspector = new Inspector(this.world, this.commands, {
+      probe: (seg) => this.sim.postMessage({ type: 'probe', seg } satisfies ToSim),
+      probeNode: (node) => this.sim.postMessage({ type: 'probeNode', node } satisfies ToSim),
+      useProfile: (id) => { this.setTool('road'); this.roadTool.setProfile(id); this.hud.setProfile(id); },
+      toast: (t) => this.hud.toast(t),
+      mark: (node, seg) => {
+        const net = this.world.roads;
+        if (node >= 0) { const nc = net.nodes.cols; this.preview.hide(); this.preview.showCircle(nc.x[node], nc.y[node], nc.z[node], 14, true); }
+        else if (seg >= 0) { const sp = segPreview(net, seg); this.preview.circle.visible = false; this.preview.show(sp.quad, sp.half, [0, 1], [sp.ya, sp.yb], true, 0x5aa8ff); }
+        else { this.preview.hide(); this.preview.circle.visible = false; }
+      },
+    });
+    this.commands.onPush = (c) => {
+      const l = c.label;
+      this.ambient.sfx(l.startsWith('demolir') || l.startsWith('remover') || l.startsWith('tirar') || l.startsWith('apagar') ? 'demolish'
+        : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place');
+    };
+    this.commands.onChange = () => {
+      this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh(); };
+    this.hud.setHistory(false, false);
+    this.setTool('camera');
+  }
+
+  async start(): Promise<void> {
+    const params = new URLSearchParams(location.search);
+    this.world.seed = Number(params.get('seed') ?? 1) >>> 0;
+    this.world.gameId = (Math.random() * 2 ** 32) >>> 0;
+    if (params.has('hora')) { this.hour = Number(params.get('hora')) % 24; this.clockSpeed = 0; }
+    this.weather.onStrike = (d) => this.ambient.thunder(d);
+    if (params.has('tempestade')) this.weather.fixed = { clouds: 1, rain: 1, storm: 1 };
+    else if (params.has('chuva')) this.weather.fixed = { clouds: 0.95, rain: 0.9 };
+    else if (params.has('limpo')) this.weather.fixed = { clouds: 0.15, rain: 0 };
+
+    this.hud.showLoading('Iniciando o vídeo…');
+    this.parts = await createScene(this.canvas);
+    console.log(`camadas de textura: ${this.parts.maxLayers}, mapa ${MAP_TILES} (${location.search})`);
+    if (MAP_TILES * MAP_TILES > this.parts.maxLayers) {
+      // a placa não comporta este tamanho de mapa: volta para o maior que cabe
+      const fit = [...MAP_SIZES].reverse().find((t) => t * t <= this.parts.maxLayers) ?? 10;
+      reloadWithMap(fit, 'grande');
+      return;
+    }
+    const { scene, renderer } = this.parts;
+    scene.add(this.terrain.mesh);
+    scene.add(this.terrain.waterMesh);
+    for (const l of this.layers) scene.add(l.group);
+    scene.add(this.preview.mesh, this.preview.marker, this.preview.circle);
+    scene.add(this.vehicles.group);
+    this.props = new PropRenderer(this.world, this.pool, this.signalsSab, this.parts.isWebGPU);
+    scene.add(this.props.group);
+    scene.add(this.transitView.group);
+    scene.add(this.weather.group);
+    this.particles = new Particles(this.world);
+    scene.add(this.particles.mesh);
+    scene.add(this.cloudView.mesh);
+    scene.add(this.inside.group);
+    scene.add(this.blast.group);
+    this.textSigns = new TextSigns(this.world, this.world.signTexts);
+    scene.add(this.textSigns.group);
+    this.itemTool.onText = (text, x, z, seg, street) => {
+      const w = this.world, key = signKey(x, z);
+      const chain = street && seg >= 0 ? streetChain(w, seg) : [];
+      const before = chain.map((s) => w.streetNames.get(s));
+      const apply = () => { w.signTexts.set(key, text); for (const s of chain) w.streetNames.set(s, text); this.textSigns.version++; this.unsaved = true; };
+      const invert = () => { w.signTexts.delete(key); chain.forEach((s, i) => { const b = before[i]; if (b === undefined) w.streetNames.delete(s); else w.streetNames.set(s, b); }); this.textSigns.version++; };
+      this.commands.run({ label: 'texto da placa', apply, invert });
+      if (street && chain.length) this.hud.toast(`Rua ${text}.`);
+    };
+
+    this.hud.showLoading('Gerando o relevo…');
+    await this.generateTerrain();
+
+    // todos os shaders compilados aqui, nunca durante o jogo
+    this.hud.showLoading('Preparando os shaders…');
+    const warm = new THREE.Group();
+    for (const l of this.layers) warm.add(l.warmupMesh());
+    warm.add(this.textSigns.warmup());
+    for (const o of this.blast.warmup()) warm.add(o);
+    scene.add(warm);
+    for (const m of [this.preview.mesh, this.preview.marker, this.preview.circle]) m.visible = true;
+    this.inside.show(0, 0, 20, 20, 0, -1000, 0, 3.2); // compila os materiais do miolo na carga
+    this.transitView.showPaths = true;
+    this.vehicles.warmup();
+    this.rig.resize(window.innerWidth, window.innerHeight);
+    this.updatePixelScale();
+    this.rig.update(0);
+    this.terrain.update(this.rig.persp, this.rig.eye);
+    // compute das peças roda uma vez aqui (compila na carga)
+    this.props.bake(renderer);
+    if (this.props.enabled) this.props.update(renderer, this.rig.persp, this.rig.eye, performance.now());
+    // opções (qualidade): da última vez, ou pela placa de vídeo; ?simples etc. mandam nas fotos
+    this.settings = loadSettings(this.parts.isWebGPU);
+    if (params.has('simples')) Object.assign(this.settings, { shadows: false, ao: false, bloom: false });
+    if (params.has('semsombra')) this.settings.shadows = false;
+    // medições: liga e desliga partes do desenho
+    if (params.has('semdetalhe')) this.cityDetail.group.visible = false;
+    if (params.has('perf')) this.perfLog = [];
+    if (params.has('sempedestres')) this.vehicles.hidePeople = true;
+    if (params.has('semao')) this.settings.ao = false;
+    if (params.has('sembrilho')) this.settings.bloom = false;
+    if (params.has('chuva')) this.settings.weather = 'chuva';
+    if (params.has('limpo')) this.settings.weather = 'limpo';
+    if (params.has('tempestade')) this.settings.weather = 'tempestade';
+    this.help = new HelpPanel(document.getElementById('hud')!);
+    this.health = new HealthPanel(document.getElementById('hud')!);
+    this.creator = new Creator({ apply: (d, fl) => this.applyDesign(d, fl) });
+    document.querySelector('#hud .panels')?.append(this.creator.el);
+    this.creator.el.style.display = 'none';
+    this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
+      [['Carregar o pior caso', 'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)', () => void this.testCity()],
+        ['Dinheiro ilimitado (liga/desliga)', 'Modo livre: nada é cobrado neste mapa', () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? 'Modo livre: dinheiro ilimitado.' : 'Dinheiro de volta ao caixa.'); }]]);
+    await this.applySettings(this.settings, false);
+    await renderer.compileAsync(scene, this.rig.persp);
+    await renderer.compileAsync(scene, this.rig.ortho);
+    this.warmPost();
+    scene.remove(warm);
+    warm.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    this.preview.hideAll();
+    this.inside.hide();
+    this.transitView.showPaths = false;
+
+    this.bindInput();
+    this.hud.hideLoading();
+    if (params.has('grande')) this.hud.toast('Sua placa de vídeo não comporta aquele tamanho de mapa: abri no maior que cabe.');
+    if (!this.parts.isWebGPU) this.hud.toast('WebGPU indisponível: rodando no modo de compatibilidade (WebGL 2).');
+    const cam = params.get('cam');
+    if (cam) {
+      const [x, z, yaw, pitch, dist] = cam.split(',').map(Number);
+      this.rig.restore(new Float64Array([x, z, yaw * Math.PI / 180, pitch * Math.PI / 180, dist, params.has('iso') ? 1 : 0]));
+    }
+    this.last = performance.now();
+    renderer.setAnimationLoop((t) => this.frame(t));
+    if (params.has('teste')) await this.testCity();
+    else if (params.has('cidade')) await this.generatedCity();
+    else if (params.has('carregar')) await this.load();
+    else if (!params.has('cam') && !params.has('vazio')) {
+      // tela de entrada (fotos automáticas pulam com ?cam, ?teste ou ?cidade)
+      new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
+        newCity: (seed, tiles) => {
+          if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
+          this.world.seed = seed; void this.generatedCity();
+        },
+        empty: (tiles) => { if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio'); },
+        load: () => void this.load(),
+        options: () => this.optionsPanel.open(),
+      });
+    }
+    await this.settle();
+    status.value = 'pronto';
+  }
+
+  /** Números do quadro (fotos automáticas e depuração). */
+  stats(): Record<string, number> {
+    const info = this.parts.renderer.info.render as { drawCalls: number; triangles: number };
+    return {
+      draws: info.drawCalls, tris: info.triangles,
+      buildings: this.world.buildings.size, segs: this.world.roads.segs.size,
+      cityMB: Math.round(this.city.gpuBytes / 1e6), roadsMB: Math.round(this.roads.gpuBytes / 1e6),
+      ...(this.simStats?.type === 'stats' ? { cars: this.simStats.cars, micro: this.simStats.micro, peds: this.simStats.peds } : {}),
+    };
+  }
+
+  /** Câmera e hora para fotos automáticas; espera as malhas ficarem prontas. */
+  async view(x: number, z: number, yaw: number, pitch: number, dist: number, hour?: number): Promise<void> {
+    this.rig.restore(new Float64Array([x, z, yaw * Math.PI / 180, pitch * Math.PI / 180, dist, 0]));
+    if (hour !== undefined) { this.hour = hour; this.clockSpeed = 0; }
+    await new Promise((r) => setTimeout(r, 500));
+    await this.settle(4);
+  }
+
+  /** Espera os workers esvaziarem (para fotos e testes). */
+  async settle(frames = 20): Promise<void> {
+    let quiet = 0;
+    while (quiet < frames) {
+      await new Promise((r) => requestAnimationFrame(r));
+      quiet = this.pool.isIdle() ? quiet + 1 : 0;
+    }
+  }
+
+  /** Gera o relevo base pela semente, um ladrilho por tarefa. */
+  private generateTerrain(): Promise<void> {
+    return new Promise((resolve) => {
+      let left = TILE_COUNT;
+      for (let t = 0; t < TILE_COUNT; t++) {
+        this.pool.submit('terrainGen', { seed: this.world.seed, tile: t }, (r) => {
+          this.world.tileMin[r.tile] = r.min;
+          this.world.tileMax[r.tile] = r.max;
+          this.world.layerDirty.add(r.tile);
+          // peças (árvores) do ladrilho dependem do relevo
+          const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
+          this.world.dirty.markRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Props);
+          if (--left === 0) resolve();
+        }, { key: `terrain:${t}`, priority: 0 });
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- quadro
+
+  private frame(now: number): void {
+    this.health?.frame(now - this.last);
+    const dt = Math.min(0.1, (now - this.last) / 1000);
+    this.last = now;
+    const { renderer, scene } = this.parts;
+
+    this.rig.update(dt);
+    const cam = this.rig.camera;
+    if (this.skyMode === 'dia') this.hour = 12;
+    else if (this.skyMode === 'noite') this.hour = 22;
+    else if (!this.paused) this.hour = (this.hour + dt * this.clockSpeed / 60) % 24;
+    if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if (this.unsaved && !this.busy && this.world.roads.segs.size) void this.save(true); }
+    const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
+    this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
+    this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
+    setTimeOfDay(this.parts, this.hour, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
+    this.particles.update(dt, this.rig.eye);
+    this.textSigns.update(this.rig.eye);
+    this.blast.update(dt);
+    if (flashU.value > 0) { this.parts.hemi.intensity += flashU.value * 4; this.parts.hemi.color.lerp(FLASH_COLOR, flashU.value * 0.6); }
+    {
+      const st = this.simStats?.type === 'stats' ? this.simStats : null;
+      this.ambient.update(dt, {
+        rain: rainU.value, wind: windU.value, traffic: Math.min(1, (st?.micro ?? 0) / 120),
+        height: this.rig.eye.y - groundY, day: 1 - nightU.value, green: 0.7,
+      });
+    }
+    this.hud.setClock(this.hour, this.clockSpeed, this.paused);
+    this.hud.setMoney(this.world.money, this.world.unlimited);
+    this.hud.setCompass(this.rig.yaw);
+
+    // ferramenta sob o cursor
+    let hit: THREE.Vector3 | null = null;
+    if (this.tool !== 'camera' && this.pointer.inside && this.drag !== 'pan' && this.drag !== 'rotate') hit = this.rig.pick(this.ndcX(), this.ndcY());
+    const terrainTool = TERRAIN_TOOLS.includes(this.tool) || GROUND_TOOLS.includes(this.tool) || (this.tool === 'sky' && this.skyTool.fog !== 'none');
+    if (terrainTool && hit) this.terrain.brush.value.set(hit.x, hit.z, this.brush.radius, 1);
+    else if (this.tool === 'zone' && hit) this.terrain.brush.value.set(hit.x, hit.z, this.zoneTool.radius, 1);
+    else this.terrain.brush.value.w = 0;
+    if (this.drag === 'zone' && hit) this.zoneTool.dab(hit.x, hit.z);
+    if (this.tool === 'building') this.hoverLotTool(hit);
+    if (this.drag === 'brush' && this.elemStroke && hit) {
+      if (this.tool === 'sky') this.elemStroke.dab(hit.x, hit.z, this.brush.radius, Item.Mist, 0.25, this.skyTool.fogHeight, this.skyTool.fog === 'erase' ? 'eraseKind' : 'lay', dt, 22);
+      else this.elemStroke.dab(hit.x, hit.z, this.brush.radius, this.elem.kind, this.elem.density, this.elem.size, this.elem.mode, dt);
+    }
+    if (this.drag === 'brush' && this.stroke && hit) {
+      if (this.stroke instanceof GroundStroke) this.stroke.dab(hit.x, hit.z, this.brush.radius, this.tool === 'paint' ? 'paint' : this.forestCut ? 'cut' : 'forest', this.groundKind, this.brush.strength, dt, this.forestSpecies);
+      else {
+        this.stroke.dab(hit.x, hit.z, this.brush, dt);
+        const rock = LANDFORM_ROCK[this.brush.mode];
+        if (this.rockStroke && rock !== undefined) this.rockStroke.dab(hit.x, hit.z, this.brush.radius * (this.brush.mode === 'gully' ? 0.6 : 0.95), 'paint', rock, 1, 1);
+      }
+    }
+    if (this.tool === 'river') this.hoverRiver(hit);
+    if (this.drag === 'free') this.roadTool.freeMove(hit);
+    else if (this.drag === 'row' && this.boxStart) this.itemTool.hoverRow(this.boxStart.x, this.boxStart.z, hit);
+    else if (this.drag === 'box' && this.boxStart && hit) {
+      // retângulo do arrasto no chão (vermelho)
+      const a = this.boxStart, cz = (a.z + hit.z) / 2, H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.8;
+      this.preview.marker.visible = false;
+      this.preview.show({ x0: (a.x + hit.x) / 2, z0: a.z, cx: (a.x + hit.x) / 2, cz, x1: (a.x + hit.x) / 2, z1: hit.z }, Math.abs(hit.x - a.x) / 2, [0, 1], [H(a.x, a.z), H(hit.x, hit.z)], true, 0xe2564b);
+    } else if (ROAD_TOOLS.includes(this.tool) && this.tool !== 'free' && this.drag !== 'pan' && this.drag !== 'rotate') this.roadTool.hover(hit);
+    if ((this.tool === 'streetscape' || this.tool === 'barrier') && this.drag !== 'pan' && this.drag !== 'rotate' && this.drag !== 'row') this.itemTool.hover(hit);
+
+    const pf = this.perfLog, T0 = pf ? performance.now() : 0;
+    for (const l of this.layers) l.processDirty();
+    this.world.dirty.drain(Dirty.Terrain); // ninguém além do desenho depende disso ainda
+    this.processRoadPaint();
+    if (this.arrowNodes.size) this.updateArrows();
+    const T1 = pf ? performance.now() : 0;
+    if (!this.generating) this.growth.processDirty();
+    this.growth.step(dt);
+    const T2 = pf ? performance.now() : 0;
+    this.terrain.uploadDirtyLayers();
+    this.terrain.update(cam, this.rig.eye);
+    for (const l of this.layers) l.update(cam, this.rig.eye);
+    const T3 = pf ? performance.now() : 0;
+    this.syncSim(now);
+    this.syncTransit();
+    this.updateInfo(now);
+    this.vehicles.update(cam, this.rig.eye, now);
+    if (this.vehicles.follow) { const p = this.vehicles.followPose; this.rig.followPose(p[0], p[1], p[2], p[3], dt); }
+    else if (this.rig.followY !== null) { this.rig.followY = null; this.hud.toast('A câmera soltou o veículo.'); }
+    const T4 = pf ? performance.now() : 0;
+    this.props.processDirty();
+    this.props.update(renderer, cam, this.rig.eye, now);
+    const T5 = pf ? performance.now() : 0;
+
+    if (this.post) { this.post.setCamera(cam); this.post.render(); }
+    else renderer.render(scene, cam);
+    // medição (?perf): quadros com mais de 30 ms dizem onde o tempo foi
+    if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); }
+  }
+
+  private toggleTrafficView(): void {
+    trafficOverlayU.value = trafficOverlayU.value > 0.5 ? 0 : 1;
+    this.hud.setTrafficView(trafficOverlayU.value > 0.5);
+  }
+
+  /** Viagens concluídas e desistências por minuto (das contagens totais da simulação). */
+  private tripsPerMin = 0;
+  private lostPerMin = 0;
+  private lastTrips: { t: number; arrived: number; lost: number } | null = null;
+  private trackTrips(st: Extract<FromSim, { type: 'stats' }>): void {
+    this.simStats = st;
+    const t = performance.now();
+    if (!this.lastTrips || st.arrived < this.lastTrips.arrived) { this.lastTrips = { t, arrived: st.arrived, lost: st.lost }; return; }
+    if (t - this.lastTrips.t < 10000) return;
+    const k = 60000 / (t - this.lastTrips.t);
+    this.tripsPerMin = (st.arrived - this.lastTrips.arrived) * k;
+    this.lostPerMin = (st.lost - this.lastTrips.lost) * k;
+    this.lastTrips = { t, arrived: st.arrived, lost: st.lost };
+  }
+
+  private infoTimer = 0;
+  /** Números da cidade no canto (duas vezes por segundo). */
+  private updateInfo(now: number): void {
+    if (now - this.infoTimer < 500) return;
+    this.infoTimer = now;
+    const fmt = (n: number) => n >= 10000 ? `${(n / 1000).toFixed(0)} mil` : n.toLocaleString('pt-BR');
+    const w = this.world, st = this.simStats?.type === 'stats' ? this.simStats : null;
+    const riders = st ? st.lines.reduce((a, l) => a + l.perHour, 0) : 0;
+    const parts = [
+      `<b>${fmt(w.residents)}</b> moradores · <b>${fmt(w.jobs)}</b> empregos · <b>${fmt(w.buildings.size)}</b> prédios`,
+      st ? `<b>${fmt(st.cars)}</b> veículos · <b>${fmt(st.peds)}</b> pedestres · ${Math.round(st.speed * 3.6)} km/h de média perto daqui` : '',
+      st ? `<b>${fmt(Math.round(this.tripsPerMin))}</b> viagens concluídas/min · <b>${fmt(st.stopped)}</b> parados perto daqui${this.lostPerMin >= 1 ? ` · ${fmt(Math.round(this.lostPerMin))} desistências/min` : ''}` : '',
+      this.transit.lines.length ? `${this.transit.lines.length} linha${this.transit.lines.length > 1 ? 's' : ''} de ônibus · <b>${fmt(riders)}</b> passageiros/h` : '',
+    ].filter(Boolean);
+    this.hud.setInfo(w.roads.segs.size || w.buildings.size ? parts.join('<br>') : '');
+  }
+
+  /** Pausa ou continua: o relógio e a simulação (carros, pedestres, ônibus) param juntos. */
+  togglePause(): void {
+    this.paused = !this.paused;
+    this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : 1 } satisfies ToSim);
+    this.hud.toast(this.paused ? 'Pausado. Espaço continua.' : 'Continuando.');
+  }
+
+  private cycleClock(): void {
+    const speeds = [0, 1, 4, 16];
+    this.clockSpeed = speeds[(speeds.indexOf(this.clockSpeed) + 1) % speeds.length];
+  }
+
+  /** Manda à simulação as mudanças da rede e a posição da câmera. */
+  private syncSim(now: number): void {
+    if (this.netOps.length) {
+      if (this.transit.lines.length) this.roadsVersion++;
+      const extra: string[] = [];
+      const ops = encodeOps(this.netOps, extra);
+      this.netOps.length = 0;
+      this.sim.postMessage({ type: 'ops', ops, extra } satisfies ToSim, [ops.buffer]);
+    }
+    this.trafficLook.center.value.set(this.rig.target.x, this.rig.target.z);
+    if (now - this.occSent > 500) { this.occSent = now; this.trafficLook.occupancy.needsUpdate = true; }
+    if (now - this.demandSent > 2000) {
+      this.demandSent = now;
+      const st = this.settings;
+      const demand = st?.demand === 'baixa' ? 0.6 : st?.demand === 'pico' ? 1.5 : 1;
+      this.sim.postMessage({ type: 'demand', hour: this.hour, demand, traffic: st?.traffic ?? 1, people: st?.people ?? 1 } satisfies ToSim);
+    }
+    if (now - this.camSent > 250) {
+      this.camSent = now;
+      this.sim.postMessage({ type: 'camera', x: this.rig.target.x, z: this.rig.target.z } satisfies ToSim);
+    }
+    if (now - this.doorsSent > 3000) this.sendDoors(now);
+  }
+
+  /**
+   * Portas dos prédios perto da câmera (roadcraft `lotDoors`): o meio da frente do lote, que olha para a via. Os
+   * pedestres que nascem por ali saem delas até a calçada. Só quando a câmera andou 80 m ou a cidade mudou.
+   */
+  private sendDoors(now: number): void {
+    this.doorsSent = now;
+    const t = this.rig.target, w = this.world, col = w.buildings.cols;
+    const moved = Math.hypot(t.x - this.doorsAt.x, t.z - this.doorsAt.z) > 80;
+    if (!moved && w.buildings.size === this.doorsAt.count) return;
+    this.doorsAt = { x: t.x, z: t.z, count: w.buildings.size };
+    const R = 450, pts: number[] = [];
+    w.buildingIndex.query(t.x - R, t.z - R, t.x + R, t.z + R, (id) => {
+      if (pts.length >= 6000 || col.floors[id] === 0) return;
+      const k = col.d[id] / 2 - 0.3, s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
+      pts.push(col.x[id] + s * k, col.z[id] + c * k);
+    });
+    const arr = new Float32Array(pts);
+    this.sim.postMessage({ type: 'doors', pts: arr } satisfies ToSim, [arr.buffer]);
+  }
+
+  /** Setas das pontas dos trechos nos nós com conexões de faixa ajustadas (só os nós que mudaram). */
+  private updateArrows(): void {
+    const net = this.world.roads, sc = net.segs.cols, arr = this.trafficLook.arrows.image.data as Float32Array;
+    let changed = false;
+    for (const n of this.arrowNodes) {
+      if (!net.nodes.alive[n]) continue;
+      const spec = net.junctions.get(n);
+      for (const s of net.segsOf(n, [])) {
+        const k = s * 2 + (sc.a[s] === n ? 0 : 1);
+        if (k >= arr.length) continue;
+        const code = spec?.lanes?.length ? arrowCode(net, n, s) : 0;
+        if (arr[k] !== code) { arr[k] = code; changed = true; }
+      }
+    }
+    this.arrowNodes.clear();
+    if (changed) this.trafficLook.arrows.needsUpdate = true;
+  }
+
+  /** Pinta de novo, no worker, os ladrilhos cujas vias mudaram. */
+  private processRoadPaint(): void {
+    const cells = this.world.dirty.drain(Dirty.RoadPaint);
+    if (cells.length === 0) return;
+    const tiles = new Set<number>();
+    for (const c of cells) tiles.add(tileOfCell(c));
+    const net = this.world.roads;
+    for (const t of tiles) {
+      const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
+      const x0 = tileOriginX(tx), z0 = tileOriginX(tz);
+      const segs: number[] = [];
+      net.forSegsNear(x0 - 30, z0 - 30, x0 + TILE_SIZE + 30, z0 + TILE_SIZE + 30, (s) => segs.push(s));
+      const graph = net.gather(segs, []);
+      this.pool.submit('roadPaint', { graph, tile: t }, (r) => this.terrain.setRoadPaint(r.tile, r.texels, r.coarse),
+        { key: `paint:${t}`, priority: 3000, transfer: roadGraphTransfer(graph) });
+    }
+  }
+
+  // --------------------------------------------------------------- entrada
+
+  private ndcX(): number { return (this.pointer.x / this.canvas.clientWidth) * 2 - 1; }
+  private ndcY(): number { return -(this.pointer.y / this.canvas.clientHeight) * 2 + 1; }
+
+  private bindInput(): void {
+    const c = this.canvas;
+    const down = { x: 0, y: 0, button: -1 };
+    c.addEventListener('contextmenu', (e) => e.preventDefault());
+    c.addEventListener('pointerdown', (e) => {
+      this.ambient.start();
+      c.setPointerCapture(e.pointerId);
+      this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
+      down.x = e.offsetX; down.y = e.offsetY; down.button = e.button;
+      if (e.button === 2) this.drag = 'rotate';
+      else if (e.button === 1 || (e.button === 0 && this.tool === 'camera')) {
+        this.drag = 'pan';
+        this.rig.beginPan(this.ndcX(), this.ndcY());
+      } else if (e.button === 0 && TERRAIN_TOOLS.includes(this.tool)) {
+        this.drag = 'brush';
+        this.stroke = new BrushStroke(this.world);
+        this.rockStroke = LANDFORM_ROCK[this.brush.mode] !== undefined ? new GroundStroke(this.world) : null;
+      } else if (e.button === 0 && this.tool === 'sky' && this.skyTool.fog !== 'none') {
+        this.drag = 'brush';
+        this.elemStroke = new ElementStroke(this.world.items);
+      } else if (e.button === 0 && this.tool === 'sky' && this.skyTool.cloud === 'move' && this.grabCloud(this.rig.pick(this.ndcX(), this.ndcY()))) {
+        this.drag = 'node';
+      } else if (e.button === 0 && this.tool === 'elements') {
+        this.drag = 'brush';
+        this.elemStroke = new ElementStroke(this.world.items);
+      } else if (e.button === 0 && this.tool === 'forest' && this.forestOne) {
+        this.drag = 'click';
+      } else if (e.button === 0 && GROUND_TOOLS.includes(this.tool)) {
+        this.drag = 'brush';
+        this.stroke = new GroundStroke(this.world);
+      } else if (e.button === 0 && this.tool === 'free' && this.roadTool.freeBegin(this.rig.pick(this.ndcX(), this.ndcY()))) {
+        this.drag = 'free';
+      } else if (e.button === 0 && this.tool === 'move' && this.roadTool.grab(this.rig.pick(this.ndcX(), this.ndcY()))) {
+        this.drag = 'node';
+      } else if (e.button === 0 && this.tool === 'building' && this.lotMode === 'corner' && this.grabCorner(this.rig.pick(this.ndcX(), this.ndcY()))) {
+        this.drag = 'node';
+      } else if (e.button === 0 && this.tool === 'zone' && !this.zoneBlock) {
+        this.drag = 'zone';
+        this.zoneTool.begin();
+      } else if (e.button === 0) {
+        this.drag = 'click'; // vira arrasto de câmera se mexer
+      }
+      e.preventDefault();
+    });
+    c.addEventListener('pointermove', (e) => {
+      const dx = e.offsetX - this.pointer.x, dy = e.offsetY - this.pointer.y;
+      this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
+      this.pointer.inside = true;
+      if (this.drag === 'click' && (this.tool === 'bulldoze' || this.tool === 'streetscape') && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
+        const px = this.pointer.x, py = this.pointer.y;
+        this.pointer.x = down.x; this.pointer.y = down.y;
+        this.boxStart = this.rig.pick(this.ndcX(), this.ndcY());
+        this.pointer.x = px; this.pointer.y = py;
+        if (this.boxStart) this.drag = this.tool === 'streetscape' ? 'row' : 'box';
+      }
+      if (this.drag === 'click' && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
+        this.drag = 'pan';
+        this.pointer.x = down.x; this.pointer.y = down.y;
+        this.rig.beginPan(this.ndcX(), this.ndcY());
+        this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
+      }
+      if (this.drag === 'rotate') this.rig.rotate(dx, dy);
+      else if (this.drag === 'pan') this.rig.pan(this.ndcX(), this.ndcY());
+    });
+    const end = (e: PointerEvent) => {
+      if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
+      const still = Math.hypot(e.offsetX - down.x, e.offsetY - down.y) <= 5;
+      if (this.drag === 'brush' && this.elemStroke) {
+        if (!this.elemStroke.cmd.empty) this.commands.push(this.elemStroke.cmd);
+        this.elemStroke = null;
+      }
+      if (this.drag === 'brush' && this.stroke) {
+        const rock = this.rockStroke;
+        this.rockStroke = null;
+        if (this.stroke.finish()) {
+          // relevo pronto: o terreno e a rocha pintada são um passo só de desfazer
+          const terr = this.stroke;
+          if (rock && rock.finish()) this.commands.push({ label: 'relevo', apply: () => { terr.apply(); rock.apply(); }, invert: () => { rock.invert(); terr.invert(); } });
+          else this.commands.push(terr);
+        }
+        this.stroke = null;
+      }
+      if (this.drag === 'zone') this.zoneTool.end();
+      if (this.drag === 'free') this.roadTool.freeEnd(this.rig.pick(this.ndcX(), this.ndcY()));
+      if (this.drag === 'row' && this.boxStart) {
+        const b = this.rig.pick(this.ndcX(), this.ndcY());
+        if (b) this.itemTool.row(this.boxStart.x, this.boxStart.z, b.x, b.z);
+        this.preview.hideAll();
+        this.boxStart = null;
+      }
+      if (this.drag === 'box' && this.boxStart) {
+        const b = this.rig.pick(this.ndcX(), this.ndcY());
+        const r = b ? demolishBox(this.world, this.boxStart.x, this.boxStart.z, b.x, b.z) : null;
+        this.preview.hideAll();
+        if (r) { this.commands.push(r.cmd); this.hud.toast(`Demolido: ${r.count} ${r.count === 1 ? 'coisa' : 'coisas'}${r.charge < 0 ? ` · devolvido R$ ${(-r.charge).toLocaleString('pt-BR')}` : ''}.`); }
+        this.boxStart = null;
+      }
+      if (this.drag === 'node' && this.cloudGrab >= 0) { this.dropCloud(this.rig.pick(this.ndcX(), this.ndcY())); }
+      else if (this.drag === 'node' && this.cornerDrag) this.dropCorner(this.rig.pick(this.ndcX(), this.ndcY()));
+      else if (this.drag === 'node') this.roadTool.drop(this.rig.pick(this.ndcX(), this.ndcY()));
+      if (this.drag === 'click' && still && e.type === 'pointerup') {
+        const hit = this.rig.pick(this.ndcX(), this.ndcY());
+        if (this.tool === 'inspect') { if (hit) this.inspector.pick(hit.x, hit.z); }
+        else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
+        else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey);
+        else if (this.tool === 'building') this.clickBuilding(hit);
+        else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey);
+        else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
+        else if (this.tool === 'sky') { if (hit) this.clickSky(hit.x, hit.z); }
+        else if (this.tool === 'person') { if (hit) this.placePerson(hit.x, hit.z); }
+        else if (this.tool === 'pistol') { if (hit) this.shoot(hit.x, hit.z); }
+        else if (this.tool === 'bomb') { if (hit) this.bomb(hit.x, hit.z); }
+        else if (this.tool === 'weather') { if (hit) this.weather.strikeAt(this.rig.eye, hit.x, hit.z, heightAt(this.world.heights, hit.x, hit.z)); }
+        else if (this.tool === 'zone' && this.zoneBlock) { if (hit) { const r = this.zoneTool.fillBlock(hit.x, hit.z); if (r !== 'ok') this.hud.toast(r); } }
+        else if (e.altKey && ROAD_TOOLS.includes(this.tool)) {
+          const p = this.roadTool.pick(hit);
+          if (p >= 0) { this.hud.setProfile(p); this.hud.toast(`Via copiada: ${PROFILE_INFO[p].name}`); }
+        } else this.roadTool.click(hit, e.shiftKey);
+      }
+      if (this.drag === 'rotate' && still && ROAD_TOOLS.includes(this.tool)) this.roadTool.cancel();
+      if (this.drag === 'pan') this.rig.endPan();
+      this.drag = 'none';
+    };
+    c.addEventListener('pointerup', end);
+    c.addEventListener('dblclick', () => { if (this.tool === 'river') this.finishRiver(); if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly(); });
+    c.addEventListener('pointercancel', end);
+    c.addEventListener('pointerleave', () => { this.pointer.inside = false; });
+    c.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      this.rig.zoomAt(Math.exp(delta * 0.0012), this.ndcX(), this.ndcY());
+    }, { passive: false });
+
+    window.addEventListener('keydown', (e) => {
+      this.ambient.start();
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.code === 'KeyZ') { e.preventDefault(); this.history(e.shiftKey); return; }
+      if (ctrl && e.code === 'KeyY') { e.preventDefault(); this.history(true); return; }
+      if (ctrl && e.code === 'KeyS') { e.preventDefault(); void this.save(); return; }
+      if (ctrl) return;
+      const tools: Record<string, Tool> = {
+        Digit1: 'camera', Digit2: 'road', Digit3: 'curve', Digit4: 'roundabout', Digit5: 'upgrade', Digit6: 'bulldoze',
+        Digit7: 'raise', Digit8: 'lower', Digit9: 'smooth', Digit0: 'flatten',
+      };
+      if (tools[e.code]) { this.setTool(tools[e.code]); return; }
+      if (e.code === 'KeyZ') { this.setTool('zone'); return; }
+      if (e.code === 'KeyY') { this.setTool('move'); return; }
+      if (e.code === 'KeyX') { this.setTool('split'); return; }
+      if (e.code === 'KeyB') { this.setTool('building'); return; }
+      if (e.code === 'KeyL') { this.setTool('transit'); return; }
+      if (this.tool === 'building' && this.selected >= 0) {
+        if (e.code === 'Delete') { this.demolishSelected(); return; }
+        if (e.code === 'PageUp') { e.preventDefault(); this.editSelected(1); return; }
+        if (e.code === 'PageDown') { e.preventDefault(); this.editSelected(-1); return; }
+      }
+      if (e.code === 'F1' || e.code === 'KeyH') { e.preventDefault(); this.help.toggle(); return; }
+      if (e.code === 'F9') { e.preventDefault(); this.health.toggle(); return; }
+      if (e.code === 'Escape' && this.help.open) { this.help.close(); return; }
+      if (e.code === 'KeyC') { this.toggleFollow(); return; }
+      if (e.code === 'KeyV') { this.setView(this.rig.mode === 'iso' ? 'persp' : 'iso'); return; }
+      if (e.code === 'KeyP') { this.cycleClock(); return; }
+      if (e.code === 'Space') { e.preventDefault(); this.togglePause(); return; }
+      if (e.code === 'KeyK') { this.toggleTrafficView(); return; }
+      if (e.code === 'KeyO') { if (this.optionsPanel.isOpen) this.optionsPanel.close(); else this.optionsPanel.open(); return; }
+      if (e.code === 'KeyT') { this.setView('top'); return; }
+      if (e.code === (this.settings.roadUp ?? 'PageUp')) { e.preventDefault(); this.setElevation(this.roadTool.elevation + 4); return; }
+      if (e.code === (this.settings.roadDown ?? 'PageDown')) { e.preventDefault(); this.setElevation(this.roadTool.elevation - 4); return; }
+      if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+        const f = e.code === 'BracketLeft' ? 1 / 1.2 : 1.2;
+        if (this.tool === 'roundabout') this.roadTool.ringBy(f); else this.setRadius(this.brush.radius * f);
+        return;
+      }
+      if (e.code === 'KeyI') { this.setTool('inspect'); return; }
+      if (e.code === 'KeyJ') { this.setTool('streetscape'); return; }
+      if (e.code === 'KeyM') { this.setTool('barrier'); return; }
+      if (this.tool === 'barrier' && e.code === 'Backspace') { this.itemTool.back(); return; }
+      if (this.tool === 'river' && e.code === 'Enter') { this.finishRiver(); return; }
+      if (this.tool === 'building' && this.lotMode === 'poly' && e.code === 'Enter') { this.finishPoly(); return; }
+      if (this.tool === 'building' && this.lotMode === 'poly' && e.code === 'Backspace') { this.polyPts.pop(); return; }
+      if (this.tool === 'river' && e.code === 'Backspace') { this.riverPts.pop(); return; }
+      if (e.code === 'KeyU') { this.setTool('paint'); return; }
+      if (e.code === 'KeyG') { this.setTool('forest'); return; }
+      if (e.code === 'KeyN') { this.setTool('river'); return; }
+      if (this.tool === 'barrier' && e.code === 'Enter') { this.itemTool.cancel(); return; }
+      if (this.tool === 'inspect' && e.code === 'Delete' && this.inspector.seg >= 0) {
+        const j = demolishSeg(this.world, this.inspector.seg);
+        if (j.settle()) this.commands.push(j);
+        return;
+      }
+      if (e.code === 'Escape' && this.vehicles.follow) { this.vehicles.follow = null; return; }
+      if (e.code === 'Escape') {
+        if (this.tool === 'inspect' && (this.inspector.node >= 0 || this.inspector.seg >= 0)) { this.inspector.close(); return; }
+        if (this.tool === 'barrier') { this.itemTool.cancel(); return; }
+        if (this.tool === 'building' && (this.lotPts?.length || this.polyPts.length || this.joinFirst >= 0)) { if (this.lotPts) this.lotPts.length = 0; this.polyPts.length = 0; this.joinFirst = -1; this.preview.hideAll(); return; }
+        if (this.tool === 'river' && this.riverPts.length) { this.riverPts.length = 0; this.preview.hideAll(); return; }
+        if (ROAD_TOOLS.includes(this.tool) && this.roadTool.busy) this.roadTool.cancel();
+        else this.setTool('camera');
+        return;
+      }
+      this.rig.keyDown(e.code);
+    });
+    window.addEventListener('keyup', (e) => this.rig.keyUp(e.code));
+    window.addEventListener('blur', () => this.rig.clearKeys());
+    window.addEventListener('resize', () => {
+      this.parts.renderer.setSize(window.innerWidth, window.innerHeight, false);
+      this.rig.resize(window.innerWidth, window.innerHeight);
+      this.updatePixelScale();
+    });
+  }
+
+  /** Aplica as opções: resolução, detalhe, imagem final (refeita e compilada aqui, nunca no meio do jogo) e tempo. */
+  private async applySettings(s: Settings, compile = true): Promise<void> {
+    this.settings = s;
+    const { renderer, scene } = this.parts;
+    renderer.setPixelRatio(window.devicePixelRatio * s.resolution);
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.updatePixelScale();
+    this.weather.fixed = s.weather === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s.weather === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s.weather === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
+    this.ambient.setVolume(s.volume ?? 0.6);
+    setPaintStyle(s.paint ?? 'br');
+    this.roadTool.furniture = s.furniture ?? 0;
+    const want = this.parts.isWebGPU && (s.shadows || s.ao || s.bloom);
+    const same = this.post && want && this.post.opts.shadows === s.shadows && this.post.opts.ao === s.ao && this.post.opts.bloom === s.bloom;
+    if (same) return;
+    if (this.post) { this.post.dispose(); this.post = null; }
+    this.parts.sun.castShadow = false;
+    renderer.shadowMap.enabled = false;
+    if (want) this.post = new Post(renderer, scene, this.rig.persp, this.parts.sun, { shadows: s.shadows, ao: s.ao, bloom: s.bloom });
+    if (compile) {
+      this.hud.showLoading('Aplicando as opções…');
+      await renderer.compileAsync(scene, this.rig.persp);
+      this.warmPost();
+      this.hud.hideLoading();
+    }
+  }
+
+  /** Roda a imagem final uma vez com cada câmera (compila os shaders dela na carga). */
+  private warmPost(): void {
+    if (!this.post) return;
+    // as duas saídas (dia sem bloom, noite com) compiladas na carga: o anoitecer não trava
+    for (const night of [true, false]) {
+      this.post.bloomOverride = night;
+      this.post.setCamera(this.rig.ortho); this.post.render();
+      this.post.setCamera(this.rig.persp); this.post.render();
+    }
+    this.post.bloomOverride = null;
+  }
+
+  /** Distâncias de detalhe pelo erro de tela: mais pixels, detalhe até mais longe. */
+  private updatePixelScale(): void {
+    const res = this.settings ? this.settings.resolution * this.settings.detail : 1;
+    const k = Math.min(3, Math.max(0.5, window.innerHeight * window.devicePixelRatio * res / 1080));
+    for (const l of this.layers) l.pixelScale = k;
+    if (this.props) this.props.pixelScale = k;
+  }
+
+  /** Desfazer (false) ou refazer (true), com som. */
+  private history(redo: boolean): void {
+    if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
+  }
+
+  private setTool(t: Tool): void {
+    if (t !== this.tool) this.ambient.sfx('click');
+    this.tool = t;
+    zoneOverlayU.value = t === 'zone' ? 1 : 0;
+    if (TERRAIN_TOOLS.includes(t)) this.brush.mode = t === 'landform' ? this.landformMode : t as BrushParams['mode'];
+    if (ROAD_TOOLS.includes(t)) this.roadTool.setMode(t);
+    else { this.roadTool.cancel(); this.hud.setHint(''); }
+    if (t === 'zone') this.hud.setHint('Arraste para pintar a zona dos lados das vias.');
+    if (t === 'building') { this.select(-1); this.setLotMode(this.lotMode); }
+    if (t !== 'inspect') this.inspector?.close();
+    if (t === 'streetscape' || t === 'barrier') this.itemTool.setMode(t); else if (this.itemTool) this.itemTool.cancel(false);
+    if (t === 'inspect') this.hud.setHint('Clique num cruzamento para mudar o controle (semáforo, placas, movimentos) ou numa via para ver o perfil.');
+    if (t === 'paint') this.hud.setHint('Arraste para pintar o chão (Grama apaga a pintura).');
+    if (t === 'forest') this.hud.setHint('Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.');
+    if (t === 'elements') this.hud.setHint('Arraste para espalhar o elemento escolhido (ou apagar); Raio e [ ] mudam o tamanho do pincel.');
+    if (t === 'landform') this.hud.setHint('Escolha o relevo e arraste (chapada, cânion, escarpa, ravina) ou clique (pão de açúcar); Força muda a altura, [ e ] o tamanho.');
+    if (t === 'sky') this.skyHint();
+    if (t === 'person') this.hud.setHint('Escolha a roupa e a altura e clique: a pessoa fica ali parada ou sai andando pela calçada.');
+    if (t === 'pistol') this.hud.setHint('Clique numa pessoa: ela cai e some.');
+    if (t === 'bomb') this.hud.setHint('Clique onde a bomba cai: no chão ou num prédio. A força muda o tamanho da explosão.');
+    if (t === 'weather') this.hud.setHint('Ajuste chuva, vento e raios nas barras; clique no mapa para cair um raio ali.');
+    if (t === 'river') this.hud.setHint('Clique os pontos do rio, de cima para baixo; Enter ou duplo clique termina, Backspace volta, Esc descarta.');
+    if (t !== 'river') this.riverPts.length = 0;
+    if (t === 'transit') this.hud.setHint('Clique na calçada para pôr paradas na linha; clique numa parada para tirar; Shift+clique torna a parada terminal.');
+    this.transitView.showPaths = t === 'transit';
+    if (t !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; } }
+    this.hud.setTool(t);
+    if (this.health) this.health.context = `ferramenta ${t}`;
+    this.canvas.style.cursor = t === 'camera' ? 'grab' : 'crosshair';
+  }
+
+  /** Para roteiros de foto e testes: as mesmas ações das ferramentas. */
+  readonly api = {
+    river: (pts: Array<[number, number]>, width = 14) => { this.riverPts = pts.slice(); this.riverWidth = width; this.finishRiver(); },
+    paint: (x: number, z: number, r: number, kind: number, mode: 'paint' | 'forest' | 'cut' = 'paint', species = 0) => {
+      const s = new GroundStroke(this.world);
+      s.dab(x, z, r, mode, kind, 1, 1, species);
+      if (s.finish()) this.commands.push(s);
+    },
+    item: (x: number, z: number, kind: number, variant = 0) => { this.itemTool.item = kind; this.itemTool.sign = variant; this.itemTool.mode = 'streetscape'; this.itemTool.click({ x, z } as THREE.Vector3, false); },
+    /** Lote desenhado: frente A→B, fundo até C. */
+    lot: (ax: number, az: number, bx: number, bz: number, cx: number, cz: number, use = 1, floors?: number) => {
+      this.lotUse = use;
+      this.lotPts = [[ax, az], [bx, bz]];
+      this.clickLot({ x: cx, z: cz } as THREE.Vector3);
+      this.lotPts = null;
+      if (floors !== undefined && this.selected >= 0) this.editSelected(floors - this.world.buildings.cols.floors[this.selected]);
+      return this.selected;
+    },
+    follow: () => { this.toggleFollow(); return !!this.vehicles.follow; },
+    /** Raio agora (fotos da tempestade). */
+    strike: () => this.weather.strikeNow(this.rig.eye, heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z)),
+    biome: (b: number) => this.setBiome(b),
+    /** Via reta de (ax, az) a (bx, bz) com o perfil pelo nome (ou id). */
+    road: (ax: number, az: number, bx: number, bz: number, profile: string | number = 0, elevation = 0) => {
+      const id = typeof profile === 'number' ? profile : PROFILES.findIndex((p) => p.name === profile);
+      const a = snap(this.world.roads, ax, az, 10), b = snap(this.world.roads, bx, bz, 10);
+      const plan = planRoad(this.world, a, null, b, Math.max(0, id), elevation);
+      if (!plan.ok) return plan.reason;
+      const j = buildRoad(this.world, plan, a, b, Math.max(0, id), this.roadTool.segFlags());
+      if (j.settle()) this.commands.push(j);
+      return 'ok';
+    },
+    zone: (x: number, z: number, r: number, zone: number) => { this.zoneTool.zone = zone; this.zoneTool.radius = r; this.zoneTool.begin(); this.zoneTool.dab(x, z); this.zoneTool.end(); },
+    line: (mode: number, stops: number[], vehicles = 2) => {
+      this.lineMode = mode; this.newLine();
+      for (let i = 0; i + 1 < stops.length; i += 2) this.clickTransit({ x: stops[i], z: stops[i + 1] } as THREE.Vector3);
+      const l = this.transit.line(this.lineSel);
+      const c = l && this.transit.setBuses(l.id, vehicles);
+      if (c) this.commands.run(c);
+    },
+    grow: async () => { this.growth.processDirty(); await this.pool.whenIdle(); return this.growth.fillAll(); },
+    /** Edições de via no ponto (x, z): dividir, inverter, duplicar, unir (nó) e mover nó para (tx, tz). */
+    edit: (what: 'split' | 'reverse' | 'duplicate' | 'join' | 'move', x: number, z: number, tx = 0, tz = 0) => {
+      const net = this.world.roads;
+      const s = net.nearestSeg(x, z, 10), n = net.nearestNode(x, z, 10);
+      const j = what === 'split' ? (s ? splitAt(this.world, s[0], s[1]) : null)
+        : what === 'reverse' ? (s ? reverseRoad(this.world, s[0]) : null)
+        : what === 'duplicate' ? (s ? duplicateRoad(this.world, s[0]) : null)
+        : what === 'join' ? (n >= 0 ? joinAt(this.world, n) : null)
+        : n >= 0 ? moveNode(this.world, n, tx, tz) : null;
+      if (!j || typeof j === 'string') return j ?? 'nada aqui';
+      if (j.empty || !j.settle()) return 'recusado';
+      this.commands.push(j);
+      return 'ok';
+    },
+    /** Pacote do salvamento (o que Exportar baixa) e abrir um pacote (o que Abrir arquivo faz). */
+    packMap: () => packSlot(SLOT),
+    openMap: (b: Blob) => this.importMap(b),
+    /** Uma pincelada de terreno (inclusive relevos prontos) em (x, z). */
+    terrain: (mode: BrushMode, x: number, z: number, radius = 80, strength = 0.4) => {
+      const st = new BrushStroke(this.world), rk = LANDFORM_ROCK[mode];
+      const p = { mode, radius, strength };
+      st.dab(x, z, p, 1);
+      const g = rk !== undefined ? new GroundStroke(this.world) : null;
+      if (g && rk !== undefined) g.dab(x, z, radius * 0.95, 'paint', rk, 1, 1);
+      if (st.finish()) { if (g?.finish()) this.commands.push({ label: 'relevo', apply: () => { st.apply(); g.apply(); }, invert: () => { g.invert(); st.invert(); } }); else this.commands.push(st); }
+    },
+    /** Elementos do chão (tipo 30..40) espalhados num círculo. */
+    elements: (kind: number, x: number, z: number, r = 12, density = 20, size = 7) => {
+      const st = new ElementStroke(this.world.items);
+      for (let i = 0; i < 6; i++) st.dab(x, z, r, kind, density, size, 'lay', 1);
+      if (!st.cmd.empty) this.commands.push(st.cmd);
+      return this.world.items.size;
+    },
+    /** Faixa de pedestres no meio da via em (x, z): 9 zebra, 10 com semáforo. */
+    crossing: (x: number, z: number, ctl: number) => {
+      const s = this.world.roads.nearestSeg(x, z, 10);
+      if (!s) return 'sem via';
+      const r = addCrossing(this.world, s[0], s[1], ctl);
+      if (typeof r === 'string') return r;
+      this.commands.push(r);
+      return 'ok';
+    },
+    /** Retorno no canteiro na via em (x, z). */
+    uturn: (x: number, z: number) => {
+      const s = this.world.roads.nearestSeg(x, z, 10);
+      if (!s) return 'sem via';
+      const r = addUTurn(this.world, s[0], s[1]);
+      if (typeof r === 'string') return r;
+      this.commands.push(r);
+      return 'ok';
+    },
+    /** Demolir tudo no retângulo. */
+    demolish: (x0: number, z0: number, x1: number, z1: number) => { const r = demolishBox(this.world, x0, z0, x1, z1); if (r) this.commands.push(r.cmd); return r?.count ?? 0; },
+    /** Altura do terreno em (x, z). */
+    ground: (x: number, z: number) => heightAt(this.world.heights, x, z),
+    junction: (x: number, z: number, ctl: number) => { const n = this.world.roads.nearestNode(x, z, 20); if (n >= 0) this.world.roads.setJunction(n, { ctl }); },
+  };
+
+  /** Rio: mostra o trecho do último ponto até o cursor. */
+  private hoverRiver(hit: THREE.Vector3 | null): void {
+    const pv = this.preview;
+    if (!hit || this.riverPts.length === 0) { pv.hide(); return; }
+    const [ax, az] = this.riverPts[this.riverPts.length - 1];
+    const ya = heightAt(this.world.heights, ax, az), yb = heightAt(this.world.heights, hit.x, hit.z);
+    pv.show({ x0: ax, z0: az, cx: (ax + hit.x) / 2, cz: (az + hit.z) / 2, x1: hit.x, z1: hit.z }, this.riverWidth / 2, [0, 1], [ya + 0.3, yb + 0.3], true, 0x3d8fd0);
+  }
+
+  private finishRiver(): void {
+    if (this.riverPts.length >= 2) {
+      const c = new RiverCommand(this.world, this.riverPts, this.riverWidth, Math.min(4, 1.2 + this.riverWidth / 12));
+      if (!c.empty) { this.commands.run(c); this.hud.toast('Rio feito: a água desce sempre pelo caminho desenhado.'); }
+    }
+    this.riverPts.length = 0;
+    this.preview.hideAll();
+  }
+
+  private skyHint(): void {
+    const s = this.skyTool;
+    this.hud.setHint(s.fog === 'lay' ? 'Arraste para pôr neblina baixa (Raio muda o tamanho do pincel).' : s.fog === 'erase' ? 'Arraste para apagar a neblina.'
+      : s.cloud === 'add' ? 'Clique no mapa: uma nuvem nasce em cima do ponto, com o tamanho, a base e a densidade escolhidos.'
+        : s.cloud === 'move' ? 'Arraste uma nuvem (pela sombra no chão) para outro lugar.' : s.cloud === 'edit' ? 'Clique numa nuvem para aplicar os valores das barras.'
+          : s.cloud === 'remove' ? 'Clique numa nuvem para apagá-la.' : 'Espalhe nuvens ou ponha neblina.');
+  }
+
+  /** Troca a lista de nuvens como um comando (desfazer volta a anterior). */
+  private setClouds(next: Cloud[], label: string): void {
+    const before = this.clouds.map((c) => ({ ...c })), after = next.map((c) => ({ ...c }));
+    const set = (l: Cloud[]) => { this.clouds = l.map((c) => ({ ...c })); this.cloudView.set(this.clouds); this.unsaved = true; };
+    this.commands.run({ label, apply: () => set(after), invert: () => set(before) });
+  }
+
+  /** Nuvem cuja projeção no chão está perto de (x, z), ou −1. */
+  private cloudAt(x: number, z: number): number {
+    let best = -1, bd = Infinity;
+    this.clouds.forEach((c, i) => { const d = Math.hypot(c.x - x, c.z - z); if (d < c.size && d < bd) { bd = d; best = i; } });
+    return best;
+  }
+
+  private clickSky(x: number, z: number): void {
+    const s = this.skyTool;
+    if (s.fog !== 'none') return;
+    const i = this.cloudAt(x, z);
+    if (s.cloud === 'add') {
+      if (this.clouds.length >= MAX_CLOUDS) { this.hud.toast(`O céu já tem o máximo de nuvens (${MAX_CLOUDS}).`); return; }
+      const y = heightAt(this.world.heights, x, z) + s.base;
+      this.setClouds([...this.clouds, { x, z, y, size: s.size, density: s.density }], 'criar nuvem');
+    } else if (s.cloud === 'remove' && i >= 0) this.setClouds(this.clouds.filter((_, k) => k !== i), 'apagar nuvem');
+    else if (s.cloud === 'edit' && i >= 0) {
+      const c = this.clouds[i];
+      this.setClouds(this.clouds.map((d, k) => k === i ? { ...c, size: s.size, density: s.density, y: c.y - (c.y - heightAt(this.world.heights, c.x, c.z)) + s.base } : d), 'ajustar nuvem');
+    } else if (i < 0 && s.cloud !== 'none') this.hud.toast('Nenhuma nuvem aqui: clique embaixo de uma.');
+  }
+
+  private grabCloud(hit: THREE.Vector3 | null): boolean {
+    this.cloudGrab = hit ? this.cloudAt(hit.x, hit.z) : -1;
+    return this.cloudGrab >= 0;
+  }
+
+  private dropCloud(hit: THREE.Vector3 | null): void {
+    const i = this.cloudGrab;
+    this.cloudGrab = -1;
+    if (i < 0 || !hit) return;
+    const c = this.clouds[i];
+    const ground = heightAt(this.world.heights, hit.x, hit.z), base = c.y - heightAt(this.world.heights, c.x, c.z);
+    this.setClouds(this.clouds.map((d, k) => k === i ? { ...c, x: hit.x, z: hit.z, y: ground + base } : d), 'mover nuvem');
+  }
+
+  /** Espalha nuvens em volta da câmera (tamanho e base pelas barras, com variação). */
+  private scatterClouds(n: number, variation: number): void {
+    const s = this.skyTool, out = this.clouds.slice(0, Math.max(0, MAX_CLOUDS - n));
+    const t = this.rig.target;
+    for (let k = 0; k < n && out.length < MAX_CLOUDS; k++) {
+      const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * 5000;
+      const x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
+      const vary = (v: number) => v * (1 + (Math.random() * 2 - 1) * variation);
+      out.push({ x, z, y: heightAt(this.world.heights, x, z) + vary(s.base), size: vary(s.size), density: Math.min(1, vary(s.density)) });
+    }
+    this.setClouds(out, 'espalhar nuvens');
+  }
+
+  private setWater(w: { waves: number; foam: number; current: number }): void {
+    this.waterCtl = w; this.unsaved = true;
+    waveU.value = w.waves; foamU.value = w.foam; currentU.value = w.current;
+  }
+
+  /** Criador de pessoas: parada (item salvo) ou andando (pedestres da simulação com a roupa escolhida). */
+  private placePerson(x: number, z: number): void {
+    const p = this.personSpec;
+    if (p.walk) {
+      this.sim.postMessage({ type: 'people', x, z, count: p.count, color: p.color } satisfies ToSim);
+      this.hud.toast(p.count === 1 ? 'A pessoa saiu andando pela calçada.' : `${p.count} pessoas saíram andando pela calçada.`);
+      return;
+    }
+    const c = new ItemsCommand(this.world.items, 'pôr pessoa');
+    for (let k = 0; k < p.count; k++) {
+      const a = (k / Math.max(1, p.count)) * Math.PI * 2, d = k ? 1.4 + k * 0.15 : 0;
+      const yaw = Math.atan2(this.rig.eye.x - x, this.rig.eye.z - z);
+      c.add([x + Math.cos(a) * d, z + Math.sin(a) * d, yaw, 0, Item.Person, (p.color & 15) | ((p.height & 15) << 4)]);
+    }
+    this.commands.push(c);
+  }
+
+  private shoot(x: number, z: number): void {
+    this.ambient.sfx('shot');
+    this.hitKind = 'pistol';
+    this.sim.postMessage({ type: 'hit', x, z, r: 3, one: true } satisfies ToSim);
+  }
+
+  /** Bomba: clarão, fogo e fumaça; prédios no raio desabam e viram entulho (um comando); a simulação tira quem estava perto. */
+  private bomb(x: number, z: number): void {
+    const w = this.world, col = w.buildings.cols;
+    const r = 8 + this.bombForce * 6;
+    const y = heightAt(w.heights, x, z);
+    this.blast.boom(x, y, z, r);
+    this.ambient.sfx('boom');
+    this.particles.burst(x, y + 1, z, 2, 8, 12);
+    this.particles.burst(x, y + 2, z, 0, 10, 40);
+    this.particles.burst(x, y + 0.5, z, 6, 10, 3);
+    this.particles.burst(x, y + 0.5, z, 4, 12, 15);
+    flashU.value = 1;
+    const doomed: number[] = [];
+    w.buildingIndex.query(x - r - 40, z - r - 40, x + r + 40, z + r + 40, (id) => {
+      if (col.floors[id] === 0) return;
+      if (Math.hypot(col.x[id] - x, col.z[id] - z) < r + Math.min(col.w[id], col.d[id]) * 0.3) doomed.push(id);
+    });
+    if (doomed.length) {
+      const j = new RoadJournal(w, 'bomba');
+      const rubble = new ItemsCommand(w.items, 'entulho');
+      for (const id of doomed) {
+        const gy = heightAt(w.heights, col.x[id], col.z[id]);
+        this.blast.collapse(col.x[id], gy, col.z[id], col.w[id], col.d[id], Math.max(3, col.floors[id] * 3.2), col.rot[id]);
+        this.particles.burst(col.x[id], gy + 1, col.z[id], 4, 14, 10);
+        const rec = w.buildingRec(id);
+        j.removeBuilding(id);
+        // entulho: o lote fica vazio e cheio de pedras e cascalho
+        j.addBuilding({ x: rec[1], z: rec[2], w: rec[3], d: rec[4], h: 0, rot: rec[6], color: 0, seed: rec[8], zone: rec[9], floors: 0, style: rec[11], fn: 0 });
+        const n = Math.min(40, Math.round(rec[3] * rec[4] / 12));
+        for (let k = 0; k < n; k++) {
+          const lx = (Math.random() - 0.5) * rec[3] * 0.85, lz = (Math.random() - 0.5) * rec[4] * 0.85, c = Math.cos(rec[6]), s = Math.sin(rec[6]);
+          rubble.add([rec[1] + lx * c + lz * s, rec[2] - lx * s + lz * c, Math.random() * 6, 0, k % 3 === 0 ? Item.Gravel : Item.Stones, 12]);
+        }
+      }
+      const both = { label: 'bomba', apply: () => { j.apply(); rubble.apply(); }, invert: () => { rubble.invert(); j.invert(); } };
+      this.commands.push(both);
+    }
+    this.hitKind = 'bomb';
+    this.sim.postMessage({ type: 'hit', x, z, r, one: false } satisfies ToSim);
+    this.hud.toast(doomed.length ? `Desabou: ${doomed.length} ${doomed.length === 1 ? 'prédio' : 'prédios'}.` : 'Impacto no chão.');
+  }
+
+  private onHit(people: number, vehicles: number): void {
+    const k = this.hitKind;
+    this.hitKind = null;
+    if (k === 'pistol') this.hud.toast(people ? 'Atingido.' : 'Ninguém aí: clique numa pessoa.');
+    else if (k === 'bomb' && people + vehicles > 0) this.hud.toast(`Houve vítimas: ${people} ${people === 1 ? 'pessoa' : 'pessoas'} e ${vehicles} ${vehicles === 1 ? 'veículo' : 'veículos'}.`);
+  }
+
+  /** Clima do painel: chuva, vento, direção, raios e trovão; null volta ao tempo que muda sozinho (ou à opção). */
+  private setWeather(w: WeatherCtl | null): void {
+    this.weatherCtl = w;
+    this.unsaved = true;
+    const wt = this.weather;
+    if (!w) {
+      wt.windFixed = null; wt.lightningRate = 0; this.ambient.thunderVolume = 1;
+      const s = this.settings?.weather;
+      wt.fixed = s === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
+      return;
+    }
+    wt.fixed = { clouds: w.rain > 0 ? 0.6 + 0.4 * w.rain : w.lightning > 0 ? 0.85 : 0.25, rain: w.rain, storm: w.lightning > 0 ? 1 : 0 };
+    wt.windFixed = Math.min(1, w.wind / 20);
+    wt.lightningRate = w.lightning;
+    const r = w.dir * Math.PI / 180;
+    windDirU.value.set(Math.sin(r), Math.cos(r));
+    this.ambient.thunderVolume = w.thunder;
+  }
+
+  /** Uma árvore da espécie escolhida (mista: carvalho ou cipreste ao acaso). */
+  private plantTree(x: number, z: number): void {
+    const sp = this.forestSpecies === 0 ? (Math.random() < 0.5 ? 1 : 2) : this.forestSpecies;
+    const type = sp === 1 ? Item.Tree : sp === 2 ? Item.Conifer : Item.Palm;
+    const c = new ItemsCommand(this.world.items, 'plantar árvore');
+    c.add([x, z, Math.random() * Math.PI * 2, 0, type, 0]);
+    this.commands.push(c);
+  }
+
+  private setBiome(b: number): void {
+    this.world.biome = b;
+    this.terrain.setBiome(b);
+    this.hud.setBiome(b);
+    // as árvores de todo o mapa mudam de espécie: refaz as peças
+    for (let c = 0; c < CELL_COUNT; c++) this.world.dirty.mark(c, Dirty.Props);
+  }
+
+  private setElevation(e: number): void {
+    this.roadTool.setElevation(e);
+    this.hud.setElevation(this.roadTool.elevation);
+  }
+
+  private setRadius(r: number): void {
+    this.brush.radius = Math.max(5, Math.min(400, r));
+    this.hud.setRadius(this.brush.radius);
+  }
+
+  private setView(v: 'persp' | 'iso' | 'top'): void {
+    if (v === 'top') this.rig.topDown(); else this.rig.setMode(v);
+    this.hud.setView(this.rig.mode);
+  }
+
+  // ------------------------------------------------------------- prédios
+
+  private select(id: number): void {
+    this.selected = id;
+    const col = this.world.buildings.cols;
+    if (id < 0 || !this.world.buildings.alive[id]) { this.selected = -1; this.hud.setBuilding(''); this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; return; }
+    const z = col.zone[id];
+    const fnName = FN_NAMES[col.fn[id]];
+    this.creator?.show(hasDesign(col.color[id]) ? decodeDesign(col.color[id], col.h[id]) : null, col.floors[id]);
+    if (this.creator) this.creator.el.style.display = this.tool === 'building' && col.floors[id] > 0 ? '' : 'none';
+    this.hud.setBuilding(`${fnName || ZONE_NAMES[z] || 'Prédio'} · ${col.floors[id]} andar${col.floors[id] === 1 ? '' : 'es'}`, col.style[id] >= 128 ? col.style[id] - 128 : -1, col.fn[id]);
+  }
+
+  private showSelection(): void {
+    const id = this.selected;
+    if (id < 0 || !this.world.buildings.alive[id]) { this.preview.circle.visible = false; return; }
+    const col = this.world.buildings.cols;
+    const y = heightAt(this.world.heights, col.x[id], col.z[id]);
+    this.preview.showCircle(col.x[id], y, col.z[id], Math.hypot(col.w[id], col.d[id]) / 2 + 2, true);
+  }
+
+  /** Segue o veículo mais perto do centro da tela, ou solta. */
+  private toggleFollow(): void {
+    if (this.vehicles.follow) { this.vehicles.follow = null; return; }
+    const t = this.rig.target;
+    if (!this.vehicles.pick(t.x, t.z, Math.max(30, this.rig.dist * 0.4))) { this.hud.toast('Nenhum veículo perto do centro da tela: aproxime a câmera de uma via com trânsito.'); return; }
+    this.rig.dist = 16; this.rig.pitch = THREE.MathUtils.degToRad(14);
+    this.hud.toast('Seguindo o veículo. Esc ou C solta; a roda aproxima.');
+  }
+
+  private lineMode = 0;
+
+  private newLine(): void {
+    achieve('PRIMEIRA_LINHA');
+    const { cmd, id } = this.transit.addLine(this.lineMode);
+    this.commands.run(cmd);
+    this.lineSel = id;
+  }
+
+  /** Parada: tira a que estiver perto, ou põe uma nova na calçada mais próxima. */
+  private clickTransit(hit: THREE.Vector3 | null, shift = false): void {
+    if (!hit) return;
+    // Shift+clique numa parada: liga ou desliga o terminal
+    if (shift) {
+      const s = this.transit.stopNear(hit.x, hit.z, 9);
+      if (!s) { this.hud.toast('Shift+clique numa parada para torná-la terminal.'); return; }
+      const l = this.transit.line(s[0])!;
+      const x = l.stops[s[1] * 2], z = l.stops[s[1] * 2 + 1];
+      const was = this.transit.terminalNear(x, z, 9) >= 0;
+      this.commands.run(this.transit.toggleTerminal(x, z));
+      this.hud.toast(was ? 'Não é mais terminal.' : 'Terminal: os ônibus esperam mais e dão a volta aqui.');
+      return;
+    }
+    const near = this.transit.stopNear(hit.x, hit.z, 9);
+    if (near) {
+      const c = this.transit.removeStop(near[0], near[1]);
+      if (c) this.commands.run(c);
+      this.lineSel = near[0];
+      return;
+    }
+    const net = this.world.roads, sc = net.segs.cols;
+    if (!this.transit.line(this.lineSel)) this.newLine();
+    const line = this.transit.line(this.lineSel)!;
+    const rail = (line.mode ?? 0) > 0;
+    const seg = net.nearestSeg(hit.x, hit.z, 30, (s) => PROFILE_INFO[sc.profile[s]].rail === rail);
+    if (!seg) { this.hud.toast(rail ? 'Ponha a estação sobre um trilho (Via → Trilhos).' : 'Ponha a parada perto de uma via.'); return; }
+    const q = net.quad(seg[0]);
+    const p2 = new Float64Array(2), d2 = new Float64Array(2);
+    bez(q, seg[1], p2); bezD(q, seg[1], d2);
+    if (rail) {
+      // estação: no eixo do trilho
+      const c = this.transit.addStop(this.lineSel, p2[0], p2[1]);
+      if (c) this.commands.run(c);
+      return;
+    }
+    const info = PROFILE_INFO[sc.profile[seg[0]]];
+    if (!info.strips.some((s) => s.kind === 'sidewalk')) { this.hud.toast('Essa via não tem calçada.'); return; }
+    const l = Math.hypot(d2[0], d2[1]) || 1;
+    const lx = d2[1] / l, lz = -d2[0] / l;
+    const side = (hit.x - p2[0]) * lx + (hit.z - p2[1]) * lz > 0 ? 1 : -1;
+    const e = side > 0 ? info.edges[info.edges.length - 1] : info.edges[0];
+    const other = side > 0 ? info.edges[0] : info.edges[info.edges.length - 1];
+    const sw = e.strip.kind === 'sidewalk' ? e : other;
+    const u = (sw.u0 + sw.u1) / 2;
+    const c = this.transit.addStop(this.lineSel, p2[0] + lx * u, p2[1] + lz * u);
+    if (c) this.commands.run(c);
+  }
+
+  /** Linhas para a simulação e para o desenho, quando mudam (ou quando as vias mudam). */
+  private syncTransit(): void {
+    const v = this.transit.version * 100000 + this.roadsVersion;
+    this.transitView.update(this.transit, this.world.roads, this.world.heights, v);
+    if (v !== this.linesSent) {
+      this.linesSent = v;
+      this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l) })) } satisfies ToSim);
+    }
+    if (this.tool === 'transit') {
+      const ids = this.transit.lines.map((l) => l.id);
+      if (!this.transit.line(this.lineSel) && ids.length) this.lineSel = ids[0];
+      for (const l of this.transit.lines) this.hud.lineModes.set(l.id, l.mode ?? 0);
+      this.hud.setLines(ids, this.lineSel);
+      const l = this.transit.line(this.lineSel);
+      const st = this.simStats?.type === 'stats' ? this.simStats.lines.find((x) => x.id === this.lineSel) : undefined;
+      this.hud.setLineInfo(l ? `${l.stops.length / 2} ${l.mode ? 'estações' : 'paradas'} · ${l.buses} ${l.mode ? (l.buses === 1 ? 'trem' : 'trens') : 'ônibus'} · ${st ? st.perHour : 0} passageiros/h · ${st ? st.waiting : 0} esperando` : 'Clique na calçada para começar uma linha');
+    }
+  }
+
+  /** Retângulo do lote: frente A→B, fundo até a distância do cursor à frente. */
+  private lotRect(c: [number, number]): { x: number; z: number; w: number; d: number; rot: number } | null {
+    const [a, b] = this.lotPts!;
+    const ex = b[0] - a[0], ez = b[1] - a[1], W = Math.hypot(ex, ez);
+    if (W < 6) return null;
+    // normal da frente para o lado do terceiro ponto
+    let nx = -ez / W, nz = ex / W;
+    let D = (c[0] - a[0]) * nx + (c[1] - a[1]) * nz;
+    if (D < 0) { nx = -nx; nz = -nz; D = -D; }
+    D = Math.min(120, Math.max(6, D));
+    // frente do prédio (+z local) aponta para a linha A-B: (sen rot, cos rot) = −n
+    return { x: (a[0] + b[0]) / 2 + nx * D / 2, z: (a[1] + b[1]) / 2 + nz * D / 2, w: Math.min(160, W), d: D, rot: Math.atan2(-nx, -nz) };
+  }
+
+  private hoverLot(hit: THREE.Vector3 | null): void {
+    const pts = this.lotPts!;
+    if (!hit) return;
+    const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.6;
+    if (pts.length === 0) { this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true); return; }
+    if (pts.length === 1) {
+      const [a] = pts;
+      this.preview.show({ x0: a[0], z0: a[1], cx: (a[0] + hit.x) / 2, cz: (a[1] + hit.z) / 2, x1: hit.x, z1: hit.z }, 0.4, [0, 1], [H(a[0], a[1]), H(hit.x, hit.z)], true, 0xffd36b);
+      return;
+    }
+    const r = this.lotRect([hit.x, hit.z]);
+    if (!r) return;
+    // fita do eixo do lote com a largura da frente: cobre o retângulo
+    const c = Math.cos(r.rot), s = Math.sin(r.rot), fx = s * r.d / 2, fz = c * r.d / 2;
+    this.preview.show({ x0: r.x + fx, z0: r.z + fz, cx: r.x, cz: r.z, x1: r.x - fx, z1: r.z - fz }, r.w / 2, [0, 1], [H(r.x + fx, r.z + fz), H(r.x - fx, r.z - fz)], true, 0x5aa8ff);
+  }
+
+  private clickLot(hit: THREE.Vector3 | null): void {
+    if (!hit || !this.lotPts) return;
+    const pts = this.lotPts;
+    if (pts.length < 2) { pts.push([hit.x, hit.z]); return; }
+    const r = this.lotRect([hit.x, hit.z]);
+    if (!r) { this.hud.toast('Lote estreito demais.'); pts.length = 0; return; }
+    const seed = (Math.random() * 2 ** 31) >>> 0;
+    const zone = this.lotUse;
+    const rec = {
+      ...r, h: 0, color: 0, seed, zone, fn: this.newFn,
+      floors: floorsFor(zone, 0, new Rng(seed)),
+      style: this.newArch >= 0 ? 128 + this.newArch : seed & 127,
+    };
+    const j = new RoadJournal(this.world, 'lote desenhado');
+    const id = j.addBuilding(rec);
+    this.commands.push(j);
+    pts.length = 0;
+    this.preview.hide();
+    this.select(id);
+  }
+
+  private setLotMode(m: LotMode): void {
+    this.lotMode = m;
+    this.lotPts = m === 'rect' ? [] : null;
+    this.polyPts.length = 0; this.joinFirst = -1; this.cornerDrag = null;
+    this.preview.hideAll();
+    if (m !== 'edit') this.select(-1);
+    this.hud.setLotMode(m);
+    const hints: Record<LotMode, string> = {
+      edit: 'Clique num prédio para editar, ou num lote vazio para construir.',
+      rect: 'Clique no começo e no fim da frente do lote; depois no fundo.',
+      poly: 'Clique os cantos do lote; Enter ou duplo clique fecha, Backspace volta um ponto.',
+      split: 'Clique num lote para dividi-lo (escolha lado a lado ou frente e fundos e em quantos).',
+      join: 'Clique num lote e depois no lote ao lado para juntá-los.',
+      delete: 'Clique num prédio: vira lote vazio. Clique num lote vazio: ele some.',
+      front: 'Clique perto de um lado do lote: a construção vira de frente para ele.',
+      corner: 'Arraste um canto do lote para mudar o tamanho.',
+    };
+    this.hud.setHint(hints[m]);
+  }
+
+  /** Contorno de um lote (registro) no chão. */
+  private showLot(id: number, color: number): void {
+    const col = this.world.buildings.cols;
+    const r = { x: col.x[id], z: col.z[id], rot: col.rot[id] };
+    const [fx, fz] = lotToWorld(r, 0, col.d[id] / 2), [bx, bz] = lotToWorld(r, 0, -col.d[id] / 2);
+    const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.7;
+    this.preview.show({ x0: fx, z0: fz, cx: r.x, cz: r.z, x1: bx, z1: bz }, col.w[id] / 2, [0, 1], [H(fx, fz), H(bx, bz)], true, color);
+  }
+
+  private hoverLotTool(hit: THREE.Vector3 | null): void {
+    if (this.lotMode === 'edit') { this.showSelection(); return; }
+    if (this.lotMode === 'rect') { if (this.lotPts) this.hoverLot(hit); return; }
+    if (!hit) return;
+    const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.7;
+    if (this.lotMode === 'poly') {
+      const pts: Array<[number, number]> = [...this.polyPts, [hit.x, hit.z]];
+      const r = pts.length >= 3 ? polygonRect(pts) : null;
+      if (r) {
+        const [fx, fz] = lotToWorld(r, 0, r.d / 2), [bx, bz] = lotToWorld(r, 0, -r.d / 2);
+        this.preview.show({ x0: fx, z0: fz, cx: r.x, cz: r.z, x1: bx, z1: bz }, r.w / 2, [0, 1], [H(fx, fz), H(bx, bz)], true, 0x5aa8ff);
+      } else if (pts.length === 2) {
+        const [a, b] = pts;
+        this.preview.show({ x0: a[0], z0: a[1], cx: (a[0] + b[0]) / 2, cz: (a[1] + b[1]) / 2, x1: b[0], z1: b[1] }, 0.4, [0, 1], [H(a[0], a[1]), H(b[0], b[1])], true, 0xffd36b);
+      } else this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true);
+      return;
+    }
+    if (this.cornerDrag) {
+      this.showLot(this.cornerDrag.id, 0x5aa8ff);
+      this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true);
+      return;
+    }
+    const id = lotAt(this.world, hit.x, hit.z);
+    if (id < 0) { this.preview.hide(); return; }
+    this.showLot(id, this.lotMode === 'delete' ? 0xe2564b : this.lotMode === 'join' && this.joinFirst >= 0 ? 0x4cd28a : 0x5aa8ff);
+  }
+
+  private clickLotTool(hit: THREE.Vector3): void {
+    if (this.lotMode === 'poly') { this.polyPts.push([hit.x, hit.z]); return; }
+    const id = lotAt(this.world, hit.x, hit.z);
+    if (id < 0) { this.hud.toast('Nenhum lote aqui: desenhe um ou zoneie a rua.'); return; }
+    let r: RoadJournal | string | null = null;
+    if (this.lotMode === 'split') r = splitLot(this.world, id, this.splitKind, this.splitParts);
+    else if (this.lotMode === 'delete') r = deleteLot(this.world, id);
+    else if (this.lotMode === 'front') { r = setLotFront(this.world, id, hit.x, hit.z); if (!r) { this.hud.toast('Esse já é o lado da frente.'); return; } }
+    else if (this.lotMode === 'join') {
+      if (this.joinFirst < 0 || !this.world.buildings.alive[this.joinFirst]) { this.joinFirst = id; this.hud.setHint('Agora clique no lote ao lado.'); return; }
+      r = joinLots(this.world, this.joinFirst, id);
+      this.joinFirst = -1;
+      this.hud.setHint('Clique num lote e depois no lote ao lado para juntá-los.');
+    }
+    if (!r) return;
+    if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
+    this.commands.push(r);
+    this.preview.hide();
+    this.hud.toast(this.lotMode === 'split' ? 'Lote dividido.' : this.lotMode === 'join' ? 'Lotes juntados.' : this.lotMode === 'front' ? 'Frente definida: a construção olha para esse lado.' : 'Apagado.');
+  }
+
+  private finishPoly(): void {
+    const r = polygonRect(this.polyPts);
+    this.polyPts.length = 0;
+    this.preview.hideAll();
+    if (!r) { this.hud.toast('Não cabe um lote aí.'); return; }
+    const seed = (Math.random() * 2 ** 31) >>> 0, zone = this.lotUse;
+    const j = new RoadJournal(this.world, 'lote desenhado');
+    j.addBuilding({ ...r, h: 0, color: 0, seed, zone, fn: this.newFn, floors: floorsFor(zone, 0, new Rng(seed)), style: this.newArch >= 0 ? 128 + this.newArch : seed & 127 });
+    this.commands.push(j);
+    this.hud.toast('Lote novo criado.');
+  }
+
+  private grabCorner(hit: THREE.Vector3 | null): boolean {
+    if (!hit) return false;
+    const id = lotAt(this.world, hit.x, hit.z);
+    if (id < 0) return false;
+    const [k, d] = nearestCorner(this.world, id, hit.x, hit.z);
+    if (d > 8) return false;
+    this.cornerDrag = { id, k };
+    return true;
+  }
+
+  private dropCorner(hit: THREE.Vector3 | null): void {
+    const c = this.cornerDrag;
+    this.cornerDrag = null;
+    this.preview.hideAll();
+    if (!c || !hit || !this.world.buildings.alive[c.id]) return;
+    const r = moveLotCorner(this.world, c.id, c.k, hit.x, hit.z);
+    if (typeof r === 'string') { this.hud.toast(`Não mudou: ${r}.`); return; }
+    this.commands.push(r);
+  }
+
+  private clickBuilding(hit: THREE.Vector3 | null): void {
+    if (!hit) return;
+    if (this.lotMode !== 'edit' && this.lotMode !== 'rect') { this.clickLotTool(hit); return; }
+    if (this.lotPts) { this.clickLot(hit); return; }
+    // prédio sob o clique?
+    const col = this.world.buildings.cols;
+    let best = -1, bd = Infinity;
+    this.world.buildingIndex.query(hit.x - 40, hit.z - 40, hit.x + 40, hit.z + 40, (id) => {
+      const dx = hit.x - col.x[id], dz = hit.z - col.z[id];
+      const s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
+      const lx = dx * c - dz * s, lz = dx * s + dz * c;
+      if (Math.abs(lx) <= col.w[id] / 2 + 1 && Math.abs(lz) <= col.d[id] / 2 + 1) {
+        const d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; best = id; }
+      }
+    });
+    if (best >= 0) { this.select(best); return; }
+    // lote livre: constrói
+    const lot = this.growth.lotAt(hit.x, hit.z);
+    if (!lot) { this.hud.toast('Clique num prédio ou num lote vazio (zoneie as vias primeiro).'); return; }
+    const j = new RoadJournal(this.world, 'construir prédio');
+    const id = j.addBuilding(this.growth.recordFor(lot.lots, lot.i));
+    this.commands.push(j);
+    this.select(id);
+  }
+
+  /** Muda andares, estilo (−1 = automático) e função do prédio escolhido. */
+  private editSelected(dFloors: number, arch?: number, fn?: number): void {
+    const id = this.selected;
+    if (id < 0 || !this.world.buildings.alive[id]) return;
+    const col = this.world.buildings.cols;
+    const from = [col.floors[id], col.style[id], col.fn[id]];
+    const style = arch === undefined ? col.style[id] : arch < 0 ? col.seed[id] & 127 : 128 + arch;
+    const to = [Math.max(1, Math.min(60, col.floors[id] + dFloors)), style, fn ?? col.fn[id]];
+    if (from.every((v, i) => v === to[i])) return;
+    const world = this.world;
+    this.commands.run({
+      label: 'editar prédio',
+      apply: () => { if (world.buildings.alive[id]) world.editBuilding(id, to[0], to[1], to[2]); },
+      invert: () => { if (world.buildings.alive[id]) world.editBuilding(id, from[0], from[1], from[2]); },
+    });
+    this.select(id);
+  }
+
+  /** Ver por dentro: o prédio escolhido, ou o do centro da tela; andar acima e abaixo. */
+  private insideCmd(c: 'toggle' | 'up' | 'down'): void {
+    const w = this.world, col = w.buildings.cols;
+    if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; return; }
+    if (c === 'toggle') {
+      const id = this.selected >= 0 ? this.selected : lotAt(w, this.rig.target.x, this.rig.target.z);
+      if (id < 0 || col.floors[id] === 0) { this.hud.toast('Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.'); return; }
+      this.insideId = id;
+      this.insideFloor = 0;
+    } else if (!this.inside.on) return;
+    else this.insideFloor += c === 'up' ? 1 : -1;
+    const id = this.insideId;
+    if (!w.buildings.alive[id]) { this.inside.hide(); return; }
+    this.insideFloor = Math.max(0, Math.min(col.floors[id] - 1, this.insideFloor));
+    const base = heightAt(w.heights, col.x[id], col.z[id]) + 0.2;
+    this.inside.show(col.x[id], col.z[id], col.w[id], col.d[id], col.rot[id], base, this.insideFloor, 3.2);
+    this.hud.toast(this.insideFloor === 0 ? 'Térreo' : `${this.insideFloor}º andar`);
+  }
+
+  /** Criador: põe (ou tira) o projeto no prédio escolhido; andares opcionais (modelo pronto). */
+  private applyDesign(d: Design | null, floors?: number): void {
+    const id = this.selected;
+    if (id < 0 || !this.world.buildings.alive[id]) { this.hud.toast('Selecione um prédio primeiro.'); return; }
+    const col = this.world.buildings.cols, w = this.world;
+    const before = [col.color[id], col.h[id], col.floors[id]];
+    const enc = d ? encodeDesign(d) : { color: 0, h: 0 };
+    const after = [enc.color, enc.h, Math.max(1, Math.min(60, floors ?? col.floors[id]))];
+    if (before.every((v, i) => v === after[i])) return;
+    this.commands.run({
+      label: 'projeto do prédio',
+      apply: () => { if (w.buildings.alive[id]) w.setDesign(id, after[0], after[1], after[2]); },
+      invert: () => { if (w.buildings.alive[id]) w.setDesign(id, before[0], before[1], before[2]); },
+    });
+    this.select(id);
+  }
+
+  private demolishSelected(): void {
+    const id = this.selected;
+    if (id < 0 || !this.world.buildings.alive[id]) return;
+    const j = new RoadJournal(this.world, 'demolir prédio');
+    j.removeBuilding(id);
+    this.commands.push(j);
+    this.select(-1);
+  }
+
+  // ------------------------------------------------------- cidade gerada
+
+  /** Esquece a cidade atual (vias, prédios, linhas, histórico). */
+  private resetCity(): void {
+    const w = this.world;
+    w.clearBuildings();
+    w.items.clear();
+    w.clearGround();
+    w.roads.clear();
+    this.growth.clear();
+    for (const l of this.layers) l.reset();
+    this.props.clear();
+    this.transit.clear();
+    this.commands.clear();
+    this.clouds = []; this.cloudView.set([]);
+    w.signTexts.clear(); w.streetNames.clear(); this.textSigns.version++;
+    w.money = START_MONEY;
+  }
+
+  /** Cidade inteira pela semente: relevo de novo, vias num worker, relevo assentado por ladrilho em paralelo, lotes e prédios. */
+  async generatedCity(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    const t0 = performance.now();
+    const phase = (name: string) => console.log(`fase: ${name} ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    this.hud.showLoading('Gerando a cidade…');
+    const w = this.world;
+    this.resetCity();
+    this.generating = true;
+    await this.generateTerrain();
+    phase('relevo');
+    const city = await new Promise<{ nodes: Float32Array; segs: Int32Array }>((resolve) =>
+      this.pool.submit('cityGen', { seed: w.seed }, (r) => resolve(r), { priority: 0 }));
+    phase('malha viária');
+    this.hud.showLoading('Assentando as vias…');
+    const ids: number[] = [];
+    for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
+    const nc = w.roads.nodes.cols;
+    const perTile: number[][] = Array.from({ length: TILE_COUNT }, () => []);
+    for (let k = 0; k < city.segs.length; k += 5) {
+      const a = ids[city.segs[k]], b = ids[city.segs[k + 1]], profile = city.segs[k + 2];
+      const mx = (nc.x[a] + nc.x[b]) / 2, mz = (nc.z[a] + nc.z[b]) / 2;
+      try {
+        w.roads.addSeg({ a, b, cx: mx, cz: mz, profile, flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
+      } catch { continue; }
+      // trecho reto para assentar o relevo, em cada ladrilho que ele toca
+      const half = PROFILE_INFO[profile].right + 0.5;
+      const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half];
+      const r = half + 8;
+      const tx0 = tileX(Math.min(nc.x[a], nc.x[b]) - r), tx1 = tileX(Math.max(nc.x[a], nc.x[b]) + r);
+      const tz0 = tileX(Math.min(nc.z[a], nc.z[b]) - r), tz1 = tileX(Math.max(nc.z[a], nc.z[b]) + r);
+      for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) perTile[tileId(tx, tz)].push(...rec);
+    }
+    // pontas sem saída com balão de retorno: um disco no assentamento do relevo
+    for (const n of ids) {
+      if (!bulbAt(w.roads, n)) continue;
+      const half = BULB_R + BULB_WALK + 1, r = half + 8;
+      const rec = [nc.x[n], nc.z[n], nc.y[n], nc.x[n], nc.z[n], nc.y[n], half];
+      for (let tz = tileX(nc.z[n] - r); tz <= tileX(nc.z[n] + r); tz++) for (let tx = tileX(nc.x[n] - r); tx <= tileX(nc.x[n] + r); tx++) perTile[tileId(tx, tz)].push(...rec);
+    }
+    phase('vias inseridas');
+    await new Promise<void>((resolve) => {
+      let left = 0;
+      for (let t = 0; t < TILE_COUNT; t++) {
+        if (!perTile[t].length) continue;
+        left++;
+        const segs = new Float32Array(perTile[t]);
+        this.pool.submit('conform', { tile: t, segs }, (r) => {
+          w.tileMin[r.tile] = r.min; w.tileMax[r.tile] = r.max;
+          w.layerDirty.add(r.tile);
+          const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
+          w.touchRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Terrain);
+          if (--left === 0) resolve();
+        }, { priority: 0, transfer: [segs.buffer] });
+      }
+      if (left === 0) resolve();
+    });
+    this.generating = false;
+    phase('relevo assentado');
+    this.hud.showLoading('Lotes e prédios…');
+    this.growth.processDirty();
+    await this.pool.whenIdle();
+    phase('lotes');
+    const n = this.growth.fillAll();
+    phase('prédios');
+    this.hud.hideLoading();
+    this.busy = false;
+    achieve('CIDADE_GERADA');
+    const secs = ((performance.now() - t0) / 1000).toFixed(0);
+    this.hud.toast(`Cidade gerada em ${secs} s: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de via.`);
+  }
+
+  // ------------------------------------------------------- cidade de teste
+
+  /** Pior caso: enche o mapa de ruas zoneadas e deixa os prédios crescerem em todos os lotes. */
+  private async testCity(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.hud.toast('Gerando a cidade de teste…');
+    const w = this.world;
+    this.resetCity();
+    const nodes: Float32Array[] = [], segs: Int32Array[] = [];
+    let left = TILE_COUNT;
+    await new Promise<void>((resolve) => {
+      for (let t = 0; t < TILE_COUNT; t++) {
+        this.pool.submit('debugTile', { seed: w.seed, tile: t }, (r) => {
+          w.tileMin[r.tile] = Math.min(w.tileMin[r.tile], r.min);
+          w.tileMax[r.tile] = Math.max(w.tileMax[r.tile], r.max);
+          w.layerDirty.add(r.tile);
+          nodes.push(r.roadNodes); segs.push(r.roadSegs);
+          if (--left === 0) resolve();
+        }, { priority: 1 });
+      }
+    });
+    // ruas: primeiro todos os nós, depois os trechos (que podem ligar ladrilhos)
+    const key = new Map<number, number>();
+    for (const a of nodes) for (let k = 0; k < a.length; k += 5) {
+      key.set(a[k] * 1000 + a[k + 1], w.roads.addNode({ x: a[k + 2], z: a[k + 3], y: a[k + 4] }));
+    }
+    const nc = w.roads.nodes.cols;
+    for (const a of segs) for (let k = 0; k < a.length; k += 4) {
+      const na = key.get(a[k] * 1000 + a[k + 1]), nb = key.get(a[k + 2] * 1000 + a[k + 3]);
+      if (na === undefined || nb === undefined) continue;
+      const mx = (nc.x[na] + nc.x[nb]) / 2, mz = (nc.z[na] + nc.z[nb]) / 2;
+      const r = Math.hypot(mx, mz);
+      const zone = r < 1300 ? Zone.Commercial : r < 2600 ? Zone.Mixed : mx > 2800 ? Zone.Industrial : Zone.Residential;
+      // trecho horizontal (mesmo j) segue a linha j; vertical, a linha i
+      const profile = a[k + 1] === a[k + 3] ? lineProfile(a[k + 1]) : lineProfile(a[k]);
+      w.roads.addSeg({ a: na, b: nb, cx: mx, cz: mz, profile, flags: 0, zl: zone, zr: zone });
+    }
+    // lotes nos workers, depois um prédio em cada lote livre
+    this.growth.processDirty();
+    await this.pool.whenIdle();
+    const n = this.growth.fillAll();
+    this.busy = false;
+    this.hud.toast(`Cidade de teste: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de rua.`);
+  }
+
+  private insertBoxes(b: BoxColumns): void {
+    for (let i = 0; i < b.count; i++) {
+      this.world.addBuilding({ x: b.x[i], z: b.z[i], w: b.w[i], d: b.d[i], h: b.h[i], rot: b.rot[i], color: b.color[i], seed: b.seed[i], zone: b.zone[i], floors: b.floors[i], style: b.style[i], fn: b.fn[i] });
+    }
+  }
+
+  // --------------------------------------------------- salvar e carregar
+
+  private async save(auto = false): Promise<void> {
+    if (this.busy) return;
+    this.unsaved = false;
+    this.busy = true;
+    const w = this.world;
+    const tiles: number[] = [];
+    for (let t = 0; t < TILE_COUNT; t++) if (w.saveDirty[t]) tiles.push(t);
+    let bytes = 0;
+    try {
+      await Promise.all(tiles.map((t) => new Promise<void>((resolve) => {
+        w.saveDirty[t] = 0;
+        const heights = packTileHeights(w.heights, t);
+        const boxes = w.gatherBoxes(cellsOfTile(t));
+        const roads = w.roads.saveTile(t, (x, z) => tileId(tileX(x), tileX(z)));
+        roads.items = w.items.saveTile((x, z) => tileId(tileX(x), tileX(z)), t, cellsOfTile(t));
+        this.pool.submit('saveTile', { slot: SLOT, tile: t, heights, boxes, roads }, (r) => {
+          w.tileInSave[r.tile] = 1;
+          bytes += r.bytes;
+          resolve();
+        }, { priority: -1, transfer: [heights.buffer as ArrayBuffer, ...boxTransfer(boxes), roads.nodes.buffer as ArrayBuffer, roads.segs.buffer as ArrayBuffer, roads.items.buffer as ArrayBuffer] });
+      })));
+      const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: w.tileInSave, camera: this.rig.state(), hour: this.hour, transit: this.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.unlimited ? NaN : w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
+        extra: JSON.stringify({ sky: this.skyMode, weather: this.weatherCtl, water: this.waterCtl, clouds: this.clouds, fog: fogLevel.value, terminals: this.transit.terminals,
+          signs: [...w.signTexts], streets: [...w.streetNames] }) });
+      await new Promise<void>((resolve) => this.pool.submit('saveMeta', { slot: SLOT, meta }, () => resolve(), { priority: -1 }));
+      if (auto) this.hud.toast('Salvo automaticamente.');
+      else this.hud.toast(tiles.length ? `Salvo (${tiles.length} ladrilhos, ${(bytes / 1024 / 1024).toFixed(1)} MB).` : 'Salvo.');
+    } catch (err) {
+      this.hud.toast(`Não foi possível salvar: ${String(err)}`);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async load(): Promise<void> {
+    if (this.busy) return;
+    const raw = await new Promise<Uint8Array | null>((resolve) =>
+      this.pool.submit('loadMeta', { slot: SLOT }, (r) => resolve(r.meta), { priority: -1 }));
+    if (!raw) { this.hud.toast('Nenhum salvamento encontrado.'); return; }
+    let meta;
+    try { meta = decodeMeta(raw); } catch (err) {
+      if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { reloadWithMap(err.tiles, 'carregar'); return; }
+      this.hud.toast(String(err)); return;
+    }
+    this.busy = true;
+    this.hud.showLoading('Carregando a cidade…');
+    const w = this.world;
+    w.clearBuildings();
+    w.items.clear();
+    w.clearGround();
+    w.roads.clear();
+    this.growth.clear();
+    for (const l of this.layers) l.reset();
+    this.props.clear();
+    this.transit.clear();
+    this.commands.clear();
+    try { setCustomProfiles(meta.profiles ? JSON.parse(meta.profiles) as Profile[] : []); } catch { setCustomProfiles([]); }
+    w.clearGround();
+    this.setBiome(meta.biome ?? 0);
+    w.unlimited = meta.money !== undefined && Number.isNaN(meta.money);
+    w.money = meta.money !== undefined && !Number.isNaN(meta.money) ? meta.money : START_MONEY;
+    const roads: RoadSave[] = [];
+    w.seed = meta.seed;
+    w.gameId = meta.gameId;
+    if (meta.hour !== undefined) this.hour = meta.hour;
+    if (meta.transit) this.transit.decode(meta.transit); else this.transit.clear();
+    try {
+      const extra = meta.extra ? JSON.parse(meta.extra) as { sky?: SkyMode; weather?: WeatherCtl | null; water?: { waves: number; foam: number; current: number } } : {};
+      this.setWater(extra.water ?? { waves: 0.3, foam: 0.4, current: 0.5 });
+      const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]> };
+      w.signTexts.clear(); for (const [k, v] of ex.signs ?? []) w.signTexts.set(k, v);
+      w.streetNames.clear(); for (const [k, v] of ex.streets ?? []) w.streetNames.set(k, v);
+      this.textSigns.version++;
+      this.transit.terminals = ex.terminals ?? []; this.transit.version++;
+      this.clouds = ex.clouds ?? []; this.cloudView.set(this.clouds); fogLevel.value = ex.fog ?? 1;
+      this.skyMode = extra.sky ?? 'ciclo'; this.hud.setSky(this.skyMode);
+      this.setWeather(extra.weather ?? null);
+    } catch { /* salvamento antigo */ }
+    w.tileInSave.set(meta.tiles);
+    let left = TILE_COUNT;
+    await new Promise<void>((resolve) => {
+      const done = () => { if (--left === 0) resolve(); };
+      for (let t = 0; t < TILE_COUNT; t++) {
+        const cells = cellsOfTile(t);
+        if (meta.tiles[t]) {
+          this.pool.submit('loadTile', { slot: SLOT, tile: t }, (r) => {
+            if (r.found) {
+              w.tileMin[t] = r.min; w.tileMax[t] = r.max;
+              if (r.boxes) this.insertBoxes(r.boxes);
+              if (r.roads) roads.push(r.roads);
+              if (r.roads?.items) w.items.loadTile(r.roads.items);
+              w.groundDirty.add(t); w.waterDirty.add(t);
+              w.tileWater[t] = r.hasWater ? 1 : 0;
+            }
+            w.layerDirty.add(t);
+            for (const c of cells) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
+            done();
+          }, { key: `terrain:${t}`, priority: 0 });
+        } else {
+          this.pool.submit('terrainGen', { seed: w.seed, tile: t }, (r) => {
+            w.tileMin[t] = r.min; w.tileMax[t] = r.max;
+            w.layerDirty.add(t);
+            for (const c of cells) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
+            done();
+          }, { key: `terrain:${t}`, priority: 0 });
+        }
+      }
+    });
+    // vias: todos os nós antes dos trechos (trechos ligam ladrilhos)
+    for (const r of roads) w.roads.loadNodes(r);
+    for (const r of roads) w.roads.loadSegs(r);
+    try {
+      for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
+    } catch { /* salvamento sem cruzamentos escolhidos */ }
+    w.saveDirty.fill(0);
+    this.rig.restore(meta.camera);
+    this.hud.setView(this.rig.mode);
+    this.hud.hideLoading();
+    this.busy = false;
+    this.hud.toast('Cidade carregada.');
+  }
+
+  /** Salva e baixa o mapa inteiro num arquivo .cidade. */
+  private async exportMap(): Promise<void> {
+    await this.save();
+    const blob = await packSlot(SLOT);
+    if (!blob) { this.hud.toast('Nada salvo para exportar ainda.'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `cidade-${this.world.seed}.cidade`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    this.hud.toast(`Mapa exportado (${(blob.size / 1024 / 1024).toFixed(1)} MB).`);
+  }
+
+  /** Abre um mapa de arquivo: troca o salvamento por ele e carrega. */
+  private async importMap(file: Blob): Promise<void> {
+    if (this.busy) return;
+    try { await unpackToSlot(SLOT, file); } catch (err) { this.hud.toast(`Não abriu: ${(err as Error).message}.`); return; }
+    await this.load();
+  }
+
+  private async newMap(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.hud.showLoading('Gerando o relevo…');
+    const w = this.world;
+    this.resetCity();
+    w.seed = (Math.random() * 2 ** 32) >>> 0;
+    w.gameId = (Math.random() * 2 ** 32) >>> 0;
+    w.tileInSave.fill(0);
+    await this.generateTerrain();
+    for (let t = 0; t < TILE_COUNT; t++) for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain);
+    // o relevo novo vem da semente: só precisa ser gravado depois de editado
+    w.saveDirty.fill(0);
+    this.hud.hideLoading();
+    this.busy = false;
+  }
+}

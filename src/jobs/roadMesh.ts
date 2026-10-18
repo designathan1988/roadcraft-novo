@@ -1,0 +1,531 @@
+// Monta a malha das vias de um pedaço da rede (worker). Trechos viram faixas
+// pela seção do perfil (asfalto, meio-fio, calçada, canteiro, mureta); nós com
+// 3+ braços viram cruzamentos com esquinas arredondadas; pontas soltas ganham
+// arremate. Faixa de pedestre, linha de retenção e faixas pintadas ficam no
+// shader (atributo extra: u, v, até o fim, código). Rebaixo de calçada junto à
+// faixa de pedestre. Trechos altos viram pontes (laje, mureta, pilares) e
+// trechos enterrados viram túneis com portal.
+
+import { arcTable, bez, bezD, tAtLength, type Arm, type Quad } from '../roads/geometry.ts';
+import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, junctionRetreats } from '../roads/junction.ts';
+import { PROFILE_INFO, Paving, Surface, type ProfileInfo, type Strip } from '../roads/profiles.ts';
+import { SegFlag } from '../roads/flags.ts';
+import { heightAt } from '../world/heights.ts';
+import { ZONE_COLORS } from '../roads/zones.ts';
+import { MeshBuilder } from './meshBuilder.ts';
+import type { PackedMesh, RoadGraph } from './protocol.ts';
+
+export const RMAT = { Asphalt: 2, Plain: 3, Sidewalk: 4, Grass: 5, Concrete: 6, Curb: 7, Zone: 8, Pavers: 9, Stone: 10 } as const;
+export const CURB_H = 0.15;
+const DECK = 1.3;
+const SKIRT = 0.7;
+const CROSSWALK = 4.2; // comprimento da faixa de pedestre + retenção
+const PILLAR_EVERY = 26;
+
+const COLOR = {
+  asphalt: 0x3a3c40, parking: 0x404246, bike: 0x9a4a3e, shoulder: 0x4a4c4f,
+  sidewalk: 0xb3b0aa, curb: 0xd3cec4, grass: 0x5a7a3e, concrete: 0xa9a59d,
+};
+
+/** Flags no código do vértice (código = trecho * 16 + flags). */
+export const RoadCode = { CrossA: 1, CrossB: 2, OneWay: 4, Ring: 8 } as const;
+
+interface ArmRef { seg: number; end: 0 | 1; arm: Arm }
+
+const p2 = new Float64Array(2), d2 = new Float64Array(2);
+
+/** Cor da pista pelo piso. */
+function surfaceColor(surface: number | undefined): number {
+  return surface === Surface.Concrete ? 0x8e8b85 : surface === Surface.Cobble ? 0x6e675f : surface === Surface.Ballast ? 0x7a746b : COLOR.asphalt;
+}
+
+function stripColor(st: Strip, surface?: number): number {
+  switch (st.kind) {
+    case 'parking': return surface ? surfaceColor(surface) : COLOR.parking;
+    case 'bike': return COLOR.bike;
+    case 'shoulder': return surface === Surface.Ballast ? surfaceColor(surface) : COLOR.shoulder;
+    case 'sidewalk': return st.pave === Paving.Pavers ? 0xa89c8c : st.pave === Paving.Stone ? 0xc9c3b8 : COLOR.sidewalk;
+    case 'curb': return COLOR.curb;
+    case 'median': return st.pave === Paving.Concrete ? COLOR.concrete : st.pave === Paving.Pavers ? 0xa89c8c : COLOR.grass;
+    case 'barrier': return COLOR.concrete;
+    default: return surfaceColor(surface);
+  }
+}
+
+function stripMat(st: Strip): number {
+  switch (st.kind) {
+    case 'sidewalk': return st.pave === Paving.Pavers ? RMAT.Pavers : st.pave === Paving.Stone ? RMAT.Stone : RMAT.Sidewalk;
+    case 'curb': return RMAT.Curb;
+    case 'median': return st.pave === Paving.Concrete ? RMAT.Concrete : st.pave === Paving.Pavers ? RMAT.Pavers : st.pave === Paving.Stone ? RMAT.Stone : RMAT.Grass;
+    case 'barrier': return RMAT.Concrete;
+    default: return RMAT.Asphalt;
+  }
+}
+
+function stripHeight(st: Strip): number {
+  if (st.flush) return st.kind === 'barrier' ? 0.9 : 0;
+  switch (st.kind) {
+    case 'sidewalk': case 'curb': case 'median': return CURB_H;
+    case 'barrier': return 0.9;
+    default: return 0;
+  }
+}
+
+export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: number, originZ: number, extent: number, lod: number): PackedMesh | null {
+  const mb = new MeshBuilder(true);
+  const quads: Quad[] = [];
+  for (let s = 0; s < g.segCount; s++) {
+    quads.push({ x0: g.nx[g.sa[s]], z0: g.nz[g.sa[s]], cx: g.scx[s], cz: g.scz[s], x1: g.nx[g.sb[s]], z1: g.nz[g.sb[s]] });
+  }
+  const tables = quads.map((q) => arcTable(q, 48));
+  const lens = tables.map((t) => t[t.length - 1]);
+
+  // braços de cada nó, ordenados, e o recuo de cada ponta de trecho
+  const armsOf: ArmRef[][] = Array.from({ length: g.nodeCount }, () => []);
+  for (let s = 0; s < g.segCount; s++) {
+    for (const end of [0, 1] as const) armsOf[end === 0 ? g.sa[s] : g.sb[s]].push({ seg: s, end, arm: armOf(quads[s], g.sprofile[s], end) });
+  }
+  const retreat = new Float64Array(g.segCount * 2);
+  const r16 = new Float64Array(16);
+  const order: number[] = [];
+  for (let n = 0; n < g.nodeCount; n++) {
+    const list = armsOf[n];
+    if (list.length === 1 && g.nctl[n] === NODE_BULB) retreat[list[0].seg * 2 + list[0].end] = bulbRetreat(list[0].arm, lens[list[0].seg]);
+    if (list.length < 2) continue;
+    junctionRetreats(list.map((r) => r.arm), list.map((r) => lens[r.seg]), r16, order);
+    list.forEach((r, i) => { retreat[r.seg * 2 + r.end] = r16[i]; });
+    // o cruzamento é montado na ordem anti-horária
+    const sorted = order.map((i) => list[i]);
+    list.length = 0; list.push(...sorted);
+  }
+  // faixa no meio da quadra: o nó de duas vias pinta a zebra como um cruzamento
+  const deg = (n: number) => armsOf[n].length === 2 && (g.nctl[n] === 9 || g.nctl[n] === 10) ? 3 : armsOf[n].length;
+
+  for (let s = 0; s < g.segCount; s++) {
+    if (!g.segOwn[s]) continue;
+    buildSegment(mb, heights, g, s, quads[s], tables[s], lens[s], retreat[s * 2], retreat[s * 2 + 1], deg(g.sa[s]), deg(g.sb[s]), lod);
+  }
+  for (let n = 0; n < g.nodeCount; n++) {
+    if (!g.nodeOwn[n]) continue;
+    const list = armsOf[n];
+    // piso do cruzamento: o da via de maior preferência
+    let best = list[0] ? g.sprofile[list[0].seg] : 0;
+    for (const r of list) if ((PROFILE_INFO[g.sprofile[r.seg]].priority ?? 0) > (PROFILE_INFO[best].priority ?? 0)) best = g.sprofile[r.seg];
+    mb.curTag = best;
+    if (list.length === 1) {
+      const r = list[0], d = retreat[r.seg * 2 + r.end];
+      if (d > 0.05) buildBulb(mb, g, n, r, quads[r.seg], tables[r.seg], lens[r.seg], d, lod);
+      else buildDeadEnd(mb, g, n, r, quads[r.seg]);
+    }
+    else if (list.length >= 2 && list.some((r) => retreat[r.seg * 2 + r.end] > 0.05)) buildJunction(mb, g, n, list, quads, tables, lens, retreat, lod);
+  }
+  return mb.pack(originX, originZ, extent);
+}
+
+/** Frame no ponto s (comprimento) do trecho: posição, direção, altura. */
+function frameAt(g: RoadGraph, s: number, q: Quad, table: Float64Array, len: number, at: number, out: Float64Array): void {
+  const t = tAtLength(table, at);
+  bez(q, t, p2); bezD(q, t, d2);
+  const l = Math.hypot(d2[0], d2[1]) || 1;
+  const ya = g.ny[g.sa[s]], yb = g.ny[g.sb[s]];
+  out[0] = p2[0]; out[1] = p2[1]; out[2] = d2[0] / l; out[3] = d2[1] / l;
+  out[4] = ya + (yb - ya) * (len > 0 ? at / len : 0);
+}
+
+function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: number, q: Quad, table: Float64Array, len: number,
+  rA: number, rB: number, degA: number, degB: number, lod: number): void {
+  const info = PROFILE_INFO[g.sprofile[s]];
+  const s0 = rA, s1 = len - rB;
+  if (s1 - s0 < 0.2) return;
+  const ring = (g.sflags[s] & SegFlag.Ring) !== 0;
+  const crossA = degA >= 3 && !ring, crossB = degB >= 3 && !ring;
+  // código: id do trecho * 16 + bits (exato em float32 até 1 milhão de trechos); o perfil vai em position.w
+  mb.curTag = info.id | (g.srule[s] & 7) << 8 | ((g.srule[s] >> 3) & 7) << 11;
+  const code = g.sid[s] * 16 + (crossA ? RoadCode.CrossA : 0) + (crossB ? RoadCode.CrossB : 0) + (info.oneWay ? RoadCode.OneWay : 0) + (ring ? RoadCode.Ring : 0);
+
+  // posições das amostras: passo regular + pontos do rebaixo
+  const step = lod === 0 ? 3 : 10;
+  const marks = new Set<number>();
+  const n0 = Math.max(1, Math.ceil((s1 - s0) / step));
+  for (let k = 0; k <= n0; k++) marks.add(s0 + (s1 - s0) * k / n0);
+  if (lod === 0) {
+    if (crossA) for (const d of [CROSSWALK - 1.2, CROSSWALK + 0.4]) if (s0 + d < s1) marks.add(s0 + d);
+    if (crossB) for (const d of [CROSSWALK - 1.2, CROSSWALK + 0.4]) if (s1 - d > s0) marks.add(s1 - d);
+  }
+  const at = [...marks].sort((a, b) => a - b);
+  const n = at.length;
+  const F = new Float64Array(n * 5);
+  const f = new Float64Array(5);
+  const ground = new Float64Array(n);
+  for (let k = 0; k < n; k++) {
+    frameAt(g, s, q, table, len, at[k], f);
+    F.set(f, k * 5);
+    ground[k] = heightAt(heights, f[0], f[1]);
+  }
+  const slope = (g.ny[g.sb[s]] - g.ny[g.sa[s]]) / Math.max(1, len);
+  const elevated = (k: number) => F[k * 5 + 4] - ground[k] > 1.2;
+  const buried = (k: number) => ground[k] - F[k * 5 + 4] > 4;
+
+  /** Altura da calçada, rebaixada junto às faixas de pedestre. */
+  const sidewalkH = (k: number): number => {
+    if (lod !== 0) return CURB_H;
+    const da = at[k] - s0, db = s1 - at[k];
+    let h = CURB_H;
+    const ramp = (d: number) => 0.02 + (CURB_H - 0.02) * Math.min(1, Math.max(0, (d - (CROSSWALK - 1.2)) / 1.6));
+    if (crossA) h = Math.min(h, ramp(da));
+    if (crossB) h = Math.min(h, ramp(db));
+    return h;
+  };
+
+  const edges = info.edges;
+  // retorno no canteiro: o canteiro se abre (vira pista) nos 9 m junto ao nó do retorno
+  const uA = g.nctl[g.sa[s]] === 11, uB = g.nctl[g.sb[s]] === 11;
+  const laneEdge = edges.find((e) => e.strip.kind === 'lane');
+  // vértices de topo: por amostra, por borda de faixa (u0 e u1 de cada faixa)
+  const tops: number[][] = edges.map(() => []);
+  for (let k = 0; k < n; k++) {
+    const o = k * 5;
+    const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
+    const lx = dz, lz = -dx;
+    // normal do topo: cross(tangente 3D, esquerda)
+    const tx = dx, ty = slope, tz = dz;
+    const nx = ty * lz - 0, ny = tz * lx - tx * lz, nz = 0 - ty * lx;
+    const v = at[k] - s0, toEnd = s1 - at[k];
+    edges.forEach((e, i) => {
+      const kind = e.strip.kind;
+      let h = stripHeight(e.strip);
+      if (kind === 'sidewalk' && !e.strip.flush) h = sidewalkH(k);
+      if (lod !== 0 && kind === 'curb') h = CURB_H;
+      let col = stripColor(e.strip, info.surface), mat = stripMat(e.strip);
+      if ((kind === 'median' || kind === 'barrier') && laneEdge && ((uA && v < 9) || (uB && toEnd < 9))) {
+        h = stripHeight(laneEdge.strip); col = stripColor(laneEdge.strip, info.surface); mat = stripMat(laneEdge.strip);
+      }
+      const a = mb.vert(px + lx * e.u0, y + h, pz + lz * e.u0, nx, ny, nz, col, mat, e.u0, v, toEnd, code);
+      const b = mb.vert(px + lx * e.u1, y + h, pz + lz * e.u1, nx, ny, nz, col, mat, e.u1, v, toEnd, code);
+      tops[i].push(a, b);
+    });
+  }
+  const hidden = (k: number) => buried(k) && buried(k + 1);
+  for (let i = 0; i < edges.length; i++) {
+    const T = tops[i];
+    for (let k = 0; k + 1 < n; k++) {
+      if (hidden(k)) continue;
+      mb.quad(T[k * 2], T[k * 2 + 1], T[k * 2 + 3], T[k * 2 + 2], 0, 1, 0);
+    }
+  }
+
+  // faixa de zona fora da calçada (só aparece com a ferramenta de zona)
+  for (const [zone, uEdge, dir] of [[g.szl[s], edges[edges.length - 1].u1, 1], [g.szr[s], edges[0].u0, -1]] as Array<[number, number, number]>) {
+    if (!zone) continue;
+    const zc = ZONE_COLORS[zone];
+    let prev: [number, number] | null = null;
+    for (let k = 0; k < n; k++) {
+      const o = k * 5;
+      const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
+      const lx = dz, lz = -dx;
+      const v = at[k] - s0, toEnd = s1 - at[k];
+      const ua = uEdge + dir * 0.6, ub = uEdge + dir * 6.6;
+      const xa = px + lx * ua, za = pz + lz * ua, xb = px + lx * ub, zb = pz + lz * ub;
+      const cur: [number, number] = [
+        mb.vert(xa, Math.max(y, heightAt(heights, xa, za)) + 0.3, za, 0, 1, 0, zc, RMAT.Zone, ua, v, toEnd, code),
+        mb.vert(xb, Math.max(y, heightAt(heights, xb, zb)) + 0.3, zb, 0, 1, 0, zc, RMAT.Zone, ub, v, toEnd, code),
+      ];
+      if (prev && !elevated(k) && !elevated(k - 1) && !hidden(k - 1)) mb.quad(prev[0], prev[1], cur[1], cur[0], 0, 1, 0);
+      prev = cur;
+    }
+  }
+
+  // muro de arrimo: nas bordas, onde o chão fica acima da calçada (via em trincheira)
+  if ((g.sflags[s] & 8) !== 0 && lod < 2) {
+    for (const [uEdge, outSign] of [[edges[edges.length - 1].u1, 1], [edges[0].u0, -1]] as Array<[number, number]>) {
+      for (let k = 0; k + 1 < n; k++) {
+        if (hidden(k)) continue;
+        const pt = (kk: number) => {
+          const o = kk * 5;
+          const lx = F[o + 3], lz = -F[o + 2];
+          const x = F[o] + lx * (uEdge + outSign * 0.15), z = F[o + 1] + lz * (uEdge + outSign * 0.15);
+          return { x, z, y: F[o + 4], g: heightAt(heights, F[o] + lx * (uEdge + outSign * 1.6), F[o + 1] + lz * (uEdge + outSign * 1.6)), nx: -lx * outSign, nz: -lz * outSign };
+        };
+        const A = pt(k), B = pt(k + 1);
+        const topA = A.g + 0.6, topB = B.g + 0.6;
+        if (topA - A.y < 1 && topB - B.y < 1) continue;
+        const v = at[k] - s0, toEnd = s1 - at[k];
+        const a0 = mb.vert(A.x, A.y, A.z, A.nx, 0, A.nz, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        const b0 = mb.vert(B.x, B.y, B.z, B.nx, 0, B.nz, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        const b1 = mb.vert(B.x, Math.max(B.y, topB), B.z, B.nx, 0, B.nz, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        const a1 = mb.vert(A.x, Math.max(A.y, topA), A.z, A.nx, 0, A.nz, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        mb.quad(a0, b0, b1, a1, A.nx, 0, A.nz);
+        // topo do muro (coroa de 30 cm), virado para cima
+        const ox = -A.nx * 0.3, oz = -A.nz * 0.3;
+        const t0 = mb.vert(A.x, Math.max(A.y, topA), A.z, 0, 1, 0, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        const t1 = mb.vert(B.x, Math.max(B.y, topB), B.z, 0, 1, 0, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        const t2 = mb.vert(B.x + ox, Math.max(B.y, topB), B.z + oz, 0, 1, 0, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        const t3 = mb.vert(A.x + ox, Math.max(A.y, topA), A.z + oz, 0, 1, 0, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
+        mb.quad(t0, t1, t2, t3, 0, 1, 0);
+      }
+    }
+  }
+
+  // faces verticais entre faixas de alturas diferentes (meio-fio, mureta)
+  const side = (k: number, u: number, y0: number, y1: number, toLeft: boolean, col: number, mat: number): [number, number] => {
+    const o = k * 5;
+    const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
+    const lx = dz, lz = -dx;
+    const nx = toLeft ? lx : -lx, nz = toLeft ? lz : -lz;
+    const v = at[k] - s0, toEnd = s1 - at[k];
+    return [
+      mb.vert(px + lx * u, y + y0, pz + lz * u, nx, 0, nz, col, mat, u, v, toEnd, code),
+      mb.vert(px + lx * u, y + y1, pz + lz * u, nx, 0, nz, col, mat, u, v, toEnd, code),
+    ];
+  };
+  const wall = (u: number, h0: (k: number) => number, h1: (k: number) => number, toLeft: boolean, col: number, mat: number, only?: (k: number) => boolean) => {
+    let prev: [number, number] | null = null;
+    for (let k = 0; k < n; k++) {
+      const cur = side(k, u, h0(k), h1(k), toLeft, col, mat);
+      if (prev && !hidden(k - 1) && (!only || (only(k - 1) && only(k)))) {
+        const o = k * 5;
+        const lx = F[o + 3], lz = -F[o + 2];
+        mb.quad(prev[0], cur[0], cur[1], prev[1], toLeft ? lx : -lx, 0, toLeft ? lz : -lz);
+      }
+      prev = cur;
+    }
+  };
+  const hOf = (i: number) => (k: number) => edges[i].strip.kind === 'sidewalk' && !edges[i].strip.flush ? sidewalkH(k) : (lod !== 0 && edges[i].strip.kind === 'curb' ? CURB_H : stripHeight(edges[i].strip));
+  if (lod === 0) {
+    for (let i = 0; i + 1 < edges.length; i++) {
+      const ha = hOf(i), hb = hOf(i + 1);
+      const u = edges[i].u1;
+      // face voltada para o lado mais baixo
+      const leftLower = stripHeight(edges[i + 1].strip) < stripHeight(edges[i].strip);
+      const rightLower = stripHeight(edges[i].strip) < stripHeight(edges[i + 1].strip);
+      if (leftLower) wall(u, hb, ha, true, stripColor(edges[i].strip, info.surface), stripMat(edges[i].strip));
+      else if (rightLower) wall(u, ha, hb, false, stripColor(edges[i + 1].strip, info.surface), stripMat(edges[i + 1].strip));
+    }
+  }
+  // bordas externas: saia até o chão (ou laje, na ponte)
+  const first = edges[0], last = edges[edges.length - 1];
+  const below = (k: number) => elevated(k) ? -DECK : -SKIRT;
+  wall(first.u0, below, hOf(0), false, elevatedAny(n, elevated) ? COLOR.concrete : stripColor(first.strip, info.surface), RMAT.Concrete);
+  wall(last.u1, below, hOf(edges.length - 1), true, elevatedAny(n, elevated) ? COLOR.concrete : stripColor(last.strip, info.surface), RMAT.Concrete);
+
+  // ponte: laje por baixo, mureta e pilares
+  const bridge = (k: number) => elevated(k);
+  if (elevatedAny(n, elevated)) {
+    let prev: [number, number] | null = null;
+    for (let k = 0; k < n; k++) {
+      const o = k * 5;
+      const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
+      const lx = dz, lz = -dx;
+      const a = mb.vert(px + lx * first.u0, y - DECK, pz + lz * first.u0, 0, -1, 0, COLOR.concrete, RMAT.Concrete);
+      const b = mb.vert(px + lx * last.u1, y - DECK, pz + lz * last.u1, 0, -1, 0, COLOR.concrete, RMAT.Concrete);
+      if (prev && (bridge(k) || bridge(k - 1))) mb.quad(prev[0], a, b, prev[1], 0, -1, 0);
+      prev = [a, b];
+    }
+    // mureta nas duas bordas onde está alto
+    const top = (h: number) => () => h;
+    for (const [u, inward] of [[first.u0, true], [last.u1, false]] as Array<[number, boolean]>) {
+      const w = inward ? 0.25 : -0.25;
+      wall(u, top(CURB_H), top(1.0), !inward, COLOR.concrete, RMAT.Concrete, bridge);
+      wall(u + w, top(CURB_H), top(1.0), inward, COLOR.concrete, RMAT.Concrete, bridge);
+    }
+    // pilares
+    const width = last.u1 - first.u0;
+    for (let d = s0 + PILLAR_EVERY / 2; d < s1; d += PILLAR_EVERY) {
+      frameAt(g, s, q, table, len, d, f);
+      const gy = heightAt(heights, f[0], f[1]);
+      if (f[4] - gy < 3) continue;
+      const lx = f[3], lz = -f[2];
+      const offs = width > 16 ? [-width / 4, width / 4] : [0];
+      for (const off of offs) {
+        mb.box(f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK, f[2], f[3], 0.8, 0.8, COLOR.concrete, RMAT.Concrete);
+      }
+      // travessa sob a laje
+      mb.box(f[0], f[1], f[4] - DECK - 1, f[4] - DECK, f[2], f[3], 0.7, width / 2 - 0.5, COLOR.concrete, RMAT.Concrete, true);
+    }
+  }
+
+  // túnel: portal na passagem do aberto para o enterrado
+  for (let k = 0; k + 1 < n; k++) {
+    if (buried(k) === buried(k + 1)) continue;
+    const kk = buried(k) ? k + 1 : k; // lado aberto
+    const o = kk * 5;
+    const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
+    const half = (last.u1 - first.u0) / 2 + 0.6;
+    const cu = (last.u1 + first.u0) / 2;
+    const cx = px + dz * cu, cz = pz - dx * cu;
+    mb.box(cx, cz, y + 5.8, y + 7.4, dx, dz, 0.6, half, COLOR.concrete, RMAT.Concrete, true);
+    for (const sgn of [-1, 1]) {
+      mb.box(cx + dz * sgn * half, cz - dx * sgn * half, y - 0.5, y + 5.8, dx, dz, 0.6, 0.6, COLOR.concrete, RMAT.Concrete);
+    }
+  }
+
+  // arremate das faixas altas nas pontas do trecho (frente da calçada, nariz do canteiro)
+  for (const kEnd of [0, n - 1]) {
+    const o = kEnd * 5;
+    const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
+    const out = kEnd === 0 ? -1 : 1; // normal para fora do trecho
+    const lx = dz, lz = -dx;
+    edges.forEach((e, i) => {
+      const h = hOf(i)(kEnd);
+      if (h <= 0.01) return;
+      const col = stripColor(e.strip, info.surface);
+      const a = mb.vert(px + lx * e.u0, y, pz + lz * e.u0, dx * out, 0, dz * out, col, RMAT.Curb);
+      const b = mb.vert(px + lx * e.u1, y, pz + lz * e.u1, dx * out, 0, dz * out, col, RMAT.Curb);
+      const c = mb.vert(px + lx * e.u1, y + h, pz + lz * e.u1, dx * out, 0, dz * out, col, RMAT.Curb);
+      const d = mb.vert(px + lx * e.u0, y + h, pz + lz * e.u0, dx * out, 0, dz * out, col, RMAT.Curb);
+      mb.quad(a, b, c, d, dx * out, 0, dz * out);
+    });
+  }
+}
+
+function elevatedAny(n: number, fn: (k: number) => boolean): boolean {
+  for (let k = 0; k < n; k++) if (fn(k)) return true;
+  return false;
+}
+
+/**
+ * Balão de retorno (roadcraft `junction/bulb.ts`): asfalto em círculo de raio BULB_R em volta do nó e calçada com
+ * meio-fio por fora, abertos para o trecho, que termina no recuo `d` (onde o círculo encontra a borda da pista).
+ */
+function buildBulb(mb: MeshBuilder, g: RoadGraph, node: number, ref: ArmRef, q: Quad, table: Float64Array, len: number, d: number, lod: number): void {
+  const { arm, seg, end } = ref;
+  const x = g.nx[node], z = g.nz[node], y0 = g.ny[node];
+  const f = new Float64Array(5);
+  frameAt(g, seg, q, table, len, end === 0 ? d : len - d, f);
+  const ySeam = f[4];
+  const dx = arm.dx, dz = arm.dz, lx = dz, lz = -dx;
+  const yAt = (along: number) => (along <= 0 ? y0 : y0 + (ySeam - y0) * Math.min(1, along / d));
+  const R = BULB_R, Ro = BULB_R + BULB_WALK;
+  const aIn = Math.acos(Math.min(1, d / R)), aOut = Math.acos(Math.min(1, d / Ro));
+  const N = lod === 0 ? 28 : 12;
+  const at = (r: number, phi: number): [number, number, number] => {
+    const along = r * Math.cos(phi), u = r * Math.sin(phi);
+    return [x + dx * along + lx * u, yAt(along), z + dz * along + lz * u];
+  };
+  const paved = surfaceColor(PROFILE_INFO[mb.curTag]?.surface);
+  // asfalto: leque do nó, do lado esquerdo da boca, por trás, até o lado direito
+  const center = mb.vert(x, y0, z, 0, 1, 0, paved, RMAT.Plain);
+  const rim: number[] = [];
+  for (let i = 0; i <= N; i++) {
+    const [px, py, pz] = at(R, aIn + (i / N) * (Math.PI * 2 - 2 * aIn));
+    rim.push(mb.vert(px, py, pz, 0, 1, 0, paved, RMAT.Plain));
+  }
+  for (let i = 0; i < N; i++) mb.tri(center, rim[i], rim[i + 1], 0, 1, 0);
+  mb.tri(center, rim[N], rim[0], 0, 1, 0);
+  // calçada em anel, meio-fio virado para dentro e saia por fora
+  let prev: number[] | null = null;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const [ix, iy, iz] = at(R, aIn + t * (Math.PI * 2 - 2 * aIn));
+    const [ox, oy, oz] = at(Ro, aOut + t * (Math.PI * 2 - 2 * aOut));
+    const nx = x - ix, nz = z - iz;
+    const cur = [
+      mb.vert(ix, iy + CURB_H, iz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), mb.vert(ox, oy + CURB_H, oz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk),
+      mb.vert(ix, iy, iz, nx, 0, nz, COLOR.curb, RMAT.Curb), mb.vert(ix, iy + CURB_H, iz, nx, 0, nz, COLOR.curb, RMAT.Curb),
+      mb.vert(ox, oy - SKIRT, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk), mb.vert(ox, oy + CURB_H, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk),
+    ];
+    if (prev) {
+      mb.quad(prev[0], cur[0], cur[1], prev[1], 0, 1, 0);
+      mb.quad(prev[2], cur[2], cur[3], prev[3], nx, 0, nz);
+      mb.quad(prev[4], cur[4], cur[5], prev[5], -nx, 0, -nz);
+    }
+    prev = cur;
+  }
+}
+
+/** Arremate de rua sem saída: faixa de calçada atravessando a ponta. */
+function buildDeadEnd(mb: MeshBuilder, g: RoadGraph, node: number, ref: ArmRef, q: Quad): void {
+  void q;
+  const { arm } = ref;
+  const x = g.nx[node], z = g.nz[node], y = g.ny[node];
+  const dx = arm.dx, dz = arm.dz, lx = dz, lz = -dx;
+  const depth = 3;
+  const P = (u: number, back: number, h: number, nx: number, ny: number, nz: number, col: number, mat: number) =>
+    mb.vert(x + lx * u - dx * back, y + h, z + lz * u - dz * back, nx, ny, nz, col, mat);
+  const L = arm.left, R = -arm.right;
+  const t = [P(R, 0, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), P(L, 0, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk),
+    P(L, depth, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), P(R, depth, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk)];
+  mb.quad(t[0], t[1], t[2], t[3], 0, 1, 0);
+  // meio-fio de frente para a rua
+  const c = [P(-arm.asphRight, 0, 0, dx, 0, dz, COLOR.curb, RMAT.Curb), P(arm.asphLeft, 0, 0, dx, 0, dz, COLOR.curb, RMAT.Curb),
+    P(arm.asphLeft, 0, CURB_H, dx, 0, dz, COLOR.curb, RMAT.Curb), P(-arm.asphRight, 0, CURB_H, dx, 0, dz, COLOR.curb, RMAT.Curb)];
+  mb.quad(c[0], c[1], c[2], c[3], dx, 0, dz);
+  // saia atrás
+  const s = [P(R, depth, -SKIRT, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk), P(L, depth, -SKIRT, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk),
+    P(L, depth, CURB_H, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk), P(R, depth, CURB_H, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk)];
+  mb.quad(s[0], s[1], s[2], s[3], -dx, 0, -dz);
+}
+
+interface ArmEnd { px: number; pz: number; y: number; dx: number; dz: number; info: ProfileInfo; arm: Arm }
+
+/** Cruzamento: asfalto em leque a partir do nó, esquinas com calçada e meio-fio arredondados. */
+function buildJunction(mb: MeshBuilder, g: RoadGraph, node: number, list: ArmRef[], quads: Quad[], tables: Float64Array[], lens: number[],
+  retreat: Float64Array, lod: number): void {
+  const cx = g.nx[node], cz = g.nz[node], cy = g.ny[node];
+  const f = new Float64Array(5);
+  const ends: ArmEnd[] = list.map((r) => {
+    const s = r.seg, len = lens[s];
+    const at = r.end === 0 ? retreat[s * 2] : len - retreat[s * 2 + 1];
+    frameAt(g, s, quads[s], tables[s], len, at, f);
+    const sgn = r.end === 0 ? 1 : -1;
+    return { px: f[0], pz: f[1], y: f[4], dx: f[2] * sgn, dz: f[3] * sgn, info: PROFILE_INFO[g.sprofile[s]], arm: r.arm };
+  });
+  const m = lod === 0 ? 7 : 3;
+  const point = (e: ArmEnd, u: number): [number, number, number] => [e.px + e.dz * u, e.pz - e.dx * u, e.y];
+  /** Curva de canto entre o lado esquerdo de a (u = ua) e o direito de b (u = -ub). */
+  const corner = (a: ArmEnd, ua: number, b: ArmEnd, ub: number): Array<[number, number, number]> => {
+    const [ax, az] = point(a, ua), [bx, bz] = point(b, -ub);
+    // controle: cruzamento das bordas prolongadas para dentro
+    const den = a.dx * b.dz - a.dz * b.dx;
+    let kx = (ax + bx) / 2, kz = (az + bz) / 2;
+    if (Math.abs(den) > 1e-3) {
+      const wx = bx - ax, wz = bz - az;
+      const sa = (wx * b.dz - wz * b.dx) / den, sb = (wx * a.dz - wz * a.dx) / den;
+      if (sa < 0.5 && sb < 0.5 && sa > -60 && sb > -60) { kx = ax + a.dx * sa; kz = az + a.dz * sa; }
+    }
+    const out: Array<[number, number, number]> = [];
+    for (let i = 0; i <= m; i++) {
+      const t = i / m, s = 1 - t;
+      out.push([s * s * ax + 2 * s * t * kx + t * t * bx, s * s * az + 2 * s * t * kz + t * t * bz, a.y + (b.y - a.y) * t]);
+    }
+    return out;
+  };
+
+  // asfalto: leque do centro
+  const ring: Array<[number, number, number]> = [];
+  const nArms = ends.length;
+  for (let i = 0; i < nArms; i++) {
+    const a = ends[i], b = ends[(i + 1) % nArms];
+    ring.push(point(a, -a.arm.asphRight));
+    ring.push(...corner(a, a.arm.asphLeft, b, b.arm.asphRight));
+  }
+  const paved = surfaceColor(PROFILE_INFO[mb.curTag]?.surface);
+  const center = mb.vert(cx, cy, cz, 0, 1, 0, paved, RMAT.Plain);
+  const rv = ring.map(([x, z, y]) => mb.vert(x, y, z, 0, 1, 0, paved, RMAT.Plain));
+  for (let i = 0; i < rv.length; i++) mb.tri(center, rv[i], rv[(i + 1) % rv.length], 0, 1, 0);
+
+  // esquinas: calçada entre a curva do asfalto e a curva externa
+  for (let i = 0; i < nArms; i++) {
+    const a = ends[i], b = ends[(i + 1) % nArms];
+    const inner = corner(a, a.arm.asphLeft, b, b.arm.asphRight);
+    const outer = corner(a, a.arm.left, b, b.arm.right);
+    let pi: number[] | null = null;
+    for (let k = 0; k <= m; k++) {
+      const [ix, iz, iy] = inner[k], [ox, oz, oy] = outer[k];
+      const nx = cx - ix, nz = cz - iz; // meio-fio olha para o centro
+      const top0 = mb.vert(ix, iy + CURB_H, iz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk);
+      const top1 = mb.vert(ox, oy + CURB_H, oz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk);
+      const c0 = mb.vert(ix, iy, iz, nx, 0, nz, COLOR.curb, RMAT.Curb);
+      const c1 = mb.vert(ix, iy + CURB_H, iz, nx, 0, nz, COLOR.curb, RMAT.Curb);
+      const s0 = mb.vert(ox, oy - SKIRT, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk);
+      const s1 = mb.vert(ox, oy + CURB_H, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk);
+      const cur = [top0, top1, c0, c1, s0, s1];
+      if (pi) {
+        mb.quad(pi[0], top0, top1, pi[1], 0, 1, 0);
+        mb.quad(pi[2], c0, c1, pi[3], nx, 0, nz);
+        mb.quad(pi[4], s0, s1, pi[5], -nx, 0, -nz);
+      }
+      pi = cur;
+    }
+  }
+}

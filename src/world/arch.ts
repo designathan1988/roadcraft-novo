@@ -1,0 +1,175 @@
+// Estilos de arquitetura: a gramática de cada fachada (cores, janela, sacada,
+// coroamento, base, pilares, telhado). O gerador de prédios (worker) escolhe
+// pelo bairro e pela semente; o shader lê os parâmetros da janela pelo índice.
+
+import { fbm } from '../core/rng.ts';
+import { Zone } from '../roads/zones.ts';
+
+export const ArchId = {
+  Colonial: 0, ArtDeco: 1, Modernist: 2, Contemporary: 3, Brick: 4, Tropical: 5, Glass: 6, Industrial: 7,
+  ColonialHouse: 8, Bungalow: 9, ModernHouse: 10, Sobrado: 11, Civic: 12,
+} as const;
+export const ARCH_COUNT = 13;
+
+/** Janela no shader. */
+export const Win = { Punched: 0, French: 1, Ribbon: 2, Curtain: 3, Tall: 4 } as const;
+/** Sacada. */
+export const Balcony = { None: 0, Every: 1, Alternate: 2, Continuous: 3 } as const;
+/** Coroamento. */
+export const Crown = { Parapet: 0, Cornice: 1, Stepped: 2, Slab: 3 } as const;
+
+export interface Arch {
+  name: string;
+  walls: number[];
+  trim: number;
+  /** Cor da base (térreo em pedra/revestimento), ou -1. */
+  base: number;
+  win: number;
+  /** Janela: folga lateral (fração da coluna), peitoril e verga (fração do andar). */
+  winSide: number; winLow: number; winHigh: number;
+  shutters: boolean;
+  /** Moldura clara em volta da janela. */
+  frame: boolean;
+  balcony: number;
+  crown: number;
+  /** Pilares salientes a cada n colunas (0 = sem). */
+  piers: number;
+  /** Faixa saliente a cada n andares (0 = sem). */
+  bands: number;
+  /** Largura da coluna (m). */
+  module: number;
+  /** Pé-direito (m). */
+  floorH: number;
+  /** Recuos no topo (escalonamento). */
+  setbacks: number;
+  roof: 'flat' | 'hip' | 'gable';
+}
+
+export const ARCHES: Arch[] = [
+  { name: 'Colonial', walls: [0xe9c46a, 0xd98c5f, 0x7fa8c9, 0xe8a7a0, 0x9cc5a1, 0xf1e3c6, 0xc96f53, 0xe0b54b, 0x88a9b5, 0xd7b9d5],
+    trim: 0xf7f4ec, base: -1, win: Win.French, winSide: 0.3, winLow: 0.06, winHigh: 0.8, shutters: true, frame: true,
+    balcony: Balcony.Every, crown: Crown.Cornice, piers: 0, bands: 1, module: 3, floorH: 3.6, setbacks: 0, roof: 'flat' },
+  { name: 'Art déco', walls: [0xe8dcc4, 0xdccaa6, 0xefe4cf, 0xd8c7ad, 0xc98a4b, 0xd9a441, 0xb8a26a, 0xd2775a, 0xe3c58f],
+    trim: 0xf0e8d6, base: 0xa89c88, win: Win.Tall, winSide: 0.22, winLow: 0.18, winHigh: 0.88, shutters: false, frame: true,
+    balcony: Balcony.None, crown: Crown.Stepped, piers: 1, bands: 0, module: 2.6, floorH: 3.4, setbacks: 2, roof: 'flat' },
+  { name: 'Modernista', walls: [0xe9ecea, 0x9fbfcf, 0xa9cbb4, 0xe8d38f, 0x7fa0bf, 0xd9a07a, 0x8fb5a8, 0xf2f0ea, 0xe6e4dc],
+    trim: 0xf4f3ee, base: -1, win: Win.Ribbon, winSide: 0.02, winLow: 0.38, winHigh: 0.86, shutters: false, frame: false,
+    balcony: Balcony.Continuous, crown: Crown.Slab, piers: 0, bands: 1, module: 3.2, floorH: 3.0, setbacks: 0, roof: 'flat' },
+  { name: 'Contemporâneo', walls: [0xf1f0ec, 0xe7e3dc, 0xcfc8bd, 0xd8b99a, 0xb7c2b0, 0x8e959a, 0xb4673f, 0xc9a27a, 0x7d8b78, 0x4a5258, 0x3f6b72, 0xa65f45, 0x6f7f91, 0xbab7b0],
+    trim: 0x3a3f43, base: 0x5a6066, win: Win.French, winSide: 0.08, winLow: 0.04, winHigh: 0.92, shutters: false, frame: false,
+    balcony: Balcony.Continuous, crown: Crown.Parapet, piers: 0, bands: 0, module: 3.4, floorH: 3.0, setbacks: 1, roof: 'flat' },
+  { name: 'Tijolinho', walls: [0xa4563f, 0x8c4a35, 0xb86a4a, 0x9a6a52, 0xb07a5a, 0x7d5444],
+    trim: 0xf2eee6, base: 0x6b6058, win: Win.Punched, winSide: 0.24, winLow: 0.28, winHigh: 0.84, shutters: false, frame: true,
+    balcony: Balcony.Alternate, crown: Crown.Cornice, piers: 0, bands: 0, module: 2.9, floorH: 3.0, setbacks: 0, roof: 'flat' },
+  { name: 'Tropical', walls: [0x3f78a8, 0x4f9a86, 0xc0633f, 0xd3a03a, 0x2f6f8f, 0x8fb9a0, 0xb84a3a, 0x6f8fb8, 0xe0c27a, 0x5a8a5a],
+    trim: 0xf7f5ef, base: -1, win: Win.French, winSide: 0.12, winLow: 0.05, winHigh: 0.86, shutters: true, frame: false,
+    balcony: Balcony.Continuous, crown: Crown.Slab, piers: 0, bands: 0, module: 3.3, floorH: 3.0, setbacks: 0, roof: 'flat' },
+  { name: 'Envidraçado', walls: [0x5f8090, 0x4f6f7f, 0x6f8880, 0x5d7795, 0x3d5260, 0x3f6f5a, 0x6a5a3f, 0x2f4f7f, 0x3f6f76, 0x887a66],
+    trim: 0x7d7f80, base: 0x8f8b84, win: Win.Curtain, winSide: 0.02, winLow: 0.24, winHigh: 0.98, shutters: false, frame: false,
+    balcony: Balcony.None, crown: Crown.Parapet, piers: 0, bands: 0, module: 1.6, floorH: 3.6, setbacks: 2, roof: 'flat' },
+  { name: 'Industrial', walls: [0x8f9ba5, 0xa3a9a6, 0x9aa49a, 0x7f8b8f, 0x6f7f8c, 0x8a9a7c, 0xc2b8a3, 0xb7b2a6, 0x7c8a96, 0xb0aca2],
+    trim: 0x5c6064, base: -1, win: Win.Ribbon, winSide: 0.06, winLow: 0.62, winHigh: 0.84, shutters: false, frame: false,
+    balcony: Balcony.None, crown: Crown.Parapet, piers: 0, bands: 0, module: 4, floorH: 5.6, setbacks: 0, roof: 'flat' },
+  { name: 'Casa colonial', walls: [0xf2d98a, 0xe8c66a, 0xf0c4a4, 0x9fc4a8, 0xb8d0e0, 0xeac6cc, 0xf6f1e6, 0xd98e6a, 0xa9c6c9, 0xe9cf8f],
+    trim: 0xf7f4ec, base: -1, win: Win.Punched, winSide: 0.26, winLow: 0.3, winHigh: 0.82, shutters: true, frame: true,
+    balcony: Balcony.None, crown: Crown.Parapet, piers: 0, bands: 0, module: 3, floorH: 3.0, setbacks: 0, roof: 'hip' },
+  { name: 'Bangalô', walls: [0xf2ead8, 0xe9dcc0, 0xf0e4cc, 0xe4d6bc, 0xcfe0c3, 0xd5e3ec, 0xf3e1a6, 0xe8dcc2, 0xd9c6a8],
+    trim: 0xffffff, base: 0x8c7b6a, win: Win.Punched, winSide: 0.22, winLow: 0.32, winHigh: 0.82, shutters: false, frame: true,
+    balcony: Balcony.None, crown: Crown.Parapet, piers: 0, bands: 0, module: 3.3, floorH: 2.9, setbacks: 0, roof: 'hip' },
+  { name: 'Casa moderna', walls: [0xf4f3ef, 0xe6e4df, 0xd8d5ce, 0x5b6064, 0xb8b5ae, 0x9c6b43, 0xc9c4ba, 0x8e8a84],
+    trim: 0x3a3f43, base: 0x7b6a5a, win: Win.French, winSide: 0.08, winLow: 0.04, winHigh: 0.9, shutters: false, frame: false,
+    balcony: Balcony.None, crown: Crown.Slab, piers: 0, bands: 0, module: 3.6, floorH: 3.0, setbacks: 0, roof: 'flat' },
+  { name: 'Sobrado', walls: [0xf1d98a, 0xf0c4a4, 0xb9d3b0, 0xb8d0e0, 0xd9c2d8, 0xe9dcc0, 0xc9714f, 0x7fa88f, 0xa4563f, 0xb86a4a],
+    trim: 0xf2eee6, base: -1, win: Win.Punched, winSide: 0.24, winLow: 0.3, winHigh: 0.82, shutters: false, frame: true,
+    balcony: Balcony.None, crown: Crown.Parapet, piers: 0, bands: 0, module: 3, floorH: 2.9, setbacks: 0, roof: 'gable' },
+  { name: 'Cívico', walls: [0xe8e2d4, 0xd8cfbd, 0xefe9de],
+    trim: 0xffffff, base: 0x9a9284, win: Win.Tall, winSide: 0.26, winLow: 0.12, winHigh: 0.86, shutters: false, frame: true,
+    balcony: Balcony.None, crown: Crown.Cornice, piers: 1, bands: 0, module: 3.4, floorH: 4.2, setbacks: 0, roof: 'flat' },
+];
+
+/** Parâmetros da janela por estilo, para o shader: (folga lateral, peitoril, verga, bits: 1 venezianas, 2 moldura). */
+export function archWindowTable(): Array<[number, number, number, number]> {
+  return ARCHES.map((a) => [a.winSide, a.winLow, a.winHigh, (a.shutters ? 1 : 0) + (a.frame ? 2 : 0)]);
+}
+
+/** Função do prédio (0 = comum, o crescimento escolhe pela zona). */
+export const Fn = {
+  None: 0, School: 1, Church: 2, Hospital: 3, Clinic: 4, Square: 5, Park: 6, GasStation: 7, Supermarket: 8,
+  CityHall: 9, Police: 10, FireStation: 11, Mall: 12, SportsCourt: 13,
+  // funções que vieram depois: o prédio sai do criador (projeto pronto por função), menos o cemitério e o parquinho
+  Council: 14, Courthouse: 15, PostOffice: 16, University: 17, Library: 18, Museum: 19, Prison: 20, Cemetery: 21, BusStation: 22,
+  Bank: 23, Pharmacy: 24, Bakery: 25, Restaurant: 26, SnackBar: 27, Bar: 28, Cinema: 29, Hotel: 30, Gym: 31, Club: 32, Office: 33, Playground: 34,
+} as const;
+export const FN_NAMES = ['', 'Escola', 'Igreja', 'Hospital', 'Posto de saúde', 'Praça', 'Parque', 'Posto de gasolina', 'Supermercado',
+  'Prefeitura', 'Delegacia', 'Bombeiros', 'Shopping', 'Quadra',
+  'Câmara de Vereadores', 'Fórum', 'Correios', 'Faculdade', 'Biblioteca', 'Museu', 'Presídio', 'Cemitério', 'Rodoviária',
+  'Agência bancária', 'Farmácia', 'Padaria', 'Restaurante', 'Lanchonete', 'Bar', 'Cinema', 'Hotel', 'Academia', 'Clube', 'Escritórios', 'Parquinho'];
+
+/** Sorteio por zona: [função, peso]. */
+const FN_BY_ZONE: Array<Array<[number, number]>> = [
+  [],
+  [[Fn.School, 25], [Fn.Church, 14], [Fn.Square, 22], [Fn.Clinic, 10], [Fn.Park, 15], [Fn.SportsCourt, 10], [Fn.Supermarket, 4]],
+  [[Fn.Square, 18], [Fn.Supermarket, 14], [Fn.CityHall, 4], [Fn.Hospital, 10], [Fn.Church, 10], [Fn.GasStation, 14], [Fn.Police, 8], [Fn.FireStation, 5], [Fn.Mall, 10]],
+  [[Fn.GasStation, 50], [Fn.FireStation, 25], [Fn.Police, 10]],
+  [[Fn.School, 15], [Fn.Church, 12], [Fn.Square, 20], [Fn.Supermarket, 14], [Fn.GasStation, 12], [Fn.Clinic, 10], [Fn.Hospital, 6], [Fn.Mall, 5]],
+];
+
+/**
+ * Função de um lote: no máximo um prédio especial por célula (o lote maior),
+ * sorteado pela célula — determinístico, sem varrer nada.
+ */
+export function civicFor(cell: number, zone: number, isBiggest: boolean, area: number): number {
+  if (!isBiggest || area < 500) return Fn.None;
+  let h = (cell * 2654435761) >>> 0;
+  h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0; h ^= h >>> 13;
+  if ((h & 1023) / 1024 > 0.4) return Fn.None;
+  const list = FN_BY_ZONE[zone] ?? [];
+  if (!list.length) return Fn.None;
+  const total = list.reduce((s, [, w]) => s + w, 0);
+  let k = ((h >>> 10) % 1000) / 1000 * total;
+  for (const [fn, w] of list) { if ((k -= w) < 0) return fn; }
+  return list[0][0];
+}
+
+/**
+ * Chaminé de galpão, pela semente (a mesma conta no gerador e na fumaça):
+ * [x local, z local, altura do topo acima do chão mais alto do lote] ou null.
+ */
+export function chimneyOf(seed: number, W: number, D: number, floors: number): [number, number, number] | null {
+  let h = (seed ^ 0x5bd1e995) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0; h ^= h >>> 13;
+  if (h % 2 !== 0 || W < 18) return null;
+  const side = (h >>> 8) & 1 ? 1 : -1;
+  return [side * (W / 2 - 3), -D / 2 + 4, 16 + floors * 2.5 + ((h >>> 12) % 9)];
+}
+
+/**
+ * Estilo pelo bairro (ruído largo: a quadra inteira lê como uma época) e pela semente.
+ * Antigo: colonial, art déco; médio: modernista, tijolinho, tropical; novo: contemporâneo, vidro.
+ */
+export function pickArch(zone: number, floors: number, x: number, z: number, style: number): number {
+  return archFor(zone, floors, eraAt(x, z), style);
+}
+
+/** Época do bairro no ponto (ruído de 900 m): o mesmo para o lote e os vizinhos dele. */
+export function eraAt(x: number, z: number): number { return fbm(x / 900, z / 900, 777, 2); }
+
+/** Estilo pela época do bairro e pela semente (`style`; 128 + estilo = escolhido pelo jogador). */
+export function archFor(zone: number, floors: number, era: number, style: number): number {
+  // estilo escolhido pelo jogador: 128 + estilo
+  if (style >= 128 && style - 128 < ARCHES.length) return style - 128;
+  const k = style / 127;
+  if (zone === Zone.Industrial) return ArchId.Industrial;
+  if (zone === Zone.Residential && floors <= 3) {
+    if (era > 0.25) return k < 0.6 ? ArchId.ColonialHouse : ArchId.Sobrado;
+    if (era < -0.2) return k < 0.55 ? ArchId.ModernHouse : ArchId.Bungalow;
+    return k < 0.4 ? ArchId.Bungalow : k < 0.7 ? ArchId.Sobrado : k < 0.85 ? ArchId.ColonialHouse : ArchId.ModernHouse;
+  }
+  if (zone === Zone.Commercial && floors >= 8) {
+    if (era > 0.3 && floors <= 18) return ArchId.ArtDeco;
+    return k < 0.55 ? ArchId.Glass : k < 0.8 ? ArchId.Contemporary : ArchId.ArtDeco;
+  }
+  if (era > 0.25) return floors <= 5 && k < 0.6 ? ArchId.Colonial : k < 0.85 ? ArchId.ArtDeco : ArchId.Brick;
+  if (era < -0.2) return k < 0.65 ? ArchId.Contemporary : ArchId.Tropical;
+  return k < 0.3 ? ArchId.Modernist : k < 0.55 ? ArchId.Brick : k < 0.8 ? ArchId.Tropical : ArchId.Contemporary;
+}

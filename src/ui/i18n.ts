@@ -1,0 +1,380 @@
+// Idioma da interface. O jogo é escrito em português; em inglês, um observador
+// troca os textos da página pela tradução assim que aparecem (rótulos, dicas,
+// avisos, opções de listas, títulos). Frases com números passam por regras.
+// Trocar de idioma recarrega a página.
+
+export type Lang = 'pt' | 'en';
+
+const KEY = 'cidade.idioma';
+
+export function currentLang(): Lang {
+  try {
+    const v = localStorage.getItem(KEY);
+    if (v === 'pt' || v === 'en') return v;
+  } catch { /* sem armazenamento */ }
+  // o jogo nasce em português; o inglês é escolhido nas Opções
+  return 'pt';
+}
+
+export function setLang(l: Lang): void {
+  try { localStorage.setItem(KEY, l); } catch { /* sem armazenamento */ }
+  location.reload();
+}
+
+const EN: Record<string, string> = {
+  // barra e ferramentas
+  'Câmera': 'Camera', 'Inspecionar': 'Inspect', 'Via': 'Road', 'Curva': 'Curve', 'Rotatória': 'Roundabout', 'Perfil': 'Profile',
+  'Demolir': 'Demolish', 'Zona': 'Zone', 'Prédio': 'Building', 'Ônibus': 'Transit', 'ônibus': 'bus', 'Paisagismo': 'Streetscape', 'Muros': 'Walls',
+  'Subir': 'Raise', 'Descer': 'Lower', 'Alisar': 'Smooth', 'Nivelar': 'Level', 'Pintar': 'Paint', 'Árvores': 'Trees', 'Rio': 'River',
+  'Perspectiva': 'Perspective', 'Isométrica': 'Isometric', 'De cima': 'Top view', 'Trânsito': 'Traffic', 'Seguir': 'Follow',
+  'Salvar': 'Save', 'Carregar': 'Load', 'Novo mapa': 'New map', 'Gerar cidade': 'Generate city', 'Opções': 'Options', 'Pausa': 'Pause',
+  'Teste': 'Test', 'Sair': 'Quit',
+  'Desfazer (Ctrl+Z)': 'Undo (Ctrl+Z)', 'Refazer (Ctrl+Y)': 'Redo (Ctrl+Y)', 'Salvar (Ctrl+S)': 'Save (Ctrl+S)',
+  'Alternar perspectiva e isométrica (V)': 'Toggle perspective and isometric (V)', 'Vista de cima (T)': 'Top view (T)',
+  'Mostrar o congestionamento nas vias (K)': 'Show congestion on the roads (K)',
+  'Seguir o veículo mais perto do centro da tela (C); Esc solta': 'Follow the vehicle nearest the screen centre (C); Esc releases',
+  'Carregar o último salvamento': 'Load the last save', 'Gerar outro relevo': 'Generate another terrain',
+  'Gerar uma cidade inteira pela semente do mapa': 'Generate a whole city from the map seed',
+  'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)': 'Fill the map with a street grid and buildings on every lot (performance test)',
+  'Carregar o pior caso': 'Load the worst case', 'Qualidade, resolução e tempo (O)': 'Quality, resolution and weather (O)',
+  'Velocidade do relógio (P)': 'Clock speed (P)', 'Mais cedo': 'Earlier', 'Mais tarde': 'Later',
+  'Dinheiro em caixa. Vias custam pela largura e pelo comprimento; pontes e túneis custam mais. Demolir devolve metade.':
+    'Cash. Roads cost by width and length; bridges and tunnels cost more. Demolishing refunds half.',
+  'Dinheiro ilimitado (liga/desliga)': 'Unlimited money (on/off)', 'Modo livre: dinheiro ilimitado.': 'Sandbox: unlimited money.',
+  'Modo livre: nada é cobrado neste mapa': 'Sandbox: nothing is charged on this map', 'Dinheiro de volta ao caixa.': 'Money back in the bank.',
+  'Botão direito': 'Right button', 'gira ·': 'rotates ·', 'meio': 'middle', 'ou': 'or', 'arrastar': 'drag', 'move ·': 'pans ·',
+  'roda': 'wheel', 'aproxima ·': 'zooms ·', 'inclina ·': 'tilts ·', 'cancela': 'cancels',
+  'Pausar ou continuar (Espaço)': 'Pause or resume (Space)', 'Pausado. Espaço continua.': 'Paused. Space resumes.', 'Continuando.': 'Resuming.',
+  'Espaço': 'Space', 'Pausar ou continuar (carros e relógio)': 'Pause or resume (cars and clock)',
+  'Mover': 'Move', 'Dividir': 'Split', 'Ponto da via': 'Road point', 'Unir as duas vias': 'Join both roads', 'Junta as duas vias deste ponto numa só': 'Joins the two roads at this point into one', 'Essas vias não se unem: perfis diferentes, sentidos opostos ou longas demais juntas.': 'These roads cannot be joined: different profiles, opposite directions or too long together.', 'Vias unidas.': 'Roads joined.', 'Inverter mão única': 'Reverse one-way', 'Os carros passam a andar no outro sentido nesta via (até os cruzamentos)': 'Cars drive the other way on this road (up to the junctions)', 'Sentido invertido.': 'Direction reversed.', 'Dividir no meio': 'Split in the middle', 'Põe um ponto no meio do trecho': 'Puts a point in the middle of the stretch', 'Via dividida em duas.': 'Road split in two.', 'Duplicar ao lado': 'Duplicate alongside', 'Uma via igual, paralela, à direita desta (até os cruzamentos)': 'An identical parallel road to the right of this one (up to the junctions)', 'Via duplicada ao lado.': 'Road duplicated alongside.', 'Arraste um nó (ponta ou cruzamento) para mudá-lo de lugar.': 'Drag a node (end or junction) to move it.', 'Solte onde o nó deve ficar; as vias ligadas acompanham. Esc cancela.': 'Drop where the node should go; connected roads follow. Esc cancels.', 'Clique numa via para dividi-la em duas naquele ponto.': 'Click a road to split it in two at that point.', 'Perto demais da ponta: clique mais para o meio.': 'Too close to the end: click nearer the middle.', 'Arrasta um nó; as vias ligadas acompanham.': 'Drags a node; connected roads follow.', 'Clique numa via para dividi-la em duas.': 'Click a road to split it in two.',
+  'Lote': 'Lot', 'Editar prédio': 'Edit building', 'Desenhar lote (retângulo)': 'Draw lot (rectangle)', 'Desenhar lote (polígono)': 'Draw lot (polygon)', 'Dividir lote': 'Split lot', 'Juntar lotes': 'Join lots', 'Apagar lotes e construções': 'Delete lots and buildings', 'Definir frente': 'Set front', 'Mover cantos': 'Move corners', 'Lado a lado': 'Side by side', 'Frente e fundos': 'Front and back', 'Pincel': 'Brush', 'Quadra inteira': 'Whole block', 'Clique dentro de uma quadra: todas as vias em volta dela recebem a zona.': 'Click inside a block: every road around it gets the zone.', 'Clique os cantos do lote; Enter ou duplo clique fecha, Backspace volta um ponto.': 'Click the lot corners; Enter or double-click closes, Backspace steps back.', 'Clique num lote para dividi-lo (escolha lado a lado ou frente e fundos e em quantos).': 'Click a lot to split it (choose side by side or front and back, and how many).', 'Clique num lote e depois no lote ao lado para juntá-los.': 'Click a lot and then the one next to it to join them.', 'Agora clique no lote ao lado.': 'Now click the lot next to it.', 'Clique num prédio: vira lote vazio. Clique num lote vazio: ele some.': 'Click a building: it becomes an empty lot. Click an empty lot: it goes away.', 'Clique perto de um lado do lote: a construção vira de frente para ele.': 'Click near a side of the lot: the building turns to face it.', 'Arraste um canto do lote para mudar o tamanho.': 'Drag a lot corner to resize it.', 'Nenhum lote aqui: desenhe um ou zoneie a rua.': 'No lot here: draw one or zone the street.', 'Esse já é o lado da frente.': 'That is already the front.', 'Lote dividido.': 'Lot split.', 'Lotes juntados.': 'Lots joined.', 'Frente definida: a construção olha para esse lado.': 'Front set: the building faces that side.', 'Apagado.': 'Deleted.', 'Não cabe um lote aí.': 'A lot does not fit there.', 'Lote novo criado.': 'New lot created.', 'Não sobra um lote que valha a pena aí.': 'No worthwhile lot is left there.', 'Esses lotes não têm um lado em comum.': 'These lots do not share a side.', 'Escolha dois lotes diferentes.': 'Choose two different lots.', 'Nenhuma via perto: desenhe as ruas da quadra primeiro.': 'No road nearby: draw the block streets first.', 'Isso não é uma quadra fechada: feche as ruas em volta.': 'This is not a closed block: close the streets around it.', 'Essa quadra já tem essa zona.': 'This block already has that zone.',
+  'Quarteirões': 'Blocks', 'Colunas': 'Columns', 'Linhas': 'Rows', 'Giro': 'Rotation', 'Encaixe': 'Snap', 'Desligado': 'Off', 'Ângulos de 15°': '15° angles', 'Ângulos e grade de 1 m': 'Angles and 1 m grid', 'Clique para construir a grade de quarteirões com o perfil escolhido (colunas, linhas, quadra e giro no painel).': 'Click to build the block grid with the chosen profile (columns, rows, block size and rotation in the panel).', 'Clique numa via, prédio, item ou muro para demolir; arraste para demolir tudo num retângulo.': 'Click a road, building, item or wall to demolish it; drag to demolish everything in a rectangle.', 'Clima': 'Weather', 'Ajustado aqui': 'Set here', 'Vento': 'Wind', 'Raios': 'Lightning', 'Trovão': 'Thunder', 'Ajuste chuva, vento e raios nas barras; clique no mapa para cair um raio ali.': 'Set rain, wind and lightning with the sliders; click the map to strike lightning there.', '◐ Dia e noite': '◐ Day and night', '☀ Sempre dia': '☀ Always day', '☾ Sempre noite': '☾ Always night', 'Céu: o ciclo de dia e noite, sempre dia ou sempre noite': 'Sky: the day-night cycle, always day or always night', 'Salvo automaticamente.': 'Saved automatically.', 'Sobre': 'About', 'Lado (m)': 'Side (m)',
+  'Exportar': 'Export', 'Abrir arquivo': 'Open file', 'Salvar o mapa num arquivo (para guardar ou levar para outro computador)': 'Save the map to a file (to keep it or take it to another computer)',
+  'Abrir um mapa salvo em arquivo': 'Open a map saved to a file', 'Nada salvo para exportar ainda.': 'Nothing saved to export yet.',
+  'Saúde do jogo': 'Game health', 'Copiar registro': 'Copy log', 'Copiado': 'Copied', 'Não foi possível copiar': 'Could not copy', 'Nada registrado': 'Nothing logged',
+  'Algo quebrou nos últimos 30 s': 'Something broke in the last 30 s', 'Houve quadro lento nos últimos 30 s': 'There was a slow frame in the last 30 s', 'Nada quebrou nem travou nos últimos 30 s': 'Nothing broke or stalled in the last 30 s',
+  'Saúde do jogo (erros e quadros lentos)': 'Game health (errors and slow frames)',
+  'Medindo o trânsito…': 'Measuring traffic…',
+  'Relevos': 'Landforms', 'Relevo': 'Landform', 'Chapada (arenito)': 'Mesa (sandstone)', 'Cânion (arenito)': 'Canyon (sandstone)', 'Escarpa de basalto': 'Basalt escarpment', 'Pão de açúcar (granito)': 'Sugarloaf (granite)', 'Ravina': 'Gully',
+  'Aplainar mapa inteiro': 'Flatten whole map', 'Deixa todo o relevo plano na altura do centro da tela (desfaz com Ctrl+Z)': 'Flattens all terrain to the height at the screen centre (undo with Ctrl+Z)', 'Mapa aplainado.': 'Map flattened.',
+  'Escolha o relevo e arraste (chapada, cânion, escarpa, ravina) ou clique (pão de açúcar); Força muda a altura, [ e ] o tamanho.': 'Pick a landform and drag (mesa, canyon, escarpment, gully) or click (sugarloaf); Strength sets the height, [ and ] the size.',
+  'Água:': 'Water:', 'Ondas': 'Waves', 'Espuma': 'Foam', 'Correnteza': 'Current', 'Elementos': 'Elements', 'Elemento': 'Element', 'Seixos': 'Pebbles', 'Folhas secas': 'Dry leaves', 'Capim alto': 'Tall grass',
+  'Samambaia': 'Fern', 'Trevo': 'Clover', 'Cogumelos': 'Mushrooms', 'Colocar': 'Place', 'Apagar este tipo': 'Erase this kind', 'Apagar tudo': 'Erase all', 'Densidade': 'Density', 'Tamanho': 'Size',
+  'Poeira': 'Dust', 'Fuligem': 'Soot', 'Faíscas': 'Sparks', 'Espuma e borrifo': 'Foam and spray',
+  'Arraste para espalhar o elemento escolhido (ou apagar); Raio e [ ] mudam o tamanho do pincel.': 'Drag to scatter the chosen element (or erase); Radius and [ ] change the brush size.',
+  'Palmeira': 'Palm', 'Espécie': 'Species', 'Mistas': 'Mixed', 'Carvalho': 'Oak', 'Cipreste': 'Cypress', 'Uma árvore por clique': 'One tree per click', 'Clique para plantar uma árvore da espécie escolhida.': 'Click to plant a tree of the chosen species.',
+  'Sem luz': 'No light', 'Luz em postes alternados': 'Light on every other pole', 'Luz em todos os postes': 'Light on every pole', 'Fileira posta ao longo da calçada.': 'Row placed along the sidewalk.',
+  'Clique numa calçada (ou no chão) para pôr o item escolhido; arraste ao longo dela para uma fileira. Shift+clique remove.': 'Click a sidewalk (or the ground) to place the chosen item; drag along it for a row. Shift+click removes.',
+  'Céu': 'Sky', 'Nuvem': 'Cloud', 'Criar nuvem': 'Create cloud', 'Mover nuvem': 'Move cloud', 'Ajustar nuvem': 'Adjust cloud', 'Apagar nuvem': 'Delete cloud', 'Base': 'Base', 'Espalhar nuvens': 'Scatter clouds', 'Apagar todas': 'Delete all',
+  'Espalha nuvens pelo céu em volta da câmera': 'Scatters clouds across the sky around the camera', 'Apaga todas as nuvens do céu': 'Deletes every cloud in the sky', 'Neblina': 'Fog', 'Pôr neblina': 'Lay fog', 'Apagar neblina': 'Erase fog', 'Névoa geral': 'Overall haze',
+  'Arraste para pôr neblina baixa (Raio muda o tamanho do pincel).': 'Drag to lay low fog (Radius changes the brush size).', 'Arraste para apagar a neblina.': 'Drag to erase the fog.',
+  'Clique no mapa: uma nuvem nasce em cima do ponto, com o tamanho, a base e a densidade escolhidos.': 'Click the map: a cloud appears above the point with the chosen size, base and density.',
+  'Arraste uma nuvem (pela sombra no chão) para outro lugar.': 'Drag a cloud (by its spot on the ground) somewhere else.', 'Clique numa nuvem para aplicar os valores das barras.': 'Click a cloud to apply the slider values.', 'Clique numa nuvem para apagá-la.': 'Click a cloud to delete it.',
+  'Espalhe nuvens ou ponha neblina.': 'Scatter clouds or lay fog.', 'Nenhuma nuvem aqui: clique embaixo de uma.': 'No cloud here: click under one.',
+  'Ajuda (F1)': 'Help (F1)', 'Ajuda: ferramentas, teclas e sobre o jogo': 'Help: tools, keys and about the game', '☰ Menu': '☰ Menu', 'Salvar, carregar, exportar, mapa novo, opções e ajuda': 'Save, load, export, new map, options and help',
+  'Vias': 'Roads', 'Zonas e prédios': 'Zones and buildings', 'Transporte': 'Transit', 'Rua': 'Street', 'Terreno': 'Terrain', 'Natureza': 'Nature', 'Céu e clima': 'Sky and weather',
+  'Projeto': 'Design', 'Escolher modelo…': 'Choose a template…', 'Prontos': 'Ready-made', 'Planta': 'Plan', 'Telhado': 'Roof', 'Acabamento': 'Finish', 'Andares recuados': 'Setback floors', 'Nenhum': 'None', 'Cor': 'Colour',
+  'Cor da fachada': 'Facade colour', 'Guarda este projeto (com os andares) na lista de modelos': 'Keeps this design (with the floors) in the template list', 'Sem projeto': 'No design',
+  'Volta ao prédio automático do gerador (pelo estilo e pela zona)': 'Back to the automatic building (by style and zone)', 'Selecione um prédio primeiro.': 'Select a building first.',
+  'Retângulo': 'Rectangle', 'Em L': 'L-shaped', 'Em U': 'U-shaped', 'Círculo': 'Circle', 'Hexágono': 'Hexagon', 'Octógono': 'Octagon', 'Chanfrado': 'Chamfered', 'Plana': 'Flat', 'Terraço': 'Terrace', '2 águas': 'Gable', '4 águas': 'Hip', '1 água': 'Shed', 'Dente de serra': 'Sawtooth',
+  'Reboco': 'Plaster', 'Tijolo': 'Brick', 'Vidro': 'Glass', 'Madeira': 'Wood', 'Pedra': 'Stone', 'Caixa d’água': 'Water tank', 'Painéis solares': 'Solar panels', 'Chaminé': 'Chimney', 'Agulha': 'Spire', 'Antena': 'Antenna', 'Ar-condicionado': 'Air conditioning',
+  'Casa': 'House', 'Sobrado geminado': 'Terraced townhouse', 'Prédio residencial': 'Apartment block', 'Torre com embasamento': 'Tower on a podium', 'Loja': 'Shop', 'Edifício de escritórios': 'Office building', 'Prédio com pátio (U)': 'Courtyard block (U)', 'Torre redonda': 'Round tower', 'Galpão': 'Warehouse', 'Fábrica': 'Factory', 'Igreja de torre': 'Church with tower',
+  'Ver por dentro': 'See inside', 'Ver por dentro: o prédio escolhido (ou o do centro da tela) cortado num andar': 'See inside: the chosen building (or the one at the screen centre) cut at a floor', 'Andar abaixo': 'Floor below', 'Andar acima': 'Floor above', 'Térreo': 'Ground floor',
+  'Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.': 'No building chosen or at the screen centre: click a building or point the view at one.',
+  'Shift+clique numa parada para torná-la terminal.': 'Shift+click a stop to make it a terminal.', 'Não é mais terminal.': 'No longer a terminal.', 'Terminal: os ônibus esperam mais e dão a volta aqui.': 'Terminal: buses wait longer and turn around here.',
+  'Clique na calçada para pôr paradas na linha; clique numa parada para tirar; Shift+clique torna a parada terminal.': 'Click a sidewalk to add stops to the line; click a stop to remove it; Shift+click makes a stop a terminal.',
+  'Câmara de Vereadores': 'City council', 'Fórum': 'Courthouse', 'Correios': 'Post office', 'Faculdade': 'University', 'Biblioteca': 'Library', 'Museu': 'Museum', 'Presídio': 'Prison', 'Cemitério': 'Cemetery', 'Rodoviária': 'Bus station',
+  'Agência bancária': 'Bank', 'Farmácia': 'Pharmacy', 'Padaria': 'Bakery', 'Restaurante': 'Restaurant', 'Lanchonete': 'Snack bar', 'Bar': 'Bar', 'Cinema': 'Cinema', 'Hotel': 'Hotel', 'Academia': 'Gym', 'Clube': 'Club', 'Escritórios': 'Offices', 'Parquinho': 'Playground',
+  'Pintura das vias': 'Road markings', 'Brasil': 'Brazil', 'EUA': 'USA', 'Europa': 'Europe', 'Clássica': 'Classic', 'Mobiliário das vias novas': 'Furniture on new roads', 'Completo': 'Complete', 'Básico (só postes)': 'Basic (lights only)',
+  'Livre': 'Freehand', 'Arraste para desenhar a via livre: ela segue o cursor em curvas suaves; solte para construir.': 'Drag to draw a freehand road: it follows the cursor in smooth curves; release to build.',
+  'Conexões de faixa': 'Lane connections', 'Ajustadas à mão. A seta pintada em cada faixa mostra as saídas dela.': 'Set by hand. The painted arrow on each lane shows its exits.',
+  'Automáticas (pelas setas de cada faixa). Clique numa saída para ligar ou desligar.': 'Automatic (by each lane arrows). Click an exit to turn it on or off.', 'Essa é a última saída da faixa: ela não pode ficar sem caminho.': 'That is the lane last exit: it cannot be left without a way.',
+  'Restaurar automáticas': 'Restore automatic', 'Ligada: clique para desligar': 'On: click to turn off', 'Desligada: clique para ligar': 'Off: click to turn on',
+  'Faixa zebra': 'Zebra crossing', 'Faixa com semáforo': 'Signal crossing', 'Faixa de pedestres no meio do trecho: os carros dão a vez a quem atravessa': 'Mid-block pedestrian crossing: cars give way to people crossing',
+  'Faixa de pedestres com semáforo no meio do trecho': 'Mid-block pedestrian crossing with a signal', 'Faixa zebra: pedestre tem preferência.': 'Zebra crossing: pedestrians have priority.', 'Faixa com semáforo.': 'Signal crossing.',
+  'Esta via não tem pedestres.': 'This road has no pedestrians.', 'A faixa precisa de espaço para uma fila de carros dos dois lados.': 'The crossing needs room for a queue of cars on both sides.', 'Remover faixa': 'Remove crossing',
+  'Faixa de pedestres: zebra (pedestre tem preferência).': 'Pedestrian crossing: zebra (pedestrians have priority).', 'Faixa de pedestres: com semáforo.': 'Pedestrian crossing: with a signal.',
+  'Retorno no canteiro': 'U-turn in the median', 'Retorno aberto no canteiro.': 'U-turn opened in the median.', 'Abre o canteiro no meio do trecho: quem passou do destino faz o retorno ali': 'Opens the median mid-stretch: drivers who passed their destination turn back there',
+  'O retorno precisa de uma via de mão dupla com canteiro central.': 'A U-turn needs a two-way road with a central median.', 'Canteiro estreito demais para um retorno.': 'Median too narrow for a U-turn.', 'O retorno precisa de espaço para uma fila de carros dos dois lados.': 'The U-turn needs room for a queue of cars on both sides.',
+  'Retorno no canteiro.': 'U-turn in the median.', 'Fechar o retorno': 'Close the U-turn', 'Retorno': 'U-turn',
+  'Corte': 'Cut', 'Talude': 'Slope', 'Muro de arrimo': 'Retaining wall',
+  'Vagas': 'Parking', 'Vagas retiradas.': 'Parking removed.', 'Vagas paralelas à guia.': 'Kerbside parking added.', 'Tirar as vagas deste lado (até os cruzamentos)': 'Remove parking on this side (up to the junctions)',
+  'Pôr vagas paralelas à guia deste lado (até os cruzamentos)': 'Add kerbside parking on this side (up to the junctions)',
+  'Grade': 'Grid', 'Grade no mapa: linhas a cada 64 m (mostrar ou ocultar)': 'Map grid: lines every 64 m (show or hide)', 'Bússola: clique para ficar de frente para o norte': 'Compass: click to face north',
+  'Teclas da via': 'Road keys', 'Aperte uma tecla…': 'Press a key…',
+  'Travar esta escolha': 'Lock this choice', 'Fixa o controle atual: ele não muda mais se as vias em volta mudarem': 'Fixes the current control: it no longer changes if the roads around change', 'Medindo o fluxo…': 'Measuring the flow…',
+  'Texto da placa (opcional)': 'Sign text (optional)', 'Nome da rua, depois clique nela': 'Street name, then click on it',
+  'Pessoas e ações': 'People and actions', 'Pistola': 'Pistol', 'Bomba': 'Bomb', 'Roupa': 'Clothes', 'Cor da roupa': 'Clothes colour', 'Parada (fica aqui)': 'Standing (stays here)', 'Andando pela calçada': 'Walking on the sidewalk', 'Quantas': 'How many',
+  'Escolha a roupa e a altura e clique: a pessoa fica ali parada ou sai andando pela calçada.': 'Choose clothes and height and click: the person stands there or walks off along the sidewalk.',
+  'Clique numa pessoa: ela cai e some.': 'Click a person: they fall and disappear.', 'Clique onde a bomba cai: no chão ou num prédio. A força muda o tamanho da explosão.': 'Click where the bomb falls: on the ground or a building. Strength changes the blast size.',
+  'A pessoa saiu andando pela calçada.': 'The person walked off along the sidewalk.', 'Atingido.': 'Hit.', 'Ninguém aí: clique numa pessoa.': 'Nobody there: click a person.', 'Impacto no chão.': 'Ground impact.',
+  'Janelas': 'Windows', 'Ala': 'Wing', 'Do acabamento': 'From the finish', 'Faixa de vidro': 'Glass band', 'Janelas largas': 'Wide windows', 'Janelas estreitas': 'Narrow windows', 'Parede cega': 'Blank wall',
+  'Sem ala': 'No wing', 'Ala à esquerda': 'Wing on the left', 'Ala à direita': 'Wing on the right', 'Alas dos dois lados': 'Wings on both sides',
+  // menu e opções
+  'Cidade': 'City', 'Semente': 'Seed', 'Tamanho do mapa': 'Map size', 'Gerar cidade nova': 'Generate a new city',
+  'Começar num mapa vazio': 'Start on an empty map', 'Carregar o último jogo': 'Load the last game',
+  'Vias, trânsito e cidades inteiras de 10 a 24 km.': 'Roads, traffic and whole cities from 10 to 24 km.',
+  'Qualidade': 'Quality', 'Baixo': 'Low', 'Médio': 'Medium', 'Alto': 'High', 'Ultra': 'Ultra', 'Personalizado': 'Custom',
+  'Resolução': 'Resolution', 'Sombras': 'Shadows', 'Oclusão de ambiente': 'Ambient occlusion', 'Brilho das luzes': 'Light bloom',
+  'Detalhe ao longe': 'Distant detail', 'Demanda de viagens': 'Trip demand', 'Baixa': 'Low', 'Normal': 'Normal', 'Pico': 'Peak',
+  'Tráfego': 'Traffic', 'Pessoas': 'People', 'Tempo': 'Weather', 'Muda sozinho': 'Changes by itself', 'Sempre limpo': 'Always clear',
+  'Chuva': 'Rain', 'Tempestade': 'Storm', 'Som ambiente': 'Ambient sound', 'Idioma': 'Language', 'Jogo': 'Game',
+  'Aplicar': 'Apply', 'Fechar': 'Close', 'Fechar (Esc)': 'Close (Esc)', 'Cancelar': 'Cancel', 'Aplicando as opções…': 'Applying options…',
+  'Modo de compatibilidade (WebGL 2): qualidade Baixo.': 'Compatibility mode (WebGL 2): Low quality.',
+  'WebGPU indisponível: rodando no modo de compatibilidade (WebGL 2).': 'WebGPU unavailable: running in compatibility mode (WebGL 2).',
+  'Sua placa de vídeo não comporta aquele tamanho de mapa: abri no maior que cabe.': 'Your graphics card cannot hold that map size: opened the largest that fits.',
+  // carregamento e arquivo
+  'Gerando o relevo…': 'Generating terrain…', 'Gerando a cidade…': 'Generating the city…', 'Gerando a cidade de teste…': 'Generating the test city…',
+  'Assentando as vias…': 'Laying the roads…', 'Lotes e prédios…': 'Lots and buildings…', 'Carregando a cidade…': 'Loading the city…',
+  'Preparando os shaders…': 'Preparing shaders…', 'Iniciando o vídeo…': 'Starting video…', 'Cidade carregada.': 'City loaded.',
+  'Nenhum salvamento encontrado.': 'No save found.', 'Salvo.': 'Saved.',
+  // vias e catálogo
+  'Ruas': 'Streets', 'Avenidas': 'Avenues', 'Rodovias': 'Highways', 'Especiais': 'Special', 'Trilhos': 'Rails', 'Meus modelos': 'My templates',
+  'Rua local': 'Local street', 'Rua estreita': 'Narrow street', 'Rua urbana': 'Urban street', 'Rua com estacionamento': 'Street with parking',
+  'Rua com ciclofaixa': 'Street with bike lane', 'Rua com canteiro central': 'Street with median', 'Rua compartilhada': 'Shared street',
+  'Rua de paralelepípedo': 'Cobblestone street', 'Mão única': 'One-way', 'Mão única, 1 faixa': 'One-way, 1 lane', 'Mão única, 2 faixas': 'One-way, 2 lanes',
+  'Mão única com estacionamento': 'One-way with parking', 'Avenida': 'Avenue', 'Avenida 4 faixas': '4-lane avenue',
+  'Avenida 6 faixas com canteiro': '6-lane avenue with median', 'Avenida com ciclovia': 'Avenue with cycle track',
+  'Avenida com estacionamento': 'Avenue with parking', 'Avenida mão única, 3 faixas': 'One-way avenue, 3 lanes',
+  'Avenida mão única, 4 faixas': 'One-way avenue, 4 lanes', 'Bulevar': 'Boulevard', 'Calçadas largas': 'Wide sidewalks',
+  'Faixa de ônibus lateral': 'Curbside bus lane', 'Corredor de ônibus central': 'Central busway', 'Via expressa': 'Expressway',
+  'Rodovia 6 faixas': '6-lane highway', 'Rodovia mão única, 2 faixas': 'One-way highway, 2 lanes', 'Rodovia mão única, 3 faixas': 'One-way highway, 3 lanes',
+  'Estrada simples': 'Country road', 'Estrada de concreto': 'Concrete road', 'Estrada rural de paralelepípedo': 'Rural cobblestone road',
+  'Pista dupla, 2 faixas': 'Dual carriageway, 2 lanes', 'Alça de acesso': 'Ramp', 'Alça de acesso, 2 faixas': 'Ramp, 2 lanes',
+  'Ferrovia dupla': 'Double railway', 'Ferrovia simples': 'Single railway', 'Metrô (duplo)': 'Metro (double)',
+  'Via personalizada': 'Custom road', 'Personalizar…': 'Customize…', 'Desenhar com este perfil': 'Draw with this profile',
+  'Abrir a seção transversal da via escolhida para mudar faixa por faixa': 'Open the cross-section of the chosen road to edit lane by lane',
+  'Seção transversal': 'Cross-section', 'Salvar como modelo': 'Save as template', 'Nome do modelo': 'Template name', 'Apagar o modelo': 'Delete template',
+  'Duplicar': 'Duplicate', 'Apagar': 'Delete', 'Mover para a esquerda': 'Move left', 'Mover para a direita': 'Move right',
+  'Seus modelos aparecem aqui: escolha uma via, clique em "Personalizar…" e salve como modelo.': 'Your templates show up here: pick a road, click "Customize…" and save it as a template.',
+  'A via de lado a lado, vista no sentido em que você desenha. Clique numa faixa para mudá-la.': 'The road from side to side, seen in the drawing direction. Click a strip to change it.',
+  'Clique numa faixa da seção para mudá-la.': 'Click a strip of the section to change it.',
+  'A via precisa de pelo menos uma faixa.': 'The road needs at least one lane.', 'No máximo 8 faixas.': 'At most 8 lanes.',
+  'Larga demais (máximo 70 m).': 'Too wide (70 m at most).', 'Calçada só nas bordas.': 'Sidewalks only at the edges.',
+  'Cada sentido precisa de uma faixa para todos os veículos, além das de ônibus.': 'Each direction needs a lane for all vehicles besides bus lanes.',
+  'As faixas de cada sentido ficam juntas, com a mão à direita.': 'Lanes of each direction stay together, driving on the right.',
+  'Perfis demais neste mapa (máximo 256).': 'Too many profiles on this map (256 at most).', 'Não salvo: dê um nome.': 'Not saved: give it a name.',
+  'Não salvo: o armazenamento do navegador está cheio ou bloqueado.': 'Not saved: browser storage is full or blocked.',
+  'Calçada': 'Sidewalk', 'Meio-fio': 'Curb', 'Estacionamento': 'Parking', 'Ciclofaixa': 'Bike lane', 'Faixa': 'Lane', 'Canteiro': 'Median',
+  'Acostamento': 'Shoulder', 'Mureta': 'Barrier', 'Faixas': 'Lanes', 'Largura': 'Width', 'Largura total': 'Total width', 'Comprimento': 'Length',
+  'Velocidade': 'Speed', 'Limite de velocidade': 'Speed limit', 'Preço': 'Price', 'Sentido': 'Direction', 'Piso': 'Surface', 'Pista': 'Carriageway',
+  'Tipo': 'Type', 'Quem usa': 'Who uses it', 'Todos os veículos': 'All vehicles', 'Só ônibus': 'Buses only', 'Altura': 'Height',
+  'Com meio-fio': 'With curb', 'No nível da pista': 'Level with the road', 'Setas de conversão': 'Turn arrows',
+  'Linha entre os sentidos': 'Line between directions', 'Linha à esquerda': 'Line on the left', 'Contínua': 'Solid', 'Tracejada': 'Dashed',
+  'Dupla contínua': 'Double solid', 'Contínua (não troca)': 'Solid (no change)', 'Tracejada (pode trocar)': 'Dashed (may change)',
+  'Asfalto': 'Asphalt', 'Concreto': 'Concrete', 'Paralelepípedo': 'Cobblestone', 'Bloquete': 'Pavers', 'Pedra portuguesa': 'Portuguese pavement',
+  'Só pintado': 'Paint only', 'Todas as direções': 'All directions', '← Só esquerda': '← Left only', '↑ Só em frente': '↑ Straight only',
+  '→ Só direita': '→ Right only', '← ↑ Esquerda ou em frente': '← ↑ Left or straight', '↑ → Em frente ou direita': '↑ → Straight or right',
+  'A → B (com o desenho)': 'A → B (with the drawing)', 'B → A (contra)': 'B → A (against)', 'Elevado': 'Elevated', 'Nível': 'Level',
+  'no chão': 'on the ground', 'Conta-gotas: desenhar outras vias iguais': 'Eyedropper: draw more roads like this',
+  'Já existe uma rotatória aqui.': 'There is already a roundabout here.', 'Clique numa via para demolir.': 'Click a road to demolish it.',
+  'Clique para começar a via.': 'Click to start the road.', 'Clique para começar a curva.': 'Click to start the curve.',
+  'Clique para o ponto de controle da curva.': 'Click for the curve control point.', 'Clique para terminar a curva.': 'Click to finish the curve.',
+  'Clique para terminar o trecho (continua a partir dele). Esc encerra.': 'Click to finish the stretch (keeps going from it). Esc ends.',
+  'Mais baixo (Page Down)': 'Lower (Page Down)',
+  // cruzamentos
+  'Controle do cruzamento': 'Junction control', 'Automático': 'Automatic', 'Semáforo': 'Traffic light', 'Placas (via principal)': 'Signs (main road)',
+  'Pare em todas': 'All-way stop', 'Preferência em todas': 'Yield on all', 'Minirrotatória': 'Mini roundabout', 'Sem sinalização': 'Uncontrolled',
+  'Passagem de nível': 'Level crossing', 'Sem placa': 'No sign', 'Preferencial': 'Priority', 'Dê a preferência': 'Yield', 'Pare': 'Stop',
+  'Regra de cada via': 'Rule of each road', 'Movimentos permitidos': 'Allowed movements', 'Clique para proibir ou permitir.': 'Click to ban or allow.',
+  'Permitido: clique para proibir': 'Allowed: click to ban', 'Tempos': 'Timings', 'Tempo fixo': 'Fixed time', 'Adaptativo (pela fila)': 'Adaptive (by queue)',
+  'Defasagem': 'Offset', 'Verde mais curto': 'Shorter green', 'Verde mais longo': 'Longer green', 'Onda verde na via principal': 'Green wave on the main road',
+  'A via principal não tem outro semáforo para coordenar.': 'The main road has no other light to coordinate with.',
+  ' Prioridade ao ônibus': ' Bus priority', 'Voltar ao automático': 'Back to automatic', 'Subir 0,5 m': 'Raise 0.5 m', 'Descer 0,5 m': 'Lower 0.5 m',
+  'Faz parte de uma rotatória: quem está no anel tem a preferência.': 'Part of a roundabout: traffic on the ring has priority.',
+  'Essa via não tem calçada.': 'This road has no sidewalk.',
+  'Clique num cruzamento para mudar o controle (semáforo, placas, movimentos) ou numa via para ver o perfil.': 'Click a junction to change its control (lights, signs, movements) or a road to see its profile.',
+  'Norte': 'North', 'Sul': 'South', 'Leste': 'East', 'Oeste': 'West', 'Nordeste': 'Northeast', 'Noroeste': 'Northwest', 'Sudeste': 'Southeast', 'Sudoeste': 'Southwest',
+  // zonas e prédios
+  'Sem zona': 'No zone', 'Residencial': 'Residential', 'Comercial': 'Commercial', 'Industrial': 'Industrial', 'Misto': 'Mixed',
+  'Residencial baixa': 'Low-density residential', 'Residencial alta': 'High-density residential', 'Comercial baixa': 'Low-density commercial',
+  'Comercial alta': 'High-density commercial', 'Tirar zona': 'Remove zone', 'Raio': 'Radius', 'Uso': 'Use',
+  'Arraste para pintar a zona dos lados das vias.': 'Drag to paint the zone along the roads.',
+  'Andares': 'Floors', 'Estilo': 'Style', 'Função': 'Function', 'Comum': 'Regular', 'Automático (bairro)': 'Automatic (neighbourhood)',
+  'Menos andares': 'Fewer floors', 'Demolir o prédio': 'Demolish the building', 'Desenhar lote': 'Draw lot',
+  'Desenhar um lote em qualquer lugar: dois cliques na frente, um no fundo. O prédio sai com o uso, o estilo e a função escolhidos.':
+    'Draw a lot anywhere: two clicks for the front, one for the back. The building gets the chosen use, style and function.',
+  'Clique no começo e no fim da frente do lote; depois no fundo.': 'Click the start and end of the lot front, then the back.',
+  'Clique num prédio para editar, ou num lote vazio para construir.': 'Click a building to edit it, or an empty lot to build.',
+  'Clique num prédio ou num lote vazio (zoneie as vias primeiro).': 'Click a building or an empty lot (zone the roads first).',
+  'Lote estreito demais.': 'Lot too narrow.',
+  'Colonial': 'Colonial', 'Art déco': 'Art deco', 'Modernista': 'Modernist', 'Contemporâneo': 'Contemporary', 'Tijolinho': 'Brick',
+  'Tropical': 'Tropical', 'Envidraçado': 'Glass', 'Casa colonial': 'Colonial house', 'Bangalô': 'Bungalow', 'Casa moderna': 'Modern house',
+  'Sobrado': 'Townhouse', 'Cívico': 'Civic', 'Escola': 'School', 'Igreja': 'Church', 'Hospital': 'Hospital', 'Posto de saúde': 'Clinic',
+  'Praça': 'Square', 'Parque': 'Park', 'Posto de gasolina': 'Gas station', 'Supermercado': 'Supermarket', 'Prefeitura': 'City hall',
+  'Delegacia': 'Police station', 'Bombeiros': 'Fire station', 'Shopping': 'Mall', 'Quadra': 'Sports court',
+  // transporte
+  'Linha': 'Line', 'Nova linha': 'New line', 'Apagar linha': 'Delete line', 'Apagar a linha escolhida': 'Delete the chosen line',
+  'Menos ônibus': 'Fewer vehicles', 'Trem': 'Train', 'Metrô': 'Metro',
+  'Começar outra linha (ônibus: paradas na calçada; trem e metrô: estações nos trilhos)': 'Start another line (bus: stops on the sidewalk; train and metro: stations on the tracks)',
+  'Clique na calçada para começar uma linha': 'Click a sidewalk to start a line',
+  'Clique na calçada para pôr paradas na linha; clique numa parada para tirar.': 'Click a sidewalk to add stops to the line; click a stop to remove it.',
+  'Ponha a parada perto de uma via.': 'Put the stop near a road.', 'Ponha a estação sobre um trilho (Via → Trilhos).': 'Put the station on a track (Road → Rails).',
+  'A câmera soltou o veículo.': 'The camera released the vehicle.', 'Seguindo o veículo. Esc ou C solta; a roda aproxima.': 'Following the vehicle. Esc or C releases; the wheel zooms.',
+  'Nenhum veículo perto do centro da tela: aproxime a câmera de uma via com trânsito.': 'No vehicle near the screen centre: move the camera closer to a busy road.',
+  // paisagismo, terreno
+  'Árvore': 'Tree', 'Pinheiro': 'Conifer', 'Arbusto': 'Bush', 'Banco': 'Bench', 'Lixeira': 'Bin', 'Iluminação': 'Street light', 'Hidrante': 'Hydrant',
+  'Caixa de correio': 'Postbox', 'Orelhão': 'Payphone', 'Boca de lobo': 'Storm drain', 'Frade': 'Bollard', 'Floreira': 'Planter', 'Placa': 'Sign',
+  'Fumaça': 'Smoke', 'Vapor': 'Steam', 'Fogo': 'Fire', 'Chafariz': 'Fountain', 'Item': 'Item',
+  'Velocidade máxima': 'Speed limit', 'Proibido estacionar': 'No parking', 'Sentido proibido': 'No entry', 'Pedestres': 'Pedestrians',
+  'Direção': 'Direction', 'Placa de rua': 'Street name', 'Informação': 'Information',
+  'Cerca': 'Fence', 'Muro': 'Wall', 'Sebe': 'Hedge', 'Defensa (guard-rail)': 'Guardrail', 'Gradil urbano': 'Railing', 'Postes com fios': 'Power poles',
+  'Clique numa calçada (ou no chão) para pôr o item escolhido. Shift+clique remove.': 'Click a sidewalk (or the ground) to place the chosen item. Shift+click removes.',
+  'Clique para começar o traço. Perto de uma via ele vai para as costas da calçada. Shift+clique remove.': 'Click to start the line. Near a road it snaps to the back of the sidewalk. Shift+click removes.',
+  'Clique para continuar o traço; Enter ou Esc termina, Backspace volta um ponto.': 'Click to continue the line; Enter or Esc ends, Backspace steps back.',
+  'Chão': 'Ground', 'Grama': 'Grass', 'Grama (apaga)': 'Grass (erases)', 'Terra': 'Dirt', 'Areia': 'Sand', 'Cascalho': 'Gravel', 'Lama': 'Mud',
+  'Mato': 'Scrub', 'Flores': 'Flowers', 'Neve': 'Snow', 'Pedras': 'Stones', 'Rocha: arenito': 'Rock: sandstone', 'Rocha: basalto': 'Rock: basalt',
+  'Rocha: granito': 'Rock: granite', 'Força': 'Strength', 'Plantar bosque': 'Plant forest', 'Cortar árvores': 'Cut trees',
+  'Bioma do mapa': 'Map biome', 'Sem ecossistema': 'No ecosystem', 'Cerrado': 'Savanna (Cerrado)', 'Mata Atlântica': 'Atlantic Forest',
+  'Amazônia': 'Amazon', 'Caatinga': 'Dry forest (Caatinga)', 'Pampa': 'Pampa', 'Pantanal': 'Wetlands (Pantanal)',
+  'Arraste para pintar o chão (Grama apaga a pintura).': 'Drag to paint the ground (Grass erases paint).',
+  'Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.': 'Drag to plant a forest, or choose Cut to clear it.',
+  'Clique os pontos do rio, de cima para baixo; Enter ou duplo clique termina, Backspace volta, Esc descarta.':
+    'Click the river points from upstream down; Enter or double-click ends, Backspace steps back, Esc discards.',
+  'Rio feito: a água desce sempre pelo caminho desenhado.': 'River made: water always flows down the drawn path.',
+  // ajuda
+  'Ajuda': 'Help', 'Ferramentas': 'Tools', 'Teclas': 'Keys', 'Ajuda: ferramentas e teclas (F1)': 'Help: tools and keys (F1)',
+  'Só olha: arrasta, gira e aproxima sem mexer em nada.': 'Just looks: pan, rotate and zoom without changing anything.',
+  'Clique num cruzamento para escolher semáforo, placas, regras de cada via, movimentos proibidos e tempos; ou numa via para ver o perfil.':
+    'Click a junction to choose lights, signs, the rule of each road, banned movements and timings; or a road to see its profile.',
+  'Clique e clique: desenha um trecho reto com o perfil escolhido no catálogo (ruas, avenidas, rodovias, trilhos). Alt+clique copia o perfil de uma via.':
+    'Click and click: draws a straight stretch with the profile chosen in the catalog (streets, avenues, highways, rails). Alt+click copies a road profile.',
+  'Três cliques: começo, ponto de controle e fim.': 'Three clicks: start, control point and end.',
+  'Clique num cruzamento ou no chão; [ e ] mudam o raio.': 'Click a junction or the ground; [ and ] change the radius.',
+  'Troca o perfil de uma via existente; Shift troca a rua inteira.': 'Changes the profile of an existing road; Shift changes the whole street.',
+  'Clique numa via para tirá-la (devolve metade do custo).': 'Click a road to remove it (refunds half the cost).',
+  'Arraste dos lados das vias: residencial, comercial, industrial, misto, baixa ou alta densidade. Os prédios nascem sozinhos.':
+    'Drag along the roads: residential, commercial, industrial, mixed, low or high density. Buildings grow by themselves.',
+  'Clique num prédio para mudar andares, estilo e função; num lote vazio para construir; ou desenhe um lote em qualquer lugar.':
+    'Click a building to change floors, style and function; an empty lot to build; or draw a lot anywhere.',
+  'Linhas de ônibus (paradas na calçada), trem e metrô (estações nos trilhos).': 'Bus lines (stops on the sidewalk), train and metro (stations on the tracks).',
+  'Árvores, bancos, postes, placas, hidrantes, fumaça, fogo, vapor e chafariz.': 'Trees, benches, lights, signs, hydrants, smoke, fire, steam and fountains.',
+  'Traços de cerca, muro, sebe, defensa, gradil e postes com fios.': 'Lines of fence, wall, hedge, guardrail, railing and power poles.',
+  'Pincel de relevo.': 'Terrain brush.', 'Subir / Descer': 'Raise / Lower', 'Alisar / Nivelar': 'Smooth / Level',
+  'Suaviza o terreno ou o deixa na altura de onde começou o traço.': 'Smooths the terrain or levels it to the height where the stroke began.',
+  'Pinta o chão: terra, areia, cascalho, flores, pedras… (Grama apaga).': 'Paints the ground: dirt, sand, gravel, flowers, stones… (Grass erases).',
+  'Planta um bosque ou abre clareira.': 'Plants a forest or clears it.',
+  'Clique os pontos do rio de cima para baixo; Enter termina.': 'Click the river points from upstream down; Enter ends.',
+  'Botão direito / Q e E': 'Right button / Q and E', 'Girar a câmera': 'Rotate the camera', 'Meio ou arrastar / WASD': 'Middle or drag / WASD',
+  'Mover a câmera': 'Move the camera', 'Roda / + e −': 'Wheel / + and −', 'Aproximar e afastar': 'Zoom in and out', 'Inclinar': 'Tilt',
+  'Isométrica e vista de cima': 'Isometric and top view', 'Seguir o veículo mais perto do centro (Esc solta)': 'Follow the vehicle nearest the centre (Esc releases)',
+  'Mapa de congestionamento': 'Congestion map', 'Velocidade do relógio': 'Clock speed', 'Desfazer e refazer': 'Undo and redo',
+  'Cancelar ou voltar à câmera': 'Cancel or back to the camera',
+  // painel de números
+  'moradores ·': 'residents ·', 'empregos ·': 'jobs ·', 'prédios': 'buildings', 'veículos ·': 'vehicles ·', 'pedestres ·': 'pedestrians ·',
+  'passageiros/h': 'passengers/h',
+};
+
+/** Frases com números ou nomes: [padrão, troca]. */
+const RULES: Array<[RegExp, string]> = [
+  [/^(\d+) mil$/, '$1k'],
+  [/^(\d+) km\/h de média perto daqui$/, '$1 km/h average nearby'],
+  [/^pedestres · (\d+) km\/h de média perto daqui$/, 'pedestrians · $1 km/h average nearby'],
+  [/^(\d+) linhas? de ônibus ·$/, '$1 transit line(s) ·'],
+  [/^(.+) · (\d+) andar(es)?$/, '$1 · $2 floor(s)'],
+  [/^Cruzamento · (\d+) vias$/, 'Junction · $1 roads'],
+  [/^Fase (\d+) \((.*)\)$/, 'Phase $1 ($2)'],
+  [/^De (.+):$/, 'From $1:'],
+  [/^Altura: (.+) m$/, 'Height: $1 m'],
+  [/^Onda verde em (\d+) semáforos\.$/, 'Green wave over $1 lights.'],
+  [/^Cidade gerada em (\d+) s: (.+) prédios e (.+) trechos de via\.$/, 'City generated in $1 s: $2 buildings and $3 road segments.'],
+  [/^Cidade de teste: (.+) prédios e (.+) trechos de rua\.$/, 'Test city: $1 buildings and $2 street segments.'],
+  [/^Salvo \((\d+) ladrilhos, (.+) MB\)\.$/, 'Saved ($1 tiles, $2 MB).'],
+  [/^Não foi possível salvar: (.*)$/, 'Could not save: $1'],
+  [/^Não dá para construir aqui: (.*)\.$/, 'Cannot build here: $1.'],
+  [/^Dinheiro insuficiente: custa R\$ (.+)\.$/, 'Not enough money: it costs R$ $1.'],
+  [/^Devolvido R\$ (.+)$/, 'Refunded R$ $1'],
+  [/^Via copiada: (.+)$/, 'Road copied: $1'],
+  [/^(\d+) pessoas saíram andando pela calçada\.$/, '$1 people walked off along the sidewalk.'],
+  [/^Desabou: (\d+) prédios?\.$/, 'Collapsed: $1 building(s).'],
+  [/^Houve vítimas: (\d+) pessoas? e (\d+) veículos?\.$/, 'Casualties: $1 people and $2 vehicles.'],
+  [/^Rua (.+)\.$/, 'Street $1.'],
+  [/^Fluxo: (\d+) veíc\.\/h \(medido nos últimos (\d+) s\)$/, 'Flow: $1 veh/h (measured over the last $2 s)'],
+  [/^(.+) já é usada pelo jogo\. Escolha outra\.$/, '$1 is already used by the game. Choose another.'],
+  [/^(✓|·) à direita$/, '$1 right'], [/^(✓|·) à esquerda$/, '$1 left'],
+  [/^(.+) \(vagas ajustadas\)$/, '$1 (parking adjusted)'],
+  [/^(.+), faixa (\d+)(.*):$/, '$1, lane $2$3:'],
+  [/^(\d+)º andar$/, 'Floor $1'],
+  [/^(\d+) recuados?$/, '$1 setback floor(s)'],
+  [/^(\d+) veículos agora · (\d+) km\/h · fila de (\d+) · cabem (\d+)$/, '$1 vehicles now · $2 km/h · queue of $3 · room for $4'],
+  [/^(.+) viagens concluídas\/min · (.+) parados perto daqui(.*)$/, '$1 trips completed/min · $2 stopped nearby$3'],
+  [/^Mapa exportado \((.+) MB\)\.$/, 'Map exported ($1 MB).'],
+  [/^Não abriu: (.*)\.$/, 'Could not open: $1.'],
+  [/^Quarteirões construídos: (\d+) × (\d+)\.$/, 'Blocks built: $1 × $2.'],
+  [/^Demolido: (\d+) coisas?(.*)\.$/, 'Demolished: $1 thing(s)$2.'],
+  [/^(\d) lotes$/, '$1 lots'],
+  [/^Não mudou: (.*)\.$/, 'Not changed: $1.'],
+  [/^Não movido: (.*)\.$/, 'Not moved: $1.'],
+  [/^Não dá para duplicar aqui: (.*)\.$/, 'Cannot duplicate here: $1.'],
+  [/^Modelo "(.+)" salvo\.$/, 'Template "$1" saved.'],
+  [/^Escolhido pela importância das vias: (.+)\.$/, 'Chosen by road importance: $1.'],
+  [/^Clique para pôr uma rotatória \(raio (\d+) m; \[ e \] mudam o raio\)\.$/, 'Click to place a roundabout (radius $1 m; [ and ] change it).'],
+  [/^Clique numa via para trocar para "(.+)" \(Shift: a rua inteira; Alt: copiar o perfil da via\)\.$/, 'Click a road to switch it to "$1" (Shift: the whole street; Alt: copy its profile).'],
+  [/^(\d+) \(mão única\)$/, '$1 (one-way)'], [/^(\d+) \(mão dupla\)$/, '$1 (two-way)'],
+  [/^(.+): (\d+) faixas?, mão única, (\d+) km\/h\. Clique para desenhar com ela\.$/, '$1: $2 lane(s), one-way, $3 km/h. Click to draw with it.'],
+  [/^(.+): (\d+) faixas?, mão dupla, (\d+) km\/h\. Clique para desenhar com ela\.$/, '$1: $2 lane(s), two-way, $3 km/h. Click to draw with it.'],
+  [/^(\d+) (paradas|estações) · (\d+) (ônibus|trem|trens) · (\d+) passageiros\/h · (\d+) esperando$/, '$1 stops · $3 vehicles · $5 passengers/h · $6 waiting'],
+  [/^Linha (\d+)(.*)$/, 'Line $1$2'],
+  [/^(.+) \(minha\)$/, '$1 (mine)'],
+  [/^(Calçada|Meio-fio|Estacionamento|Ciclofaixa|Faixa|Canteiro|Acostamento|Mureta) (\d+) de (\d+)$/, '$1 $2 of $3'],
+];
+
+let active = false;
+
+/** Um nome dentro de uma frase: inteiro, ou pedaço a pedaço quando vem com " · ". */
+function part(g: string): string {
+  if (EN[g] !== undefined) return EN[g];
+  return g.split(' · ').map((x) => EN[x] ?? x).join(' · ');
+}
+
+/** Tradução de um texto (ou ele mesmo), se o inglês estiver ligado. */
+export function tr(s: string): string { return active ? translate(s) : s; }
+
+/** Tradução para o inglês (ou o próprio texto, se não houver). */
+export function translate(s: string): string {
+  const k = s.trim();
+  if (!k) return s;
+  let t = EN[k];
+  if (t === undefined) {
+    for (const [re, rep] of RULES) {
+      const m = re.exec(k);
+      if (!m) continue;
+      // cada trecho capturado também é traduzido (nomes de via, de prédio, de direção)
+      t = rep.replace(/\$(\d)/g, (_, i: string) => part(m[Number(i)] ?? ''));
+      break;
+    }
+  }
+  if (t === undefined || t === k) return s;
+  return s.replace(k, t);
+}
+
+function translateNode(n: Node): void {
+  if (n.nodeType === Node.TEXT_NODE) {
+    const v = n.nodeValue ?? '';
+    const t = tr(v);
+    if (t !== v) n.nodeValue = t;
+    return;
+  }
+  if (n.nodeType !== Node.ELEMENT_NODE) return;
+  const e = n as Element;
+  for (const a of ['title', 'placeholder', 'aria-label']) {
+    const v = e.getAttribute(a);
+    if (v) { const t = tr(v); if (t !== v) e.setAttribute(a, t); }
+  }
+  for (let c = e.firstChild; c; c = c.nextSibling) translateNode(c);
+}
+
+/** Liga a tradução na página inteira (só se o idioma não for português). */
+export function startTranslation(lang: Lang): void {
+  if (lang === 'pt') return;
+  active = true;
+  document.documentElement.lang = 'en';
+  translateNode(document.body);
+  new MutationObserver((list) => {
+    for (const m of list) {
+      if (m.type === 'characterData') translateNode(m.target);
+      else if (m.type === 'attributes') translateNode(m.target);
+      else for (const a of m.addedNodes) translateNode(a);
+    }
+  }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title', 'placeholder', 'aria-label'] });
+}
