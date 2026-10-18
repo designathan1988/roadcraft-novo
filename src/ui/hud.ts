@@ -11,6 +11,7 @@ import { button, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
 import { mountCompass, type Compass } from './compass.ts';
+import { AboutBox } from './about.ts';
 import {
   CATS, ShellState, categoriesOf, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
   type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
@@ -198,7 +199,7 @@ export class Hud {
   private layers = { grid: false, zones: false, traffic: false };
   private view: 'persp' | 'iso' = 'persp';
   private insideFloor = -1;
-  private about: HTMLElement;
+  private about = new AboutBox();
   // dock and drawer
   private catButtons = new Map<Category, HTMLButtonElement>();
   private drawer: HTMLElement;
@@ -336,12 +337,11 @@ export class Hud {
     this.toastEl.hidden = true;
     this.tip = el('div', 'v2-tip');
     this.tip.hidden = true;
-    this.about = this.makeAbout();
 
-    this.root.append(hud, this.pop, this.drawer, this.toolOptions, this.side, this.hint, dock, this.toastEl, this.tip, this.about, this.fileIn);
+    this.root.append(hud, this.pop, this.drawer, this.toolOptions, this.side, this.hint, dock, this.toastEl, this.tip, this.about.root, this.fileIn);
     this.compass = mountCompass(this.root, { north: () => a.north(), drag: (dx, dy) => a.orbit(dx, dy) });
     // the panels never let a click or a wheel through to the map
-    for (const e of [hud, this.pop, this.drawer, this.toolOptions, this.side, dock, this.about]) {
+    for (const e of [hud, this.pop, this.drawer, this.toolOptions, this.side, dock]) {
       e.addEventListener('pointerdown', (ev) => ev.stopPropagation());
       e.addEventListener('wheel', (ev) => ev.stopPropagation(), { passive: true });
     }
@@ -469,7 +469,7 @@ export class Hud {
   /** Esc: closes the open menu, then the About box. False: nothing was open here. */
   escape(): boolean {
     if (this.popId) { this.closePop(); return true; }
-    if (!this.about.hidden) { this.about.hidden = true; return true; }
+    if (this.about.isOpen) { this.about.close(); return true; }
     return false;
   }
 
@@ -501,7 +501,7 @@ export class Hud {
         this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => a.paint(v)),
         el('hr'),
         this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate'),
-        this.row(t('action.about'), () => { this.about.hidden = false; }, 'm_about'),
+        this.row(t('action.about'), () => this.about.open(), 'm_about'),
       );
     } else if (id === 'layers') {
       const layer = (key: string, tip: string, icon: string, on: boolean, flip: () => void): HTMLButtonElement => {
@@ -575,17 +575,6 @@ export class Hud {
     }
     const dds = m.querySelectorAll('dd');
     rows.forEach(([, v], i) => { if (dds[i].textContent !== v) dds[i].textContent = v; });
-  }
-
-  private makeAbout(): HTMLElement {
-    const box = el('div', 'v2-dialog-back');
-    box.hidden = true;
-    const d = el('div', 'v2-dialog');
-    d.append(el('h2', '', t('ui.about.title')), el('p', 'v2-muted', `${t('about.build')}: ${typeof __BUILD__ === 'string' ? __BUILD__ : ''}`), el('p', '', t('ui.about.credits')),
-      button('v2-pill wide', t('about.close'), () => { box.hidden = true; }));
-    box.append(d);
-    box.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === box) box.hidden = true; });
-    return box;
   }
 
   // ================================================================ tooltip

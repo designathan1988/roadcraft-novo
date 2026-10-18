@@ -147,3 +147,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .v2-building-slot > .creator > select { height: 28px; padding: 0 6px; border: 1px solid var(--v-line); border-radius: 7px; background: var(--v-bg-solid); color: var(--v-text); font: inherit; color-scheme: dark; }
 .v2-building-slot > .creator > .check, .v2-building-slot > .creator > button { grid-column: 1 / -1; }
 .v2-building-slot > .creator > .inline, .v2-building-slot > .creator > input[type=color] { grid-column: 2; }
+/* About: the art packs and their licences. */
+.v2-dialog.about { width: min(640px, calc(100vw - 32px)); }
+.v2-dialog h3 { margin: 14px 0 6px; color: var(--v-muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.about-packs { display: grid; gap: 8px; }
+.about-pack { padding: 8px 10px; border: 1px solid var(--v-line); border-radius: 10px; background: var(--v-raise); }
+.about-pack-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.about-licence { padding: 2px 8px; border-radius: 999px; background: var(--v-accent-soft); color: var(--v-accent); font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.about-list { margin: 6px 0 0; padding-left: 18px; color: var(--v-muted); font-size: 12px; }
+.about-text summary { margin-top: 6px; color: var(--v-accent); font-size: 12px; cursor: pointer; }
+.about-text pre { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 8px; border-radius: 8px; background: var(--v-bg-solid); color: var(--v-muted); font-size: 11px; white-space: pre-wrap; user-select: text; }
