@@ -161,7 +161,7 @@ test('ônibus: rodam a linha, param nas paradas e levam gente', () => {
   tr.density = 0;
   // três paradas na calçada de vias diferentes (grade de −180 a 180)
   tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
-  assert.equal(tr.lines[0].stopLane.length, 3);
+  assert.equal(tr.lines[0].stopLane.length, 4); // ida (3) e volta pelo outro lado (1: as pontas são terminais)
   let served = 0, maxBuses = 0;
   for (let i = 0; i < 20 * 600; i++) {
     tr.step(0.05);

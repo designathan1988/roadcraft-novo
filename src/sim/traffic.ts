@@ -114,7 +114,12 @@ interface SimLine {
 }
 
 /** Linha recebida da página: paradas como pontos (x, z) na calçada. */
-export interface LineSpec { id: number; color: number; buses: number; stops: number[]; mode?: number; /** índices das paradas que são terminais */ term?: number[] }
+export interface LineSpec {
+  id: number; color: number; buses: number; stops: number[]; mode?: number; /** índices das paradas que são terminais */ term?: number[];
+  /** Bus line that runs as a ring (last stop → first). Otherwise (Roadcraft) it runs out and back: the return trip
+   *  stops on the other side of the street, and both ends are terminals. Trains always follow their stations in order. */
+  loop?: boolean;
+}
 
 const DWELL = 14;
 /** Espera no terminal (s): o ônibus descansa e acerta o horário antes de voltar. */
@@ -379,7 +384,7 @@ export class Traffic {
   private mvB = new Float64Array(4);
 
   /** The manoeuvres going on, for the page (inspection, photos): [x, z, kind, share done] each, and the counters. */
-  manoeuvreList(): { list: number[]; planned: number; kerbStops: number; docked: number } {
+  manoeuvreList(): { list: number[]; planned: number; kerbStops: number; docked: number; crossings: number[]; trains: number[] } {
     const t = this.mvs.t, mc = t.cols, list: number[] = [], p = this.mvA;
     for (let m = 0; m < t.end; m++) {
       if (!t.alive[m]) continue;
@@ -394,7 +399,10 @@ export class Traffic {
       this.sim.lanePoint(c.lane[v], c.s[v], p);
       list.push(p[0], p[2], 4, Math.min(1, c.dwell[v] / 6));
     }
-    return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked };
+    // level crossings with the barrier down, and the trains in the window (x, z) for inspection
+    const crossings = [...this.crossingClosed.keys()].filter((n) => this.crossingDown(n)), trains: number[] = [];
+    this.lines.forEach((ln, li) => { if (ln.mode) for (const v of this.busSets[li]) if (this.veh.alive[v] && c.micro[v] && c.lane[v] >= 0) { this.sim.lanePoint(c.lane[v], c.s[v], p); trains.push(p[0], p[2]); } });
+    return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked, crossings, trains };
   }
 
   /** Docks sent by the page; each gets the node trucks drive to. */
@@ -1189,8 +1197,51 @@ export class Traffic {
     return this.gateRules(conn, v, toEnd);
   }
 
+  /** Level crossings whose barrier is down (a train within reach): node → simulation time until it lifts. */
+  private crossingClosed = new Map<number, number>();
+  /** Barrier reach: a train this far (m, along its route) or on the crossing closes it. */
+  static readonly CROSSING_REACH = 160;
+
+  /**
+   * Level crossings (Roadcraft): each train in the micro window closes the barriers of the crossings ahead of it
+   * on its route within CROSSING_REACH, and of the one it is on, for 1 s, renewed every step while it is there.
+   * The page reads the state in the signals buffer: 128 | the rail arms' bits while the barrier is down, 0 up.
+   * Work per step: the trains in the window × the nodes of their route within reach.
+   */
+  private updateCrossings(): void {
+    const c = this.veh.cols, sim = this.sim, sc = sim.net.segs.cols;
+    this.lines.forEach((ln, li) => {
+      if (!ln.mode) return;
+      for (const v of this.busSets[li]) {
+        if (!this.veh.alive[v] || !c.micro[v]) continue;
+        if (c.conn[v] >= 0) { const n = sim.conns.cols.node[c.conn[v]]; if (sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1); }
+        if (c.lane[v] < 0) continue;
+        let d = sim.laneLen(c.lane[v]) - c.s[v];
+        for (let k = c.rIdx[v]; k < c.rLen[v] && d < Traffic.CROSSING_REACH; k++) {
+          const n = this.routeAt(v, k);
+          if (n >= 0 && n < sim.nodeCtl.length && sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1);
+          if (k + 1 < c.rLen[v]) { const s = this.segBetween(n, this.routeAt(v, k + 1)); if (s < 0) break; d += sc.len[s]; }
+        }
+      }
+    });
+    for (const [n, until] of this.crossingClosed) {
+      const open = until < this.time || !sim.net.nodes.alive[n];
+      if (this.signals && n < this.signals.length) {
+        let mask = 0;
+        if (!open) { const segs = sim.net.segsOf(n, []); segs.forEach((s, a) => { if (PROFILE_INFO[sc.profile[s]].rail) mask |= 1 << a; }); }
+        this.signals[n] = open ? 0 : 128 | (mask & 63);
+      }
+      if (open) this.crossingClosed.delete(n);
+    }
+  }
+
+  /** The barrier of the level crossing at node n is down. */
+  crossingDown(n: number): boolean { return (this.crossingClosed.get(n) ?? -1) >= this.time; }
+
   private gateRules(conn: number, v: number, toEnd: number): boolean {
     const sim = this.sim, k = sim.conns.cols, n = k.node[conn], c = this.veh.cols;
+    // level crossing with the barrier down: road traffic waits (the train goes through)
+    if (sim.nodeCtl[n] === Ctl.Crossing && this.crossingDown(n) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(k.from[conn])]].rail) return false;
     if (sim.nodePhases[n] > 0) {
       if (!this.windowSignals.has(n)) return true;
       if (!this.stageGreen(conn)) {
@@ -1816,15 +1867,17 @@ export class Traffic {
       const rail = (sp.mode ?? 0) > 0;
       const ln: SimLine = { id: sp.id, color: sp.color, buses: sp.buses, mode: sp.mode ?? 0, stopLane: [], stopV: [], waiting: [], lastT: [],
         stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
-      for (let i = 0; i + 1 < sp.stops.length; i += 2) {
-        const x = sp.stops[i], z = sp.stops[i + 1];
+      /** One stop at (x, z); `flip`: the stop of the return trip, across the street. False if no road there. */
+      const addStop = (x: number, z: number, i: number, flip: boolean): boolean => {
         // ônibus: via comum mais perto; trem e metrô: trilho mais perto
         const hit = net.nearestSeg(x, z, 40, (sg) => PROFILE_INFO[sc.profile[sg]].rail === rail);
-        if (!hit) continue;
+        if (!hit) return false;
         const [seg, t] = hit;
         const q = net.quad(seg);
         const pp = new Float64Array(2), dd = new Float64Array(2);
         bez(q, t, pp); bezD(q, t, dd);
+        // return trip: the same stop mirrored across the street's centre line
+        if (flip) { x = 2 * pp[0] - x; z = 2 * pp[1] - z; }
         // lado: u+ (esquerda de a→b) é a calçada de quem anda de b para a
         const u = (x - pp[0]) * dd[1] - (z - pp[1]) * dd[0];
         let dir = u > 0 ? -1 : 1;
@@ -1834,7 +1887,7 @@ export class Traffic {
           dir = nx * dd[0] + nz * dd[1] >= 0 ? 1 : -1;
         }
         if (laneCount(sc.profile[seg], dir) === 0) dir = -dir;
-        if (laneCount(sc.profile[seg], dir) === 0) continue;
+        if (laneCount(sc.profile[seg], dir) === 0) return false;
         const lane = laneId(seg, dir, 0);
         const L = this.sim.laneLen(lane);
         const along = this.sim.sAlong(seg, t);
@@ -1847,6 +1900,14 @@ export class Traffic {
         this.sim.lanePoint(lane, ln.stopV[ln.stopV.length - 1], lp);
         ln.stopX.push(x); ln.stopZ.push(z); ln.stopY.push(lp[1] + 0.15);
         ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // olhando para a via
+        return true;
+      };
+      const kept: number[] = [];
+      for (let i = 0; i + 1 < sp.stops.length; i += 2) if (addStop(sp.stops[i], sp.stops[i + 1], i, false)) kept.push(i);
+      // Roadcraft bus lines go out and back: the stops of the return trip on the other side, the two ends terminals
+      if (!rail && !sp.loop && kept.length >= 2) {
+        ln.term.add(0); ln.term.add(ln.stopLane.length - 1);
+        for (let k = kept.length - 2; k >= 1; k--) addStop(sp.stops[kept[k]], sp.stops[kept[k] + 1], kept[k], true);
       }
       ln.waitTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
       return ln;
@@ -2062,6 +2123,7 @@ export class Traffic {
     this.lineCheck -= dt;
     if (this.lineCheck <= 0) { this.lineCheck = 2; this.keepBuses(); }
     this.updateSignals(dt);
+    this.updateCrossings();
     this.processMeso();
     this.mvs.beginStep();
     this.stepMicro(dt);

@@ -8,7 +8,8 @@ import type { Command } from '../core/commands.ts';
 export const Mode = { Bus: 0, Train: 1, Metro: 2 } as const;
 export const MODE_NAMES = ['Ônibus', 'Trem', 'Metrô'];
 
-export interface Line { id: number; color: number; buses: number; stops: number[]; mode?: number }
+/** A line. Bus lines run out and back (Roadcraft) unless `loop` (a ring: last stop → first). */
+export interface Line { id: number; color: number; buses: number; stops: number[]; mode?: number; loop?: boolean }
 
 /** Cores das linhas (índices da paleta dos veículos: PAINTS em render/vehicles.ts). */
 export const LINE_COLORS = [7, 5, 11, 8, 14, 15, 6, 4];
@@ -83,6 +84,29 @@ export class Transit {
     };
   }
 
+  /** Line colour (index into the vehicle palette, LINE_COLORS) as a command. */
+  setColor(id: number, color: number): Command | null {
+    const l = this.line(id);
+    if (!l || l.color === color) return null;
+    const before = l.color;
+    return {
+      label: 'cor da linha',
+      apply: () => { const x = this.line(id); if (x) x.color = color; this.touch(); },
+      invert: () => { const x = this.line(id); if (x) x.color = before; this.touch(); },
+    };
+  }
+
+  /** Ring line (last stop → first) or out and back, as a command. */
+  setLoop(id: number, loop: boolean): Command | null {
+    const l = this.line(id);
+    if (!l || !!l.loop === loop) return null;
+    return {
+      label: loop ? 'linha circular' : 'linha de ida e volta',
+      apply: () => { const x = this.line(id); if (x) x.loop = loop; this.touch(); },
+      invert: () => { const x = this.line(id); if (x) x.loop = !loop; this.touch(); },
+    };
+  }
+
   /** Liga ou desliga o terminal no ponto (comando). */
   toggleTerminal(x: number, z: number): Command {
     const i = this.terminalNear(x, z, 9);
@@ -126,7 +150,8 @@ export class Transit {
   encode(): Float64Array {
     const out: number[] = [this.lines.length, this.nextId];
     // modo vai junto com a cor (cor + modo × 256): salvamentos antigos leem como ônibus
-    for (const l of this.lines) out.push(l.id, l.color + (l.mode ?? 0) * 256, l.buses, l.stops.length / 2, ...l.stops);
+    // ring lines add 4096 (older saves read as out-and-back)
+    for (const l of this.lines) out.push(l.id, l.color + (l.mode ?? 0) * 256 + (l.loop ? 4096 : 0), l.buses, l.stops.length / 2, ...l.stops);
     return new Float64Array(out);
   }
 
@@ -137,7 +162,7 @@ export class Transit {
     this.nextId = a[o++];
     for (let i = 0; i < n; i++) {
       const id = a[o++], color = a[o++], buses = a[o++], k = a[o++];
-      this.lines.push({ id, color: color % 256, mode: Math.floor(color / 256), buses, stops: Array.from(a.subarray(o, o + k * 2)) });
+      this.lines.push({ id, color: color % 256, mode: Math.floor(color / 256) % 16, loop: color >= 4096, buses, stops: Array.from(a.subarray(o, o + k * 2)) });
       o += k * 2;
     }
     this.touch();

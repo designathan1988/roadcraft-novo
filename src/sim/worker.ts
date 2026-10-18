@@ -32,7 +32,7 @@ export type FromSim =
   | { type: 'probeNode'; node: number; passed: number; time: number }
   | { type: 'hit'; people: number; vehicles: number }
   /** Manoeuvres going on (answer to 'probeManoeuvres'): [x, z, kind (sim/manoeuvres MKind), share done] each; counters. */
-  | { type: 'manoeuvres'; list: number[]; planned: number; kerbStops: number; docked: number }
+  | { type: 'manoeuvres'; list: number[]; planned: number; kerbStops: number; docked: number; crossings: number[]; trains: number[] }
   /** O automático trocou o controle do nó pelo fluxo medido (Flow: 1 semáforo, 2 placas). A página pode
    *  passar o mesmo `flow` para `effectiveControl` (pintura, placas, cabeças de semáforo, inspetor). */
   | { type: 'autoControl'; node: number; flow: number }

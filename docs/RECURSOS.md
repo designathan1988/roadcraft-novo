@@ -45,7 +45,12 @@ Quem termina um item põe ✅, o commit e o nome da foto.
   portão do galpão (lote (−w/2 + 10, d/2 − 6)): a sessão de prédios desenha a doca ali.
 - Demanda baixa/normal/pico; % de tráfego e pessoas; pausa e velocidades; mapa de congestionamento; métricas;
   seguir veículo; pedestres nas calçadas e saindo das portas; bicicletas.
-- Ônibus (pontos, terminais, linhas), trem e metrô (trilhos, estações, linhas).
+- Ônibus (pontos, terminais, linhas), trem e metrô (trilhos, estações, linhas). ✅ como o Roadcraft: linha de
+  ônibus vai e volta (as paradas da volta do outro lado da rua, as pontas terminais; `hudActions.lineLoop(true)`
+  deixa circular), cor da linha e ± veículos como comandos (`hudActions.lineColor`, `buses`), passageiros de
+  verdade (pedestres andam até a parada, esperam, embarcam e descem a pé; demanda por parada), trem em laço
+  próprio com cancela: a passagem de nível fecha com o trem a 160 m e nenhum carro entra (estado no buffer de
+  sinais: 128 | braços de trilho; o desenho da cancela é da sessão de vias). Foto `transporte-cancela.png`.
 
 ## 4. Zonas, lotes e crescimento — ✅ no motor
 - Zonas R/C/I/misto × densidade; pincel, quadra inteira, tirar; lotes propostos ao longo das vias.
