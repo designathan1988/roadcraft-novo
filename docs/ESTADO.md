@@ -17,6 +17,10 @@ Atualizado: 2026-10-18, 21h40.
   inspetor de via com nome e numeração (`b5a35b4`); 98 testes. Causa das 10 falhas do `verificar.mjs` achada
   pela interface (o roteiro 2 fica sem dinheiro com a economia nova: `a.road` recusa e `setJunction(-1)` quebra)
   e passada a funcionalidades para corrigir.
+- 21h40: vias/terreno/luz completas, itens 3-5 (árvores de cards, grama em tufos, relevo de rocha; veículos do
+  Roadcraft com rodas, vidro, escapamento; mobiliário automático) (`8a27c71`); budget ok (cidade 479 chamadas,
+  antes 548). Devolvido à sessão de vias: ocupantes sob o carro (alturas em `people/occupants.ts`), céu do
+  horizonte, grama nos lotes, foto de ponte e túnel, inglês nos arquivos dela.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
