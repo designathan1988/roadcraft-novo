@@ -338,6 +338,7 @@
 .v2-dd-opt.on { color: var(--v-accent); font-weight: 650; }
 
 /* A panel's name over its rows. */
+.v2-pop-sub { padding: 0 10px 4px; color: var(--v-muted); font-size: 11px; }
 .v2-pop-title { padding: 6px 10px 4px; color: var(--v-muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* What a mode with nothing to pick does, in the panel itself. */

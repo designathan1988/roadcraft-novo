@@ -127,7 +127,7 @@ export class ShellState {
 export interface LineRow { id: number; mode: number; color: number; buses: number; stops: number; perHour: number; waiting: number }
 
 /** The building picked with the Build tool. */
-export interface BuildingInfo { fn: number; zone: number; floors: number; arch: number }
+export interface BuildingInfo { fn: number; zone: number; floors: number; arch: number; address?: string; decay?: number }
 
 export interface DrawerHost {
   readonly a: HudActions;
@@ -302,8 +302,9 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
   if (editing) {
     if (b) {
       p.options.append(el('div', 'v2-pop-title', `${b.fn ? loose(FN_NAMES[b.fn]) : t(`zone.name.${b.zone}`)} · ${plural('ui.floors', b.floors)}`));
-      const address = a.addressOf?.() ?? '';
-      if (address) p.options.append(el('div', 'v2-muted building-address', address));
+      // the address under the title (the decay has its own row below, with Renovate)
+      const address = b.address || (a.addressOf?.() ?? '');
+      if (address) p.options.append(el('div', 'v2-pop-sub', address));
       p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
       p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(Math.max(1, b.floors + d)); })));
       p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));

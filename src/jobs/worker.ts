@@ -75,7 +75,9 @@ const handlers: { [K in JobKind]: Handler<K> } = {
   },
   saveMeta: async (p) => [{ bytes: await storage.saveMeta(p.slot, p.meta) }, []],
   loadTile: async (p) => {
-    const t = await storage.loadTile(p.slot, p.tile);
+    let t: Awaited<ReturnType<typeof storage.loadTile>>;
+    // an unreadable tile is reported (the page puts the save in quarantine), never thrown away silently
+    try { t = await storage.loadTile(p.slot, p.tile); } catch { return [{ tile: p.tile, found: false, corrupt: true, min: 0, max: 0, boxes: null, roads: null }, []]; }
     if (!t) return [{ tile: p.tile, found: false, min: 0, max: 0, boxes: null, roads: null }, []];
     const mm = storage.unpackTileHeights(H(), p.tile, t.heights);
     let hasWater = false;

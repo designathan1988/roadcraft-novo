@@ -24,28 +24,44 @@ Quem termina um item põe ✅, o commit e o nome da foto.
   faixa com validação; materiais da pista (asfalto, concreto, paralelepípedo, bloquete, pedra portuguesa, grama).
 - Edições: melhorar (Shift = rua inteira), conta-gotas, mover nó, dividir, unir, inverter, duplicar, zebra e
   semáforo de meio de quadra, retorno no canteiro, vagas por lado, balão de retorno, transição de largura, nome e
-  numeração de rua, placas automáticas de velocidade, desgaste do asfalto.
+  numeração de rua (✅ nome gerado por rua e numeração métrica, par à direita: `roads/streetNames.ts`; o painel
+  do prédio mostra "Rua São Bento, 253", foto `desgaste.png`; placa de rua sem texto recebe o nome), placas
+  automáticas de velocidade, desgaste do asfalto. Placa = regra ✅: Pare/Dê a preferência posta na calçada junto
+  a um braço de cruzamento muda a regra dele (`roads/signRule.ts`). Pintura regional salva com o mapa ✅.
 - Cruzamentos: controle (auto, semáforo, placas, pare em todas, preferência, minirrotatória, sem), regra por
   perna, semáforo adaptativo/fixo com fases, defasagem, onda verde, ônibus; movimentos proibidos; conectores
   manuais; altura do nó; automático pelo fluxo com trava.
+- Economia das vias ✅ (commit "Economia das vias do Roadcraft", foto `economia.png`): preço por m² de pista,
+  canteiro e calçada × modo de construção, devolve 25 % ao demolir, recusa sem saldo, cidade gerada grátis.
 - Pintura regional (Brasil, EUA, Europa, Clássica); mobiliário automático (completo, básico, nenhum).
 - Postes com fios e luz (nenhum, alternados, todos); muros, cercas, sebes, defensas, gradis; paisagismo de calçada
   (árvore, arbusto, banco, lixeira, hidrante, correio, orelhão, boca de lobo, placas com regra).
 
 ## 3. Trânsito — ✅ no motor (micro perto, meso longe)
 - IDM + MOBIL; 8 tipos de veículo com medidas reais; luz de freio e setas; ocupantes; sombra de mancha; estacionar
-  na guia (🟡 sem manobra A*); caminhões em docas de galpão com manobra de ré (❌ aqui); paradas no meio-fio.
+  na guia com manobra ✅, caminhões em docas de galpão com manobra de ré e o trânsito esperando ✅, paradas no
+  meio-fio deixando passageiro ✅ (Reeds-Shepp `sim/reedsShepp.ts`, `sim/manoeuvres.ts`: só a 350 m da câmera,
+  4 planos por passo; fotos `manobra-doca.png`, `manobra-vaga.png`, `manobra-meio-fio.png`). A doca fica no
+  portão do galpão (lote (−w/2 + 10, d/2 − 6)): a sessão de prédios desenha a doca ali.
 - Demanda baixa/normal/pico; % de tráfego e pessoas; pausa e velocidades; mapa de congestionamento; métricas;
   seguir veículo; pedestres nas calçadas e saindo das portas; bicicletas.
 - Ônibus (pontos, terminais, linhas), trem e metrô (trilhos, estações, linhas).
 
 ## 4. Zonas, lotes e crescimento — ✅ no motor
 - Zonas R/C/I/misto × densidade; pincel, quadra inteira, tirar; lotes propostos ao longo das vias.
-- Lote à mão: retângulo, polígono (🟡 vira retângulo), curvar lado, mover cantos, dividir (lado a lado, frente e
-  fundos, por linha ❌, N partes), juntar, frente, apagar.
+- Lote à mão: retângulo, polígono, curvar lado, mover cantos, dividir (lado a lado, frente e fundos, por linha,
+  N partes), juntar, frente, apagar. ✅ na lógica (polígono de até 16 cantos no registro, salvamento versão 7,
+  foto `lote-poligono.png`); 🟡 o prédio e a mureta ainda saem pelo retângulo envolvente: a sessão de prédios lê
+  `BoxColumns.shapeN/shape` (formato em `jobs/protocol.ts`).
+- Crescimento como o Roadcraft ✅ (`world/growth.ts`, foto `crescimento.png`): o próximo lote é o livre mais perto
+  do último que cresceu (a rua enche em sequência), no máximo 3 andares acima do vizinho mais alto a 30 m (no
+  crescimento ao longo do tempo; a cidade gerada nasce madura), uma praça por bairro de 2×2 células, nomes de
+  rua desde a geração (`roads/streetNames.ts`).
 - Crescimento: vizinhos diferentes, marcos a ~22 % das torres (`data/lots-roadcraft/*.json`, 38 projetos — ❌
   converter para o gerador), esquina com jardim, portões, estacionamento nos fundos, encosta com split-level,
-  garagem, terraços e docas (❌ aqui), paletas brasileiras, desgaste e reforma (❌ aqui).
+  garagem, terraços e docas (❌ aqui), paletas brasileiras, desgaste e reforma (✅ na lógica: 5 dias de graça,
+  30 dias até cair aos pedaços, Shift+clique reforma, `decay` 0..10 no registro, foto `desgaste.png`; o visual
+  do desgaste é da sessão de prédios).
 
 ## 5. Construtor de prédios — 🟡 (planta, volumes, telhados, acabamentos, peças de telhado, modelos, ver por dentro)
 - Falta do Roadcraft: booleanas (união, subtração, interseção), extrudar/inset/offset/chanfro, primitivas, planta
@@ -75,5 +91,8 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 - Destruição: explosão em camadas, prédios pré-fraturados, ragdoll (prioridade baixa; o motor tem a versão simples).
 
 ## 8. Produto — ✅ no motor
+- Mapas antigos e reparo ✅ (`roads/repair.ts`, `mapFile.ts` quarantineSlot; fotos `reparo.png`, `quarentena.png`):
+  ponta solta dentro de outra via vira cruzamento ao abrir; mapa ou ladrilho ilegível volta do relevo original e o
+  salvamento inteiro é copiado intacto para `saves/quarentena-<data>-<slot>`, nunca apagado.
 - Salvar/carregar por ladrilho, autosave, exportar/abrir arquivo, desfazer/refazer, menu inicial com semente e
   tamanho (10/16/20/24 km), opções e presets, idioma, ajuda, saúde (F9), Electron, Steam, empacotamento.

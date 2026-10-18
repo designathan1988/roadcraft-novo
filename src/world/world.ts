@@ -6,8 +6,10 @@ import { NO_WATER, createGroundBuffers } from './ground.ts';
 import { CELL_COUNT, DirtyCells, Dirty, SpatialIndex, TILE_COUNT, cellX, cellId, tileOfCell, tileX, tileId } from '../core/grid.ts';
 import { Table } from '../core/table.ts';
 import { createHeightBuffer } from './heights.ts';
-import { emptyBoxes, type BoxColumns } from '../jobs/protocol.ts';
+import { SHAPE_MAX, SHAPE_SCALE, SHAPE_STRIDE, emptyBoxes, type BoxColumns } from '../jobs/protocol.ts';
+import { MinuteHeap, decayTenths, nextTenthAt } from './decay.ts';
 import { RoadNetwork } from '../roads/network.ts';
+import { ROAD_TUNING } from '../roads/tuning.ts';
 
 /** Prédios. No marco 1 só caixas genéricas; o gerador procedural entra no marco 4. */
 export const buildingSchema = {
@@ -20,19 +22,36 @@ export const buildingSchema = {
   /** Função (escola, igreja, hospital…; 0 = comum). */
   fn: Uint8Array,
   cell: Int32Array,
+  /** Corners of a polygon lot (0 = rectangle); the corners live in World.lotShape (see BoxColumns.shape). */
+  shapeN: Uint8Array,
+  /** City minute built or renovated, decay in tenths, and the minute of its next tenth in the decay heap. */
+  built: Float32Array, decay: Uint8Array, due: Float64Array,
 };
 
 /** Campos de um prédio (o resto vem do gerador). */
-export interface BuildingRec { x: number; z: number; w: number; d: number; h: number; rot: number; color: number; seed: number; zone: number; floors: number; style: number; fn?: number }
+export interface BuildingRec {
+  x: number; z: number; w: number; d: number; h: number; rot: number; color: number; seed: number; zone: number; floors: number; style: number; fn?: number;
+  /** City minute built (default: now). */
+  built?: number;
+  /** Polygon lot corners in the lot frame, metres, flat [x0, z0, x1, z1, …] (absent = rectangle). */
+  shape?: ArrayLike<number>;
+}
 
-/** Dinheiro do começo de um mapa novo. */
-export const START_MONEY = 25_000_000;
+/** Area of a polygon given as flat [x, z, …] (positive when counter-clockwise with z up). */
+export function polygonArea(p: ArrayLike<number>, n = p.length / 2): number {
+  let a = 0;
+  for (let i = 0, j = n - 1; i < n; j = i++) a += p[j * 2] * p[i * 2 + 1] - p[i * 2] * p[j * 2 + 1];
+  return a / 2;
+}
+
+/** Money a new map starts with (Roadcraft's, `roads/tuning.ts`). */
+export const START_MONEY = ROAD_TUNING.economy.startingFunds;
 
 export class World {
   seed = 1;
   gameId = 0;
   /** Dinheiro em caixa (R$). Vias custam pela largura, comprimento e estrutura. */
-  money = START_MONEY;
+  money: number = START_MONEY;
   /** Modo livre: nada é cobrado. */
   unlimited = false;
   readonly heightsSab: SharedArrayBuffer;
@@ -72,6 +91,14 @@ export class World {
   readonly roads: RoadNetwork;
   /** Itens de rua postos pelo jogador. */
   readonly items: StreetItems;
+  /** Polygon lot corners, SHAPE_STRIDE int16 (decimetres, lot frame) per building id. */
+  lotShape = new Int16Array((1 << 16) * SHAPE_STRIDE);
+  /** City clock in minutes since the map began (the hour of day is Game.hour; this one never wraps). */
+  clock = 0;
+  /** Each building's next decay tenth (world/decay.ts). */
+  private decayHeap = new MinuteHeap();
+  /** Buildings that passed a tenth since the start (counted, for the commit messages). */
+  decayChanges = 0;
 
   constructor() {
     this.roads = new RoadNetwork(this);
@@ -82,7 +109,64 @@ export class World {
     this.groundSab = gb.ground; this.waterSab = gb.water;
     this.ground32 = new Uint32Array(this.groundSab);
     this.water = new Float32Array(this.waterSab);
-    this.buildings.onGrow((cap) => this.buildingIndex.grow(cap));
+    this.buildings.onGrow((cap) => {
+      this.buildingIndex.grow(cap);
+      const s = new Int16Array(cap * SHAPE_STRIDE); s.set(this.lotShape); this.lotShape = s;
+    });
+  }
+
+  /** Corners of a polygon lot in metres (lot frame), flat; empty for a rectangle. */
+  lotPolygon(id: number): number[] {
+    const n = this.buildings.cols.shapeN[id], o = id * SHAPE_STRIDE, out: number[] = [];
+    for (let k = 0; k < n * 2; k++) out.push(this.lotShape[o + k] / SHAPE_SCALE);
+    return out;
+  }
+
+  /** Lot outline in metres (lot frame): the polygon, or the rectangle's four corners. */
+  lotOutline(id: number): number[] {
+    const c = this.buildings.cols;
+    if (c.shapeN[id]) return this.lotPolygon(id);
+    const w = c.w[id] / 2, d = c.d[id] / 2;
+    return [-w, -d, w, -d, w, d, -w, d];
+  }
+
+  /** Advances the city clock; buildings that reach a new decay tenth get their cell redrawn (only those). */
+  advanceClock(minutes: number): void {
+    if (!(minutes > 0)) return;
+    this.clock += minutes;
+    const h = this.decayHeap, c = this.buildings.cols;
+    while (h.topKey <= this.clock) {
+      const at = h.topKey, id = h.pop();
+      if (!this.buildings.alive[id] || c.due[id] !== at) continue; // gone or filed again later
+      this.refreshDecay(id);
+    }
+  }
+
+  /** Sets the clock (loading a save): every building is filed again. */
+  setClock(minute: number): void {
+    this.clock = minute;
+    this.decayHeap.clear();
+    this.clock = 0;
+    const t = this.buildings;
+    for (let id = 0; id < t.end; id++) if (t.alive[id]) this.refreshDecay(id);
+  }
+
+  private refreshDecay(id: number): void {
+    const c = this.buildings.cols;
+    const d = decayTenths(c.built[id], this.clock);
+    if (d !== c.decay[id]) { c.decay[id] = d; this.decayChanges++; this.touchCell(c.cell[id], Dirty.Buildings); }
+    const next = nextTenthAt(c.built[id], d);
+    c.due[id] = next;
+    if (next !== Infinity) this.decayHeap.push(next, id);
+  }
+
+  /** Renovation (Roadcraft Shift+click): the building is new again. Returns the previous built minute. */
+  setBuilt(id: number, minute: number): number {
+    const c = this.buildings.cols, before = c.built[id];
+    c.built[id] = minute;
+    this.refreshDecay(id);
+    this.touchCell(c.cell[id], Dirty.Save);
+    return before;
   }
 
   /** Marca células sujas e o que depende delas (salvamento, versão). */
@@ -120,7 +204,9 @@ export class World {
 
   private count(id: number, sign: number): void {
     const c = this.buildings.cols;
-    const [r, j] = World.capacity(c.zone[id], c.w[id], c.d[id], c.floors[id]);
+    // a polygon lot counts its own area (as a square of the same area)
+    const side = c.shapeN[id] ? Math.sqrt(Math.abs(polygonArea(this.lotShape.subarray(id * SHAPE_STRIDE), c.shapeN[id]))) / SHAPE_SCALE : 0;
+    const [r, j] = c.shapeN[id] ? World.capacity(c.zone[id], side, side, c.floors[id]) : World.capacity(c.zone[id], c.w[id], c.d[id], c.floors[id]);
     this.residents += r * sign; this.jobs += j * sign;
   }
 
@@ -131,23 +217,37 @@ export class World {
     const { x, z } = b;
     c.x[id] = x; c.z[id] = z; c.w[id] = b.w; c.d[id] = b.d; c.h[id] = b.h; c.rot[id] = b.rot; c.color[id] = b.color;
     c.seed[id] = b.seed; c.zone[id] = b.zone; c.floors[id] = b.floors; c.style[id] = b.style; c.fn[id] = b.fn ?? 0;
+    const n = b.shape ? Math.min(SHAPE_MAX, b.shape.length >> 1) : 0;
+    c.shapeN[id] = n >= 3 ? n : 0;
+    const o = id * SHAPE_STRIDE;
+    this.lotShape.fill(0, o, o + SHAPE_STRIDE);
+    if (b.shape && c.shapeN[id]) for (let k = 0; k < n * 2; k++) this.lotShape[o + k] = Math.round(b.shape[k] * SHAPE_SCALE);
+    c.built[id] = b.built ?? this.clock;
+    c.decay[id] = 0;
     const cid = cellId(cellX(x), cellX(z));
     c.cell[id] = cid;
     this.buildingIndex.insert(id, x, z);
     this.cellBuildings[cid]++;
     this.count(id, 1);
+    this.refreshDecay(id);
     this.touchCell(cid, Dirty.Buildings);
     return id;
   }
 
-  /** Dados de um prédio, para comandos (desfazer). */
+  /** Building fields for commands (undo): [id, x, z, w, d, h, rot, color, seed, zone, floors, style, fn, built, n, corners…]. */
   buildingRec(id: number): number[] {
     const c = this.buildings.cols;
-    return [id, c.x[id], c.z[id], c.w[id], c.d[id], c.h[id], c.rot[id], c.color[id], c.seed[id], c.zone[id], c.floors[id], c.style[id], c.fn[id]];
+    return [id, c.x[id], c.z[id], c.w[id], c.d[id], c.h[id], c.rot[id], c.color[id], c.seed[id], c.zone[id], c.floors[id], c.style[id], c.fn[id], c.built[id], c.shapeN[id], ...this.lotPolygon(id)];
+  }
+
+  /** The record of buildingRec as a BuildingRec (without the id). */
+  static recOf(r: number[]): BuildingRec {
+    const n = r[14] ?? 0;
+    return { x: r[1], z: r[2], w: r[3], d: r[4], h: r[5], rot: r[6], color: r[7], seed: r[8], zone: r[9], floors: r[10], style: r[11], fn: r[12] ?? 0, built: r[13], shape: n ? r.slice(15, 15 + n * 2) : undefined };
   }
 
   restoreBuilding(r: number[]): void {
-    this.addBuilding({ x: r[1], z: r[2], w: r[3], d: r[4], h: r[5], rot: r[6], color: r[7], seed: r[8], zone: r[9], floors: r[10], style: r[11], fn: r[12] ?? 0 }, r[0]);
+    this.addBuilding(World.recOf(r), r[0]);
   }
 
   /** Muda andares/estilo (edição do jogador). */
@@ -191,6 +291,8 @@ export class World {
         out.x[k] = col.x[id]; out.z[k] = col.z[id]; out.w[k] = col.w[id]; out.d[k] = col.d[id];
         out.h[k] = col.h[id]; out.rot[k] = col.rot[id]; out.color[k] = col.color[id];
         out.seed[k] = col.seed[id]; out.zone[k] = col.zone[id]; out.floors[k] = col.floors[id]; out.style[k] = col.style[id]; out.fn[k] = col.fn[id];
+        out.shapeN[k] = col.shapeN[id]; out.built[k] = col.built[id]; out.decay[k] = col.decay[id];
+        if (col.shapeN[id]) out.shape.set(this.lotShape.subarray(id * SHAPE_STRIDE, (id + 1) * SHAPE_STRIDE), k * SHAPE_STRIDE);
         k++;
       });
     }
@@ -211,5 +313,7 @@ export class World {
     this.buildings.clear();
     this.cellBuildings.fill(0);
     this.residents = 0; this.jobs = 0;
+    this.decayHeap.clear();
+    this.clock = 0;
   }
 }

@@ -42,6 +42,7 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.build.next': 'Next lot drawn',
   'ui.floors.one': '{count} floor',
   'ui.floors.other': '{count} floors',
+  'building.decay': 'Wear {pct} % (Shift+click renovates)',
   'ui.weather.mode': 'Weather',
   'ui.weather.auto': 'Changes by itself',
   'ui.weather.manual': 'Set here',
