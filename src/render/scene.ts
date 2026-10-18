@@ -22,7 +22,7 @@ export interface SceneParts {
 }
 
 /** Tone mapping as Roadcraft (ACES at exposure 1: three's ACES already scales its input by 1 / 0.6). */
-export const TONE_EXPOSURE = 0.92;
+export const TONE_EXPOSURE = 0.8;
 
 export async function createScene(canvas: HTMLCanvasElement): Promise<SceneParts> {
   const forceWebGL = new URLSearchParams(location.search).has('webgl');
@@ -87,10 +87,10 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<SceneParts
   const view = normalize(cameraPosition.sub(positionWorld));
   const fres = pow(float(1).sub(max(dot(view, vec3(0, 1, 0)), 0)), 4);
   const ripple = mx_noise_float(positionWorld.xz.mul(0.05).add(time.mul(0.05))).mul(0.04).mul(waveU.mul(3).add(0.4));
-  const deep = sRGBTransferEOTF(vec3(0.07, 0.17, 0.2));
+  const deep = sRGBTransferEOTF(vec3(0.03, 0.09, 0.12));
   const skyc = sRGBTransferEOTF(vec3(0.62, 0.74, 0.85));
   wm.colorNode = vec4(mix(deep, skyc, clamp(fres.add(ripple), 0, 1)), 1);
-  wm.roughnessNode = float(0.12);
+  wm.roughnessNode = float(0.2);
   wm.metalnessNode = float(0);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE * 8, MAP_SIZE * 8).rotateX(-Math.PI / 2), wm);
   water.position.y = SEA_LEVEL;
@@ -102,8 +102,9 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<SceneParts
 }
 
 function configureSky(sky: SkyMesh): void {
-  sky.turbidity.value = 3;
-  sky.rayleigh.value = 1.2;
+  // a clear blue sky with a gradient (Roadcraft's day: zenith 4d7fc4, horizon c9dcea)
+  sky.turbidity.value = 2;
+  sky.rayleigh.value = 2.2;
   sky.mieCoefficient.value = 0.004;
   sky.mieDirectionalG.value = 0.8;
 }
@@ -119,7 +120,7 @@ const ENV_STEP_LIGHT = 0.08;
  */
 export class SkyEnvironment {
   /** How much of the sky the materials see by day (Roadcraft: 0.6, with a sky fill of 0.8). */
-  static readonly INTENSITY = 0.16;
+  static readonly INTENSITY = 0.1;
   private pmrem: THREE.PMREMGenerator | null = null;
   private probe = new THREE.Scene();
   private probeSky = new SkyMesh();
@@ -151,8 +152,8 @@ export class SkyEnvironment {
     this.lastLight = light;
     this.probeSky.sunPosition.value.copy(dir);
     // overcast: the sky goes flat and grey (more turbid, less blue)
-    this.probeSky.turbidity.value = 3 + 9 * (1 - light);
-    this.probeSky.rayleigh.value = 1.2 * (0.35 + 0.65 * light);
+    this.probeSky.turbidity.value = 2 + 10 * (1 - light);
+    this.probeSky.rayleigh.value = 2.2 * (0.35 + 0.65 * light);
     this.target = this.pmrem.fromScene(this.probe, 0.04, 0.1, 100, { size: 128, renderTarget: this.target });
     this.scene.environment = this.target.texture;
     this.refreshes++;
@@ -210,7 +211,7 @@ export function setTimeOfDay(p: SceneParts, hour: number, clouds = 0.25, rain = 
   if (elev > -3) {
     setSun(p, Math.max(elev, 0.5), az);
     p.sun.color.copy(SUN_LOW).lerp(SUN_DAY, smooth(2, 25, elev));
-    p.sun.intensity = 4.0 * day * (1 - 0.88 * overcast);
+    p.sun.intensity = 4.6 * day * (1 - 0.88 * overcast);
   } else {
     // the moon, on the other side of the sky
     setSun(p, 38, az + 180);
@@ -222,7 +223,7 @@ export function setTimeOfDay(p: SceneParts, hour: number, clouds = 0.25, rain = 
   p.hemi.groundColor.copy(BOUNCE_NIGHT).lerp(BOUNCE_DAY, day);
   // overcast: no sun, the sky lights everything evenly (stronger). By day the environment (PMREM of the sky) carries
   // part of the sky light, so the fill is lower than before it (0.72 → 0.5)
-  p.hemi.intensity = (0.25 + 0.5 * day + 1.25 * night) * (1 + 1.1 * overcast) * (1 - 0.3 * rain);
+  p.hemi.intensity = (0.25 + 0.3 * day + 1.25 * night) * (1 + 1.1 * overcast) * (1 - 0.3 * rain);
   _envDir.copy(p.sky.sunPosition.value as THREE.Vector3);
   p.env.update(_envDir, day * (1 - 0.6 * overcast) * (1 - 0.3 * rain));
   const dusk = smooth(-6, 2, elev) * (1 - smooth(4, 16, elev));
