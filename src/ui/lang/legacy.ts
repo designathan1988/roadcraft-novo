@@ -114,7 +114,7 @@ export const LEGACY_EN: Record<string, string> = {
   'Rua local': 'Local street', 'Rua estreita': 'Narrow street', 'Rua urbana': 'Urban street', 'Rua com estacionamento': 'Street with parking',
   'Rua com ciclofaixa': 'Street with bike lane', 'Rua com canteiro central': 'Street with median', 'Rua compartilhada': 'Shared street',
   'Rua de paralelepípedo': 'Cobblestone street', 'Mão única': 'One-way', 'Mão única, 1 faixa': 'One-way, 1 lane', 'Mão única, 2 faixas': 'One-way, 2 lanes',
-  'Mão única com estacionamento': 'One-way with parking', 'Avenida': 'Avenue', 'Avenida 4 faixas': '4-lane avenue',
+  'Mão única com estacionamento': 'One-way with parking', 'Estacionamento de um lado': 'Parking on one side', 'Avenida': 'Avenue', 'Avenida 4 faixas': '4-lane avenue',
   'Avenida 6 faixas com canteiro': '6-lane avenue with median', 'Avenida com ciclovia': 'Avenue with cycle track',
   'Avenida com estacionamento': 'Avenue with parking', 'Avenida mão única, 3 faixas': 'One-way avenue, 3 lanes',
   'Avenida mão única, 4 faixas': 'One-way avenue, 4 lanes', 'Bulevar': 'Boulevard', 'Calçadas largas': 'Wide sidewalks',

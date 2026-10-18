@@ -219,4 +219,10 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.touch.dragDo': "Move the map (camera) or brush (with a tool)",
   'ui.touch.compassKey': "Drag the compass",
   'ui.touch.compassDo': "Turn and tilt the camera; tap it to face north",
+  'ui.start.sub': "Roads, traffic and whole cities from 10 to 24 km.",
+  'ui.start.seed': "Seed",
+  'ui.start.size': "Map size",
+  'ui.start.generate': "Generate a new city",
+  'ui.start.empty': "Start on an empty map",
+  'ui.start.quit': "Quit",
 };

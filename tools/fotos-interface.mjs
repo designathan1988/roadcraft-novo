@@ -44,6 +44,7 @@ export const SCENES = {
   'editor-secao': scene(`click('[data-cat=roads]');await W(300);click('.rc-card.on .rc-custom.edit');await W(300);Q('.section-canvas').dispatchEvent(new MouseEvent('click',{clientX:Q('.section-canvas').getBoundingClientRect().left+Q('.section-canvas').getBoundingClientRect().width*0.5,clientY:Q('.section-canvas').getBoundingClientRect().top+40,bubbles:true}))`),
   'construir-predio': scene(`click('[data-cat=build]');await W(200);const b=g.world.buildings,c=b.cols;let best=-1,bd=1e9;for(let i=0;i<b.alive.length;i++){if(!b.alive[i]||c.floors[i]<3)continue;const d=Math.hypot(c.x[i]-g.rig.target.x,c.z[i]-g.rig.target.z);if(d<bd){bd=d;best=i;}}g.select(best)`),
   'teclas': scene(`const key=(c)=>window.dispatchEvent(new KeyboardEvent('keydown',{code:c,key:c,bubbles:true}));key('KeyT');await W(200);key('F1');await W(200);click('[data-pop=menu]');await W(200);key('Escape');await W(200);key('F1')`),
+  'inicio': '(async()=>{await new Promise(r=>setTimeout(r,1500));})()',
   'ingles': scene(`click('[data-cat=roads]')`),
 };
 
@@ -55,6 +56,6 @@ const env = {
   CIDADE_SEQ: JSON.stringify(rest.map((n) => [path.join(out, `${n}.png`), SCENES[n]])),
 };
 delete env.ELECTRON_RUN_AS_NODE;
-const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first}.png`), `?cidade&mapa=10&limpo&hora=11&cam=0,0,35,32,260${lang}`, SCENES[first]],
+const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first}.png`), first === 'inicio' ? '?mapa=10&limpo&hora=11' : `?cidade&mapa=10&limpo&hora=11&cam=0,0,35,32,260${lang}`, SCENES[first]],
   { cwd: root, env, stdio: 'inherit' });
 p.on('exit', (code) => process.exit(code ?? 0));

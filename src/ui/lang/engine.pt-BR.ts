@@ -219,4 +219,10 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.touch.dragDo': "Mover o mapa (com a câmera) ou pincelar (com a ferramenta)",
   'ui.touch.compassKey': "Arrastar a bússola",
   'ui.touch.compassDo': "Girar e inclinar a câmera; tocar nela põe o norte para cima",
+  'ui.start.sub': "Vias, trânsito e cidades inteiras de 10 a 24 km.",
+  'ui.start.seed': "Semente",
+  'ui.start.size': "Tamanho do mapa",
+  'ui.start.generate': "Gerar cidade nova",
+  'ui.start.empty': "Começar num mapa vazio",
+  'ui.start.quit': "Sair",
 };
