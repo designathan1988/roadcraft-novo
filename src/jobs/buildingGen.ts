@@ -1497,11 +1497,13 @@ function facadeRelief(g: Gen, x0: number, x1: number, z0: number, z1: number, y0
   blank(mb);
   const h = hash2(seed, 0xfa);
   // friso de laje (quem não tem faixas do estilo): 14 cm, 6 cm para fora
-  if (!a.bands && a.win !== Win.Curtain) {
+  // (detail layer only: under a pixel past 220 m, where the shader's slab line takes over)
+  const dm = detailOut;
+  if (dm && !a.bands && a.win !== Win.Curtain) {
     const fc = shadeHex(wallCol, 0.9);
     for (let fl = 1; fl < lower; fl++) {
       const y = y0 + groundH + (fl - 1) * fh;
-      ring(mb, f, x0, x1, z0, z1, y - 0.07, y + 0.07, 0.06, fc);
+      ring(dm, f, x0, x1, z0, z1, y - 0.07, y + 0.07, 0.06, fc);
     }
   }
   // brise vertical (lâminas de concreto) na frente dos contemporâneos, metade deles
@@ -1525,11 +1527,15 @@ function facadeRelief(g: Gen, x0: number, x1: number, z0: number, z1: number, y0
 function door(mb: MeshBuilder, f: Frame, x: number, z1: number, y: number, trim: number, canopy: boolean): void {
   blank(mb);
   const w = canopy ? 1.8 : 1.0, hgt = canopy ? 2.6 : 2.2;
-  prism(mb, f, x - w / 2 - 0.12, x + w / 2 + 0.12, z1 - 0.02, z1 + 0.08, y - 0.05, y + hgt + 0.12, trim, BMAT.Plain, 50, trim, BMAT.Plain);
+
   prism(mb, f, x - w / 2, x + w / 2, z1, z1 + 0.11, y, y + hgt, canopy ? 0x2f3438 : 0x5a3c26, canopy ? BMAT.Metal : BMAT.Plain, 50, -1, 0);
   if (canopy) prism(mb, f, x - w / 2 - 0.6, x + w / 2 + 0.6, z1, z1 + 1.3, y + hgt + 0.25, y + hgt + 0.45, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true);
-  // soleira
-  prism(mb, f, x - w / 2 - 0.15, x + w / 2 + 0.15, z1, z1 + 0.45, y - 0.15, y + 0.04, 0xbdb7ab, BMAT.Paving, 50, 0xbdb7ab, BMAT.Paving);
+  // the frame and the step in the detail layer (near)
+  const dm = detailOut;
+  if (!dm) return;
+  blank(dm);
+  prism(dm, f, x - w / 2 - 0.12, x + w / 2 + 0.12, z1 - 0.02, z1 + 0.08, y - 0.05, y + hgt + 0.12, trim, BMAT.Plain, 50, trim, BMAT.Plain);
+  prism(dm, f, x - w / 2 - 0.15, x + w / 2 + 0.15, z1, z1 + 0.45, y - 0.15, y + 0.04, 0xbdb7ab, BMAT.Paving, 50, 0xbdb7ab, BMAT.Paving);
 }
 
 /**
@@ -1539,12 +1545,14 @@ function door(mb: MeshBuilder, f: Frame, x: number, z1: number, y: number, trim:
 function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y: number, col: number): void {
   blank(mb);
   prism(mb, f, x0, x1, z - 0.06, z, y + 0.98, y + 1.05, col, BMAT.Metal, 50, col, BMAT.Metal);
-  prism(mb, f, x0, x1, z - 0.05, z - 0.01, y + 0.1, y + 0.15, col, BMAT.Metal, 50, col, BMAT.Metal);
-  const n = Math.max(1, Math.round((x1 - x0) / 1.2));
-  for (let k = 0; k <= n; k++) { const x = x0 + 0.03 + (x1 - x0 - 0.06) * k / n; prism(mb, f, x - 0.03, x + 0.03, z - 0.06, z, y, y + 0.98, col, BMAT.Metal, 50, -1, 0); }
+  // the handrail in the mesh; the bottom rail, the posts and the balusters in the detail layer (near)
   const det = detailOut;
   if (!det) return;
   blank(det);
+  for (const x of [x0 + 0.03, x1 - 0.03]) prism(det, f, x - 0.03, x + 0.03, z - 0.06, z, y, y + 0.98, col, BMAT.Metal, 50, -1, 0);
+  prism(det, f, x0, x1, z - 0.05, z - 0.01, y + 0.1, y + 0.15, col, BMAT.Metal, 50, col, BMAT.Metal);
+  const n = Math.max(1, Math.round((x1 - x0) / 1.2));
+  for (let k = 1; k < n; k++) { const x = x0 + 0.03 + (x1 - x0 - 0.06) * k / n; prism(det, f, x - 0.03, x + 0.03, z - 0.06, z, y, y + 0.98, col, BMAT.Metal, 50, -1, 0); }
   const m = Math.floor((x1 - x0) / 0.12);
   for (let k = 1; k < m; k++) {
     const x = x0 + (x1 - x0) * k / m;
@@ -1750,7 +1758,11 @@ function gate(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: 
   const col = 0x3a3f43, x0 = Math.min(ax, bx), z = (az + bz) / 2;
   prism(mb, f, x0, x0 + len, z - 0.03, z + 0.03, gy + h - 0.06, gy + h, col, BMAT.Metal, 50, col, BMAT.Metal);
   prism(mb, f, x0, x0 + len, z - 0.03, z + 0.03, gy + 0.08, gy + 0.14, col, BMAT.Metal, 50, col, BMAT.Metal);
-  for (let u = 0.06; u < len; u += 0.14) prism(mb, f, x0 + u - 0.015, x0 + u + 0.015, z - 0.015, z + 0.015, gy + 0.08, gy + h, col, BMAT.Metal, 50, -1, 0);
+  // the bars in the detail layer (near): from afar the gate reads by its rails
+  const dm = detailOut;
+  if (!dm) return;
+  blank(dm);
+  for (let u = 0.06; u < len; u += 0.14) ledge(dm, f, x0, z - 0.015, 1, 0, 0, 1, u - 0.015, u + 0.015, gy + 0.08, gy + h, 0.03, col, LEDGE_JAMB);
 }
 
 /**
