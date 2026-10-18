@@ -14,7 +14,7 @@ const PACKS: readonly Pack[] = [
   { name: 'ui.about.pack.makehuman', licence: 'CC0 1.0', author: 'ui.about.author.makehuman', text: 'models/people/LICENSE-MakeHuman-CC0.txt', list: 'models/people/LICENSES.json' },
   { name: 'ui.about.pack.rocketbox', licence: 'MIT', author: 'ui.about.author.rocketbox', text: 'models/citizens/LICENSE-MICROSOFT.txt' },
   { name: 'ui.about.pack.quaternius', licence: 'CC0 1.0', author: 'ui.about.author.quaternius', text: 'models/citizens/LICENSE-ANIMATIONS.txt' },
-  { name: 'ui.about.pack.proxies', licence: '', author: '', list: 'models/people/proxies/LICENSES.json' },
+  { name: 'ui.about.pack.proxies', licence: 'CC0 1.0', author: 'ui.about.author.proxies', list: 'models/people/proxies/index.json' },
 ];
 
 /** A file of the build, or null when it is not there. */
@@ -93,7 +93,7 @@ export class AboutBox {
         // one line per licence and author, with how many files
         const groups = new Map<string, number>();
         for (const r of rows) {
-          const key = `${r.licence ?? r.license ?? '?'}|${r.author ?? '?'}`;
+          const key = `${r.licence ?? r.license ?? '?'}|${r.author ?? (p.author ? t(p.author) : '?')}`;
           groups.set(key, (groups.get(key) ?? 0) + 1);
         }
         const ul = el('ul', 'about-list');

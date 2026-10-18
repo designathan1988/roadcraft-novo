@@ -239,4 +239,5 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.build.decay': "Decay",
   'ui.build.renovate': "Renovate",
   'ui.build.renovateTip': "Renovate the building: it is new again (Shift+click does the same)",
+  'ui.about.author.proxies': "MakeHuman system assets (MakeHuman community, makehumancommunity.org)",
 };
