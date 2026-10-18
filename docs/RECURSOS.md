@@ -6,7 +6,7 @@ seus dicionários (`data/textos-roadcraft/pt-BR.ts`, 1.760 linhas: cada chave é
 que o motor chegou. Estado aqui: ✅ existe e foi visto · 🟡 existe, mas abaixo do Roadcraft · ❌ falta.
 Quem termina um item põe ✅, o commit e o nome da foto.
 
-## 1. Interface (a do Roadcraft, não a do motor) — ✅ (ramo da interface, commits 9c833c2…; fotos `test-results/interface/*.png` e `test-results/nome/*.png` por `node tools/fotos-interface.mjs`). Ainda 🟡: aviso de nós impossíveis na barra (o motor não conta), zoom e centro no painel Câmera, abas Modelos/Fachada/Telhado/Peças/Cores do construtor (sessão de prédios), remover poste (sem ação no motor).
+## 1. Interface (a do Roadcraft, não a do motor) — ✅ (ramo da interface, commits 9c833c2…; fotos `test-results/interface/*.png` e `test-results/nome/*.png` por `node tools/fotos-interface.mjs`). Ainda 🟡: aviso de nós impossíveis na barra (o motor não conta), abas Modelos/Fachada/Telhado/Peças/Cores do construtor (sessão de prédios).
 - Dock de baixo com 7 categorias e teclas: Vias (1), Zonas (Z), Construir (H), Paisagem (T), Transporte (O),
   Demolir (B), Informação (I); gaveta de cada uma com abas e opções; dicas de ferramenta; dicas para toque.
 - Barra de cima: céu (dia, noite, ciclo), relógio, dinheiro, aviso de nós impossíveis, contagens, velocidade

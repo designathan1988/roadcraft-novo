@@ -6,6 +6,8 @@ import { Item } from '../world/items.ts';
 import { GROUND_COLORS, Ground } from '../world/ground.ts';
 import { ARCHES, FN_NAMES } from '../world/arch.ts';
 import { PROFILES } from '../roads/profiles.ts';
+import { DEFAULT_PERSON_OPTIONS, type PersonOptions } from '../render/people/creator.ts';
+import { renderPeople } from './peoplePanel.ts';
 import type { HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hud.ts';
 import type { RoadCatalog } from './roadCatalog.ts';
 import { button, card, choices, el, orow, range, select, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
@@ -117,7 +119,11 @@ export class ShellState {
   signText = '';
   barrier: number = Item.Fence;
   poleLights = 0;
+  /** Remove poles: clicks with the item tools take things away. */
+  itemRemove = false;
   person = { color: 3, height: 7, walk: false, count: 1 };
+  /** The people creator's choices (DEFAULT_PERSON_OPTIONS, one person standing to start). */
+  people: PersonOptions = { ...DEFAULT_PERSON_OPTIONS, count: 1, mode: 'stand' };
   bomb = 3;
   landTab: LandTab = 'relief';
   transitTab: TransitTab = 'stop';
@@ -152,7 +158,7 @@ export interface DrawerParts { tabs: HTMLElement; options: HTMLElement; strip: H
 const SOON = (): string => t('ui.soon');
 
 /** The section of things in the strip: a group with its title (for screen readers) and its cards. */
-function section(strip: HTMLElement, label: string): HTMLElement {
+export function section(strip: HTMLElement, label: string): HTMLElement {
   const box = el('div', 'v2-section');
   box.append(el('div', 'v2-section-title', label));
   const items = el('div', 'v2-section-items');
@@ -449,40 +455,24 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     }
   } else if (now === 'street') {
     const furniture = section(p.strip, t('tool.streetscape'));
-    for (const [k, key, icon] of STREET) furniture.append(card(t(key), cur === 'streetscape' && s.item === k, () => { s.item = k; a.item(k); h.pick('streetscape'); h.render(); }, svg(icon, 30)));
+    for (const [k, key, icon] of STREET) furniture.append(card(t(key), cur === 'streetscape' && s.item === k, () => { s.itemRemove = false; a.itemRemove(false); s.item = k; a.item(k); h.pick('streetscape'); h.render(); }, svg(icon, 30)));
     const walls = section(p.strip, t('v2.land.walls'));
-    for (const [k, key, icon] of WALLS) walls.append(card(t(key), cur === 'barrier' && s.barrier === k, () => { s.barrier = k; a.barrierKind(k); h.pick('barrier'); h.render(); }, svg(icon, 30)));
+    for (const [k, key, icon] of WALLS) walls.append(card(t(key), cur === 'barrier' && s.barrier === k, () => { s.itemRemove = false; a.itemRemove(false); s.barrier = k; a.barrierKind(k); h.pick('barrier'); h.render(); }, svg(icon, 30)));
     const poles = section(p.strip, t('tool.pole'));
-    poles.append(card(t('pole.mode.build'), cur === 'barrier' && s.barrier === Item.PoleLine, () => { s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_build', 30)));
-    poles.append(soon(card(t('pole.mode.remove'), false, () => undefined, svg('pole_remove', 30)), SOON()));
+    const poleOn = cur === 'barrier' && s.barrier === Item.PoleLine;
+    poles.append(card(t('pole.mode.build'), poleOn && !s.itemRemove, () => { s.itemRemove = false; a.itemRemove(false); s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_build', 30)));
+    poles.append(card(t('pole.mode.remove'), poleOn && s.itemRemove, () => { s.itemRemove = true; a.itemRemove(true); s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_remove', 30)));
     if (cur === 'streetscape' && s.item === Item.Sign) {
       p.options.append(orow(t('v2.row.sign'), select(t('sign.type'), SIGNS.map(([k, key]) => [k, t(key)] as const), s.sign, (v) => { s.sign = Number(v); a.signType(s.sign); h.render(); })));
       p.options.append(orow(t('v2.row.text'), textInput(t(s.sign === 2 ? 'sign.street.placeholder' : s.sign === 0 ? 'sign.text.speed' : 'sign.text'), s.signText, (v) => { s.signText = v; a.signText(v); })));
     }
-    if (cur === 'barrier' && s.barrier === Item.PoleLine) {
+    if (cur === 'barrier' && s.barrier === Item.PoleLine && !s.itemRemove) {
       p.options.append(orow(t('v2.row.lights'), choices((['none', 'alternate', 'all'] as const).map((m, i) => ({
         label: `${t('pole.lamps')}: ${t(`pole.lamps.${m}`)}`, on: s.poleLights === i, run: () => { s.poleLights = i; a.poleLights(i); h.render(); }, icon: svg(`pl_${m}`, 18),
       })))));
     }
   } else {
-    const ps = s.person, send = (): void => a.personSpec({ ...ps });
-    const sw = el('div', 'v2-swatches');
-    CLOTHES.forEach((c, i) => {
-      const b = el('button', `v2-swatch${ps.color === i ? ' on' : ''}`);
-      b.type = 'button';
-      b.style.setProperty('--c', c);
-      b.title = t('ui.person.clothes');
-      b.addEventListener('click', (e) => { e.stopPropagation(); ps.color = i; send(); h.render(); });
-      sw.append(b);
-    });
-    p.options.append(orow(t('ui.person.clothes'), sw),
-      range(t('ui.person.height'), 0, 15, 1, ps.height, (v) => `${fmtDec((0.86 + v * 0.02) * 1.75, 2)} m`, (v) => { ps.height = v; send(); }),
-      orow(t('ui.person.behaviour'), choices([
-        { label: t('ui.person.stand'), on: !ps.walk, run: () => { ps.walk = false; send(); h.render(); } },
-        { label: t('ui.person.walk'), on: ps.walk, run: () => { ps.walk = true; send(); h.render(); } },
-      ])),
-      orow(t('ui.person.count'), choices([1, 2, 5, 10, 20].map((n) => ({ label: String(n), on: ps.count === n, run: () => { ps.count = n; send(); h.render(); } })))));
-    p.strip.append(el('p', 'v2-note', t('hint.tool.person')));
+    renderPeople(h, p, CLOTHES);
   }
 }
 /** The landform the relief tab has in hand. */

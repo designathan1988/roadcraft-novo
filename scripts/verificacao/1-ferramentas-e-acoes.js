@@ -87,7 +87,14 @@
   await check('noite e dia', async () => { await g.view(X, Z, 30, 40, 300, 22); await wait(500); await g.view(X, Z, 30, 40, 300, 11); return true; });
 
   // ---------------- pessoas e ações
-  await check('pessoa parada', () => { const n = items(); g.personSpec = { color: 3, height: 7, walk: false, count: 2 }; g.placePerson(X + 20, Z + 30); return items() >= n + 2 || 'pessoa não entrou'; });
+  await check('pessoa parada (criador de pessoas)', () => {
+    // with the cooked people loaded the click goes through their creator (a group, one undo step); without them, a street item
+    const cr = g.vehicles.people.creator, n = items(), k = cr ? cr.size : 0;
+    g.personSpec = { color: 3, height: 7, walk: false, count: 2 }; g.personOptions = { count: 2, mode: 'stand' };
+    g.placePerson(X + 20, Z + 30);
+    if (cr) { if (cr.size !== k + 1) return 'grupo não entrou'; g.commands.undo(); return cr.size === k || 'desfazer não tirou o grupo'; }
+    return items() >= n + 2 || 'pessoa não entrou';
+  });
   await check('pessoas andando', () => { g.personSpec = { color: 5, height: 7, walk: true, count: 5 }; g.placePerson(X + 20, Z + 30); return true; });
   await check('pistola', () => { g.shoot(X + 20, Z + 30); return true; });
   await check('bomba derruba prédio', () => {
