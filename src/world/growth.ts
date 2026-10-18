@@ -8,7 +8,8 @@ import type { JobPool } from '../jobs/pool.ts';
 import { roadGraphTransfer, type LotColumns } from '../jobs/protocol.ts';
 import { Zone, baseZone, zoneDensity } from '../roads/zones.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
-import { archFor, civicFor, eraAt } from './arch.ts';
+import { Fn, archFor, civicFor, eraAt } from './arch.ts';
+import { generatedBuilt } from './decay.ts';
 import { LANDMARKS, encodeDesign } from './design.ts';
 import { hash2 } from '../core/rng.ts';
 import type { BuildingRec, World } from './world.ts';
@@ -67,6 +68,7 @@ export class Growth {
   }
 
   private setLots(c: number, lots: LotColumns | null): void {
+    this.taken.delete(c);
     if (lots && lots.count > 0) {
       this.lots.set(c, lots);
       if (this.cellPos[c] < 0) { this.cellPos[c] = this.cells.length; this.cells.push(c); }
@@ -96,29 +98,108 @@ export class Growth {
     return hit;
   }
 
-  /** Cresce até `n` prédios agora (cidade de teste) ou devagar no tempo. */
+  /** Where the last building grew: the next one is the free lot nearest it, so a street fills in sequence. */
+  private last: { x: number; z: number } | null = null;
+  /** Lots known to be taken (a hint per cell's lots; checked again before building). */
+  private taken = new Map<number, Uint8Array>();
+
+  /**
+   * Grows buildings over time (Roadcraft growth): the next lot is the free one nearest the last that grew, in the
+   * 3×3 cells around it; when none is left there, a lot anywhere. Bounded work per frame (`budget` tries).
+   */
   step(dt: number, budget = 8): void {
     if (this.cells.length === 0 || this.rate <= 0) return;
     this.acc = Math.min(this.acc + dt * this.rate, 50);
     let tries = budget;
     while (this.acc >= 1 && tries-- > 0) {
+      const next = this.last ? this.nearestFree(this.last.x, this.last.z) : null;
+      if (next) { this.grow(next.l, next.i, true); continue; }
       const c = this.cells[this.rng.int(0, this.cells.length)];
       const l = this.lots.get(c)!;
       const i = this.rng.int(0, l.count);
-      if (this.occupied(l, i)) continue;
-      this.place(l, i);
-      this.acc -= 1;
+      if (this.occupied(l, i)) { this.markTaken(c, i); continue; }
+      this.grow(l, i, true);
     }
   }
 
-  recordFor(l: LotColumns, i: number): BuildingRec {
+  private grow(l: LotColumns, i: number, organic: boolean): void {
+    this.world.addBuilding(this.recordFor(l, i, organic));
+    this.markTaken(cellId(cellX(l.x[i]), cellX(l.z[i])), i);
+    this.last = { x: l.x[i], z: l.z[i] };
+    this.acc -= 1;
+  }
+
+  private markTaken(c: number, i: number): void {
+    const l = this.lots.get(c);
+    if (!l) return;
+    let t = this.taken.get(c);
+    if (!t || t.length !== l.count) this.taken.set(c, (t = new Uint8Array(l.count)));
+    t[i] = 1;
+  }
+
+  /** Free lot nearest (x, z) in the 3×3 cells around it (lots already seen taken are skipped), or null. */
+  private nearestFree(x: number, z: number): { l: LotColumns; i: number } | null {
+    const cx = cellX(x), cz = cellX(z);
+    const cand: Array<[number, number, number]> = [];
+    for (let j = cz - 1; j <= cz + 1; j++) for (let k = cx - 1; k <= cx + 1; k++) {
+      if (j < 0 || k < 0 || j >= MAP_CELLS || k >= MAP_CELLS) continue;
+      const c = cellId(k, j), l = this.lots.get(c);
+      if (!l) continue;
+      const t = this.taken.get(c);
+      for (let i = 0; i < l.count; i++) if (!t || t.length !== l.count || !t[i]) cand.push([(l.x[i] - x) ** 2 + (l.z[i] - z) ** 2, c, i]);
+    }
+    cand.sort((a, b) => a[0] - b[0]);
+    for (let k = 0; k < cand.length && k < 12; k++) {
+      const [, c, i] = cand[k], l = this.lots.get(c)!;
+      if (!this.occupied(l, i)) return { l, i };
+      this.markTaken(c, i);
+    }
+    return null;
+  }
+
+  /** Cell of the neighbourhood (2×2 cells, 512 m) that holds its square: the first, in an order drawn by the
+   * neighbourhood, whose biggest lot is big enough and not industrial. −1 when none. */
+  private squareCell(cell: number): number {
+    const bx = (cell % MAP_CELLS) >> 1, bz = ((cell / MAP_CELLS) | 0) >> 1;
+    const h = hash2(bx, bz, 4242);
+    for (let k = 0; k < 4; k++) {
+      const q = (h + k) & 3, x = bx * 2 + (q & 1), z = bz * 2 + (q >> 1);
+      if (x >= MAP_CELLS || z >= MAP_CELLS) continue;
+      const c = cellId(x, z), l = this.lots.get(c);
+      if (!l) continue;
+      const b = Growth.biggest(l);
+      if (l.w[b] * l.d[b] >= 500 && baseZone(l.zone[b]) !== Zone.Industrial) return c;
+    }
+    return -1;
+  }
+
+  private static biggest(l: LotColumns): number {
+    let b = 0;
+    for (let k = 0; k < l.count; k++) if (l.w[k] * l.d[k] > l.w[b] * l.d[b]) b = k;
+    return b;
+  }
+
+  /**
+   * Record of the building for lot i. One square per neighbourhood (Roadcraft), in the biggest lot of the cell the
+   * neighbourhood draws; one other civic building at most per cell. `organic` (growing over time, not the
+   * generated city filled at once): at most 3 floors above the tallest neighbour within 30 m (Roadcraft).
+   */
+  recordFor(l: LotColumns, i: number, organic = false): BuildingRec {
     const r = new Rng(l.seed[i]);
-    // prédio especial: o maior lote da célula, sorteado pela célula
     const cell = cellId(cellX(l.x[i]), cellX(l.z[i]));
-    let biggest = i;
-    for (let k = 0; k < l.count; k++) if (l.w[k] * l.d[k] > l.w[biggest] * l.d[biggest]) biggest = k;
-    const fn = civicFor(cell, baseZone(l.zone[i]), biggest === i, l.w[i] * l.d[i]);
-    const zone = baseZone(l.zone[i]), floors = floorsFor(l.zone[i], l.profile[i], r);
+    const biggest = Growth.biggest(l) === i;
+    let fn = biggest && this.squareCell(cell) === cell ? Fn.Square : civicFor(cell, baseZone(l.zone[i]), biggest, l.w[i] * l.d[i]);
+    if (fn === Fn.Square && !(biggest && this.squareCell(cell) === cell)) fn = Fn.None;
+    const zone = baseZone(l.zone[i]);
+    let floors = floorsFor(l.zone[i], l.profile[i], r);
+    if (organic) {
+      let tallest = -1;
+      const col = this.world.buildings.cols;
+      this.world.buildingIndex.query(l.x[i] - 30, l.z[i] - 30, l.x[i] + 30, l.z[i] + 30, (id) => {
+        if (Math.hypot(col.x[id] - l.x[i], col.z[id] - l.z[i]) <= 30 + Math.max(col.w[id], col.d[id]) / 2) tallest = Math.max(tallest, col.floors[id]);
+      });
+      if (tallest >= 0) floors = Math.min(floors, Math.max(1, tallest) + 3);
+    }
     const rec: BuildingRec = {
       fn,
       x: l.x[i], z: l.z[i], w: l.w[i], d: l.d[i], rot: l.rot[i], h: 0, color: 0,
@@ -202,12 +283,16 @@ export class Growth {
     return null;
   }
 
-  /** Enche todos os lotes livres de uma vez (cidade de teste). */
+  /** Fills every free lot at once (generated and test city): a grown-up town, aged over a tenth of the decay. */
   fillAll(): number {
     let n = 0;
     for (const c of this.cells) {
       const l = this.lots.get(c)!;
-      for (let i = 0; i < l.count; i++) if (!this.occupied(l, i)) { this.place(l, i); n++; }
+      for (let i = 0; i < l.count; i++) if (!this.occupied(l, i)) {
+        const rec = this.recordFor(l, i);
+        rec.built = this.world.clock - generatedBuilt(rec.seed);
+        this.world.addBuilding(rec); n++;
+      }
     }
     return n;
   }
@@ -216,6 +301,8 @@ export class Growth {
 
   clear(): void {
     this.lots.clear();
+    this.taken.clear();
+    this.last = null;
     for (const c of this.cells) this.cellPos[c] = -1;
     this.cells.length = 0;
   }

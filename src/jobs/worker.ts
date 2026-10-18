@@ -1,4 +1,4 @@
-// Worker do pool: recebe tarefas, devolve buffers transferidos.
+// Pool worker: receives jobs, returns transferred buffers.
 
 import { setCustomProfiles } from '../roads/profiles.ts';
 import { NO_WATER, WATER_TILE_RES } from '../world/ground.ts';
@@ -28,7 +28,7 @@ let water: Float32Array | null = null;
 type Handler<K extends JobKind> = (p: JobPayloads[K]) => Promise<[JobResults[K], Transferable[]]> | [JobResults[K], Transferable[]];
 
 const H = (): Float32Array => {
-  if (!heights) throw new Error('worker sem init');
+  if (!heights) throw new Error('worker not initialized');
   return heights;
 };
 
@@ -67,7 +67,7 @@ const handlers: { [K in JobKind]: Handler<K> } = {
   },
   conform: (p) => [{ tile: p.tile, ...conformTile(H(), p.tile, p.segs) }, []],
   saveTile: async (p) => {
-    // chão e água do ladrilho lidos direto da memória compartilhada
+    // tile ground and water read straight from shared memory
     const gl = WATER_TILE_RES * WATER_TILE_RES, wl = gl;
     const g = ground ? ground.slice(p.tile * gl, (p.tile + 1) * gl) : undefined;
     const w = water ? water.slice(p.tile * wl, (p.tile + 1) * wl) : undefined;
@@ -75,7 +75,9 @@ const handlers: { [K in JobKind]: Handler<K> } = {
   },
   saveMeta: async (p) => [{ bytes: await storage.saveMeta(p.slot, p.meta) }, []],
   loadTile: async (p) => {
-    const t = await storage.loadTile(p.slot, p.tile);
+    let t: Awaited<ReturnType<typeof storage.loadTile>>;
+    // an unreadable tile is reported (the page puts the save in quarantine), never thrown away silently
+    try { t = await storage.loadTile(p.slot, p.tile); } catch { return [{ tile: p.tile, found: false, corrupt: true, min: 0, max: 0, boxes: null, roads: null }, []]; }
     if (!t) return [{ tile: p.tile, found: false, min: 0, max: 0, boxes: null, roads: null }, []];
     const mm = storage.unpackTileHeights(H(), p.tile, t.heights);
     let hasWater = false;

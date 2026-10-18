@@ -1,5 +1,5 @@
-// Tabela SoA: um array tipado por campo, ids densos e lista livre.
-// Nenhum objeto por entidade.
+// SoA table: one typed array per field, dense ids and a free list.
+// No object per entity.
 
 type TypedCtor =
   | Float32ArrayConstructor | Float64ArrayConstructor
@@ -14,9 +14,9 @@ export class Table<S extends Schema> {
   readonly schema: S;
   cols: Columns<S>;
   alive: Uint8Array;
-  /** Maior id já usado + 1. Ids válidos estão em [0, end). */
+  /** Highest id ever used + 1. Valid ids are in [0, end). */
   end = 0;
-  /** Entidades vivas. */
+  /** Live entities. */
   size = 0;
   private free: Int32Array;
   private freeTop = 0;
@@ -48,7 +48,7 @@ export class Table<S extends Schema> {
     for (const fn of this.growListeners) fn(cap);
   }
 
-  /** Reserva um id (reaproveita da lista livre). Campos não são zerados aqui. */
+  /** Reserves an id (reuses one from the free list). Fields are not zeroed here. */
   alloc(): number {
     let id: number;
     if (this.freeTop > 0) id = this.free[--this.freeTop];
@@ -61,15 +61,15 @@ export class Table<S extends Schema> {
     return id;
   }
 
-  /** Reserva um id específico (usado ao desfazer uma remoção). */
+  /** Reserves a specific id (used when undoing a removal). */
   allocAt(id: number): void {
     if (id >= this.capacity) this.grow(id + 1);
-    if (this.alive[id]) throw new Error(`id ${id} já vivo`);
+    if (this.alive[id]) throw new Error(`id ${id} already alive`);
     if (id >= this.end) {
       for (let i = this.end; i < id; i++) this.pushFree(i);
       this.end = id + 1;
     } else {
-      // tira id da lista livre
+      // take id off the free list
       for (let i = 0; i < this.freeTop; i++) {
         if (this.free[i] === id) { this.free[i] = this.free[--this.freeTop]; break; }
       }

@@ -15,14 +15,16 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from './protocol.ts';
-import { lotParking } from './buildingGen.ts';
+import { lotParking, buildBuildingParts } from './buildingGen.ts';
 
 /** Tipos de peça (4 bits; 15 = vaga livre). */
 export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17 } as const;
 /** Types 16..23 belong to the roads/vegetation work, 24..30 to the buildings work (see the shared notes). */
 export const PROP_TYPES = 18;
 /** Mobiliário (variante da peça Furniture). */
-export const FURN = { Hydrant: 0, Postbox: 1, Phone: 2, Drain: 3, Bollard: 4, Planter: 5 } as const;
+export const FURN = { Hydrant: 0, Postbox: 1, Phone: 2, Drain: 3, Bollard: 4, Planter: 5,
+  // peças de fachada dos prédios (sessão prédios; jobs/buildingGen.ts PART): 8..15
+  WallAc: 8, RoofAc: 9, Vase: 10, Clothesline: 11, Dish: 12, Vent: 13, Chair: 14, Tank: 15 } as const;
 /** Muros e cercas (variante da peça Barrier); a peça vai de z = 0 a 1 e o shader estica. */
 export const BARRIER = { Fence: 0, Wall: 1, Hedge: 2, Guardrail: 3, Railing: 4 } as const;
 /** Placas (variante da peça Sign). */
@@ -534,6 +536,9 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
       }
     }
   }
+
+  // peças de fachada dos prédios (sessão prédios): ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água
+  buildBuildingParts(heights, b, (v, x, y, z, yaw, s) => out.add(PROP.Furniture, x, y, z, yaw, v, s, 0));
 
   const count = out.extra.length;
   return { count, data: new Float32Array(out.data), extra: new Uint32Array(out.extra) };

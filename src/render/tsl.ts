@@ -1,5 +1,5 @@
-// Os tipos do TSL no @types/three não aceitam aritmética mista de int/float
-// nem variáveis reatribuídas; nos shaders usamos o TSL sem tipos estáticos.
+// The TSL types in @types/three do not accept mixed int/float arithmetic
+// or reassigned variables; in shaders we use TSL without static types.
 import * as TSL from 'three/tsl';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -8,8 +8,8 @@ export type Node = any;
 export const T: Record<string, any> = TSL;
 
 /**
- * Vértice compacto (snorm16 posição, normal octaédrica snorm8): liga posição e
- * normal no material e devolve a normal de mundo como varying.
+ * Compact vertex (snorm16 position, snorm8 octahedral normal): wires position and
+ * normal into the material and returns the world normal as a varying.
  */
 export function useCompactVertex(m: { positionNode: Node; normalNode: Node }, name: string): Node {
   const { Fn, attribute, vec3, float, abs, max, select, normalize, varyingProperty, transformNormalToView } = T;
@@ -29,10 +29,10 @@ export function useCompactVertex(m: { positionNode: Node; normalNode: Node }, na
 }
 
 /**
- * Posição do quadro anterior para a velocidade do TRAA. O three só sabe a anterior pelo atributo `position` cru:
- * material que monta a posição no `positionNode` (terreno, água, props, veículos) gravava velocidade errada, o TRAA
- * dava peso total ao quadro atual ali e o chão e as árvores tremiam com tudo parado. `prev` = a mesma posição no
- * quadro anterior (veículos andando); sem ele, a atual (parado: só a câmera mexe).
+ * Previous-frame position for the TRAA velocity. three only knows the previous one through the raw `position` attribute:
+ * a material that builds the position in `positionNode` (terrain, water, props, vehicles) wrote the wrong velocity, TRAA
+ * gave full weight to the current frame there and the ground and trees shimmered with everything still. `prev` = the
+ * same position in the previous frame (moving vehicles); without it, the current one (still: only the camera moves).
  */
 export function withPrevious<M extends { setupPosition: (b: Node) => Node }>(m: M, prev?: Node): M {
   const { positionLocal, positionPrevious } = T;
@@ -46,8 +46,8 @@ export function withPrevious<M extends { setupPosition: (b: Node) => Node }>(m: 
 }
 
 /**
- * Máscara do esmaecimento entre níveis de detalhe: cada malha leva
- * `userData.fade` (0..1 entrando, −1..0 saindo); as duas máscaras se completam.
+ * Fade mask between detail levels: each mesh carries
+ * `userData.fade` (0..1 fading in, −1..0 fading out); the two masks complement each other.
  */
 export function lodFadeMask(): Node {
   const { uniform, interleavedGradientNoise, screenCoordinate, select } = T;

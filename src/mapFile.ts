@@ -65,3 +65,25 @@ export async function unpackToSlot(slot: string, file: Blob): Promise<number> {
   }
   return files.length;
 }
+
+/**
+ * Quarantine (Roadcraft: an unreadable map is never deleted): copies every file of the save `slot` into
+ * `saves/quarentena-<date>-<slot>`, untouched, so it can be sent for repair. Returns the folder name, or null.
+ */
+export async function quarantineSlot(slot: string): Promise<string | null> {
+  const dir = await slotDir(slot, false);
+  if (!dir) return null;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const name = `quarentena-${stamp}-${slot}`;
+  const root = await navigator.storage.getDirectory();
+  const saves = await root.getDirectoryHandle('saves', { create: true });
+  const q = await saves.getDirectoryHandle(name, { create: true });
+  for await (const [file, h] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
+    if (h.kind !== 'file') continue;
+    const data = await (await (h as FileSystemFileHandle).getFile()).arrayBuffer();
+    const w = await (await q.getFileHandle(file, { create: true })).createWritable();
+    await w.write(data);
+    await w.close();
+  }
+  return name;
+}

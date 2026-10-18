@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts', 'verificacao');
-const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js')).sort();
+// VER_ONLY=texto roda só os roteiros cujo nome contém o texto; VER_LIMIT=segundos muda o tempo de cada um
+const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js') && (!process.env.VER_ONLY || f.includes(process.env.VER_ONLY))).sort();
 const shot = path.join(os.tmpdir(), 'cidade-verificacao.png');
 let ok = 0, bad = 0;
 for (const f of files) {
@@ -18,13 +19,15 @@ for (const f of files) {
   const lines = await new Promise((resolve) => {
     const out = [];
     const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, '?vazio&hora=11&workers=3&cam=1500,1500,0,50,400', script],
-      { cwd: root, env: { ...process.env, CIDADE_SETTLE: '1', CIDADE_LIMIT: '560' } });
+      { cwd: root, env: { ...process.env, CIDADE_SETTLE: '1', CIDADE_LIMIT: process.env.VER_LIMIT ?? '560' } });
     let buf = '';
     p.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { out.push(buf.slice(0, i)); buf = buf.slice(i + 1); } });
     p.on('exit', () => resolve(out));
   });
   const ver = lines.filter((l) => l.includes('VER ')).map((l) => l.slice(l.indexOf('VER ') + 4));
   if (ver.length === 0) { console.log(`${f}: o roteiro não terminou`); bad++; continue; }
+  // sem a linha final o roteiro travou ou estourou o tempo: a última verificação impressa diz onde
+  if (!lines.some((l) => l.includes('VERIFICAÇÃO'))) ver.push(`FALHOU o roteiro parou depois de: ${ver[ver.length - 1] ?? '(nada)'}`);
   const fails = ver.filter((v) => v.startsWith('FALHOU'));
   ok += ver.length - fails.length; bad += fails.length;
   console.log(`${f}: ${ver.length - fails.length} ok, ${fails.length} falhas`);
