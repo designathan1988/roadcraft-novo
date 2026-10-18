@@ -1,33 +1,33 @@
-// Edição é comando: apply e invert. Desfazer aplica o inverso.
-// Nada de clonar ou serializar o mundo.
+// An edit is a command: apply and invert. Undo applies the inverse.
+// No cloning or serializing the world.
 
 export interface Command {
   readonly label: string;
   apply(): void;
   invert(): void;
-  /** Tenta absorver um comando seguinte (ex.: pinceladas do mesmo traço). */
+  /** Tries to absorb a following command (e.g. brush dabs of the same stroke). */
   merge?(next: Command): boolean;
 }
 
 export class CommandStack {
   private done: Command[] = [];
   private undone: Command[] = [];
-  /** Comando aberto que ainda aceita junções (traço de pincel em curso). */
+  /** Open command that still accepts merges (brush stroke in progress). */
   private open: Command | null = null;
   readonly limit: number;
   onChange: () => void = () => {};
-  /** Um comando novo entrou (não chamado ao juntar, desfazer ou refazer). */
+  /** A new command was added (not called on merge, undo or redo). */
   onPush: (cmd: Command) => void = () => {};
 
   constructor(limit = 500) { this.limit = limit; }
 
-  /** Aplica e registra. */
+  /** Applies and records. */
   run(cmd: Command): void {
     cmd.apply();
     this.push(cmd);
   }
 
-  /** Registra um comando que já foi aplicado (ex.: edição incremental). */
+  /** Records a command that was already applied (e.g. incremental edit). */
   push(cmd: Command): void {
     this.undone.length = 0;
     if (this.open && this.open.merge?.(cmd)) { this.onChange(); return; }
@@ -37,7 +37,7 @@ export class CommandStack {
     this.onChange();
   }
 
-  /** Começa um grupo que junta comandos até endGroup. */
+  /** Starts a group that merges commands until endGroup. */
   beginGroup(cmd: Command): void {
     this.push(cmd);
     this.open = cmd;

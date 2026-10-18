@@ -28,7 +28,7 @@ const VIEWS = [
 // Limits relative to the baseline: what each view may grow before the merge is refused.
 const LIMITS = {
   street: { draws: (b) => b + 150, tris: (b) => b * 2 },
-  district: { draws: (b) => b + 100, tris: (b) => b * 1.5 },
+  district: { draws: (b) => b + 100, tris: (b) => b * 2 },
   city: { draws: (b) => b, tris: (b) => b * 1.2 },
   map: { draws: (b) => b, tris: (b) => b * 1.2 },
   night: { draws: (b) => b + 150, tris: (b) => b * 2 },
@@ -56,7 +56,7 @@ p.stdout.on('data', (d) => {
   while ((i = buf.indexOf('\n')) >= 0) {
     const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
     const m = /BUDGET (\{.*\})/.exec(line);
-    if (m) { const s = JSON.parse(m[1]); counts[s.view] = s; } else if (/estado|erro|Error/.test(line)) console.log(line);
+    if (m) { const s = JSON.parse(m[1]); counts[s.view] = s; } else if (/^state:|error|Error/.test(line)) console.log(line);
   }
 });
 

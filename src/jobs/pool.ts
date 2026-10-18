@@ -1,6 +1,6 @@
-// Sistema de tarefas único com prioridade, rodando num pool de workers.
-// A página nunca espera: envia e recebe por callback. Resultado de versão
-// velha (mesma chave reenviada depois) é descartado.
+// Single job system with priority, running on a pool of workers.
+// The page never waits: it sends and receives by callback. A stale result
+// (same key resubmitted later) is discarded.
 
 import type { FromWorker, JobKind, JobPayloads, JobResults, SharedWorld, ToWorker } from './protocol.ts';
 import { MAP_TAG } from '../config.ts';
@@ -16,7 +16,7 @@ interface Pending {
   cancelled: boolean;
 }
 
-/** Heap binário mínimo por (prioridade, seq). */
+/** Binary min-heap by (priority, seq). */
 class Heap {
   items: Pending[] = [];
   private less(a: Pending, b: Pending) { return a.priority < b.priority || (a.priority === b.priority && a.seq < b.seq); }
@@ -52,9 +52,9 @@ class Heap {
 }
 
 export interface SubmitOptions {
-  /** Chave de deduplicação: um novo envio com a mesma chave invalida o anterior. */
+  /** Deduplication key: a new submit with the same key invalidates the previous one. */
   key?: string;
-  /** Menor = antes. */
+  /** Lower = sooner. */
   priority?: number;
   transfer?: Transferable[];
 }
@@ -69,7 +69,7 @@ export class JobPool {
   private idleWaiters: Array<() => void> = [];
   readonly size: number;
 
-  /** Mesma mensagem para todos os workers (chega antes dos trabalhos enviados depois). */
+  /** Same message to all workers (arrives before jobs sent later). */
   broadcast(msg: ToWorker): void { for (const w of this.workers) w.postMessage(msg); }
 
   constructor(shared: SharedWorld, count = workerCount()) {
@@ -101,7 +101,7 @@ export class JobPool {
     this.pump();
   }
 
-  /** Promessa para quando não houver nada na fila nem rodando (tela de carga). */
+  /** Promise for when nothing is queued or running (loading screen). */
   whenIdle(): Promise<void> {
     if (this.isIdle()) return Promise.resolve();
     return new Promise((r) => this.idleWaiters.push(r));
@@ -131,14 +131,14 @@ export class JobPool {
     const p = this.busy[i];
     this.busy[i] = null;
     if (p && p.seq === msg.id) {
-      if (msg.type === 'error') console.error(`tarefa ${p.kind} falhou:`, msg.message);
+      if (msg.type === 'error') console.error(`job ${p.kind} failed:`, msg.message);
       else if (!p.key || this.latest.get(p.key) === p.seq) p.done(msg.result);
     }
     this.pump();
   }
 }
 
-/** Workers do pool: núcleos − 2, ou ?workers=N (fotos e testes que não devem tomar a máquina). */
+/** Pool workers: cores − 2, or ?workers=N (photos and tests that must not hog the machine). */
 function workerCount(): number {
   const asked = Number(new URLSearchParams(globalThis.location?.search ?? '').get('workers'));
   return asked > 0 ? Math.floor(asked) : Math.max(1, (navigator.hardwareConcurrency || 4) - 2);

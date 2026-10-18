@@ -1,17 +1,17 @@
 // @ts-nocheck
-// Cópia do TRAANode do three r186 (examples/jsm/tsl/display) com a correção da profundidade anterior.
+// Copy of three r186's TRAANode (examples/jsm/tsl/display) with the previous-depth fix.
 //
-// O `samplePreviousDepth` do three (TAAUtils) recebe a câmera como argumento de um Fn do TSL: lá dentro ela vira
-// um proxy de nó e `camera.isOrthographicCamera` dá verdadeiro também na perspectiva. A profundidade anterior saía
-// convertida como ortográfica (~0,006 em vez de ~0,9994), o TRAA via "desoclusão" em TODO pixel e jogava fora o
-// histórico: cada quadro saía cru, com o jitter de ±½ pixel, e a imagem inteira tremia parada (era o "tremor da
-// câmera"). Aqui a reprojeção é feita fora do Fn, com o tipo da câmera num uniforme (troca perspectiva/isométrica).
+// three's `samplePreviousDepth` (TAAUtils) receives the camera as an argument of a TSL Fn: inside it becomes
+// a node proxy and `camera.isOrthographicCamera` is also true for the perspective camera. The previous depth came out
+// converted as orthographic (~0.006 instead of ~0.9994), TRAA saw "disocclusion" on EVERY pixel and threw away the
+// history: each frame came out raw, with the ±½ pixel jitter, and the whole image shook while still (the "camera
+// shake"). Here the reprojection is done outside the Fn, with the camera type in a uniform (perspective/isometric switch).
 import { HalfFloatType, Vector2, RenderTarget, RendererUtils, QuadMesh, NodeMaterial, TempNode, NodeUpdateType, Matrix4, DepthTexture, FloatType } from 'three/webgpu';
 import { float, Fn, max, texture, uniform, uv, vec2, vec4, convertToTexture, passTexture, velocity, ivec2, mix, context, getViewPosition, viewZToPerspectiveDepth, viewZToOrthographicDepth, OnBeforeRenderPipeline, OnAfterRenderPipeline } from 'three/tsl';
 import { clipAABB, computeHaltonOffsets, flickerReduction, sampleCurrentDepth } from 'three/addons/tsl/utils/TAAUtils.js';
 
 const _quadMesh = /*@__PURE__*/ new QuadMesh();
-/** 1 = mostra a validade do histórico e o peso do quadro atual. */
+/** 1 = shows the history validity and the current frame's weight. */
 export const traaDebug = /*@__PURE__*/ uniform( 0 );
 const _size = /*@__PURE__*/ new Vector2();
 
@@ -198,7 +198,7 @@ class TRAANode extends TempNode {
 		 */
 		this._cameraNearFar = uniform( new Vector2() );
 
-		/** 1 = câmera ortográfica (isométrica). */
+		/** 1 = orthographic (isometric) camera. */
 		this._cameraOrtho = uniform( 0 );
 
 		/**
@@ -612,7 +612,7 @@ class TRAANode extends TempNode {
 
 			const output = flickerReduction( currentColor, clippedHistoryColor, currentWeight );
 
-			// depuração (traaDebug = 1): vermelho = histórico recusado, verde = peso do quadro atual, azul = desoclusão
+			// debug (traaDebug = 1): red = history rejected, green = current frame weight, blue = disocclusion
 			const dbgValid = vec4( hasValidHistory.select( float( 0 ), float( 1 ) ), currentWeight, isDisocclusion.select( float( 1 ), float( 0 ) ), 1 );
 			return traaDebug.greaterThan( 0.5 ).select( dbgValid, output );
 

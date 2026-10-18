@@ -1,4 +1,4 @@
-// Ponte mínima e segura entre a página e o processo principal (Steam).
+// Minimal, safe bridge between the page and the main process (Steam).
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('cidadeSteam', {
   info: () => ipcRenderer.invoke('steam:info'),
