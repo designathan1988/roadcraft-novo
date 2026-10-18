@@ -88,5 +88,8 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 - Destruição: explosão em camadas, prédios pré-fraturados, ragdoll (prioridade baixa; o motor tem a versão simples).
 
 ## 8. Produto — ✅ no motor
+- Mapas antigos e reparo ✅ (`roads/repair.ts`, `mapFile.ts` quarantineSlot; fotos `reparo.png`, `quarentena.png`):
+  ponta solta dentro de outra via vira cruzamento ao abrir; mapa ou ladrilho ilegível volta do relevo original e o
+  salvamento inteiro é copiado intacto para `saves/quarentena-<data>-<slot>`, nunca apagado.
 - Salvar/carregar por ladrilho, autosave, exportar/abrir arquivo, desfazer/refazer, menu inicial com semente e
   tamanho (10/16/20/24 km), opções e presets, idioma, ajuda, saúde (F9), Electron, Steam, empacotamento.

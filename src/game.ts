@@ -73,7 +73,8 @@ import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParam
 import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
-import { packSlot, unpackToSlot } from './mapFile.ts';
+import { packSlot, quarantineSlot, unpackToSlot } from './mapFile.ts';
+import { repairDanglingEnds } from './roads/repair.ts';
 
 const SLOT = 'cidade-1';
 /** Trechos cabíveis no mapa de ocupação (2 sentidos por trecho). */
@@ -2007,7 +2008,8 @@ export class Game {
     let meta;
     try { meta = decodeMeta(raw); } catch (err) {
       if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { reloadWithMap(err.tiles, 'carregar'); return; }
-      this.hud.toast(String(err)); return;
+      const q = await quarantineSlot(SLOT).catch(() => null);
+      this.hud.toast(q ? `Não deu para ler o mapa (${(err as Error).message}). Ele foi guardado intacto em "${q}".` : String(err)); return;
     }
     this.busy = true;
     this.hud.showLoading('Carregando a cidade…');
@@ -2047,13 +2049,23 @@ export class Game {
       this.setWeather(extra.weather ?? null);
     } catch { /* salvamento antigo */ }
     w.tileInSave.set(meta.tiles);
-    let left = TILE_COUNT;
+    let left = TILE_COUNT, corrupt = 0;
     await new Promise<void>((resolve) => {
       const done = () => { if (--left === 0) resolve(); };
       for (let t = 0; t < TILE_COUNT; t++) {
         const cells = cellsOfTile(t);
         if (meta.tiles[t]) {
           this.pool.submit('loadTile', { slot: SLOT, tile: t }, (r) => {
+            if (r.corrupt) {
+              // unreadable tile: its terrain comes back from the seed; the save goes to quarantine below
+              corrupt++;
+              this.pool.submit('terrainGen', { seed: w.seed, tile: t }, (g) => {
+                w.tileMin[t] = g.min; w.tileMax[t] = g.max; w.layerDirty.add(t);
+                for (const c of cells) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
+                done();
+              }, { key: `terrain:${t}`, priority: 0 });
+              return;
+            }
             if (r.found) {
               w.tileMin[t] = r.min; w.tileMax[t] = r.max;
               if (r.boxes) this.insertBoxes(r.boxes);
@@ -2079,9 +2091,18 @@ export class Game {
     // vias: todos os nós antes dos trechos (trechos ligam ladrilhos)
     for (const r of roads) w.roads.loadNodes(r);
     for (const r of roads) w.roads.loadSegs(r);
+    // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
+    for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
     try {
       for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
     } catch { /* salvamento sem cruzamentos escolhidos */ }
+    // old maps: dead ends lying inside another road become junctions
+    const repaired = repairDanglingEnds(w);
+    if (corrupt) {
+      const q = await quarantineSlot(SLOT).catch(() => null);
+      this.hud.toast(`${corrupt} ${corrupt === 1 ? 'pedaço do mapa estava ilegível e voltou' : 'pedaços do mapa estavam ilegíveis e voltaram'} do relevo original${q ? `; o salvamento original foi guardado intacto em "${q}"` : ''}.`);
+    }
+    if (repaired) this.hud.toast(`Mapa reparado: ${repaired} ${repaired === 1 ? 'ponta solta dentro de outra via virou cruzamento' : 'pontas soltas dentro de outras vias viraram cruzamentos'}.`);
     w.saveDirty.fill(0);
     this.rig.restore(meta.camera);
     this.hud.setView(this.rig.mode);

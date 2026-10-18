@@ -99,7 +99,7 @@ export interface JobResults {
   conform: { tile: number; min: number; max: number };
   saveTile: { tile: number; bytes: number };
   saveMeta: { bytes: number };
-  loadTile: { tile: number; found: boolean; min: number; max: number; boxes: BoxColumns | null; roads: RoadSave | null; hasWater?: boolean };
+  loadTile: { tile: number; found: boolean; min: number; max: number; boxes: BoxColumns | null; roads: RoadSave | null; hasWater?: boolean; /** the file exists but cannot be read */ corrupt?: boolean };
   loadMeta: { meta: Uint8Array | null };
 }
 
