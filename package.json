@@ -15,7 +15,8 @@
     "electron": "vite build && electron .",
     "shot": "vite build && tools/shot.sh",
     "package:win": "vite build && node tools/package.mjs win32",
-    "package:linux": "vite build && node tools/package.mjs linux"
+    "package:linux": "vite build && node tools/package.mjs linux",
+    "cook:people": "node tools/cook-people.mjs"
   },
   "dependencies": {
     "steamworks.js": "^0.4.0",
