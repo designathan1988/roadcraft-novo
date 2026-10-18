@@ -1,5 +1,5 @@
-// Steam pela steamworks.js, só no processo principal (a página continua isolada).
-// Sem Steam aberto (ou fora da Steam), tudo vira nada: o jogo roda igual.
+// Steam through steamworks.js, only in the main process (the page stays isolated).
+// Without Steam open (or outside Steam), everything becomes a no-op: the game runs the same.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 let client = null;
 let lib = null;
 
-/** Liga o Steam. appId: steam_appid.txt ao lado do executável, senão 480 (Spacewar, teste). */
+/** Starts Steam. appId: steam_appid.txt next to the executable, otherwise 480 (Spacewar, test). */
 export function initSteam(appDir) {
   if (process.env.CIDADE_SHOT || process.env.CIDADE_NO_STEAM) return false;
   try {
@@ -21,15 +21,15 @@ export function initSteam(appDir) {
     client = lib.init(appId);
     return true;
   } catch (err) {
-    console.log('Steam indisponível:', err?.message ?? err);
+    console.log('Steam unavailable:', err?.message ?? err);
     client = null;
     return false;
   }
 }
 
-/** Overlay do Steam na janela do Electron (chamar depois de initSteam). */
+/** Steam overlay in the Electron window (call after initSteam). */
 export function enableOverlay() {
-  try { if (lib && client) lib.electronEnableSteamOverlay(); } catch { /* sem overlay */ }
+  try { if (lib && client) lib.electronEnableSteamOverlay(); } catch { /* no overlay */ }
 }
 
 export function steamInfo() {

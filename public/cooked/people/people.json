@@ -1,0 +1,1285 @@
+{
+ "format": "roadcraft5-people",
+ "version": 2,
+ "bytes": 29533184,
+ "bones": [
+  "Root",
+  "pelvis",
+  "spine_01",
+  "spine_02",
+  "spine_03",
+  "neck_01",
+  "head",
+  "clavicle_l",
+  "upperarm_l",
+  "lowerarm_l",
+  "hand_l",
+  "clavicle_r",
+  "upperarm_r",
+  "lowerarm_r",
+  "hand_r",
+  "thigh_l",
+  "calf_l",
+  "foot_l",
+  "ball_l",
+  "thigh_r",
+  "calf_r",
+  "foot_r",
+  "ball_r"
+ ],
+ "parents": [
+  -1,
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  4,
+  7,
+  8,
+  9,
+  4,
+  11,
+  12,
+  13,
+  1,
+  15,
+  16,
+  17,
+  1,
+  19,
+  20,
+  21
+ ],
+ "regions": {
+  "skin": 0,
+  "hair": 1,
+  "top": 2,
+  "bottom": 3,
+  "shoes": 4,
+  "hat": 5,
+  "eyes": 6,
+  "phone": 8,
+  "cup": 9,
+  "bag": 10,
+  "paper": 11,
+  "umbrella": 12,
+  "helmet": 13
+ },
+ "clipSets": [
+  [
+   {
+    "name": "walk",
+    "start": 0,
+    "frames": 37,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "idle",
+    "start": 37,
+    "frames": 155,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "sit",
+    "start": 192,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "walkPhone",
+    "start": 272,
+    "frames": 37,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "phone",
+    "start": 309,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "read",
+    "start": 389,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "drink",
+    "start": 469,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "walkUmbrella",
+    "start": 549,
+    "frames": 37,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "umbrella",
+    "start": 586,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "walkCarry",
+    "start": 666,
+    "frames": 37,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "pedal",
+    "start": 703,
+    "frames": 30,
+    "fps": 30,
+    "loop": true
+   }
+  ],
+  [
+   {
+    "name": "walk",
+    "start": 0,
+    "frames": 32,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "idle",
+    "start": 32,
+    "frames": 117,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "sit",
+    "start": 149,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "walkPhone",
+    "start": 229,
+    "frames": 32,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "phone",
+    "start": 261,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "read",
+    "start": 341,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "drink",
+    "start": 421,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "walkUmbrella",
+    "start": 501,
+    "frames": 32,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "umbrella",
+    "start": 533,
+    "frames": 80,
+    "fps": 10,
+    "loop": true
+   },
+   {
+    "name": "walkCarry",
+    "start": 613,
+    "frames": 32,
+    "fps": 30,
+    "loop": true
+   },
+   {
+    "name": "pedal",
+    "start": 645,
+    "frames": 30,
+    "fps": 30,
+    "loop": true
+   }
+  ]
+ ],
+ "paletteFrames": 22528,
+ "maxTris": [
+  4138,
+  636,
+  166
+ ],
+ "vertices": 89188,
+ "layout": {
+  "vpos": {
+   "byteOffset": 0,
+   "count": 356752
+  },
+  "vattr": {
+   "byteOffset": 1427200,
+   "count": 356752
+  },
+  "index": {
+   "byteOffset": 2854400,
+   "count": 451935
+  },
+  "palette": {
+   "byteOffset": 4662272,
+   "count": 6217728
+  }
+ },
+ "variations": [
+  {
+   "clipSet": 0,
+   "paletteStart": 0,
+   "sex": "female",
+   "band": "child",
+   "years": 10,
+   "height": 1.333,
+   "outfit": "female_casualsuit01",
+   "hair": "bob02",
+   "shoes": "shoes01",
+   "hat": null,
+   "skin": "young_african_female",
+   "lod": [
+    [
+     0,
+     3996
+    ],
+    [
+     11988,
+     553
+    ],
+    [
+     13647,
+     132
+    ]
+   ],
+   "sitPelvis": [
+    0.478,
+    -0.347
+   ],
+   "walkAdvance": 1.2913732799738646
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 733,
+   "sex": "female",
+   "band": "child",
+   "years": 11,
+   "height": 1.245,
+   "outfit": "female_sportsuit01",
+   "hair": "afro01",
+   "shoes": "shoes02",
+   "hat": null,
+   "skin": "young_caucasian_female",
+   "lod": [
+    [
+     14043,
+     3999
+    ],
+    [
+     26040,
+     547
+    ],
+    [
+     27681,
+     150
+    ]
+   ],
+   "sitPelvis": [
+    0.442,
+    -0.319
+   ],
+   "walkAdvance": 1.192458468394354
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 1466,
+   "sex": "female",
+   "band": "child",
+   "years": 8,
+   "height": 1.042,
+   "outfit": "female_casualsuit02",
+   "hair": "bob02",
+   "shoes": "shoes03",
+   "hat": null,
+   "skin": "young_african_female",
+   "lod": [
+    [
+     28131,
+     3998
+    ],
+    [
+     40125,
+     519
+    ],
+    [
+     41682,
+     157
+    ]
+   ],
+   "sitPelvis": [
+    0.359,
+    -0.259
+   ],
+   "walkAdvance": 0.9688884271867574
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 2199,
+   "sex": "female",
+   "band": "child",
+   "years": 9,
+   "height": 1.132,
+   "outfit": "female_casualsuit01",
+   "hair": "afro01",
+   "shoes": "shoes04",
+   "hat": null,
+   "skin": "young_asian_female",
+   "lod": [
+    [
+     42153,
+     3998
+    ],
+    [
+     54147,
+     596
+    ],
+    [
+     55935,
+     153
+    ]
+   ],
+   "sitPelvis": [
+    0.398,
+    -0.288
+   ],
+   "walkAdvance": 1.0746066032871604
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 2932,
+   "sex": "female",
+   "band": "young",
+   "years": 22,
+   "height": 1.637,
+   "outfit": "female_casualsuit02",
+   "hair": "long01",
+   "shoes": "shoes03",
+   "hat": null,
+   "skin": "young_caucasian_female",
+   "lod": [
+    [
+     56394,
+     3995
+    ],
+    [
+     68379,
+     611
+    ],
+    [
+     70212,
+     150
+    ]
+   ],
+   "sitPelvis": [
+    0.572,
+    -0.404
+   ],
+   "walkAdvance": 1.5369643098786474
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 3665,
+   "sex": "female",
+   "band": "young",
+   "years": 27,
+   "height": 1.66,
+   "outfit": "female_sportsuit01",
+   "hair": "bob01",
+   "shoes": "shoes04",
+   "hat": null,
+   "skin": "young_african_female",
+   "lod": [
+    [
+     70662,
+     3620
+    ],
+    [
+     81522,
+     564
+    ],
+    [
+     83214,
+     146
+    ]
+   ],
+   "sitPelvis": [
+    0.578,
+    -0.407
+   ],
+   "walkAdvance": 1.5520401847995817
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 4398,
+   "sex": "female",
+   "band": "young",
+   "years": 26,
+   "height": 1.673,
+   "outfit": "female_casualsuit01",
+   "hair": "long01",
+   "shoes": "shoes05",
+   "hat": null,
+   "skin": "young_asian_female",
+   "lod": [
+    [
+     83652,
+     3997
+    ],
+    [
+     95643,
+     636
+    ],
+    [
+     97551,
+     166
+    ]
+   ],
+   "sitPelvis": [
+    0.589,
+    -0.416
+   ],
+   "walkAdvance": 1.5814748350121082
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 5131,
+   "sex": "female",
+   "band": "young",
+   "years": 22,
+   "height": 1.667,
+   "outfit": "female_elegantsuit01",
+   "hair": "bob01",
+   "shoes": "shoes06",
+   "hat": null,
+   "skin": "young_african_female",
+   "lod": [
+    [
+     98049,
+     3633
+    ],
+    [
+     108948,
+     565
+    ],
+    [
+     110643,
+     143
+    ]
+   ],
+   "sitPelvis": [
+    0.582,
+    -0.411
+   ],
+   "walkAdvance": 1.5642229018397629
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 5864,
+   "sex": "female",
+   "band": "adult",
+   "years": 44,
+   "height": 1.689,
+   "outfit": "female_elegantsuit01",
+   "hair": "ponytail01",
+   "shoes": "shoes05",
+   "hat": null,
+   "skin": "middleage_african_female",
+   "lod": [
+    [
+     111072,
+     3999
+    ],
+    [
+     123069,
+     605
+    ],
+    [
+     124884,
+     136
+    ]
+   ],
+   "sitPelvis": [
+    0.592,
+    -0.416
+   ],
+   "walkAdvance": 1.5890141090750696
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 6597,
+   "sex": "female",
+   "band": "adult",
+   "years": 38,
+   "height": 1.525,
+   "outfit": "female_casualsuit02",
+   "hair": "braid01",
+   "shoes": "shoes06",
+   "hat": null,
+   "skin": "middleage_asian_female",
+   "lod": [
+    [
+     125292,
+     3864
+    ],
+    [
+     136884,
+     579
+    ],
+    [
+     138621,
+     159
+    ]
+   ],
+   "sitPelvis": [
+    0.53,
+    -0.37
+   ],
+   "walkAdvance": 1.4230217823721467
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 7330,
+   "sex": "female",
+   "band": "adult",
+   "years": 38,
+   "height": 1.804,
+   "outfit": "female_casualsuit01",
+   "hair": "ponytail01",
+   "shoes": "shoes01",
+   "hat": null,
+   "skin": "middleage_african_female",
+   "lod": [
+    [
+     139098,
+     3999
+    ],
+    [
+     151095,
+     604
+    ],
+    [
+     152907,
+     152
+    ]
+   ],
+   "sitPelvis": [
+    0.638,
+    -0.451
+   ],
+   "walkAdvance": 1.7138364024497568
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 8063,
+   "sex": "female",
+   "band": "adult",
+   "years": 40,
+   "height": 1.567,
+   "outfit": "female_elegantsuit01",
+   "hair": "braid01",
+   "shoes": "shoes02",
+   "hat": null,
+   "skin": "middleage_caucasian_female",
+   "lod": [
+    [
+     153363,
+     3877
+    ],
+    [
+     164994,
+     618
+    ],
+    [
+     166848,
+     149
+    ]
+   ],
+   "sitPelvis": [
+    0.541,
+    -0.377
+   ],
+   "walkAdvance": 1.4500333391316236
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 8796,
+   "sex": "female",
+   "band": "senior",
+   "years": 70,
+   "height": 1.514,
+   "outfit": "female_casualsuit01",
+   "hair": "afro01",
+   "shoes": "shoes01",
+   "hat": null,
+   "skin": "old_asian_female",
+   "lod": [
+    [
+     167295,
+     3999
+    ],
+    [
+     179292,
+     596
+    ],
+    [
+     181080,
+     160
+    ]
+   ],
+   "sitPelvis": [
+    0.534,
+    -0.369
+   ],
+   "walkAdvance": 1.4337966290749609
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 9529,
+   "sex": "female",
+   "band": "senior",
+   "years": 65,
+   "height": 1.691,
+   "outfit": "female_elegantsuit01",
+   "hair": "bob02",
+   "shoes": "shoes02",
+   "hat": null,
+   "skin": "old_african_female",
+   "lod": [
+    [
+     181560,
+     3997
+    ],
+    [
+     193551,
+     559
+    ],
+    [
+     195228,
+     148
+    ]
+   ],
+   "sitPelvis": [
+    0.592,
+    -0.413
+   ],
+   "walkAdvance": 1.5904016842022537
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 10262,
+   "sex": "female",
+   "band": "senior",
+   "years": 69,
+   "height": 1.616,
+   "outfit": "female_casualsuit02",
+   "hair": "afro01",
+   "shoes": "shoes03",
+   "hat": null,
+   "skin": "old_caucasian_female",
+   "lod": [
+    [
+     195672,
+     3997
+    ],
+    [
+     207663,
+     511
+    ],
+    [
+     209196,
+     157
+    ]
+   ],
+   "sitPelvis": [
+    0.563,
+    -0.391
+   ],
+   "walkAdvance": 1.5120217278674246
+  },
+  {
+   "clipSet": 0,
+   "paletteStart": 10995,
+   "sex": "female",
+   "band": "senior",
+   "years": 65,
+   "height": 1.63,
+   "outfit": "female_elegantsuit01",
+   "hair": "bob02",
+   "shoes": "shoes04",
+   "hat": null,
+   "skin": "old_african_female",
+   "lod": [
+    [
+     209667,
+     3999
+    ],
+    [
+     221664,
+     620
+    ],
+    [
+     223524,
+     149
+    ]
+   ],
+   "sitPelvis": [
+    0.568,
+    -0.396
+   ],
+   "walkAdvance": 1.5269043555110693
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 11728,
+   "sex": "male",
+   "band": "child",
+   "years": 7,
+   "height": 1.054,
+   "outfit": "male_casualsuit02",
+   "hair": "short02",
+   "shoes": "shoes02",
+   "hat": null,
+   "skin": "young_african_male",
+   "lod": [
+    [
+     223971,
+     3999
+    ],
+    [
+     235968,
+     591
+    ],
+    [
+     237741,
+     159
+    ]
+   ],
+   "sitPelvis": [
+    0.349,
+    -0.271
+   ],
+   "walkAdvance": 0.8838846243065264
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 12403,
+   "sex": "male",
+   "band": "child",
+   "years": 11,
+   "height": 1.377,
+   "outfit": "male_casualsuit04",
+   "hair": "short03",
+   "shoes": "shoes03",
+   "hat": null,
+   "skin": "young_caucasian_male",
+   "lod": [
+    [
+     238218,
+     4000
+    ],
+    [
+     250218,
+     627
+    ],
+    [
+     252099,
+     159
+    ]
+   ],
+   "sitPelvis": [
+    0.471,
+    -0.37
+   ],
+   "walkAdvance": 1.1955621506056437
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 13078,
+   "sex": "male",
+   "band": "child",
+   "years": 9,
+   "height": 1.239,
+   "outfit": "male_casualsuit03",
+   "hair": "short04",
+   "shoes": "shoes04",
+   "hat": null,
+   "skin": "young_african_male",
+   "lod": [
+    [
+     252576,
+     3999
+    ],
+    [
+     264573,
+     586
+    ],
+    [
+     266331,
+     158
+    ]
+   ],
+   "sitPelvis": [
+    0.42,
+    -0.329
+   ],
+   "walkAdvance": 1.064531003018841
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 13753,
+   "sex": "male",
+   "band": "child",
+   "years": 9,
+   "height": 1.199,
+   "outfit": "male_casualsuit06",
+   "hair": "short01",
+   "shoes": "shoes05",
+   "hat": null,
+   "skin": "young_asian_male",
+   "lod": [
+    [
+     266805,
+     3999
+    ],
+    [
+     278802,
+     569
+    ],
+    [
+     280509,
+     137
+    ]
+   ],
+   "sitPelvis": [
+    0.405,
+    -0.318
+   ],
+   "walkAdvance": 1.0282730179845045
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 14428,
+   "sex": "male",
+   "band": "young",
+   "years": 20,
+   "height": 1.72,
+   "outfit": "male_casualsuit03",
+   "hair": "short04",
+   "shoes": "shoes04",
+   "hat": null,
+   "skin": "young_caucasian_male",
+   "lod": [
+    [
+     280920,
+     3997
+    ],
+    [
+     292911,
+     573
+    ],
+    [
+     294630,
+     144
+    ]
+   ],
+   "sitPelvis": [
+    0.612,
+    -0.479
+   ],
+   "walkAdvance": 1.549091883705722
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 15103,
+   "sex": "male",
+   "band": "young",
+   "years": 19,
+   "height": 1.783,
+   "outfit": "male_casualsuit05",
+   "hair": "short01",
+   "shoes": "shoes05",
+   "hat": null,
+   "skin": "young_african_male",
+   "lod": [
+    [
+     295062,
+     4000
+    ],
+    [
+     307062,
+     500
+    ],
+    [
+     308562,
+     148
+    ]
+   ],
+   "sitPelvis": [
+    0.637,
+    -0.5
+   ],
+   "walkAdvance": 1.6137086614598002
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 15778,
+   "sex": "male",
+   "band": "young",
+   "years": 25,
+   "height": 1.722,
+   "outfit": "male_casualsuit02",
+   "hair": "afro01",
+   "shoes": "shoes06",
+   "hat": null,
+   "skin": "young_asian_male",
+   "lod": [
+    [
+     309006,
+     3997
+    ],
+    [
+     320997,
+     578
+    ],
+    [
+     322731,
+     139
+    ]
+   ],
+   "sitPelvis": [
+    0.609,
+    -0.485
+   ],
+   "walkAdvance": 1.5419969410318881
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 16453,
+   "sex": "male",
+   "band": "young",
+   "years": 20,
+   "height": 1.842,
+   "outfit": "male_casualsuit04",
+   "hair": "short02",
+   "shoes": "shoes01",
+   "hat": null,
+   "skin": "young_african_male",
+   "lod": [
+    [
+     323148,
+     3997
+    ],
+    [
+     335139,
+     631
+    ],
+    [
+     337032,
+     146
+    ]
+   ],
+   "sitPelvis": [
+    0.66,
+    -0.518
+   ],
+   "walkAdvance": 1.6733146317903367
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 17128,
+   "sex": "male",
+   "band": "adult",
+   "years": 40,
+   "height": 1.73,
+   "outfit": "male_casualsuit01",
+   "hair": "afro01",
+   "shoes": "shoes06",
+   "hat": null,
+   "skin": "middleage_african_male",
+   "lod": [
+    [
+     337470,
+     3997
+    ],
+    [
+     349461,
+     536
+    ],
+    [
+     351069,
+     148
+    ]
+   ],
+   "sitPelvis": [
+    0.619,
+    -0.482
+   ],
+   "walkAdvance": 1.5636787964362238
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 17803,
+   "sex": "male",
+   "band": "adult",
+   "years": 39,
+   "height": 1.631,
+   "outfit": "male_worksuit01",
+   "hair": "short02",
+   "shoes": "shoes01",
+   "hat": null,
+   "skin": "middleage_asian_male",
+   "lod": [
+    [
+     351513,
+     4000
+    ],
+    [
+     363513,
+     556
+    ],
+    [
+     365181,
+     145
+    ]
+   ],
+   "sitPelvis": [
+    0.575,
+    -0.456
+   ],
+   "walkAdvance": 1.453455407489712
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 18478,
+   "sex": "male",
+   "band": "adult",
+   "years": 38,
+   "height": 1.806,
+   "outfit": "male_elegantsuit01",
+   "hair": "short03",
+   "shoes": "shoes02",
+   "hat": "fedora01",
+   "skin": "middleage_african_male",
+   "lod": [
+    [
+     365616,
+     4138
+    ],
+    [
+     378030,
+     623
+    ],
+    [
+     379899,
+     152
+    ]
+   ],
+   "sitPelvis": [
+    0.649,
+    -0.507
+   ],
+   "walkAdvance": 1.64321550918743
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 19153,
+   "sex": "male",
+   "band": "adult",
+   "years": 43,
+   "height": 1.745,
+   "outfit": "male_casualsuit05",
+   "hair": "short04",
+   "shoes": "shoes03",
+   "hat": null,
+   "skin": "middleage_caucasian_male",
+   "lod": [
+    [
+     380355,
+     3998
+    ],
+    [
+     392349,
+     561
+    ],
+    [
+     394032,
+     152
+    ]
+   ],
+   "sitPelvis": [
+    0.627,
+    -0.489
+   ],
+   "walkAdvance": 1.5850568024582334
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 19828,
+   "sex": "male",
+   "band": "senior",
+   "years": 70,
+   "height": 1.775,
+   "outfit": "male_casualsuit06",
+   "hair": "short03",
+   "shoes": "shoes02",
+   "hat": null,
+   "skin": "old_asian_male",
+   "lod": [
+    [
+     394488,
+     3998
+    ],
+    [
+     406482,
+     611
+    ],
+    [
+     408315,
+     147
+    ]
+   ],
+   "sitPelvis": [
+    0.643,
+    -0.51
+   ],
+   "walkAdvance": 1.62680409461384
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 20503,
+   "sex": "male",
+   "band": "senior",
+   "years": 73,
+   "height": 1.871,
+   "outfit": "male_elegantsuit01",
+   "hair": "short04",
+   "shoes": "shoes03",
+   "hat": "fedora01",
+   "skin": "old_african_male",
+   "lod": [
+    [
+     408756,
+     4135
+    ],
+    [
+     421161,
+     549
+    ],
+    [
+     422808,
+     139
+    ]
+   ],
+   "sitPelvis": [
+    0.685,
+    -0.533
+   ],
+   "walkAdvance": 1.7315754296829302
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 21178,
+   "sex": "male",
+   "band": "senior",
+   "years": 71,
+   "height": 1.749,
+   "outfit": "male_casualsuit02",
+   "hair": "short01",
+   "shoes": "shoes04",
+   "hat": null,
+   "skin": "old_caucasian_male",
+   "lod": [
+    [
+     423225,
+     4000
+    ],
+    [
+     435225,
+     582
+    ],
+    [
+     436971,
+     144
+    ]
+   ],
+   "sitPelvis": [
+    0.635,
+    -0.493
+   ],
+   "walkAdvance": 1.6054488436273404
+  },
+  {
+   "clipSet": 1,
+   "paletteStart": 21853,
+   "sex": "male",
+   "band": "senior",
+   "years": 67,
+   "height": 1.937,
+   "outfit": "male_worksuit01",
+   "hair": "afro01",
+   "shoes": "shoes05",
+   "hat": "fedora01",
+   "skin": "old_african_male",
+   "lod": [
+    [
+     437403,
+     4134
+    ],
+    [
+     449805,
+     572
+    ],
+    [
+     451521,
+     138
+    ]
+   ],
+   "sitPelvis": [
+    0.712,
+    -0.557
+   ],
+   "walkAdvance": 1.8009332856477962
+  }
+ ],
+ "sources": {
+  "makehuman": "public/models/people (CC0-1.0, LICENSE-MakeHuman-CC0.txt, LICENSES.json)",
+  "rocketbox": "public/models/citizens (MIT, LICENSE-MICROSOFT.txt)"
+ }
+}

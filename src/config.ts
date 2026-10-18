@@ -1,14 +1,14 @@
-// Constantes do mundo. O tamanho do mapa vive aqui e em nenhum outro lugar.
+// World constants. The map size lives here and nowhere else.
 
-/** Lado do ladrilho em metros (unidade de salvamento, terreno e nível L2). */
+/** Tile side in meters (unit of saving, terrain and the L2 level). */
 export const TILE_SIZE = 1024;
-/** Tamanhos de mapa oferecidos (ladrilhos por lado). */
+/** Offered map sizes (tiles per side). */
 export const MAP_SIZES = [10, 16, 20, 24];
 
 /**
- * Tamanho escolhido antes de qualquer módulo montar arrays: na página vem de
- * ?mapa=N ou da última escolha (localStorage); nos workers, do nome do worker.
- * Trocar de tamanho recarrega a página.
+ * Size chosen before any module builds arrays: on the page it comes from
+ * ?mapa=N or the last choice (localStorage); in workers, from the worker name.
+ * Changing the size reloads the page.
  */
 function readMapTiles(): number {
   const g = globalThis as { name?: unknown; location?: { search?: string }; localStorage?: Storage; document?: unknown };
@@ -20,41 +20,41 @@ function readMapTiles(): number {
       if (m) v = Number(m[1]);
       else v = Number(g.localStorage?.getItem('cidade.mapa') ?? NaN);
     }
-  } catch { /* sem acesso: tamanho padrão */ }
+  } catch { /* no access: default size */ }
   return MAP_SIZES.includes(v) ? v : 10;
 }
 
-/** Ladrilhos por lado do mapa. 10 → mapa de 10.240 m. */
+/** Tiles per map side. 10 → a 10,240 m map. */
 export const MAP_TILES = readMapTiles();
-/** Marca para passar o tamanho aos workers pelo nome. */
+/** Tag that passes the size to workers through the worker name. */
 export const MAP_TAG = `mapa=${MAP_TILES}`;
-/** Lado do mapa em metros. */
+/** Map side in meters. */
 export const MAP_SIZE = TILE_SIZE * MAP_TILES;
-/** Metade do mapa: o mundo vai de -MAP_HALF a +MAP_HALF em X e Z. */
+/** Half the map: the world spans -MAP_HALF to +MAP_HALF in X and Z. */
 export const MAP_HALF = MAP_SIZE / 2;
 
-/** Níveis da grade espacial (lado em metros). */
+/** Spatial grid levels (side in meters). */
 export const PLATE_SIZE = 2048;
 export const CELL_SIZE = 256;
 export const SUBCELL_SIZE = 64;
 
 export const CELLS_PER_TILE = TILE_SIZE / CELL_SIZE; // 4
-export const MAP_CELLS = MAP_SIZE / CELL_SIZE; // 40 no mapa de 10 km
+export const MAP_CELLS = MAP_SIZE / CELL_SIZE; // 40 on the 10 km map
 export const MAP_SUBCELLS = MAP_SIZE / SUBCELL_SIZE; // 160
 export const MAP_PLATES = Math.ceil(MAP_SIZE / PLATE_SIZE); // 5
 
-/** Espaçamento das amostras de altura do terreno (m). */
+/** Spacing of terrain height samples (m). */
 export const HEIGHT_SPACING = 4;
-/** Amostras de altura por lado de ladrilho (= camada da textura). */
+/** Height samples per tile side (= texture layer). */
 export const HEIGHT_TILE_RES = TILE_SIZE / HEIGHT_SPACING; // 256
-/** Amostras de altura por lado do mapa. */
+/** Height samples per map side. */
 export const HEIGHT_MAP_RES = HEIGHT_TILE_RES * MAP_TILES; // 2560
 
-/** Faixa de altura do terreno (m). */
+/** Terrain height range (m). */
 export const TERRAIN_MIN_Y = -64;
 export const TERRAIN_MAX_Y = 400;
-/** Nível do mar. */
+/** Sea level. */
 export const SEA_LEVEL = 0;
 
-/** Versão do formato de salvamento. */
+/** Save format version. */
 export const SAVE_VERSION = 6;

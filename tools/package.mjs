@@ -1,5 +1,5 @@
-// Empacota o jogo com o Electron (Windows e Linux), sem precisar de Node no PC do jogador.
-// Uso: node tools/package.mjs [win32|linux]
+// Packages the game with Electron (Windows and Linux), with no Node needed on the player's PC.
+// Usage: node tools/package.mjs [win32|linux]
 import { packager } from '@electron/packager';
 import fs from 'node:fs';
 
@@ -21,7 +21,7 @@ const paths = await packager({
   prune: false,
   ignore: (p) => {
     if (keep.has(p)) return false;
-    // de node_modules só vai a steamworks.js (e só o binário da plataforma)
+    // from node_modules only steamworks.js ships (and only the platform's binary)
     if (p.startsWith('/node_modules/steamworks.js/dist/')) {
       const want = platform === 'win32' ? 'win64' : 'linux64';
       return !p.startsWith(`/node_modules/steamworks.js/dist/${want}`) && p !== '/node_modules/steamworks.js/dist';
@@ -31,6 +31,6 @@ const paths = await packager({
     return ![...keep].some((k) => k && (p === k || p.startsWith(k + '/')));
   },
 });
-// Steam: o executável procura steam_appid.txt ao lado (480 = teste); troque pelo AppID do jogo
+// Steam: the executable looks for steam_appid.txt next to it (480 = test); replace with the game's AppID
 for (const p of paths) fs.writeFileSync(`${p}/steam_appid.txt`, process.env.STEAM_APPID ?? '480');
 console.log(paths.join('\n'));

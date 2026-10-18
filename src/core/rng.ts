@@ -1,6 +1,6 @@
-// Aleatoriedade determinística: mesmo semente, mesmo resultado, em qualquer thread.
+// Deterministic randomness: same seed, same result, on any thread.
 
-/** Hash inteiro de 32 bits (lowbias32). */
+/** 32-bit integer hash (lowbias32). */
 export function hash32(x: number): number {
   x = (x ^ (x >>> 16)) >>> 0;
   x = Math.imul(x, 0x7feb352d) >>> 0;
@@ -14,7 +14,7 @@ export function hash2(a: number, b: number, seed = 0): number {
   return hash32((hash32((a | 0) ^ seed) + Math.imul(b | 0, 0x9e3779b1)) >>> 0);
 }
 
-/** Gerador mulberry32. Estado num número; sem alocação por chamada. */
+/** mulberry32 generator. State in one number; no allocation per call. */
 export class Rng {
   state: number;
   constructor(seed: number) { this.state = seed >>> 0; }
@@ -32,7 +32,7 @@ export class Rng {
 
 const GRAD = new Float32Array([1, 0, -1, 0, 0, 1, 0, -1, 0.7071, 0.7071, -0.7071, 0.7071, 0.7071, -0.7071, -0.7071, -0.7071]);
 
-/** Ruído de gradiente 2D em [-1, 1] aproximadamente. */
+/** 2D gradient noise, roughly in [-1, 1]. */
 export function noise2(x: number, y: number, seed: number): number {
   const x0 = Math.floor(x), y0 = Math.floor(y);
   const fx = x - x0, fy = y - y0;
