@@ -1,6 +1,10 @@
-// Tela de entrada: cidade nova pela semente, mapa vazio, carregar, opções, sair.
+// The start screen, in Roadcraft's look: a new city from a seed, an empty map, the last game, options, language
+// and (in the executable) quit, over the map as it loads behind.
 
 import { MAP_SIZES, MAP_TILES, TILE_SIZE } from '../config.ts';
+import { choices, el, orow, select } from './dom.ts';
+import { svg } from './icons.ts';
+import { LANGUAGES, lang, setLang, t } from './i18n.ts';
 
 export interface MenuActions {
   newCity(seed: number, tiles: number): void;
@@ -13,52 +17,46 @@ export class StartMenu {
   readonly root: HTMLElement;
 
   constructor(parent: HTMLElement, maxLayers: number, a: MenuActions) {
-    const r = document.createElement('div');
-    r.className = 'options menu';
-    const box = document.createElement('div');
-    box.className = 'options-box menu-box';
-    const title = document.createElement('h1');
-    title.textContent = 'Cidade';
-    const sub = document.createElement('p');
-    sub.className = 'opt-note';
-    sub.textContent = 'Vias, trânsito e cidades inteiras de 10 a 24 km.';
-    const seedRow = document.createElement('div'); seedRow.className = 'opt-row';
-    const seedLabel = document.createElement('span'); seedLabel.textContent = 'Semente';
-    const seed = document.createElement('input'); seed.type = 'number'; seed.min = '1'; seed.value = String(1 + Math.floor(Math.random() * 9999));
-    seed.className = 'seed';
-    seedRow.append(seedLabel, seed);
-    const sizeRow = document.createElement('div'); sizeRow.className = 'opt-row';
-    const sizeLabel = document.createElement('span'); sizeLabel.textContent = 'Tamanho do mapa';
-    const size = document.createElement('select');
-    for (const t of MAP_SIZES) {
-      const o = document.createElement('option');
-      o.value = String(t);
-      // um ladrilho por camada de textura: placas com poucas camadas não abrem os mapas maiores
-      if (t * t > maxLayers) o.disabled = true;
-      o.textContent = `${Math.round(t * TILE_SIZE / 1000)} km × ${Math.round(t * TILE_SIZE / 1000)} km`;
-      size.append(o);
-    }
-    size.value = String(MAP_TILES);
-    sizeRow.append(sizeLabel, size);
-    const tiles = () => Number(size.value);
-    const btn = (label: string, fn: () => void, main = false) => {
-      const b = document.createElement('button'); b.textContent = label;
-      if (main) b.className = 'main';
-      b.addEventListener('click', () => { fn(); });
+    const r = el('div', 'v2-start');
+    const box = el('div', 'v2-start-box');
+    const brand = el('div', 'v2-start-brand');
+    brand.innerHTML = svg('roads', 40);
+    const h = el('h1');
+    h.append('Road', el('b', '', 'craft'));
+    brand.append(h);
+    const sub = el('p', 'v2-start-sub', t('ui.start.sub'));
+    const seed = el('input', 'v2-search');
+    seed.type = 'number'; seed.min = '1'; seed.value = String(1 + Math.floor(Math.random() * 9999));
+    seed.addEventListener('keydown', (e) => e.stopPropagation());
+    const sizes = MAP_SIZES.map((tiles) => [tiles, `${Math.round(tiles * TILE_SIZE / 1000)} km × ${Math.round(tiles * TILE_SIZE / 1000)} km`] as const);
+    const size = select(t('ui.start.size'), sizes, MAP_TILES, () => undefined);
+    // one tile per texture layer: cards with few layers cannot open the larger maps
+    for (const o of size.options) if (Number(o.value) ** 2 > maxLayers) o.disabled = true;
+    const tiles = (): number => Number(size.value);
+    const close = (): void => r.classList.add('hidden');
+    const big = (label: string, icon: string, fn: () => void, primary = false): HTMLButtonElement => {
+      const b = el('button', `v2-btn${primary ? ' primary' : ''}`);
+      b.type = 'button';
+      b.innerHTML = svg(icon, 18);
+      b.append(el('span', '', label));
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
       return b;
     };
-    const close = () => r.classList.add('hidden');
-    const list = document.createElement('div'); list.className = 'menu-buttons';
+    const list = el('div', 'v2-start-buttons');
     list.append(
-      btn('Gerar cidade nova', () => { close(); a.newCity(Math.max(1, Number(seed.value) >>> 0), tiles()); }, true),
-      btn('Começar num mapa vazio', () => { close(); a.empty(tiles()); }),
-      btn('Carregar o último jogo', () => { close(); a.load(); }),
-      btn('Opções', () => a.options()),
+      big(t('ui.start.generate'), 'generate', () => { close(); a.newCity(Math.max(1, Number(seed.value) >>> 0), tiles()); }, true),
+      big(t('ui.start.empty'), 'm_new', () => { close(); a.empty(tiles()); }),
+      big(t('ui.menu.load'), 'm_open', () => { close(); a.load(); }),
+      big(t('ui.options.title'), 'm_quality', () => a.options()),
     );
-    // sair só faz sentido no executável
-    if ((globalThis as { cidadeSteam?: unknown }).cidadeSteam) list.append(btn('Sair', () => window.close()));
-    box.append(title, sub, seedRow, sizeRow, list);
+    // quitting only makes sense in the executable
+    if ((globalThis as { cidadeSteam?: unknown }).cidadeSteam) list.append(big(t('ui.start.quit'), 'close', () => window.close()));
+    const langs = el('div', 'v2-start-langs');
+    langs.append(choices(LANGUAGES.map(([code, name]) => ({ label: name, on: lang() === code, run: () => setLang(code) }))));
+    box.append(brand, sub, orow(t('ui.start.seed'), seed), orow(t('ui.start.size'), size), list, langs);
     r.append(box);
+    r.addEventListener('pointerdown', (e) => e.stopPropagation());
+    r.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
     parent.append(r);
     this.root = r;
   }

@@ -1,0 +1,149 @@
+/* What this engine adds to Roadcraft's look (shell.css): the hint bar, dialogs, loading, the start screen, the F9
+   panel, the section editor and the inspector's pieces. Same tokens (--v-*). */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; color: var(--v-text); font: 13px/1.3 Inter, ui-sans-serif, "Segoe UI", Roboto, sans-serif; user-select: none; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+.v2 select, .v2-select { height: 30px; max-width: 100%; padding: 0 8px; border: 1px solid var(--v-line); border-radius: var(--v-r-s); background: var(--v-bg-solid); color: var(--v-text); font: inherit; font-size: 12.5px; color-scheme: dark; }
+.v2 select:focus { outline: none; border-color: var(--v-accent); }
+.v2-orow .v2-select { flex: 1; min-width: 0; }
+.v2 .soon { opacity: 0.38; cursor: help !important; }
+.v2-pill.on { color: var(--v-accent); border-color: var(--v-accent); background: var(--v-accent-soft); }
+.v2-pill.wide { width: auto; padding: 0 16px; }
+.v2-act.on { color: var(--v-accent); border-color: var(--v-accent); background: var(--v-accent-soft); }
+.v2-act > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* The tool's hint: one line over the dock; with the drawer open it goes under the top bar. */
+.v2-hintbar {
+  position: absolute; left: 50%; bottom: calc(12px + var(--v-dock-h) + 8px); transform: translateX(-50%); z-index: 4;
+  max-width: min(720px, calc(100vw - 24px)); padding: 5px 12px; border-radius: 999px; pointer-events: none;
+  background: rgba(14, 22, 24, 0.78); border: 1px solid var(--v-line); color: var(--v-text); font-size: 12.5px; text-align: center;
+}
+.v2-hintbar[hidden] { display: none; }
+.v2:has(> .v2-drawer:not([hidden])) > .v2-hintbar { bottom: auto; top: calc(12px + var(--v-hud-h) + 10px); }
+.v2:has(> .v2-toast:not([hidden])) > .v2-hintbar { opacity: 0; }
+
+/* The selection column holds the inspector and hides with it. */
+.v2-side:not(:has(> .inspector:not(.hidden))) { display: none; }
+.v2-side > .inspector { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; }
+.v2-side > .inspector.hidden { display: none; }
+
+/* Transit lines: the chosen one ringed; one under the other. */
+.v2-transit-line { cursor: pointer; border: 1px solid transparent; }
+.v2-transit-line.on { border-color: var(--v-accent); }
+.v2-transit-line .v2-icon { width: 24px; height: 24px; }
+.v2-section-items:has(> .v2-transit-line) { grid-auto-flow: row; }
+
+/* The buildings session's panel under the Build options. */
+.v2-building-slot:empty { display: none; }
+.v2-building-slot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 6px; border-top: 1px solid var(--v-line); font-size: 12px; }
+.v2-building-slot button { padding: 3px 7px; border: 1px solid var(--v-line); border-radius: 7px; background: var(--v-raise); color: var(--v-text); font: inherit; font-size: 12px; }
+.v2-building-slot .label { color: var(--v-muted); }
+
+/* Modal boxes: About, the options. */
+.v2-dialog-back { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(4, 10, 11, 0.5); pointer-events: auto; }
+.v2-dialog-back[hidden], .v2-dialog-back.hidden { display: none; }
+.v2-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; padding: 18px 20px; border-radius: 16px; background: rgba(14, 22, 24, 0.97); border: 1px solid var(--v-line); box-shadow: var(--v-shadow); color: var(--v-text); }
+.v2-dialog h2 { margin: 0 0 10px; font-size: 17px; font-weight: 700; }
+.v2-dialog p { line-height: 1.45; }
+.v2-dialog .opt-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 38px; border-top: 1px solid var(--v-line); }
+.v2-dialog .opt-row > span:first-child { color: var(--v-muted); font-size: 12px; font-weight: 600; }
+.v2-dialog .opt-row > :last-child { justify-self: start; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.v2-dialog select { height: 30px; padding: 0 8px; border: 1px solid var(--v-line); border-radius: var(--v-r-s); background: var(--v-bg-solid); color: var(--v-text); font: inherit; color-scheme: dark; }
+.v2-dialog input[type=range] { accent-color: var(--v-accent); }
+.v2-dialog input[type=checkbox] { accent-color: var(--v-accent); width: 16px; height: 16px; }
+.v2-dialog .value { min-width: 44px; font-variant-numeric: tabular-nums; font-size: 12px; }
+.v2-dialog .opt-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.v2-dialog .opt-note { color: var(--v-muted); font-size: 12px; }
+.v2-btn { height: 34px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--v-line); background: var(--v-raise); color: var(--v-text); font: inherit; font-weight: 600; cursor: pointer; }
+.v2-btn:hover { border-color: var(--v-accent-line); background: var(--v-raise-2); }
+.v2-btn.primary { background: var(--v-accent); border-color: var(--v-accent); color: var(--v-accent-ink); }
+.v2-btn.primary:hover { filter: brightness(1.08); }
+.v2-btn:disabled { opacity: .4; cursor: default; }
+
+/* Loading and the error that stops it. */
+#loading { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: radial-gradient(120% 90% at 50% 30%, #1d3431 0%, #0b1416 100%); transition: opacity .35s; }
+#loading.hidden { opacity: 0; pointer-events: none; }
+#loading h1 { margin: 0; font-weight: 800; letter-spacing: .02em; font-size: 34px; color: #4fe0bf; }
+#loading-text { color: #a3b4b0; max-width: 520px; text-align: center; }
+#loading.error #loading-text { color: #ffb3aa; }
+
+/* The F9 panel. */
+.health { position: absolute; top: calc(12px + var(--v-hud-h) + 10px); right: 12px; z-index: 8; width: 380px; max-height: 60vh; overflow: auto; padding: 12px 14px; pointer-events: auto;
+  background: var(--v-bg); border: 1px solid var(--v-line); border-radius: 16px; box-shadow: var(--v-shadow); color: var(--v-text); }
+.health.hidden { display: none; }
+.health h3 { margin: 0 0 8px; font-size: 15px; }
+.health-status { margin-bottom: 8px; font-weight: 600; }
+.health-status.ok { color: var(--v-accent); } .health-status.warn { color: #ffc864; } .health-status.bad { color: var(--v-danger); }
+.health-list { font-size: 12px; color: var(--v-muted); display: grid; gap: 3px; margin-bottom: 10px; }
+.health .row { display: flex; gap: 6px; }
+
+/* The start screen (StartMenu). */
+.v2-start { position: fixed; inset: 0; z-index: 25; display: grid; place-items: center; pointer-events: auto;
+  background: radial-gradient(90% 70% at 50% 35%, rgba(16, 32, 30, 0.45) 0%, rgba(6, 12, 13, 0.8) 100%); }
+.v2-start.hidden { display: none; }
+.v2-start-box { width: min(440px, calc(100vw - 32px)); padding: 26px 26px 20px; border-radius: 18px; background: rgba(14, 22, 24, 0.94); border: 1px solid var(--v-line); box-shadow: var(--v-shadow); }
+.v2-start-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.v2-start-brand svg { width: 40px; height: 40px; color: var(--v-accent); }
+.v2-start-brand h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: .01em; }
+.v2-start-brand h1 b { color: var(--v-accent); font-weight: 800; }
+.v2-start-sub { margin: 0 0 16px; color: var(--v-muted); font-size: 13px; }
+.v2-start .v2-orow { grid-template-columns: 120px minmax(0, 1fr); }
+.v2-start input.v2-search { width: 120px; }
+.v2-start-buttons { display: grid; gap: 8px; margin-top: 16px; }
+.v2-start-buttons .v2-btn { height: 42px; display: flex; align-items: center; gap: 10px; text-align: left; }
+.v2-start-buttons .v2-btn svg { flex: none; width: 18px; height: 18px; }
+.v2-start-langs { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* The section editor (the engine's, in Roadcraft's road panel). */
+.rp-panel.section-editor.hidden { display: none; }
+.section-canvas { width: 100%; height: 96px; border-radius: 8px; background: #2a3a26; cursor: pointer; }
+.section-editor .grid2 { display: grid; grid-template-columns: 210px 1fr; gap: 6px 12px; align-items: center; }
+.section-editor .grid2 > .label { color: var(--v-muted); font-size: 12px; font-weight: 600; }
+.section-editor .row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.section-editor .problems { color: var(--v-danger-ink); font-size: 12px; min-height: 14px; }
+.section-editor .problems.ok { color: var(--v-accent); }
+.section-editor input[type=range] { accent-color: var(--v-accent); }
+.section-editor .value { min-width: 56px; font-variant-numeric: tabular-nums; font-size: 12px; }
+.section-editor select { height: 28px; padding: 0 6px; border: 1px solid var(--v-line); border-radius: 7px; background: var(--v-bg-solid); color: var(--v-text); font: inherit; color-scheme: dark; }
+.section-editor .rp-tool { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 9px; border: 1px solid var(--v-line); border-radius: 8px; background: var(--v-raise); font-size: 12px; }
+.section-editor .rp-tool i { width: 10px; height: 10px; border-radius: 3px; }
+
+/* The inspector (side panel). */
+.inspector h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.inspector .insp-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.inspector .insp-kind { color: var(--v-muted); font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.inspector h4 { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--v-line); color: var(--v-muted); font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.inspect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.inspect-card { padding: 7px 9px; border-radius: 9px; background: rgba(5, 16, 18, 0.55); border: 1px solid var(--v-line); min-width: 0; }
+.inspect-card span { display: block; font-size: 9.5px; color: var(--v-muted); letter-spacing: .08em; text-transform: uppercase; }
+.inspect-card strong { display: block; font-size: 13.5px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inspect-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.inspect-actions button, .inspector .ins-btn { min-height: 32px; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--v-line); background: transparent; color: var(--v-text); font: inherit; font-size: 12px; cursor: pointer; text-align: center; }
+.inspect-actions button:hover:not(:disabled), .inspector .ins-btn:hover:not(:disabled) { border-color: var(--v-accent-line); background: var(--v-accent-soft); }
+.inspect-actions button.danger, .inspector .ins-btn.danger { color: var(--v-danger-ink); border-color: rgba(255, 111, 99, 0.4); }
+.inspect-actions button.primary, .inspector .ins-btn.primary { background: var(--v-accent); border-color: var(--v-accent); color: var(--v-accent-ink); font-weight: 650; }
+.inspect-actions button:disabled, .inspector .ins-btn:disabled { opacity: .4; cursor: default; }
+.inspect-actions button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.inspector .ins-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.inspector .ins-row > .label { flex: 1; min-width: 110px; color: var(--v-muted); font-size: 12px; }
+.inspector .note { color: var(--v-muted); font-size: 11.5px; line-height: 1.4; }
+.inspector select { height: 30px; width: 100%; padding: 0 8px; border: 1px solid var(--v-line); border-radius: var(--v-r-s); background: var(--v-bg-solid); color: var(--v-text); font: inherit; color-scheme: dark; }
+.inspector .ins-row select { width: auto; flex: 1; }
+.inspector .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--v-line); background: rgba(5, 16, 18, 0.55); font: inherit; font-size: 11.5px; cursor: pointer; color: var(--v-text); }
+.inspector .chip i { width: 8px; height: 8px; border-radius: 50%; }
+.inspector .chip.in i { background: #4aa3e8; }
+.inspector .chip.out i { background: #4ee08a; }
+.inspector .chip.out.off { opacity: .5; text-decoration: line-through; }
+.inspector .chip.out.off i { background: #ff5b50; }
+.inspector .chip.on { border-color: #4aa3e8; background: rgba(74, 163, 232, 0.16); }
+.inspector .chip:hover { border-color: var(--v-accent-line); }
+.inspector .profile-art { display: block; width: 100%; height: 56px; border-radius: 8px; }
+.inspector .v2-search { width: 100%; }
+.inspector .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.inspector .check input { accent-color: var(--v-accent); }
+.inspector .legs { display: grid; gap: 6px; }
+/* The creator (buildings session) inside the slot: name and control side by side, checks in a row. */
+.v2-building-slot > .creator { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 4px 8px; align-items: center; width: 100%; }
+.v2-building-slot > .creator > .label { color: var(--v-muted); font-size: 11.5px; font-weight: 600; }
+.v2-building-slot > .creator > select { height: 28px; padding: 0 6px; border: 1px solid var(--v-line); border-radius: 7px; background: var(--v-bg-solid); color: var(--v-text); font: inherit; color-scheme: dark; }
+.v2-building-slot > .creator > .check, .v2-building-slot > .creator > button { grid-column: 1 / -1; }
+.v2-building-slot > .creator > .inline, .v2-building-slot > .creator > input[type=color] { grid-column: 2; }

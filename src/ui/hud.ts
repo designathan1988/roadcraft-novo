@@ -1,30 +1,42 @@
-// Interface: barra de ferramentas, painel da ferramenta e avisos. DOM simples.
+// The game's interface, with Roadcraft's look and layout: a thin bar on top (sky, clock, money, counts, speed,
+// layers, simulation, camera, undo, redo, health, help, menu), the dock of seven categories at the bottom, the
+// drawer of each category with its tabs and things, the tool options at the bottom left, the selection panel on
+// the right, the compass, toasts and the tool's hint. The DOM is built once; per-frame calls only write a text
+// node when its value changed. Tools act through HudActions (implemented in game.ts).
 
+import './shell.css';
+import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
-import { BARRIER_KINDS, SIGN_TYPES, STREET_ITEMS } from '../tools/itemTool.ts';
-import { Item } from '../world/items.ts';
-import { BIOMES, GROUND_NAMES, Ground, TREE_SPECIES } from '../world/ground.ts';
-import { ARCHES, FN_NAMES } from '../world/arch.ts';
-import { MODE_NAMES } from '../world/transit.ts';
-import { ZONE_NAMES } from '../roads/zones.ts';
-import { PAINTS } from '../render/vehicles.ts';
+import { button, el, orow, range, choices } from './dom.ts';
+import { svg } from './icons.ts';
+import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
+import { mountCompass, type Compass } from './compass.ts';
+import {
+  CATS, ShellState, categoriesOf, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
+  type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
+} from './drawers.ts';
 
-const PAINT_SWATCHES = PAINTS.map((p) => `#${p.toString(16).padStart(6, '0')}`);
+declare const __BUILD__: string;
 
 export type Tool = 'camera' | 'inspect' | 'road' | 'curve' | 'roundabout' | 'upgrade' | 'blocks' | 'free' | 'move' | 'split' | 'bulldoze' | 'zone' | 'building' | 'transit' | 'streetscape' | 'barrier' | 'raise' | 'lower' | 'smooth' | 'flatten' | 'paint' | 'forest' | 'river' | 'weather' | 'landform' | 'elements' | 'sky' | 'person' | 'pistol' | 'bomb';
 export type SkyMode = 'ciclo' | 'dia' | 'noite';
 export interface SkyToolState { cloud: 'none' | 'add' | 'move' | 'edit' | 'remove'; fog: 'none' | 'lay' | 'erase'; size: number; base: number; density: number; fogHeight: number }
-/** Chuva 0..1, vento em m/s, direção em graus (para onde sopra), raios por minuto, trovão 0..1. */
+/** Rain 0..1, wind in m/s, direction in degrees (where it blows to), lightning per minute, thunder 0..1. */
 export interface WeatherCtl { rain: number; wind: number; dir: number; lightning: number; thunder: number }
 export type LotMode = 'edit' | 'rect' | 'poly' | 'split' | 'join' | 'delete' | 'front' | 'corner';
-export const LOT_MODES: Array<[LotMode, string]> = [
-  ['edit', 'Editar prédio'], ['rect', 'Desenhar lote (retângulo)'], ['poly', 'Desenhar lote (polígono)'], ['split', 'Dividir lote'],
-  ['join', 'Juntar lotes'], ['delete', 'Apagar lotes e construções'], ['front', 'Definir frente'], ['corner', 'Mover cantos'],
-];
 export const TERRAIN_TOOLS: Tool[] = ['raise', 'lower', 'smooth', 'flatten', 'landform'];
-/** Pincéis de chão (usam o mesmo raio). */
+/** Ground brushes (they share the radius). */
 export const GROUND_TOOLS: Tool[] = ['paint', 'forest', 'elements'];
 export const ROAD_TOOLS: Tool[] = ['road', 'curve', 'free', 'roundabout', 'upgrade', 'blocks', 'move', 'split', 'bulldoze'];
+
+/** The simulation's settings the Simulation panel changes. */
+export interface SimSettings { traffic: number; people: number; demand: 'baixa' | 'normal' | 'pico' }
+
+/** The city's numbers for the top bar and the Simulation panel (counters the engine already keeps). */
+export interface CityStatus {
+  cars: number; peds: number; residents: number; jobs: number; buildings: number;
+  speedKmh: number; tripsPerMin: number; lostPerMin: number; stopped: number; roads: number; nodes: number;
+}
 
 export interface HudActions {
   tool(t: Tool): void;
@@ -34,25 +46,25 @@ export interface HudActions {
   zone(z: number): void;
   zoneRadius(r: number): void;
   floors(delta: number): void;
-  /** Estilo de arquitetura (−1 = automático pelo bairro). */
+  /** Architecture style (−1 = automatic by neighbourhood). */
   style(arch: number): void;
   buildingFn(fn: number): void;
-  /** Ferramenta de lote: editar prédio, desenhar (retângulo, polígono), dividir, juntar, apagar, frente, cantos. */
+  /** Lot tool: edit building, draw (rectangle, polygon), split, join, delete, front, corners. */
   lotMode(mode: LotMode): void;
-  /** Divisão: lado a lado ou frente e fundos, em quantas partes. */
+  /** Split: side by side or front and back, into how many. */
   lotSplit(kind: 'side' | 'depth', parts: number): void;
-  /** Zona: pincel ou quadra inteira. */
+  /** Zone: brush or whole block. */
   zoneFill(block: boolean): void;
   lotUse(zone: number): void;
   demolishBuilding(): void;
-  /** Ver por dentro: liga/desliga e muda o andar (+1 / −1). */
+  /** See inside: on/off and floor (+1 / −1). */
   inside(cmd: 'toggle' | 'up' | 'down'): void;
   elevation(delta: number): void;
-  /** Encaixe da via: 0 desligado, 1 ângulos, 2 ângulos e grade. */
+  /** Road snapping: 0 off, 1 angles, 2 angles and grid. */
   roadSnap(mode: number): void;
-  /** Corte da via rebaixada: talude ou muro de arrimo. */
+  /** Sides of a lowered road: batter or retaining walls. */
   cutWalls(on: boolean): void;
-  /** Quarteirões: colunas, linhas, quadra (m), giro (°). */
+  /** Blocks: columns, rows, block (m), rotation (°). */
   blocks(b: { cols: number; rows: number; size: number; angle: number }): void;
   undo(): void;
   redo(): void;
@@ -68,9 +80,9 @@ export interface HudActions {
   help(): void;
   trafficView(): void;
   follow(): void;
-  /** Grade no mapa (liga/desliga). */
+  /** Map grid (on/off). */
   grid(): void;
-  /** Bússola: norte para cima. */
+  /** Compass: north up. */
   north(): void;
   timeSpeed(): void;
   pause(): void;
@@ -81,603 +93,641 @@ export interface HudActions {
   deleteLine(): void;
   item(kind: number): void;
   signType(kind: number): void;
-  /** Texto da placa (nome da rua etc.). */
+  /** Sign text (street name etc.). */
   signText(text: string): void;
   barrierKind(kind: number): void;
   groundKind(kind: number): void;
   forestMode(cut: boolean): void;
-  /** Espécie do bosque e modo uma árvore por clique. */
   forestSpecies(species: number): void;
   forestOne(one: boolean): void;
-  /** Luz dos postes com fios. */
   poleLights(mode: number): void;
   biome(b: number): void;
   riverWidth(w: number): void;
-  /** Relevo pronto do pincel. */
   landform(mode: string): void;
-  /** Pincel de elementos: tipo (item), modo, densidade (por 100 m²) e tamanho (0..15). */
   elements(e: { kind: number; mode: 'lay' | 'eraseKind' | 'eraseAll'; density: number; size: number }): void;
-  /** Aplainar o mapa inteiro. */
   flattenMap(): void;
-  /** Clima ajustado pelo jogador (null = muda sozinho). */
   weather(w: WeatherCtl | null): void;
-  /** Céu: ciclo de dia e noite, sempre dia ou sempre noite. */
   sky(mode: SkyMode): void;
-  /** Água dos rios e do mar: ondas e espuma 0..1, correnteza em m/s. */
   water(w: { waves: number; foam: number; current: number }): void;
-  /** Ferramenta Céu: o que o clique faz com as nuvens ou a neblina, e os valores das barras. */
   skyTool(s: SkyToolState): void;
-  /** Espalhar nuvens pelo céu, ou apagar todas. */
   scatterClouds(count: number, variation: number): void;
   clearClouds(): void;
-  /** Névoa geral (0..2). */
   fogLevel(v: number): void;
-  /** Pessoas: cor da roupa (0..15), altura (0..15), andando (true) ou parada, quantas. */
   personSpec(p: { color: number; height: number; walk: boolean; count: number }): void;
-  /** Força da bomba (1..5). */
   bombForce(f: number): void;
+  // ---- added with the Roadcraft interface
+  /** Simulation speed: 0 paused, 1, 2 or 4. */
+  speed(n: number): void;
+  /** The compass dragged: turn and tilt as a right-button drag of so many pixels. */
+  orbit(dx: number, dy: number): void;
+  /** A quarter of a right angle to the left (−1) or right (+1). */
+  turn(dir: number): void;
+  /** Tilt towards the top view (+1) or the horizon (−1). */
+  tilt(dir: number): void;
+  /** The zone colours shown with any tool. */
+  zoneLayer(on: boolean): void;
+  /** Traffic %, people % and demand. */
+  simulation(s: Partial<SimSettings>): void;
+  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string };
+  /** Regional road markings: br, us, eu, classic. */
+  paint(style: string): void;
+  /** Furniture of new roads: 0 complete, 1 basic, 2 none. */
+  furniture(n: number): void;
+  /** Roundabout radius ×f. */
+  ring(f: number): void;
+  /** Stops become terminals when clicked. */
+  terminal(on: boolean): void;
+  /** The F9 panel. */
+  health(): void;
 }
 
-/** Categorias da barra: cada ferramenta mora numa; a linha de baixo mostra as da categoria escolhida. */
-const CATEGORIES: Array<[string, string, Tool[]]> = [
-  ['vias', 'Vias', ['road', 'curve', 'free', 'roundabout', 'upgrade', 'blocks', 'move', 'split', 'bulldoze']],
-  ['cidade', 'Zonas e prédios', ['zone', 'building']],
-  ['transporte', 'Transporte', ['transit']],
-  ['rua', 'Rua', ['streetscape', 'barrier']],
-  ['terreno', 'Terreno', ['raise', 'lower', 'smooth', 'flatten', 'landform', 'river']],
-  ['natureza', 'Natureza', ['paint', 'elements', 'forest']],
-  ['ceu', 'Céu e clima', ['weather', 'sky']],
-  ['pessoas', 'Pessoas e ações', ['person', 'pistol', 'bomb']],
-];
+type PopId = 'menu' | 'layers' | 'sim' | 'camera' | 'help';
 
-const TOOLS: Array<[Tool, string, string]> = [
-  ['camera', 'Câmera', '1'],
-  ['inspect', 'Inspecionar', 'I'],
-  ['road', 'Via', '2'],
-  ['curve', 'Curva', '3'],
-  ['free', 'Livre', ''],
-  ['roundabout', 'Rotatória', '4'],
-  ['upgrade', 'Perfil', '5'],
-  ['blocks', 'Quarteirões', ''],
-  ['move', 'Mover', 'Y'],
-  ['split', 'Dividir', 'X'],
-  ['bulldoze', 'Demolir', '6'],
-  ['zone', 'Zona', 'Z'],
-  ['building', 'Prédio', 'B'],
-  ['transit', 'Ônibus', 'L'],
-  ['streetscape', 'Paisagismo', 'J'],
-  ['barrier', 'Muros', 'M'],
-  ['raise', 'Subir', '7'],
-  ['lower', 'Descer', '8'],
-  ['smooth', 'Alisar', '9'],
-  ['flatten', 'Nivelar', '0'],
-  ['landform', 'Relevos', ''],
-  ['paint', 'Pintar', 'U'],
-  ['elements', 'Elementos', ''],
-  ['forest', 'Árvores', 'G'],
-  ['river', 'Rio', 'N'],
-  ['weather', 'Clima', ''],
-  ['sky', 'Céu', ''],
-  ['person', 'Pessoas', ''],
-  ['pistol', 'Pistola', ''],
-  ['bomb', 'Bomba', ''],
-];
+/** The keys of each tool, for the help panel: [key, what it does]. */
+const TOOL_KEYS: Partial<Record<Tool | 'roads' | 'terrain', Array<[string, string]>>> = {
+  roads: [['help.key.click', 'ui.do.roadPoint'], ['ui.key.altClick', 'ui.do.copyProfile'], ['help.key.pageUpDown', 'palette.height'], ['help.key.esc', 'ui.do.cancel']],
+  roundabout: [['help.key.click', 'ui.do.roundabout'], ['ui.key.brackets', 'v2.roundabout.radius']],
+  terrain: [['v2.key.drag', 'ui.do.brush'], ['ui.key.brackets', 'terrain.radius']],
+  bulldoze: [['help.key.click', 'help.do.remove'], ['v2.key.drag', 'ui.do.boxRemove'], ['help.key.undo', 'help.do.undo']],
+  streetscape: [['help.key.click', 'help.do.streetscape'], ['v2.key.drag', 'hint.streetscape.row'], ['help.key.shiftClick', 'help.do.streetscapeRemove']],
+  barrier: [['help.key.click', 'help.do.barrierPoint'], ['help.key.doubleClickEnter', 'help.do.barrierEnd'], ['help.key.backspace', 'help.do.barrierBack'], ['help.key.shiftClick', 'help.do.barrierRemove'], ['help.key.esc', 'help.do.barrierCancel']],
+  inspect: [['help.key.click', 'help.do.pick'], ['ui.key.delete', 'ui.do.deleteRoad'], ['help.key.esc', 'help.do.close']],
+  transit: [['help.key.click', 'ui.do.stop'], ['help.key.shiftClick', 'ui.do.terminal']],
+  building: [['help.key.click', 'ui.do.pickBuilding'], ['help.key.pageUpDown', 'ui.build.floors'], ['ui.key.delete', 'inspector.demolish'], ['help.key.doubleClickEnter', 'ui.do.closePolygon']],
+  river: [['help.key.click', 'ui.do.riverPoint'], ['help.key.doubleClickEnter', 'ui.do.riverEnd'], ['help.key.backspace', 'help.do.barrierBack']],
+  zone: [['v2.key.drag', 'ui.do.zone'], ['ui.key.brackets', 'terrain.radius']],
+};
+const CAMERA_KEYS: Array<[string, string]> = [['help.key.orbitDrag', 'help.do.orbit'], ['help.key.panDrag', 'help.do.pan'], ['help.key.wheel', 'help.do.zoom'], ['help.key.qe', 'ui.do.turn'],
+  ['ui.key.rf', 'ui.do.tilt'], ['ui.key.v', 'ui.do.iso'], ['ui.key.c', 'ui.do.follow'], ['ui.key.k', 'sim.congestionLabel']];
+const GLOBAL_KEYS: Array<[string, string]> = [['v2.key.tools', 'v2.do.tools'], ['help.key.undo', 'v2.do.undo'], ['v2.key.redo', 'v2.do.redo'], ['ui.key.save', 'action.saveMap'],
+  ['v2.key.space', 'v2.do.pause'], ['ui.key.p', 'sim.speed'], ['ui.key.f1', 'builder.help'], ['v2.key.f9', 'v2.do.health'], ['help.key.esc', 'ui.do.escape']];
 
 export class Hud {
   readonly root: HTMLElement;
-  private toolButtons = new Map<Tool, HTMLButtonElement>();
-  private subBar!: HTMLElement;
-  private catButtons = new Map<HTMLElement, HTMLButtonElement>();
-  private toolCat = new Map<Tool, HTMLElement>();
-  private catRow: HTMLElement | null = null;
+  readonly catalog: RoadCatalog;
+  /** The selection column on the right: the inspector lives here. */
+  readonly side: HTMLElement;
+  /** Extension point of the Build drawer: the buildings session mounts its editor (creator.ts) here. */
+  readonly buildingSlot: HTMLElement;
+  private a: HudActions;
+  private s = new ShellState();
   private current: Tool = 'camera';
-
-  private showCategory(row: HTMLElement | null): void {
-    for (const [r, b] of this.catButtons) { r.style.display = r === row ? '' : 'none'; b.classList.toggle('open', r === row); }
-    this.catRow = row;
-  }
-  private undoBtn!: HTMLButtonElement;
-  private redoBtn!: HTMLButtonElement;
-  private viewBtn!: HTMLButtonElement;
-  private clockLabel!: HTMLElement;
-  private info!: HTMLElement;
-  private trafficBtn!: HTMLButtonElement;
-  private gridBtn!: HTMLButtonElement;
-  private compass!: HTMLElement;
-  private compassDeg = 999;
-  private speedBtn!: HTMLButtonElement;
-  private pauseBtn!: HTMLButtonElement;
-  private moneyLabel!: HTMLElement;
-  private radiusInput!: HTMLInputElement;
-  private radiusLabel!: HTMLElement;
-  private brushPanel!: HTMLElement;
-  private roadPanel!: HTMLElement;
-  private blocksRow!: HTMLElement;
-  private zonePanel!: HTMLElement;
-  private zoneSel!: HTMLSelectElement;
-  private buildingPanel!: HTMLElement;
-  private buildingInfo!: HTMLElement;
-  private archSel!: HTMLSelectElement;
-  private lotSel!: HTMLSelectElement;
-  private splitRow!: HTMLElement;
-  private fnSel!: HTMLSelectElement;
-  private elevLabel!: HTMLElement;
-  private transitPanel!: HTMLElement;
-  private itemPanel!: HTMLElement;
-  private groundPanel!: HTMLElement;
-  private forestPanel!: HTMLElement;
-  private riverPanel!: HTMLElement;
-  private landPanel!: HTMLElement;
-  private elemPanel!: HTMLElement;
-  private skyPanel!: HTMLElement;
-  private personPanel!: HTMLElement;
-  private bombPanel!: HTMLElement;
-  private weatherPanel!: HTMLElement;
-  private skySel!: HTMLSelectElement;
-  private biomeSel!: HTMLSelectElement;
-  private barrierPanel!: HTMLElement;
-  private lineSel!: HTMLSelectElement;
-  private lineInfo!: HTMLElement;
-  private catalog!: RoadCatalog;
-  private hint!: HTMLElement;
+  private cat: Category | null = null;
+  private open = false;
+  private lastTool = new Map<Category, Tool>();
+  // top bar
+  private clockText = document.createTextNode('');
+  private moneyText = document.createTextNode('');
+  private statsText = document.createTextNode('');
+  private stats: HTMLElement;
+  private skyButtons: HTMLButtonElement[] = [];
+  private speedButtons: HTMLButtonElement[] = [];
+  private undoB: HTMLButtonElement;
+  private redoB: HTMLButtonElement;
+  private insideBar: HTMLElement;
+  private insideLevel: HTMLElement;
+  private speedNow = 1;
+  private status: CityStatus | null = null;
+  private moneyShown = NaN;
+  private clockShown = '';
+  // popovers
+  private pop: HTMLElement;
+  private popId: PopId | null = null;
+  private popAnchor: HTMLElement | null = null;
+  private metrics: HTMLElement | null = null;
+  private layers = { grid: false, zones: false, traffic: false };
+  private view: 'persp' | 'iso' = 'persp';
+  private insideFloor = -1;
+  private about: HTMLElement;
+  // dock and drawer
+  private catButtons = new Map<Category, HTMLButtonElement>();
+  private drawer: HTMLElement;
+  private toolOptions: HTMLElement;
+  private parts: DrawerParts;
+  private hint: HTMLElement;
   private toastEl: HTMLElement;
   private toastTimer = 0;
+  private tip: HTMLElement;
+  private tipFor: HTMLElement | null = null;
+  private compass: Compass;
   private loading: HTMLElement;
   private loadingText: HTMLElement;
+  private rows: LineRow[] = [];
+  private rowsKey = '';
+  private lineNow = 0;
+  private picked: BuildingInfo | null = null;
+  private host: DrawerHost;
+  private fileIn: HTMLInputElement;
 
   constructor(a: HudActions) {
+    this.a = a;
     this.root = document.getElementById('hud')!;
-    this.toastEl = document.getElementById('toast')!;
+    this.root.className = 'v2';
     this.loading = document.getElementById('loading')!;
     this.loadingText = document.getElementById('loading-text')!;
+    this.catalog = new RoadCatalog({ use: (id) => a.profile(id), toast: (text) => this.toast(text) });
+    const st = a.settings();
+    this.s.furniture = st.furniture;
 
-    const bar = el('div', 'bar');
-    const tools = el('div', 'group');
-    // câmera e inspecionar soltas; o resto por categoria (a linha de ferramentas aparece embaixo)
-    this.subBar = el('div', 'subbar');
-    const info = new Map(TOOLS.map(([t, l, k]) => [t, [l, k] as [string, string]]));
-    const mk = (t: Tool) => {
-      const [label, key] = info.get(t)!;
-      const b = button(label, () => a.tool(t), key ? `${label} (${key})` : label);
-      this.toolButtons.set(t, b);
-      return b;
-    };
-    tools.append(mk('camera'), mk('inspect'), el('span', 'sep'));
-    for (const [id, name, list] of CATEGORIES) {
-      const row = el('div', 'group sub');
-      for (const t of list) row.append(mk(t));
-      row.style.display = 'none';
-      this.subBar.append(row);
-      const cb = button(name, () => {
-        const open = this.catRow === row && row.style.display !== 'none';
-        this.showCategory(open ? null : row);
-        if (!open && !list.includes(this.current)) a.tool(list[0]);
-      }, `${name}: ${list.map((t) => info.get(t)![0]).join(', ')}`);
-      cb.dataset.cat = id;
-      this.catButtons.set(row, cb);
-      for (const t of list) this.toolCat.set(t, row);
-      tools.append(cb);
+    // ============================================================ top bar
+    const hud = el('header', 'v2-hud');
+    const city = el('div', 'v2-city');
+    const sky = el('div', 'v2-seg v2-sky');
+    for (const [mode, key, icon] of [['dia', 'sky.day', 'sun'], ['noite', 'sky.night', 'moon'], ['ciclo', 'sky.cycle', 'cycle']] as const) {
+      const b = button('v2-seg-b', t(key), () => { a.sky(mode); this.setSky(mode); }, svg(icon, 16));
+      b.dataset.sky = mode;
+      this.skyButtons.push(b);
+      sky.append(b);
     }
-    bar.append(tools);
+    sky.title = t('sky.title');
+    const clock = el('strong', 'v2-clock');
+    clock.append(this.clockText);
+    const moneyEl = el('strong', 'v2-money');
+    moneyEl.append(this.moneyText);
+    moneyEl.title = t('ui.money.tip');
+    this.stats = el('div', 'v2-stats');
+    this.stats.append(this.statsText);
+    city.append(sky, clock, moneyEl, this.stats);
 
-    const edit = el('div', 'group');
-    this.undoBtn = button('↶', a.undo, 'Desfazer (Ctrl+Z)');
-    this.redoBtn = button('↷', a.redo, 'Refazer (Ctrl+Y)');
-    edit.append(this.undoBtn, this.redoBtn);
-    bar.append(edit);
-
-    const view = el('div', 'group');
-    this.viewBtn = button('Perspectiva', () => a.view(this.viewBtn.dataset.mode === 'iso' ? 'persp' : 'iso'), 'Alternar perspectiva e isométrica (V)');
-    this.trafficBtn = button('Trânsito', a.trafficView, 'Mostrar o congestionamento nas vias (K)');
-    view.append(this.viewBtn, button('De cima', () => a.view('top'), 'Vista de cima (T)'), this.trafficBtn,
-      button('Seguir', a.follow, 'Seguir o veículo mais perto do centro da tela (C); Esc solta'),
-      (this.gridBtn = button('Grade', a.grid, 'Grade no mapa: linhas a cada 64 m (mostrar ou ocultar)')));
-    // canto esquerdo: Menu (arquivo, opções, ajuda) e a vista; canto direito: relógio e dinheiro
-    const left = el('div', 'corner-left'), right = el('div', 'corner-right');
-
-    const fileIn = document.createElement('input');
-    fileIn.type = 'file'; fileIn.accept = '.cidade'; fileIn.style.display = 'none';
-    fileIn.addEventListener('change', () => { const f = fileIn.files?.[0]; if (f) a.importMap(f); fileIn.value = ''; });
-    document.body.append(fileIn);
-    const file = el('div', 'group menu-list hidden');
-    const menuBtn = button('☰ Menu', () => file.classList.toggle('hidden'), 'Salvar, carregar, exportar, mapa novo, opções e ajuda');
-    file.addEventListener('click', () => file.classList.add('hidden'));
-    file.append(
-      button('Salvar', a.save, 'Salvar (Ctrl+S)'),
-      button('Carregar', a.load, 'Carregar o último salvamento'),
-      button('Exportar', a.exportMap, 'Salvar o mapa num arquivo (para guardar ou levar para outro computador)'),
-      button('Abrir arquivo', () => fileIn.click(), 'Abrir um mapa salvo em arquivo'),
-      button('Novo mapa', a.newMap, 'Gerar outro relevo'),
-      button('Gerar cidade', a.generate, 'Gerar uma cidade inteira pela semente do mapa'),
-      button('Opções', a.options, 'Qualidade, resolução e tempo (O)'),
-      button('Ajuda (F1)', a.help, 'Ajuda: ferramentas, teclas e sobre o jogo'),
-    );
-    const menuBox = el('div', 'group');
-    menuBox.append(menuBtn);
-    left.append(menuBox, view, file);
-
-    const clock = el('div', 'group');
-    this.clockLabel = el('span', 'value');
-    this.speedBtn = button('1×', a.timeSpeed, 'Velocidade do relógio (P)');
-    this.moneyLabel = el('span', 'value money');
-    this.moneyLabel.title = 'Dinheiro em caixa. Vias custam pela largura e pelo comprimento; pontes e túneis custam mais. Demolir devolve metade.';
-    this.pauseBtn = button('⏸', a.pause, 'Pausar ou continuar (Espaço)');
-    this.skySel = selectOf([[0, '◐ Dia e noite'], [1, '☀ Sempre dia'], [2, '☾ Sempre noite']], 0, (v) => a.sky((['ciclo', 'dia', 'noite'] as const)[v]));
-    this.skySel.title = 'Céu: o ciclo de dia e noite, sempre dia ou sempre noite';
-    clock.append(this.clockLabel, this.pauseBtn, this.speedBtn, this.skySel, this.moneyLabel);
-    right.append(clock);
-    // bússola: gira com a câmera; clique deixa o norte para cima
-    this.compass = el('button', 'compass');
-    this.compass.title = 'Bússola: clique para ficar de frente para o norte';
-    this.compass.innerHTML = '<svg viewBox="-20 -20 40 40" width="40" height="40"><circle r="18" fill="rgba(18,22,28,0.85)" stroke="rgba(255,255,255,0.25)"/><g class="needle"><path d="M0,-15 L5,0 L0,3 L-5,0 Z" fill="#e2564b"/><path d="M0,15 L5,0 L0,-3 L-5,0 Z" fill="#d9dde2"/><text y="-6" x="0" font-size="7" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">N</text></g></svg>';
-    this.compass.addEventListener('click', (e) => { e.stopPropagation(); a.north(); });
-    right.append(this.compass);
-    this.root.append(bar, this.subBar, left, right);
-    // números da cidade, no canto
-    this.info = el('div', 'info');
-    this.root.append(this.info);
-
-    // painel do pincel
-    const panels = el('div', 'panels');
-    this.brushPanel = el('div', 'group brush');
-    this.radiusLabel = el('span', 'value');
-    this.radiusInput = slider(5, 400, 60, (v) => { this.radiusLabel.textContent = `${v} m`; a.radius(v); });
-    this.radiusLabel.textContent = '60 m';
-    const strength = slider(1, 100, 40, (v) => a.strength(v / 100));
-    this.brushPanel.append(label('Raio'), this.radiusInput, this.radiusLabel, label('Força'), strength);
-
-    // painel das vias
-    this.roadPanel = el('div', 'group brush');
-    this.catalog = new RoadCatalog({ use: (id) => a.profile(id), toast: (t) => this.toast(t) });
-    this.root.append(this.catalog.el);
-    this.elevLabel = el('span', 'value');
-    const blk = { cols: 3, rows: 3, size: 100, angle: 0 };
-    const num = (v: number, min: number, max: number, step: number, set: (n: number) => void) => {
-      const i = document.createElement('input'); i.type = 'number'; i.min = String(min); i.max = String(max); i.step = String(step); i.value = String(v); i.className = 'num';
-      i.addEventListener('change', () => { set(Math.max(min, Math.min(max, Number(i.value) || min))); a.blocks({ ...blk }); });
-      i.addEventListener('keydown', (e) => e.stopPropagation());
-      return i;
-    };
-    this.blocksRow = el('span', 'inline');
-    this.blocksRow.append(label('Colunas'), num(3, 1, 12, 1, (n) => { blk.cols = n; }), label('Linhas'), num(3, 1, 12, 1, (n) => { blk.rows = n; }),
-      label('Lado (m)'), num(100, 40, 300, 10, (n) => { blk.size = n; }), label('Giro'), num(0, -90, 90, 5, (n) => { blk.angle = n; }));
-    this.roadPanel.append(label('Corte'), selectOf([[0, 'Talude'], [1, 'Muro de arrimo']], 0, (v) => a.cutWalls(v === 1)), label('Encaixe'), selectOf([[0, 'Desligado'], [1, 'Ângulos de 15°'], [2, 'Ângulos e grade de 1 m']], 0, a.roadSnap), this.blocksRow,
-      label('Altura'),
-      button('−', () => a.elevation(-4), 'Mais baixo (Page Down)'), this.elevLabel, button('+', () => a.elevation(4), 'Mais alto (Page Up)'));
-    // painel de zona
-    this.zonePanel = el('div', 'group brush');
-    this.zoneSel = document.createElement('select');
-    ZONE_NAMES.forEach((name, z) => {
-      const o = document.createElement('option');
-      o.value = String(z); o.textContent = z === 0 ? 'Tirar zona' : name;
-      this.zoneSel.append(o);
-    });
-    this.zoneSel.value = '1';
-    this.zoneSel.addEventListener('change', () => { a.zone(Number(this.zoneSel.value)); this.zoneSel.blur(); });
-    const zr = el('span', 'value');
-    zr.textContent = '40 m';
-    const zs = slider(10, 200, 40, (v) => { zr.textContent = `${v} m`; a.zoneRadius(v); });
-    this.zonePanel.append(label('Zona'), this.zoneSel, selectOf([[0, 'Pincel'], [1, 'Quadra inteira']], 0, (v) => a.zoneFill(v === 1)), label('Raio'), zs, zr);
-
-    // painel de prédio
-    this.buildingPanel = el('div', 'group brush');
-    this.archSel = selectOf([[-1, 'Automático (bairro)'], ...ARCHES.map((x, i) => [i, x.name] as [number, string])], -1, a.style);
-    this.fnSel = selectOf(FN_NAMES.map((n, i) => [i, n || 'Comum'] as [number, string]), 0, a.buildingFn);
-    this.buildingInfo = el('span', 'value');
-    this.buildingPanel.append(this.buildingInfo,
-      label('Andares'), button('−', () => a.floors(-1), 'Menos andares'), button('+', () => a.floors(1), 'Mais andares'),
-      label('Estilo'), this.archSel, label('Função'), this.fnSel,
-      button('Demolir', () => a.demolishBuilding(), 'Demolir o prédio'));
-    const modes = LOT_MODES.map(([, n], i) => [i, n] as [number, string]);
-    this.lotSel = selectOf(modes, 0, (i) => { this.splitRow.style.display = LOT_MODES[i][0] === 'split' ? '' : 'none'; a.lotMode(LOT_MODES[i][0]); });
-    let splitKind: 'side' | 'depth' = 'side', parts = 2;
-    this.splitRow = el('span', 'inline');
-    this.splitRow.append(selectOf([[0, 'Lado a lado'], [1, 'Frente e fundos']], 0, (v) => { splitKind = v ? 'depth' : 'side'; a.lotSplit(splitKind, parts); }),
-      selectOf([2, 3, 4, 5, 6].map((n) => [n, `${n} lotes`] as [number, string]), 2, (v) => { parts = v; a.lotSplit(splitKind, parts); }));
-    this.splitRow.style.display = 'none';
-    this.buildingPanel.append(button('Ver por dentro', () => a.inside('toggle'), 'Ver por dentro: o prédio escolhido (ou o do centro da tela) cortado num andar'),
-      button('▼', () => a.inside('down'), 'Andar abaixo'), button('▲', () => a.inside('up'), 'Andar acima'));
-    this.buildingPanel.append(label('Lote'), this.lotSel, this.splitRow, label('Uso'),
-      selectOf([[1, 'Residencial'], [2, 'Comercial'], [3, 'Industrial'], [4, 'Misto']] as Array<[number, string]>, 1, a.lotUse));
-    // painel de ônibus
-    this.transitPanel = el('div', 'group brush');
-    this.lineSel = document.createElement('select');
-    this.lineSel.addEventListener('change', () => { a.line(Number(this.lineSel.value)); this.lineSel.blur(); });
-    this.lineInfo = el('span', 'value');
-    this.transitPanel.append(label('Linha'), this.lineSel, selectOf(MODE_NAMES.map((n, i) => [i, n] as [number, string]), 0, a.lineMode),
-      button('Nova linha', () => a.newLine(), 'Começar outra linha (ônibus: paradas na calçada; trem e metrô: estações nos trilhos)'),
-      label('Ônibus'), button('−', () => a.buses(-1), 'Menos ônibus'), button('+', () => a.buses(1), 'Mais ônibus'),
-      this.lineInfo, button('Apagar linha', () => a.deleteLine(), 'Apagar a linha escolhida'));
-    // paisagismo e muros
-    this.itemPanel = el('div', 'group brush');
-    const signText = document.createElement('input');
-    signText.type = 'text'; signText.maxLength = 32; signText.className = 'text';
-    signText.placeholder = 'Texto da placa (opcional)';
-    signText.addEventListener('keydown', (e) => e.stopPropagation());
-    signText.addEventListener('input', () => a.signText(signText.value));
-    const signSel = selectOf(SIGN_TYPES, 4, (v) => { signText.placeholder = v === 2 ? 'Nome da rua, depois clique nela' : 'Texto da placa (opcional)'; a.signType(v); });
-    signSel.style.display = 'none'; signText.style.display = 'none';
-    this.itemPanel.append(label('Item'), selectOf(STREET_ITEMS, Item.Tree, (v) => { signSel.style.display = signText.style.display = v === Item.Sign ? '' : 'none'; a.item(v); }), signSel, signText);
-    this.barrierPanel = el('div', 'group brush');
-    const lights = selectOf([[0, 'Sem luz'], [1, 'Luz em postes alternados'], [2, 'Luz em todos os postes']], 0, a.poleLights);
-    lights.style.display = 'none';
-    this.barrierPanel.append(label('Tipo'), selectOf(BARRIER_KINDS, Item.Fence, (v) => { lights.style.display = v === Item.PoleLine ? '' : 'none'; a.barrierKind(v); }), lights);
-    // chão, árvores e rio
-    this.groundPanel = el('div', 'group brush');
-    this.groundPanel.append(label('Chão'), selectOf(GROUND_NAMES, Ground.Sand, a.groundKind));
-    this.forestPanel = el('div', 'group brush');
-    this.forestPanel.append(label('Árvores'), selectOf([[0, 'Plantar bosque'], [1, 'Cortar árvores'], [2, 'Uma árvore por clique']], 0, (v) => { a.forestMode(v === 1); a.forestOne(v === 2); }),
-      label('Espécie'), selectOf(TREE_SPECIES, 0, a.forestSpecies),
-      label('Bioma do mapa'), (this.biomeSel = selectOf(BIOMES.map((n, i) => [i, n] as [number, string]), 0, a.biome)));
-    this.riverPanel = el('div', 'group brush');
-    const rw = el('span', 'value'); rw.textContent = '14 m';
-    this.riverPanel.append(label('Largura'), slider(6, 60, 14, (v) => { rw.textContent = `${v} m`; a.riverWidth(v); }), rw);
-    // clima: barras que valem na hora; clique no mapa faz cair um raio
-    this.weatherPanel = el('div', 'group brush');
-    const wc: WeatherCtl = { rain: 0, wind: 4, dir: 65, lightning: 0, thunder: 1 };
-    let manual = false;
-    const send = () => a.weather(manual ? { ...wc } : null);
-    const modeSel = selectOf([[0, 'Muda sozinho'], [1, 'Ajustado aqui']], 0, (v) => { manual = v === 1; send(); });
-    const wbar = (name: string, min: number, max: number, v: number, unit: string, set: (n: number) => void): HTMLElement[] => {
-      const val = el('span', 'value'); val.textContent = `${v}${unit}`;
-      const sl = slider(min, max, v, (n) => { val.textContent = `${n}${unit}`; set(n); manual = true; modeSel.value = '1'; send(); });
-      return [label(name), sl, val];
-    };
-    this.weatherPanel.append(label('Tempo'), modeSel,
-      ...wbar('Chuva', 0, 100, 0, '%', (n) => { wc.rain = n / 100; }),
-      ...wbar('Vento', 0, 25, 4, ' m/s', (n) => { wc.wind = n; }),
-      ...wbar('Direção', 0, 359, 65, '°', (n) => { wc.dir = n; }),
-      ...wbar('Raios', 0, 12, 0, '/min', (n) => { wc.lightning = n; }),
-      ...wbar('Trovão', 0, 100, 100, '%', (n) => { wc.thunder = n / 100; }));
-    const wa = { waves: 0.3, foam: 0.4, current: 0.5 };
-    const abar = (name: string, min: number, max: number, v: number, unit: string, set: (n: number) => void): HTMLElement[] => {
-      const val = el('span', 'value'); val.textContent = `${v}${unit}`;
-      return [label(name), slider(min, max, v, (n) => { val.textContent = `${n}${unit}`; set(n); a.water({ ...wa }); }), val];
-    };
-    this.weatherPanel.append(el('span', 'sep'), label('Água:'),
-      ...abar('Ondas', 0, 100, 30, '%', (n) => { wa.waves = n / 100; }),
-      ...abar('Espuma', 0, 100, 40, '%', (n) => { wa.foam = n / 100; }),
-      ...abar('Correnteza', 0, 3, 0.5, ' m/s', (n) => { wa.current = n; }));
-    this.landPanel = el('div', 'group brush');
-    this.landPanel.append(label('Relevo'), selectOf([[0, 'Chapada (arenito)'], [1, 'Cânion (arenito)'], [2, 'Escarpa de basalto'], [3, 'Pão de açúcar (granito)'], [4, 'Ravina']], 0,
-      (v) => a.landform(['mesa', 'canyon', 'escarpment', 'sugarloaf', 'gully'][v])),
-      button('Aplainar mapa inteiro', () => a.flattenMap(), 'Deixa todo o relevo plano na altura do centro da tela (desfaz com Ctrl+Z)'));
-    this.elemPanel = el('div', 'group brush');
-    const ec = { kind: 30, mode: 'lay' as 'lay' | 'eraseKind' | 'eraseAll', density: 8, size: 7 };
-    const ELEMS: Array<[number, string]> = [[30, 'Pedras'], [31, 'Seixos'], [32, 'Cascalho'], [33, 'Folhas secas'], [34, 'Grama'], [35, 'Capim alto'],
-      [36, 'Mato'], [37, 'Samambaia'], [38, 'Trevo'], [39, 'Flores'], [40, 'Cogumelos']];
-    const ed = el('span', 'value'); ed.textContent = '8';
-    const es = el('span', 'value'); es.textContent = '100%';
-    this.elemPanel.append(label('Elemento'), selectOf(ELEMS, 30, (v) => { ec.kind = v; a.elements({ ...ec }); }),
-      selectOf([[0, 'Colocar'], [1, 'Apagar este tipo'], [2, 'Apagar tudo']], 0, (v) => { ec.mode = (['lay', 'eraseKind', 'eraseAll'] as const)[v]; a.elements({ ...ec }); }),
-      label('Densidade'), slider(1, 40, 8, (v) => { ec.density = v; ed.textContent = String(v); a.elements({ ...ec }); }), ed,
-      label('Tamanho'), slider(0, 15, 7, (v) => { ec.size = v; es.textContent = `${Math.round((0.6 + v / 15) * 100 / 1.07)}%`; a.elements({ ...ec }); }), es);
-    this.skyPanel = el('div', 'group brush');
-    const sk: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
-    const skVal = (t: string) => { const v = el('span', 'value'); v.textContent = t; return v; };
-    const sv = skVal('500 m'), bv = skVal('900 m'), dv = skVal('80%'), hv = skVal('6'), gv = skVal('100%'), cv = skVal('8');
-    let count = 8;
-    const cloudSel = selectOf([[0, 'Criar nuvem'], [1, 'Mover nuvem'], [2, 'Ajustar nuvem'], [3, 'Apagar nuvem'], [4, '—']], 0, (v) => {
-      sk.cloud = (['add', 'move', 'edit', 'remove', 'none'] as const)[v]; if (v < 4) { sk.fog = 'none'; fogSel.value = '0'; } a.skyTool({ ...sk });
-    });
-    const fogSel = selectOf([[0, '—'], [1, 'Pôr neblina'], [2, 'Apagar neblina']], 0, (v) => {
-      sk.fog = (['none', 'lay', 'erase'] as const)[v]; if (v > 0) { sk.cloud = 'none'; cloudSel.value = '4'; } a.skyTool({ ...sk });
-    });
-    this.skyPanel.append(label('Nuvem'), cloudSel,
-      label('Tamanho'), slider(100, 1500, 500, (v) => { sk.size = v; sv.textContent = `${v} m`; a.skyTool({ ...sk }); }), sv,
-      label('Base'), slider(300, 2500, 900, (v) => { sk.base = v; bv.textContent = `${v} m`; a.skyTool({ ...sk }); }), bv,
-      label('Densidade'), slider(10, 100, 80, (v) => { sk.density = v / 100; dv.textContent = `${v}%`; a.skyTool({ ...sk }); }), dv,
-      slider(1, 24, 8, (v) => { count = v; cv.textContent = String(v); }), cv,
-      button('Espalhar nuvens', () => a.scatterClouds(count, 0.5), 'Espalha nuvens pelo céu em volta da câmera'),
-      button('Apagar todas', () => a.clearClouds(), 'Apaga todas as nuvens do céu'),
-      el('span', 'sep'), label('Neblina'), fogSel,
-      label('Altura'), slider(1, 15, 6, (v) => { sk.fogHeight = v; hv.textContent = String(v); a.skyTool({ ...sk }); }), hv,
-      label('Névoa geral'), slider(0, 200, 100, (v) => { gv.textContent = `${v}%`; a.fogLevel(v / 100); }), gv);
-    // criador de pessoas: roupa, altura e se fica parada ou sai andando
-    this.personPanel = el('div', 'group brush');
-    const ps = { color: 3, height: 7, walk: false, count: 1 };
-    const pal = el('span', 'inline');
-    PAINT_SWATCHES.forEach((c, i) => {
-      const b = document.createElement('button'); b.className = 'swatch'; b.style.background = c; b.title = 'Cor da roupa';
-      b.addEventListener('click', (e) => { e.stopPropagation(); ps.color = i; for (const o of pal.children) (o as HTMLElement).classList.remove('active'); b.classList.add('active'); a.personSpec({ ...ps }); });
-      if (i === ps.color) b.classList.add('active');
-      pal.append(b);
-    });
-    const phv = el('span', 'value'); phv.textContent = '1,72 m';
-    this.personPanel.append(label('Roupa'), pal, label('Altura'), slider(0, 15, 7, (v) => { ps.height = v; phv.textContent = `${((0.86 + v * 0.02) * 1.75).toFixed(2).replace('.', ',')} m`; a.personSpec({ ...ps }); }), phv,
-      selectOf([[0, 'Parada (fica aqui)'], [1, 'Andando pela calçada']], 0, (v) => { ps.walk = v === 1; a.personSpec({ ...ps }); }),
-      label('Quantas'), selectOf([1, 2, 5, 10, 20].map((n) => [n, String(n)] as [number, string]), 1, (v) => { ps.count = v; a.personSpec({ ...ps }); }));
-    this.bombPanel = el('div', 'group brush');
-    const fv = el('span', 'value'); fv.textContent = '3';
-    this.bombPanel.append(label('Força'), slider(1, 5, 3, (v) => { fv.textContent = String(v); a.bombForce(v); }), fv);
-    panels.append(this.personPanel, this.bombPanel, this.skyPanel, this.elemPanel, this.landPanel, this.weatherPanel, this.groundPanel, this.forestPanel, this.riverPanel, this.itemPanel, this.barrierPanel, this.brushPanel, this.roadPanel, this.zonePanel, this.buildingPanel, this.transitPanel);
-    this.root.append(panels);
-
-    this.hint = el('div', 'hint');
-    this.root.append(this.hint);
-
-    const help = el('div', 'help');
-    help.innerHTML =
-      '<b>Botão direito</b> gira · <b>meio</b> ou <b>arrastar</b> move · <b>roda</b> aproxima · ' +
-      '<b>WASD</b> move · <b>Q/E</b> gira · <b>R/F</b> inclina · <b>Esc</b> cancela';
-    this.root.append(help);
-    this.setElevation(0);
-  }
-
-  setTool(t: Tool): void {
-    this.current = t;
-    for (const [k, b] of this.toolButtons) b.classList.toggle('active', k === t);
-    // a categoria da ferramenta fica aberta e marcada (atalho de teclado também abre)
-    const row = this.toolCat.get(t) ?? null;
-    if (row) this.showCategory(row);
-    for (const [r, b] of this.catButtons) b.classList.toggle('active', r === row);
-    this.brushPanel.style.display = TERRAIN_TOOLS.includes(t) || GROUND_TOOLS.includes(t) || t === 'sky' ? '' : 'none';
-    this.groundPanel.style.display = t === 'paint' ? '' : 'none';
-    this.forestPanel.style.display = t === 'forest' ? '' : 'none';
-    this.riverPanel.style.display = t === 'river' ? '' : 'none';
-    this.weatherPanel.style.display = t === 'weather' ? '' : 'none';
-    this.landPanel.style.display = t === 'landform' ? '' : 'none';
-    this.elemPanel.style.display = t === 'elements' ? '' : 'none';
-    this.skyPanel.style.display = t === 'sky' ? '' : 'none';
-    this.personPanel.style.display = t === 'person' ? '' : 'none';
-    this.bombPanel.style.display = t === 'bomb' ? '' : 'none';
-    this.roadPanel.style.display = ROAD_TOOLS.includes(t) && t !== 'bulldoze' && t !== 'move' && t !== 'split' ? '' : 'none';
-    this.catalog.visible = ROAD_TOOLS.includes(t) && t !== 'bulldoze' && t !== 'roundabout' && t !== 'move' && t !== 'split';
-    void 0;
-    this.zonePanel.style.display = t === 'zone' ? '' : 'none';
-    this.blocksRow.style.display = t === 'blocks' ? '' : 'none';
-    this.buildingPanel.style.display = t === 'building' ? '' : 'none';
-    this.transitPanel.style.display = t === 'transit' ? '' : 'none';
-    this.itemPanel.style.display = t === 'streetscape' ? '' : 'none';
-    this.barrierPanel.style.display = t === 'barrier' ? '' : 'none';
-  }
-
-  /** Lista de linhas e a escolhida. */
-  /** Modo de cada linha (para o nome na lista). */
-  lineModes = new Map<number, number>();
-
-  setLines(ids: number[], current: number): void {
-    const key = ids.join(',') + '|' + current + '|' + [...this.lineModes.values()].join(',');
-    if (this.lineSel.dataset.key === key) return;
-    this.lineSel.dataset.key = key;
-    this.lineSel.innerHTML = '';
-    for (const id of ids) {
-      const o = document.createElement('option');
-      o.value = String(id); o.textContent = `Linha ${id}${this.lineModes.get(id) ? ` (${MODE_NAMES[this.lineModes.get(id)!]})` : ''}`;
-      this.lineSel.append(o);
+    const speed = el('div', 'v2-speed');
+    for (const n of [0, 1, 2, 4]) {
+      const b = el('button', 'v2-speed-b');
+      b.type = 'button';
+      b.dataset.speed = String(n);
+      b.innerHTML = n === 0 ? svg('pause', 16) : `${n}×`;
+      b.title = n === 0 ? `${t('sim.pause')} (${t('v2.key.space')})` : `${t('sim.speed')} ${n}×`;
+      b.addEventListener('click', (e) => { e.stopPropagation(); a.speed(n); });
+      this.speedButtons.push(b);
+      speed.append(b);
     }
-    if (ids.length === 0) { const o = document.createElement('option'); o.textContent = '—'; this.lineSel.append(o); }
-    this.lineSel.value = String(current);
+
+    const actions = el('div', 'v2-actions');
+    this.insideLevel = el('span', 'v2-inside-level');
+    this.insideBar = el('div', 'v2-inside');
+    this.insideBar.append(button('v2-icon on', t('inside.toggle'), () => a.inside('toggle'), svg('interiorView', 18)),
+      button('v2-icon', t('inside.down'), () => a.inside('down'), svg('floorDown', 16)), this.insideLevel,
+      button('v2-icon', t('inside.up'), () => a.inside('up'), svg('floorUp', 16)));
+    this.insideBar.hidden = true;
+    const layersB = button('v2-pill', t('v2.layers'), () => this.toggle('layers', layersB), svg('layers', 18));
+    const simB = button('v2-pill', t('builder.menu.simulation'), () => this.toggle('sim', simB), svg('advanced', 18));
+    const camB = button('v2-pill', t('camera.label'), () => this.toggle('camera', camB), svg('camera', 18));
+    this.undoB = button('v2-icon', t('action.undo'), () => a.undo(), svg('undo', 18));
+    this.redoB = button('v2-icon', t('action.redo'), () => a.redo(), svg('redo', 18));
+    const healthB = button('v2-icon', t('health.button'), () => a.health(), svg('health', 18));
+    const helpB = button('v2-icon', `${t('builder.help')} (F1)`, () => this.toggle('help', helpB), svg('help', 18));
+    helpB.dataset.pop = 'help';
+    const menuB = button('v2-pill', t('builder.menu.app'), () => this.toggle('menu', menuB), svg('menu', 18));
+    for (const [b, id] of [[layersB, 'layers'], [simB, 'sim'], [camB, 'camera'], [menuB, 'menu']] as const) b.dataset.pop = id;
+    actions.append(this.insideBar, layersB, simB, camB, this.undoB, this.redoB, healthB, helpB, menuB);
+    hud.append(city, speed, actions);
+
+    this.pop = el('div', 'v2-pop');
+    this.pop.hidden = true;
+    document.addEventListener('pointerdown', (e) => {
+      if (!this.popId) return;
+      const target = e.target as Node;
+      if (!this.pop.contains(target) && !this.popAnchor?.contains(target)) this.closePop();
+    }, true);
+    this.fileIn = el('input');
+    this.fileIn.type = 'file'; this.fileIn.accept = '.cidade'; this.fileIn.hidden = true;
+    this.fileIn.addEventListener('change', () => { const f = this.fileIn.files?.[0]; if (f) a.importMap(f); this.fileIn.value = ''; });
+
+    // ============================================================ dock
+    const dock = el('nav', 'v2-dock');
+    for (const c of CATS) {
+      const b = el('button', `v2-cat${c.id === 'demolish' ? ' danger' : ''}`);
+      b.type = 'button';
+      b.dataset.cat = c.id;
+      b.innerHTML = svg(c.icon, 24);
+      b.append(el('span', 'v2-cat-name', t(`v2.dock.${c.id}`)));
+      b.title = `${t(`ui.cat.${c.id}`)}  ${c.key}`;
+      b.addEventListener('click', (e) => { e.stopPropagation(); this.openCategory(c.id, true); });
+      this.catButtons.set(c.id, b);
+      dock.append(b);
+    }
+
+    // ============================================================ drawer and tool options
+    this.drawer = el('section', 'v2-drawer');
+    const head = el('div', 'v2-drawer-head');
+    const tabs = el('div', 'v2-tabs');
+    tabs.setAttribute('role', 'tablist');
+    head.append(tabs);
+    const body = el('div', 'v2-drawer-body');
+    const strip = el('div', 'v2-strip');
+    body.append(strip);
+    strip.addEventListener('wheel', (e) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { strip.scrollLeft += e.deltaY; e.preventDefault(); }
+      e.stopPropagation();
+    }, { passive: false });
+    const close = button('v2-icon', t('v2.close'), () => { this.open = false; a.tool('camera'); this.render(); }, svg('close', 18));
+    this.drawer.append(head, body, close);
+    this.toolOptions = el('section', 'v2-toolopts');
+    const options = el('div', 'v2-options');
+    const tools = el('div', 'v2-head-tools');
+    this.toolOptions.append(options, tools);
+    this.parts = { tabs, options, strip, tools };
+    this.buildingSlot = el('div', 'v2-building-slot');
+
+    this.side = el('aside', 'v2-side');
+    this.hint = el('div', 'v2-hintbar');
+    this.hint.hidden = true;
+    this.toastEl = el('div', 'v2-toast');
+    this.toastEl.setAttribute('role', 'status');
+    this.toastEl.hidden = true;
+    this.tip = el('div', 'v2-tip');
+    this.tip.hidden = true;
+    this.about = this.makeAbout();
+
+    this.root.append(hud, this.pop, this.drawer, this.toolOptions, this.side, this.hint, dock, this.toastEl, this.tip, this.about, this.fileIn);
+    this.compass = mountCompass(this.root, { north: () => a.north(), drag: (dx, dy) => a.orbit(dx, dy) });
+    // the panels never let a click or a wheel through to the map
+    for (const e of [hud, this.pop, this.drawer, this.toolOptions, this.side, dock, this.about]) {
+      e.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+      e.addEventListener('wheel', (ev) => ev.stopPropagation(), { passive: true });
+    }
+    this.bindTips();
+    window.addEventListener('resize', () => this.fitDrawer());
+    // the tool options panel follows the side panel: the drawer gives way to both
+    new ResizeObserver(() => this.fitDrawer()).observe(this.side);
+
+    const self = this;
+    this.host = {
+      a, s: this.s, catalog: this.catalog, buildingSlot: this.buildingSlot,
+      tool: () => self.current,
+      pick: (tool) => { a.tool(tool); },
+      render: () => self.render(),
+      lines: () => ({ rows: self.rows, current: self.lineNow }),
+      building: () => self.picked,
+      insideFloor: () => self.insideFloor,
+      roadKeys: () => { const k = a.settings(); return `${keyName(k.roadUp)} / ${keyName(k.roadDown)}`; },
+    };
+    this.setSky('ciclo');
+    this.syncSpeed();
+    this.render();
   }
 
-  setLineInfo(text: string): void { if (this.lineInfo.textContent !== text) this.lineInfo.textContent = text; }
-
-  setRadius(r: number): void {
-    this.radiusInput.value = String(r);
-    this.radiusLabel.textContent = `${Math.round(r)} m`;
+  // ================================================================ categories
+  /** Opens a category's drawer with its tool (the dock button, or its key). A second press puts the tool down. */
+  openCategory(id: Category, fromDock = false): void {
+    if (this.cat === id && this.open && (fromDock || id === 'info')) {
+      this.open = false;
+      this.a.tool('camera');
+      this.render();
+      return;
+    }
+    this.cat = id;
+    this.open = true;
+    const def = CATS.find((c) => c.id === id)!.tool;
+    const keep = categoriesOf(this.current).includes(id);
+    if (!keep) this.a.tool(this.lastTool.get(id) ?? def);
+    else this.render();
   }
 
+  /** The category a key or the game put the tool in. */
+  setTool(tool: Tool): void {
+    this.current = tool;
+    const cats = categoriesOf(tool);
+    if (!cats.length) this.open = false;
+    else {
+      if (!this.cat || !cats.includes(this.cat)) this.cat = cats[0];
+      this.open = true;
+      this.lastTool.set(this.cat, tool);
+    }
+    const hint = `hint.tool.${tool}`;
+    const own = t(hint);
+    if (own !== hint) this.setHint(own);
+    this.render();
+  }
+
+  private render(): void {
+    for (const [id, b] of this.catButtons) b.classList.toggle('on', this.open && id === this.cat);
+    const p = this.parts;
+    p.tabs.replaceChildren(); p.options.replaceChildren(); p.strip.replaceChildren(); p.tools.replaceChildren();
+    const show = this.open && this.cat !== null && this.cat !== 'info';
+    if (show) {
+      if (this.cat !== 'roads' && this.cat !== 'transit') this.catalog.visible = false;
+      switch (this.cat) {
+        case 'roads': renderRoads(this.host, p); break;
+        case 'zones': renderZones(this.host, p); break;
+        case 'build': renderBuild(this.host, p); break;
+        case 'landscape': renderLandscape(this.host, p); break;
+        case 'transit': renderTransit(this.host, p); break;
+        case 'demolish': renderDemolish(this.host, p); break;
+      }
+      if (this.cat === 'transit' && this.current === 'road') { this.catalog.visible = false; }
+    } else this.catalog.visible = false;
+    this.drawer.hidden = !show || (p.tabs.childElementCount === 0 && p.strip.childElementCount === 0);
+    this.toolOptions.hidden = !show || p.options.childElementCount === 0;
+    p.strip.classList.toggle('two-rows', p.strip.querySelectorAll('.v2-card').length > 10);
+    this.root.dataset.tool = this.current;
+    this.fitDrawer();
+    if (this.popId === 'help') this.fillPop('help');
+  }
+
+  /** The drawer stands centred in the room between the tool options (left) and the selection panel (right). */
+  private fitDrawer(): void {
+    if (this.drawer.hidden) return;
+    const vw = window.innerWidth;
+    let left = 12, right = vw - 12;
+    if (!this.toolOptions.hidden) left = Math.max(left, this.toolOptions.getBoundingClientRect().right + 12);
+    const sr = this.side.getBoundingClientRect();
+    if (sr.width > 0 && sr.bottom > this.drawer.getBoundingClientRect().top - 4) right = Math.min(right, sr.left - 12);
+    const room = Math.max(320, right - left);
+    this.drawer.style.left = `${Math.round(right - left >= 320 ? (left + right) / 2 : vw / 2)}px`;
+    this.drawer.style.maxWidth = `${Math.floor(room)}px`;
+  }
+
+  // ================================================================ popovers
+  private toggle(id: PopId, anchor: HTMLElement): void {
+    if (this.popId === id) { this.closePop(); return; }
+    this.popId = id;
+    this.popAnchor = anchor;
+    this.fillPop(id);
+    this.pop.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    this.pop.style.top = `${Math.round(r.bottom + 8)}px`;
+    this.pop.style.right = `${Math.max(12, Math.round(window.innerWidth - r.right))}px`;
+    anchor.classList.add('on');
+  }
+
+  private closePop(): void {
+    this.popAnchor?.classList.remove('on');
+    this.pop.hidden = true;
+    this.popId = null;
+    this.popAnchor = null;
+    this.metrics = null;
+  }
+
+  /** The help panel (F1, or the "?" button). */
+  toggleHelp(): void {
+    const b = this.root.querySelector<HTMLElement>('[data-pop="help"]');
+    if (b) this.toggle('help', b);
+  }
+
+  get helpOpen(): boolean { return this.popId === 'help'; }
+
+  /** Esc: closes the open menu, then the About box. False: nothing was open here. */
+  escape(): boolean {
+    if (this.popId) { this.closePop(); return true; }
+    if (!this.about.hidden) { this.about.hidden = true; return true; }
+    return false;
+  }
+
+  private row(label: string, run: () => void, icon: string): HTMLButtonElement {
+    return button('v2-row', label, () => { run(); this.closePop(); }, svg(icon, 18));
+  }
+
+  private seg(label: string, items: ReadonlyArray<readonly [string, string]>, value: string, pick: (v: string) => void): HTMLElement {
+    return orow(label, choices(items.map(([v, name]) => ({ label: name, on: v === value, run: () => { pick(v); if (this.popId) this.fillPop(this.popId); } }))));
+  }
+
+  private fillPop(id: PopId): void {
+    const a = this.a;
+    const titles: Partial<Record<PopId, string>> = { layers: 'v2.layers', sim: 'builder.menu.simulation', camera: 'camera.label', help: 'builder.help' };
+    const body = el('div', 'v2-pop-body');
+    this.metrics = null;
+    if (id === 'menu') {
+      const st = a.settings();
+      body.append(
+        this.row(t('action.newMap'), () => a.newMap(), 'm_new'),
+        this.row(t('ui.menu.generate'), () => a.generate(), 'generate'),
+        this.row(t('ui.menu.load'), () => a.load(), 'm_open'),
+        this.row(t('action.openMap'), () => this.fileIn.click(), 'm_open'),
+        this.row(t('ui.menu.save'), () => a.save(), 'm_save'),
+        this.row(t('action.saveMap'), () => a.exportMap(), 'm_save'),
+        el('hr'),
+        this.row(t('menu.graphicsOptions'), () => a.options(), 'm_quality'),
+        this.seg(t('menu.language'), LANGUAGES, lang(), (v) => setLang(v as 'pt-BR' | 'en')),
+        this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => a.paint(v)),
+        el('hr'),
+        this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate'),
+        this.row(t('action.about'), () => { this.about.hidden = false; }, 'm_about'),
+      );
+    } else if (id === 'layers') {
+      const layer = (key: string, tip: string, icon: string, on: boolean, flip: () => void): HTMLButtonElement => {
+        const b = button(`v2-row v2-switch${on ? ' on' : ''}`, t(key), () => { flip(); this.fillPop('layers'); }, svg(icon, 18));
+        b.setAttribute('role', 'switch');
+        b.setAttribute('aria-checked', String(on));
+        b.title = t(tip);
+        return b;
+      };
+      body.append(
+        layer('v2.layer.grid', 'v2.grid.toggle', 'grid', this.layers.grid, () => a.grid()),
+        layer('zone.colours', 'zone.colours', 'zones', this.layers.zones, () => { this.layers.zones = !this.layers.zones; a.zoneLayer(this.layers.zones); }),
+        layer('sim.congestionLabel', 'sim.congestion', 'heat', this.layers.traffic, () => a.trafficView()),
+        layer('v2.layer.inside', 'inside.toggle', 'interiorView', this.insideFloor >= 0, () => a.inside('toggle')),
+      );
+    } else if (id === 'sim') {
+      const st = a.settings();
+      body.append(
+        range(t('sim.traffic'), 10, 200, 10, Math.round(st.traffic * 100), (v) => `${v}%`, (v) => a.simulation({ traffic: v / 100 })),
+        range(t('sim.people'), 10, 200, 10, Math.round(st.people * 100), (v) => `${v}%`, (v) => a.simulation({ people: v / 100 })),
+        this.seg(t('sim.demand'), [['baixa', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['pico', t('sim.demand.peak')]], st.demand, (v) => a.simulation({ demand: v as SimSettings['demand'] })),
+      );
+      this.metrics = el('dl', 'v2-metrics');
+      body.append(this.metrics);
+      this.syncMetrics();
+    } else if (id === 'camera') {
+      body.classList.add('icons');
+      const cam = (key: string, icon: string, run: () => void, on = false): HTMLButtonElement => button(`v2-icon${on ? ' on' : ''}`, t(key), run, svg(icon, 18));
+      body.append(
+        cam('ui.camera.turnLeft', 'undo', () => a.turn(-1)),
+        cam('camera.tiltDown', 'lower', () => a.tilt(-1)),
+        cam('camera.north', 'roundabout', () => a.north()),
+        cam('camera.tiltUp', 'raise', () => a.tilt(1)),
+        cam('ui.camera.turnRight', 'redo', () => a.turn(1)),
+        cam('camera.perspective', 'mass', () => { a.view(this.view === 'iso' ? 'persp' : 'iso'); this.fillPop('camera'); }, this.view === 'persp'),
+        cam('ui.camera.top', 'top', () => a.view('top')),
+        cam('ui.camera.follow', 'follow', () => a.follow()),
+      );
+    } else {
+      body.classList.add('help');
+      const keyList = (title: string, rows: Array<[string, string]>): HTMLElement => {
+        const box = el('div', 'v2-keys');
+        box.append(el('div', 'v2-subhead', title));
+        const dl = el('dl');
+        for (const [k, d] of rows) { const dt = el('dt'); dt.append(el('kbd', '', t(k))); dl.append(dt, el('dd', '', t(d))); }
+        box.append(dl);
+        return box;
+      };
+      const c = this.current;
+      const own = TOOL_KEYS[c] ?? (categoriesOf(c)[0] === 'roads' ? TOOL_KEYS.roads : categoriesOf(c)[0] === 'landscape' ? TOOL_KEYS.terrain : undefined);
+      if (own) body.append(keyList(`${t('help.section.tool')}: ${t(`ui.toolName.${c}`)}`, own));
+      if (isTouch()) body.append(keyList(t('ui.touch.title'), [['ui.touch.tapKey', 'ui.touch.tapDo'], ['ui.touch.dragKey', 'ui.touch.dragDo'], ['ui.touch.compassKey', 'ui.touch.compassDo']]));
+      body.append(keyList(t('help.section.camera'), CAMERA_KEYS), keyList(t('v2.help.global'), GLOBAL_KEYS));
+    }
+    const key = titles[id];
+    this.pop.replaceChildren(...(key ? [el('div', 'v2-pop-title', t(key))] : []), body);
+  }
+
+  private syncMetrics(): void {
+    const m = this.metrics, s = this.status;
+    if (!m) return;
+    const rows: Array<[string, string]> = s ? [
+      ['sim.metric.trips', t('ui.perMin', { n: fmtInt(s.tripsPerMin) })], ['sim.metric.lost', t('ui.perMin', { n: fmtInt(s.lostPerMin) })],
+      ['sim.metric.speed', `${fmtInt(s.speedKmh)} km/h`], ['sim.metric.queued', fmtInt(s.stopped)],
+      ['ui.metric.vehicles', fmtInt(s.cars)], ['ui.metric.peds', fmtInt(s.peds)], ['ui.metric.residents', fmtCount(s.residents)], ['ui.metric.jobs', fmtCount(s.jobs)],
+      ['ui.metric.buildings', fmtCount(s.buildings)], ['sim.metric.network', `${plural('status.roads', s.roads)} · ${plural('status.nodes', s.nodes)}`],
+    ] : [];
+    if (m.childElementCount !== rows.length * 2) {
+      m.replaceChildren();
+      for (const [k] of rows) m.append(el('dt', '', t(k)), el('dd', '', ''));
+    }
+    const dds = m.querySelectorAll('dd');
+    rows.forEach(([, v], i) => { if (dds[i].textContent !== v) dds[i].textContent = v; });
+  }
+
+  private makeAbout(): HTMLElement {
+    const box = el('div', 'v2-dialog-back');
+    box.hidden = true;
+    const d = el('div', 'v2-dialog');
+    d.append(el('h2', '', t('ui.about.title')), el('p', 'v2-muted', `${t('about.build')}: ${typeof __BUILD__ === 'string' ? __BUILD__ : ''}`), el('p', '', t('ui.about.credits')),
+      button('v2-pill wide', t('about.close'), () => { box.hidden = true; }));
+    box.append(d);
+    box.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === box) box.hidden = true; });
+    return box;
+  }
+
+  // ================================================================ tooltip
+  private bindTips(): void {
+    const tip = this.tip;
+    this.root.addEventListener('pointerover', (e) => {
+      const target = (e.target as HTMLElement).closest<HTMLElement>('[title], [data-tip]');
+      if (!target || !this.root.contains(target)) return;
+      if (target.title) { target.dataset.tip = target.title; target.removeAttribute('title'); }
+      const text = target.dataset.tip ?? '';
+      if (!text) return;
+      this.tipFor = target;
+      tip.textContent = text;
+      tip.hidden = false;
+      const r = target.getBoundingClientRect();
+      const w = tip.offsetWidth, h = tip.offsetHeight;
+      const above = r.top - h - 8 >= 4;
+      tip.style.left = `${Math.round(Math.max(6, Math.min(window.innerWidth - w - 6, r.left + r.width / 2 - w / 2)))}px`;
+      tip.style.top = `${Math.round(above ? r.top - h - 8 : r.bottom + 8)}px`;
+    });
+    this.root.addEventListener('pointerout', (e) => {
+      if (!this.tipFor) return;
+      const to = e.relatedTarget as Node | null;
+      if (to && this.tipFor.contains(to)) return;
+      this.tipFor = null;
+      tip.hidden = true;
+    });
+    this.root.addEventListener('pointerdown', () => { tip.hidden = true; });
+  }
+
+  // ================================================================ what the game tells
+  setLines(rows: LineRow[], current: number): void {
+    const key = `${current}|${rows.map((r) => `${r.id},${r.mode},${r.buses},${r.stops},${Math.round(r.perHour / 10)}`).join(';')}`;
+    if (key === this.rowsKey) return;
+    this.rowsKey = key;
+    this.rows = rows;
+    this.lineNow = current;
+    if (this.cat === 'transit' && this.open) this.render();
+  }
+
+  setRadius(r: number): void { this.s.radius = Math.round(r); if (this.cat === 'landscape' && this.open) this.render(); }
   setProfile(p: number): void { this.catalog.select(p); }
+  setBiome(b: number): void { this.s.biome = b; }
+  setSky(m: SkyMode): void {
 
-  setBiome(b: number): void { this.biomeSel.value = String(b); }
-
-  setSky(m: SkyMode): void { this.skySel.value = String(['ciclo', 'dia', 'noite'].indexOf(m)); }
-
-  setZone(z: number): void { this.zoneSel.value = String(z); }
-
-  /** Prédio selecionado (ou nenhum). */
-  setLotMode(mode: LotMode): void { this.lotSel.value = String(LOT_MODES.findIndex(([m]) => m === mode)); this.splitRow.style.display = mode === 'split' ? '' : 'none'; }
-
-  setBuilding(text: string, arch = -1, fn = 0): void {
-    this.buildingInfo.textContent = text;
-    this.archSel.value = String(arch); this.fnSel.value = String(fn);
-    const on = text.includes('andar');
-    // sem prédio escolhido, estilo e função valem para o próximo lote desenhado
-    for (const b of this.buildingPanel.querySelectorAll('button')) if (!['Ver por dentro', '▼', '▲'].includes(b.textContent ?? '')) (b as HTMLButtonElement).disabled = !on;
+    for (const b of this.skyButtons) { const on = b.dataset.sky === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
+  }
+  setZone(_z: number): void { /* the shell keeps the zone it chose */ }
+  setLotMode(m: LotMode): void {
+    if (this.s.lotMode === m) return;
+    this.s.lotMode = m;
+    if (this.open && (this.cat === 'build' || this.cat === 'zones')) this.render();
+  }
+  /** The building picked with the Build tool (null: none). */
+  setBuilding(b: BuildingInfo | null): void {
+    this.picked = b;
+    if (this.open && this.cat === 'build') this.render();
+  }
+  setElevation(e: number): void { this.s.elevation = e; }
+  /** See inside: the floor shown (−1: off). */
+  setInside(floor: number): void {
+    this.insideFloor = floor;
+    this.insideBar.hidden = floor < 0;
+    const text = floor <= 0 ? t('inside.ground') : t('inside.floor', { n: floor });
+    if (this.insideLevel.textContent !== text) this.insideLevel.textContent = text;
+    if (this.popId === 'layers') this.fillPop('layers');
   }
 
-  setElevation(e: number): void {
-    this.elevLabel.textContent = e === 0 ? 'no chão' : `${e > 0 ? '+' : ''}${e} m`;
-  }
-
-  setClock(hour: number, speed: number, paused = false): void {
-    const p = paused ? '▶' : '⏸';
-    if (this.pauseBtn.textContent !== p) { this.pauseBtn.textContent = p; this.pauseBtn.classList.toggle('active', paused); }
+  /** Every frame: writes the clock only when the shown minute changes. */
+  setClock(hour: number, simSpeed: number, paused = false): void {
     const h = Math.floor(hour), m = Math.floor((hour - h) * 60);
-    const t = `${String(h).padStart(2, '0')}:${String(m - (m % 5)).padStart(2, '0')}`;
-    if (this.clockLabel.textContent !== t) this.clockLabel.textContent = t;
-    const s = speed === 0 ? 'Pausa' : `${speed}×`;
-    if (this.speedBtn.textContent !== s) this.speedBtn.textContent = s;
+    const text = `${String(h).padStart(2, '0')}:${String(m - (m % 5)).padStart(2, '0')}`;
+    if (text !== this.clockShown) { this.clockShown = text; this.clockText.data = text; }
+    const now = paused ? 0 : simSpeed;
+    if (now !== this.speedNow) { this.speedNow = now; this.syncSpeed(); }
+  }
+
+  private syncSpeed(): void {
+    for (const b of this.speedButtons) { const on = Number(b.dataset.speed) === this.speedNow; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
   }
 
   setMoney(v: number, unlimited: boolean): void {
-    const t = unlimited ? 'R$ ∞' : `R$ ${Math.round(v).toLocaleString('pt-BR')}`;
-    if (this.moneyLabel.textContent !== t) this.moneyLabel.textContent = t;
+    const shown = unlimited ? Infinity : Math.round(v);
+    if (shown === this.moneyShown) return;
+    this.moneyShown = shown;
+    this.moneyText.data = unlimited ? t('ui.money.unlimited') : money(shown);
   }
 
-  setInfo(html: string): void { if (this.info.innerHTML !== html) this.info.innerHTML = html; }
-
-  setTrafficView(on: boolean): void { this.trafficBtn.classList.toggle('active', on); }
-
-  setGrid(on: boolean): void { this.gridBtn.classList.toggle('active', on); }
-
-  /** Rumo da câmera (rad): a agulha aponta para o norte na tela. */
-  setCompass(yaw: number): void {
-    const d = Math.round(yaw * 180 / Math.PI);
-    if (d === this.compassDeg) return;
-    this.compassDeg = d;
-    (this.compass.querySelector('.needle') as SVGGElement).setAttribute('transform', `rotate(${d})`);
+  /** The city's numbers (twice a second). */
+  setStatus(s: CityStatus): void {
+    this.status = s;
+    const line = s.cars + s.peds > 0 ? `${plural('status.vehicles', s.cars)} · ${plural('status.people', s.peds)}` : '';
+    if (this.statsText.data !== line) this.statsText.data = line;
+    const tip = t('ui.stats.tip', { residents: fmtCount(s.residents), jobs: fmtCount(s.jobs), buildings: fmtCount(s.buildings), speed: fmtInt(s.speedKmh) });
+    if (this.stats.title !== tip && !this.stats.dataset.tip) this.stats.title = tip; else if (this.stats.dataset.tip) this.stats.dataset.tip = tip;
+    this.syncMetrics();
   }
+
+  setTrafficView(on: boolean): void { this.layers.traffic = on; if (this.popId === 'layers') this.fillPop('layers'); }
+  setGrid(on: boolean): void { this.layers.grid = on; if (this.popId === 'layers') this.fillPop('layers'); }
+
+  /** Camera heading (rad): the needle points to north on the screen. */
+  setCompass(yaw: number): void { this.compass.point(yaw); }
 
   setHint(text: string): void {
-    this.hint.textContent = text;
-    this.hint.style.display = text ? '' : 'none';
+    const shown = forTouch(loose(text));
+    if (this.hint.textContent !== shown) this.hint.textContent = shown;
+    this.hint.hidden = !shown;
   }
 
   setHistory(canUndo: boolean, canRedo: boolean): void {
-    this.undoBtn.disabled = !canUndo;
-    this.redoBtn.disabled = !canRedo;
+    this.undoB.disabled = !canUndo;
+    this.redoB.disabled = !canRedo;
   }
 
-  setView(mode: 'persp' | 'iso'): void {
-    this.viewBtn.dataset.mode = mode;
-    this.viewBtn.textContent = mode === 'iso' ? 'Isométrica' : 'Perspectiva';
-  }
+  setView(mode: 'persp' | 'iso'): void { this.view = mode; if (this.popId === 'camera') this.fillPop('camera'); }
 
   toast(text: string): void {
-    this.toastEl.textContent = text;
-    this.toastEl.classList.add('show');
+    this.toastEl.textContent = forTouch(loose(text));
+    this.toastEl.hidden = false;
     clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => this.toastEl.classList.remove('show'), 2600);
+    this.toastTimer = window.setTimeout(() => { this.toastEl.hidden = true; }, 2600);
   }
 
   showLoading(text: string): void {
-    this.loadingText.textContent = text;
+    this.loadingText.textContent = loose(text);
     this.loading.classList.remove('hidden');
   }
 
   hideLoading(): void { this.loading.classList.add('hidden'); }
 
   fatal(text: string): void {
-    this.loadingText.textContent = text;
+    this.loadingText.textContent = loose(text);
     this.loading.classList.add('error');
     this.loading.classList.remove('hidden');
   }
+
+  /** The decimal notation of the interface (for panels of other areas). */
+  static dec(n: number, d = 1): string { return fmtDec(n, d); }
 }
 
-function el(tag: string, cls: string): HTMLElement {
-  const e = document.createElement(tag);
-  e.className = cls;
-  return e;
-}
-
-function label(t: string): HTMLElement {
-  const e = el('span', 'label');
-  e.textContent = t;
-  return e;
-}
-
-function button(text: string, fn: () => void, title = ''): HTMLButtonElement {
-  const b = document.createElement('button');
-  b.textContent = text;
-  b.title = title;
-  b.addEventListener('click', (e) => { e.stopPropagation(); fn(); (e.currentTarget as HTMLElement).blur(); });
-  return b;
-}
-
-function selectOf(opts: Array<[number, string]>, value: number, fn: (v: number) => void): HTMLSelectElement {
-  const s = document.createElement('select');
-  for (const [v, t] of opts) { const o = document.createElement('option'); o.value = String(v); o.textContent = t; s.append(o); }
-  s.value = String(value);
-  s.addEventListener('change', () => { fn(Number(s.value)); s.blur(); });
-  return s;
-}
-
-function slider(min: number, max: number, value: number, fn: (v: number) => void): HTMLInputElement {
-  const i = document.createElement('input');
-  i.type = 'range';
-  i.min = String(min); i.max = String(max); i.value = String(value);
-  if (max - min <= 5) i.step = '0.1';
-  i.addEventListener('input', () => fn(Number(i.value)));
-  return i;
+/** A key code as the player reads it. */
+export function keyName(code: string): string {
+  return code.replace(/^Key/, '').replace(/^Digit/, '').replace('PageUp', 'Page Up').replace('PageDown', 'Page Down');
 }
