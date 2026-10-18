@@ -1,7 +1,7 @@
-// Imagem final: sombras do sol em 3 cascatas (só perto), oclusão de ambiente
-// (GTAO em meia resolução), brilho das luzes à noite (bloom), suavização
-// temporal (TRAA) e o mapeamento de tons. Cada parte liga e desliga pelas opções; no modo de
-// compatibilidade (WebGL 2) tudo fica desligado.
+// Final image: the sun's shadows in 3 cascades (near only), ambient occlusion (GTAO at half resolution), the glow
+// of lights at night (bloom), temporal anti-aliasing (TRAA), ACES tone mapping and Roadcraft's grade (CAS sharpening,
+// S curve, vibrance, split toning, vignette). Each part switches with the options; in compatibility mode (WebGL 2)
+// everything is off.
 
 import * as THREE from 'three/webgpu';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
@@ -14,12 +14,18 @@ import { nightU } from './scene.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
-const { pass, mrt, output, normalView, packNormalToRGB, unpackRGBToNormal, sample, vec4, vec3, mix, float, dot, renderOutput, smoothstep, max, min, clamp, screenUV } = T;
+const {
+  pass, mrt, output, normalView, packNormalToRGB, unpackRGBToNormal, sample, vec2, vec4, vec3, mix, float, dot, renderOutput,
+  smoothstep, max, min, clamp, screenUV, select, pow, sqrt, screenSize, cameraProjectionMatrix,
+} = T;
+
+/** CAS strength (Roadcraft's "high" quality: 0.35). */
+const SHARPEN = 0.35;
 
 export interface PostOptions { shadows: boolean; ao: boolean; bloom: boolean }
 
-/** Material transparente só pinta a cor: deixa a normal e a velocidade do que está atrás
- *  (a oclusão e o TRAA leem essas camadas; senão chuva e nuvens viram riscos e manchas). */
+/** A transparent material paints colour only: it leaves the normal and velocity of what is behind it (the occlusion
+ *  and the TRAA read those layers; otherwise rain and clouds turn into streaks and smudges). */
 export function colorOnly<M extends THREE.NodeMaterial>(m: M): M {
   m.mrtNode = mrt({ output, normal: vec4(0, 0, 0, 0), velocity: vec4(0, 0, 0, 0) });
   return m;
@@ -35,7 +41,7 @@ export class Post {
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, sun: THREE.DirectionalLight, opts: PostOptions) {
     this.renderer = renderer;
     this.opts = opts;
-    // sombras em cascata: só até onde a sombra ainda passa de um pixel útil
+    // cascaded shadows: only as far as a shadow still covers a useful pixel
     if (opts.shadows) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -52,10 +58,10 @@ export class Post {
     }
 
     this.pipeline = new THREE.RenderPipeline(renderer);
-    // sem MSAA: a suavização é temporal (TRAA), que também limpa o ruído da oclusão
+    // no MSAA: anti-aliasing is temporal (TRAA), which also cleans the occlusion's noise
     const scenePass = pass(scene, camera, { samples: 0 });
     this.scenePass = scenePass;
-    // normal e velocidade misturam pelo material: o opaco sobrescreve, o transparente de colorOnly não mexe
+    // normal and velocity blend by material: opaque overwrites, colorOnly's transparent leaves them
     const outs = mrt({ output, normal: packNormalToRGB(normalView), velocity: stableVelocity });
     outs.setBlendMode('normal', new THREE.BlendMode(THREE.MaterialBlending));
     outs.setBlendMode('velocity', new THREE.BlendMode(THREE.MaterialBlending));
@@ -76,52 +82,74 @@ export class Post {
       const occ = clean.r;
       color = vec4(color.rgb.mul(mix(float(1), occ, 0.85)), color.a);
     }
-    // uma suavização (TRAA) por saída: um mesmo TRAA em duas imagens finais perde o histórico e a imagem
-    // inteira tremia nas bordas (10% dos pixels mudando com tudo parado)
+    // one TRAA per output: one TRAA shared by two final images loses its history and the whole image shook at the
+    // edges (10% of the pixels changing with everything still)
     const aa = traa(color, depthTex, scenePass.getTextureNode('velocity'), camera);
     this.camera = camera;
     this.traas = [aa];
-    // acabamento da cor: saturação +18% e contraste leve em volta do meio-tom (antes do AgX da saída)
-    // acabamento como o do roadcraft, depois do AgX e do sRGB (na cor da tela): curva S de contraste, vibração
-    // (realça só as cores fracas), luzes um pouco quentes e bordas da tela levemente escuras
-    const grade = (c: Node): Node => {
-      const hdrLuma = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-      const pre = mix(vec3(hdrLuma, hdrLuma, hdrLuma), c.rgb, 1.08);
-      const d = renderOutput(vec4(pre, 1)).rgb;
-      const sCurve = mix(d, smoothstep(0, 1, d), 0.22);
-      const l = dot(sCurve, vec3(0.2126, 0.7152, 0.0722));
-      const sat = max(max(sCurve.r, sCurve.g), sCurve.b).sub(min(min(sCurve.r, sCurve.g), sCurve.b));
-      const vib = mix(vec3(l, l, l), sCurve, float(1).add(float(1).sub(sat).mul(0.3)));
-      const warm = vib.add(vec3(0.02, 0.008, -0.014).mul(smoothstep(0.55, 1, l)));
-      const r = screenUV.sub(0.5).length().mul(1.35);
-      const vig = mix(float(1), float(0.84), smoothstep(0.45, 1.05, r));
-      return vec4(clamp(warm.mul(vig), 0, 1), 1);
+
+    // Grade as Roadcraft's GRADED_OUTPUT_FRAGMENT, after the tone mapping and the sRGB transfer (display colour).
+    const toDisplay = (c: Node): Node => renderOutput(vec4(c.rgb, 1)).rgb;
+    // CAS only where a pixel spans little ground (10-30 cm, as Roadcraft's sharp mask), never on the sky
+    const viewZ = scenePass.getViewZNode('depth');
+    const persp = cameraProjectionMatrix.element(2).element(3).lessThan(-0.5);
+    const span = select(persp, viewZ.negate(), float(1)).mul(2).div(cameraProjectionMatrix.element(1).element(1).mul(screenSize.y));
+    const sharpMask = float(1).sub(smoothstep(0.1, 0.3, span)).mul(depthTex.sample(screenUV).r.greaterThan(0).toFloat());
+    /** What CAS (AMD FidelityFX, sharpen-only path) changes on the displayed pixel, from the resolved image's taps.
+     *  A delta so the night output can add it to the image with bloom (the bloom itself is never sharpened). */
+    const casDelta = (srcNode: Node): Node => {
+      // the TRAA node renders into its own target: its texture is what can be sampled at the neighbours
+      const src = srcNode.getTextureNode ? srcNode.getTextureNode() : srcNode;
+      const px = vec2(1, 1).div(screenSize);
+      const tap = (dx: number, dy: number) => pow(toDisplay(src.sample(screenUV.add(px.mul(vec2(dx, dy))))), vec3(2.2));
+      const cl = pow(toDisplay(src.sample(screenUV)), vec3(2.2));
+      const b = tap(0, -1), d = tap(-1, 0), f = tap(1, 0), h = tap(0, 1);
+      const mn = min(min(min(d, cl), min(f, b)), h);
+      const mx = max(max(max(d, cl), max(f, b)), h);
+      const amp = sqrt(clamp(min(mn, vec3(1, 1, 1).sub(mx)).div(max(mx, vec3(1e-4, 1e-4, 1e-4))), 0, 1));
+      const w = amp.g.mul(-1 / (8 + (5 - 8) * SHARPEN));
+      const sharp = clamp(b.add(d).add(f).add(h).mul(w).add(cl).div(w.mul(4).add(1)), 0, 1);
+      return pow(sharp, vec3(1 / 2.2)).sub(pow(cl, vec3(1 / 2.2))).mul(sharpMask);
     };
-    // a conversão para a tela já foi feita dentro do acabamento
+    const grade = (c: Node, src: Node): Node => {
+      let d: Node = clamp(toDisplay(c).add(casDelta(src)), 0, 1);
+      const l = dot(d, vec3(0.2126, 0.7152, 0.0722));
+      // contrast: an S round the middle grey
+      d = mix(d, smoothstep(0, 1, d), 0.25);
+      // vibrance: the dull colours gain more than the vivid
+      const sat = max(max(d.r, d.g), d.b).sub(min(min(d.r, d.g), d.b));
+      d = mix(vec3(l, l, l), d, float(1).add(float(1).sub(sat).mul(0.3)));
+      // split toning: warm highlights, cool shadows
+      d = d.add(vec3(0.02, 0.008, -0.014).mul(smoothstep(0.15, 0.85, l)));
+      const q = screenUV.sub(0.5);
+      const vig = mix(float(1), float(0.78), smoothstep(0.3, 0.85, dot(q, q).mul(2.4)));
+      return vec4(clamp(d.mul(vig), 0, 1), 1);
+    };
+    // the conversion to the screen is done inside the grade
     this.pipeline.outputColorTransform = false;
-    this.dayOut = grade(aa);
+    this.dayOut = grade(aa, aa);
     this.nightOut = this.dayOut;
     if (opts.bloom) {
-      // só as luzes fortes (janelas, postes, faróis), à noite e no entardecer. Depois do TRAA: sobre a imagem
-      // já resolvida (antes dele, o brilho do quadro tremido entrava na história e a imagem chuviscava).
-      // De dia o brilho quase não aparece e a passada custa: a saída de dia não tem bloom.
+      // only the strong lights (windows, lamps, headlights), at night and at dusk. After the TRAA: over the resolved
+      // image (before it, the glow of the jittered frame went into the history and the image drizzled).
+      // By day the glow hardly shows and the pass costs: the day output has no bloom.
       const aaN = traa(color, depthTex, scenePass.getTextureNode('velocity'), camera);
       this.traas.push(aaN);
       const b = bloom(aaN, 0.6, 0.35, 0.9);
       b.strength = nightU.mul(0.55).add(0.08);
-      this.nightOut = grade(aaN.add(b));
+      this.nightOut = grade(aaN.add(b), aaN);
     }
-    // depuração da estabilidade da imagem (ver CLAUDE.md "Traps"):
-    //  ?semtraa  imagem sem a suavização temporal (sem jitter): o piso da diferença entre quadros parados;
-    //  ?traadbg  vermelho = histórico recusado, verde = peso do quadro atual, azul = desoclusão (parado: quase preto);
-    //  ?vel      velocidade ×5000 (vermelho x, verde y, azul = NaN); com a câmera parada tem de ficar escuro.
+    // image stability debugging (see CLAUDE.md "Traps"):
+    //  ?semtraa  image without temporal anti-aliasing (no jitter): the floor of the difference between still frames;
+    //  ?traadbg  red = history rejected, green = current frame weight, blue = disocclusion (still: almost black);
+    //  ?vel      velocity ×5000 (red x, green y, blue = NaN); with the camera still it must stay dark.
     const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
-    if (q?.has('semtraa')) this.dayOut = this.nightOut = grade(color);
+    if (q?.has('semtraa')) this.dayOut = this.nightOut = grade(color, scenePass.getTextureNode('output'));
     if (q?.has('traadbg')) { traaDebug.value = 1; this.dayOut = this.nightOut = aa; }
     if (q?.has('vel')) {
       const v = scenePass.getTextureNode('velocity');
       const nan = v.x.equal(v.x).not().or(v.y.equal(v.y).not());
-      // + o TRAA em quantidade nula: ele precisa estar no grafo (é ele quem põe o jitter na câmera)
+      // + the TRAA at zero weight: it has to be in the graph (it is what jitters the camera)
       this.dayOut = this.nightOut = T.select(nan, vec4(0, 0, 1, 1), vec4(min(v.x.abs().mul(5000), 1), min(v.y.abs().mul(5000), 1), 0.12, 1)).add(aa.mul(1e-6));
     }
     this.pipeline.outputNode = this.nightOut;
@@ -133,10 +161,10 @@ export class Post {
   private dayOut: Node;
   private nightOut: Node;
   private active: Node | null = null;
-  /** Força a saída com bloom (aquecimento: compila as duas). */
+  /** Forces the output with bloom (warm-up: compiles both). */
   bloomOverride: boolean | null = null;
 
-  /** A câmera ativa mudou (perspectiva/isométrica). */
+  /** The active camera changed (perspective/isometric). */
   setCamera(camera: THREE.Camera): void {
     this.camera = camera;
     if (this.scenePass.camera !== camera) {
@@ -147,7 +175,7 @@ export class Post {
   }
 
   render(): void {
-    // troca só quando muda (guardada aqui: refazer a imagem final a cada quadro zera o histórico do TRAA)
+    // switch only when it changes (kept here: rebuilding the final image every frame zeroes the TRAA's history)
     const want = (this.bloomOverride ?? nightU.value > 0.04) ? this.nightOut : this.dayOut;
     if (this.active !== want) { this.active = want; this.pipeline.outputNode = want; this.pipeline.needsUpdate = true; }
     updateVelocityCamera(this.camera);
