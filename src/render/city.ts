@@ -14,11 +14,44 @@ import { nightU } from './scene.ts';
 import { ARCHES, archWindowTable } from '../world/arch.ts';
 import { cutMask } from './inside.ts';
 import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
+import { FINISH_BY_MAT, FINISH_COUNT, FINISH_LOOKS, FINISH_SIZE } from '../jobs/buildingFinishes.ts';
 
 const {
   attribute, vec3, vec4, float, int, mix, clamp, fract, fwidth, smoothstep, floor, mod, select, hash, min, abs,
-  positionWorld, cameraPosition, sRGBTransferEOTF, dot, max, step, normalize, pow, texture, vec2,
+  positionWorld, cameraPosition, sRGBTransferEOTF, dot, max, step, normalize, pow, texture, vec2, cross, transformNormalToView,
 } = T;
+
+/**
+ * The 13 building finishes as two texture arrays (layer = finish id − 1): albedo tone + roughness, normal + metalness.
+ * Neutral until the bake worker answers (mean tone, flat normal): the same image as without textures.
+ */
+function finishArray(fill: [number, number, number, number]): THREE.DataArrayTexture {
+  const n = FINISH_SIZE * FINISH_SIZE * FINISH_COUNT, data = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) data.set(fill, i * 4);
+  const t = new THREE.DataArrayTexture(data, FINISH_SIZE, FINISH_SIZE, FINISH_COUNT);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return t;
+}
+export const FINISH_ALBEDO = finishArray([128, 128, 128, 230]);
+export const FINISH_NORMAL = finishArray([128, 128, 255, 0]);
+let finishBaked = false;
+/** Starts the bake (once): a worker fills both arrays and they go up to the GPU again, with mipmaps. */
+function bakeFinishesOnce(): void {
+  if (finishBaked || typeof Worker === 'undefined') return;
+  finishBaked = true;
+  const w = new Worker(new URL('../jobs/buildingFinishWorker.ts', import.meta.url), { type: 'module', name: 'finishes' });
+  w.onmessage = (e: MessageEvent<{ albedo: Uint8Array; normal: Uint8Array }>) => {
+    (FINISH_ALBEDO.image.data as Uint8Array).set(e.data.albedo); FINISH_ALBEDO.needsUpdate = true;
+    (FINISH_NORMAL.image.data as Uint8Array).set(e.data.normal); FINISH_NORMAL.needsUpdate = true;
+    w.terminate();
+  };
+}
+/** Per finish: (1 / tile size in m, normal strength, 0, 0). Index = finish id (0 unused). */
+const FINISH_LOOK = T.uniformArray(Array.from({ length: FINISH_COUNT + 1 }, (_, k) => new THREE.Vector4(k ? 1 / FINISH_LOOKS[k].worldSize : 0, k ? FINISH_LOOKS[k].normalScale : 0, 0, 0)), 'vec4');
+const FINISH_AUTO = T.uniformArray(FINISH_BY_MAT.map((f) => new THREE.Vector4(f, 0, 0, 0)), 'vec4');
 
 /** Ruído de reboco feito uma vez (128², repete sem emenda): R grão fino + manchas, G escorrido (esticado em y). */
 function wallNoise(): THREE.DataTexture {
@@ -118,8 +151,14 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   // dither da troca de nível e o corte do "ver por dentro"
   m.maskNode = lodFadeMask().and(cutMask());
 
+  bakeFinishesOnce();
   const col = attribute('col', 'vec4');
-  const mat = floor(col.w.mul(255).add(0.5));
+  const matByte = floor(col.w.mul(255).add(0.5));
+  const mat = mod(matByte, 16);
+  // acabamento: nibble alto do byte de material (0 = o padrão do material)
+  const finV = floor(matByte.div(16));
+  const fin = select(finV.greaterThan(0.5), finV, FINISH_AUTO.element(int(mat)).x);
+  const hasFin = step(float(0.5), fin);
   // gramado do lote com o mesmo gramado assado do terreno
   const lawn = step(abs(mat.sub(7)), float(0.5));
   const base = sRGBTransferEOTF(col.xyz).mul(mix(vec3(1, 1, 1), texture(GRASS_TEX, positionWorld.xz.div(GRASS_TILE)).xyz.mul(2), lawn));
@@ -253,10 +292,21 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const shutterAmt = shutter.mul(archMask);
   let wallFinal: Node = mix(mix(wallC, trimC, frameAmt), shutterC, shutterAmt);
   const P = positionWorld;
+  // acabamento: UV em metros no plano da face (u na horizontal da face, v subindo; na laje, x e z)
+  const look = FINISH_LOOK.element(int(floor(fin.add(0.5))));
+  const faceH = vec2(n.z, n.x.negate());
+  const flatFace = step(dot(faceH, faceH), float(0.0025));
+  const tAx = normalize(mix(vec3(faceH.x, 0, faceH.y), vec3(1, 0, 0), flatFace));
+  const bAx = cross(n, tAx);
+  const fuvM = vec2(dot(P, tAx), dot(P, bAx)).mul(look.x);
+  const layer = int(max(fin.sub(1), float(0)));
+  const finA = texture(FINISH_ALBEDO, fuvM).depth(layer);
+  const finN = texture(FINISH_NORMAL, fuvM).depth(layer);
+  const finTone = mix(vec3(1, 1, 1), finA.xyz.mul(2), hasFin);
   const wn = texture(WALL_NOISE, vec2(P.x.add(P.z), P.y).mul(0.11));
   const grain = wn.r.mul(2).sub(1);
   const isFacade = hasWin.max(vertical.mul(isWall));
-  const plain = float(1).sub(isCurtain);
+  const plain = float(1).sub(isCurtain).mul(float(1).sub(hasFin));
   const winCol = band(ww, float(1).sub(ww), fx, wu).mul(hasWin).mul(float(1).sub(inShop)).mul(step(float(0), yy));
   // escorrido de chuva sob a janela (mais escuro perto do peitoril)
   const streakN = wn.g;
@@ -268,7 +318,8 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const sill = sillW.mul(band(wLow.sub(float(0.06)), wLow, fy, wy));
   const sillShadow = sillW.mul(band(wLow.sub(float(0.12)), wLow.sub(float(0.06)), fy, wy));
   const wallK = float(1).add(grain.mul(0.11).mul(plain)).sub(streak).sub(slab.mul(0.22)).sub(sillShadow.mul(0.3));
-  wallFinal = mix(wallFinal.mul(wallK), mix(trimC, vec3(0.86, 0.84, 0.8), 0.5), sill.mul(isFacade).mul(detail).mul(plain));
+  const sillAmt = sill.mul(isFacade).mul(detail).mul(float(1).sub(isCurtain));
+  wallFinal = mix(wallFinal.mul(wallK).mul(finTone), mix(trimC, vec3(0.86, 0.84, 0.8), 0.5), sillAmt);
   // recuo de verdade pelo ângulo de visão: o vidro fica ~22 cm para dentro; onde a abertura (na parede) não
   // mostra o vidro, aparece a parede do vão (em sombra), do lado oposto ao olhar
   const inward = max(dot(V, n.negate()), float(0.15));
@@ -283,8 +334,14 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   m.colorNode = vec4(albedo, 1);
   m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
 
-  const rough = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
+  const rough0 = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
+  const rough = mix(rough0, finA.w, hasFin);
   m.roughnessNode = mix(rough, float(0.12), winAmt);
-  m.metalnessNode = select(mat.equal(5), float(0.35), float(0)).mul(float(1).sub(winAmt));
+  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), finN.w.mul(hasFin)).mul(float(1).sub(winAmt));
+  // relevo do acabamento (fora do vidro), na base da face
+  const nm = finN.xyz.mul(2).sub(1);
+  const nk = look.y.mul(hasFin).mul(float(1).sub(winAmt)).mul(float(1).sub(sillAmt));
+  const nW = normalize(tAx.mul(nm.x.mul(nk)).add(bAx.mul(nm.y.mul(nk))).add(n.mul(nm.z)));
+  m.normalNode = transformNormalToView(nW);
   return m;
 }

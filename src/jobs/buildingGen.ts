@@ -13,8 +13,9 @@ import { MeshBuilder } from './meshBuilder.ts';
 import { ARCHES, ArchId, Balcony, Crown, Fn, Win, archWindowTable, chimneyOf, pickArch, type Arch } from '../world/arch.ts';
 import type { BoxColumns, PackedMesh } from './protocol.ts';
 import { CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign, type Design } from '../world/design.ts';
+import { FIN } from './buildingFinishes.ts';
 
-export const GEN_VERSION = 14;
+export const GEN_VERSION = 15;
 /** Camada de detalhe: para onde vão as peças 3D das janelas enquanto o gerador roda num descarte. */
 let detailOut: MeshBuilder | null = null;
 /** Lajes: manta clara, cimento, piche, cinza escuro, telhado verde. */
@@ -282,7 +283,9 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
       detailOut = mb;
       g.mb = sink; g.lod = 0;
     }
-    if (hasDesign(b.color[i])) design(g, decodeDesign(b.color[i], b.h[i]));
+    const v0 = mb.v;
+    const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
+    if (ds) design(g, ds);
     else if (b.fn[i] === Fn.Cemetery || b.fn[i] === Fn.Playground) openLot(g, b.fn[i]);
     else if (CIVIC_DESIGNS[b.fn[i]]) { const [ds, minF] = CIVIC_DESIGNS[b.fn[i]]; design({ ...g, floors: Math.max(minF, Math.min(floors, minF * 2)) }, ds); }
     else if (b.fn[i]) civic(g, b.fn[i]);
@@ -295,6 +298,7 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
     else if (zone === Zone.Commercial && floors >= 8) tower(g);
     else block(g);
     detailOut = null;
+    applyFinishes(mb, v0, finishTable(arch, b.seed[i], b.fn[i], zone, ds));
   }
   return mb.pack(originX, originZ, extent);
 }
@@ -1311,4 +1315,51 @@ function mixHex(a: number, b: number, t: number): number {
 function shadeHex(rgb: number, k: number): number {
   const r = Math.round(((rgb >> 16) & 255) * k), g = Math.round(((rgb >> 8) & 255) * k), b = Math.round((rgb & 255) * k);
   return (r << 16) | (g << 8) | b;
+}
+
+// ------------------------------------------------------------ finishes (texture-array layer per vertex)
+
+/** Finish per building material for one building (index = BMAT); 0 = the shader's default for that material. */
+const finTable = new Uint8Array(16);
+
+/** Wall finish by style, picked from the seed (a hash, not the generator's Rng: the layout stays as it was). */
+const WALL_FINISHES: number[][] = [];
+WALL_FINISHES[ArchId.Colonial] = [FIN.Plaster, FIN.Plaster, FIN.Stucco];
+WALL_FINISHES[ArchId.ArtDeco] = [FIN.Stucco, FIN.Stone, FIN.Plaster];
+WALL_FINISHES[ArchId.Modernist] = [FIN.Ceramic, FIN.Ceramic, FIN.Plaster];
+WALL_FINISHES[ArchId.Contemporary] = [FIN.Panel, FIN.Concrete, FIN.Plaster, FIN.Plaster];
+WALL_FINISHES[ArchId.Brick] = [FIN.Brick];
+WALL_FINISHES[ArchId.Tropical] = [FIN.Ceramic, FIN.Plaster, FIN.Plaster];
+WALL_FINISHES[ArchId.Glass] = [FIN.Stone, FIN.Concrete];
+WALL_FINISHES[ArchId.Industrial] = [FIN.Concrete, FIN.Plaster];
+WALL_FINISHES[ArchId.ColonialHouse] = [FIN.Plaster, FIN.Stucco];
+WALL_FINISHES[ArchId.Bungalow] = [FIN.Stucco, FIN.Plaster];
+WALL_FINISHES[ArchId.ModernHouse] = [FIN.Concrete, FIN.Plaster, FIN.Plaster, FIN.Wood];
+WALL_FINISHES[ArchId.Sobrado] = [FIN.Plaster, FIN.Plaster, FIN.Brick];
+WALL_FINISHES[ArchId.Civic] = [FIN.Stone, FIN.Plaster];
+
+/** Creator finishes (design.ts FINISHES order) → finish id. */
+const DESIGN_FINISH = [FIN.Plaster, FIN.Brick, FIN.Panel, FIN.Concrete, FIN.Metal, FIN.Wood, FIN.Stone];
+
+/** The finish of each material of one building (shared table, filled per call). */
+export function finishTable(arch: number, seed: number, fn: number, zone: number, ds: Design | null): Uint8Array {
+  finTable.fill(0);
+  const h = hash2(seed, arch, 0x51f15e);
+  const list = WALL_FINISHES[fn ? ArchId.Civic : arch] ?? WALL_FINISHES[ArchId.Colonial];
+  let wall = list[h % list.length];
+  if (ds) wall = DESIGN_FINISH[ds.finish] ?? FIN.Plaster;
+  finTable[BMAT.Wall] = wall;
+  finTable[BMAT.Shop] = wall;
+  // trim and parapets follow a plain wall; brick, tile, wood and panel buildings get rendered parapets and cornices
+  finTable[BMAT.Plain] = wall === FIN.Brick || wall === FIN.Ceramic || wall === FIN.Wood || wall === FIN.Panel ? FIN.Plaster : wall;
+  finTable[BMAT.RoofFlat] = (h >>> 8) % 10 < 3 ? FIN.Concrete : FIN.Roofing;
+  finTable[BMAT.RoofTile] = (h >>> 12) % 10 < 1 && zone !== Zone.Industrial ? FIN.Slate : FIN.Tile;
+  if (zone === Zone.Industrial && !ds) finTable[BMAT.Metal] = FIN.Metal;
+  return finTable;
+}
+
+/** Writes the finish (high nibble of the material byte) on the vertices of one building. */
+function applyFinishes(mb: MeshBuilder, v0: number, table: Uint8Array): void {
+  const m = mb.mat;
+  for (let i = v0; i < mb.v; i++) { const k = m[i]; if (k < 16) m[i] = k | (table[k] << 4); }
 }
