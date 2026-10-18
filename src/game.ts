@@ -127,6 +127,8 @@ export class Game {
   private simSpeed = 1;
   private zoneLayer = false;
   private transitTerminal = false;
+  /** Clicks with the street item tools remove instead of placing (Remove poles; Shift+click does the same). */
+  private itemRemove = false;
   private health!: HealthPanel;
   private creator!: Creator;
   private lineSel = 0;
@@ -298,6 +300,8 @@ export class Game {
       weather: (w) => this.setWeather(w),
       sky: (m) => { this.skyMode = m; this.unsaved = true; },
       personSpec: (p) => { this.personSpec = p; },
+      personOptions: (o) => { this.personOptions = o; },
+      peopleCatalog: () => this.vehicles.people.catalog(),
       bombForce: (f) => { this.bombForce = f; },
       water: (w) => this.setWater(w),
       skyTool: (s) => { this.skyTool = s; this.skyHint(); },
@@ -359,6 +363,8 @@ export class Game {
       furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
       ring: (f) => this.roadTool.ringBy(f),
       terminal: (on) => { this.transitTerminal = on; },
+      itemRemove: (on) => { this.itemRemove = on; },
+      cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
       health: () => this.health.toggle(),
     } satisfies HudActions));
     this.roadTool = new RoadTool(this.world, this.commands, this.preview, this.hud);
@@ -917,7 +923,7 @@ export class Game {
         const hit = this.rig.pick(this.ndcX(), this.ndcY());
         if (this.tool === 'inspect') { if (hit) this.inspector.pick(hit.x, hit.z); }
         else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
-        else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey);
+        else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey || this.itemRemove);
         else if (this.tool === 'building') this.clickBuilding(hit, e.shiftKey);
         else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey || this.transitTerminal);
         else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
@@ -1326,7 +1332,15 @@ export class Game {
   }
 
   /** Criador de pessoas: parada (item salvo) ou andando (pedestres da simulação com a roupa escolhida). */
+  /** The people creator screen's choices (src/render/people/creator.ts), used when the cooked people are loaded. */
+  private personOptions: Partial<PersonOptions> = {};
+
   private placePerson(x: number, z: number): void {
+    // the cooked people (people front): a group of 1 to 20 with the screen's clothes, height, mode and object
+    if (this.vehicles.people.creator) {
+      const n = this.personOptions.count ?? 1;
+      if (this.api.people(x, z, this.personOptions)) { this.hud.toast(n === 1 ? 'Pessoa criada.' : `${n} pessoas criadas.`); return; }
+    }
     const p = this.personSpec;
     if (p.walk) {
       this.sim.postMessage({ type: 'people', x, z, count: p.count, color: p.color } satisfies ToSim);

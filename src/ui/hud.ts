@@ -12,6 +12,7 @@ import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
 import { mountCompass, type Compass } from './compass.ts';
 import { AboutBox } from './about.ts';
+import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
 import {
   CATS, ShellState, categoriesOf, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
   type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
@@ -60,6 +61,10 @@ export interface OptionalActions {
   streetNameAt?(x: number, z: number): string;
   /** Regional road paint of this map, saved with it. */
   mapPaint?(style: string): void;
+  /** The people creator's choices (people front, src/render/people/creator.ts). */
+  personOptions?(o: Partial<PersonOptions>): void;
+  /** What the people creator offers; null until the cooked people load. */
+  peopleCatalog?(): ReturnType<typeof creatorCatalog> | null;
 }
 
 export interface HudActions extends OptionalActions {
@@ -163,6 +168,10 @@ export interface HudActions extends OptionalActions {
   terminal(on: boolean): void;
   /** The F9 panel. */
   health(): void;
+  /** Street item clicks remove (on) or place (off). */
+  itemRemove(on: boolean): void;
+  /** Camera distance to its target (m) and the target on the map. */
+  cameraNumbers(): { dist: number; x: number; z: number };
 }
 
 type PopId = 'menu' | 'layers' | 'sim' | 'camera' | 'help';
@@ -223,6 +232,7 @@ export class Hud {
   private view: 'persp' | 'iso' = 'persp';
   private insideFloor = -1;
   private about = new AboutBox();
+  private readoutTimer = 0;
   // dock and drawer
   private catButtons = new Map<Category, HTMLButtonElement>();
   private drawer: HTMLElement;
@@ -511,6 +521,7 @@ export class Hud {
     const titles: Partial<Record<PopId, string>> = { layers: 'v2.layers', sim: 'builder.menu.simulation', camera: 'camera.label', help: 'builder.help' };
     const body = el('div', 'v2-pop-body');
     this.metrics = null;
+    clearInterval(this.readoutTimer);
     if (id === 'menu') {
       const st = a.settings();
       body.append(
@@ -565,6 +576,19 @@ export class Hud {
         cam('ui.camera.top', 'top', () => a.view('top')),
         cam('ui.camera.follow', 'follow', () => a.follow()),
       );
+      const dl = el('dl', 'v2-metrics');
+      const zoom = el('dd', '', ''), centre = el('dd', '', '');
+      dl.append(el('dt', '', t('camera.zoom')), zoom, el('dt', '', t('camera.centre')), centre);
+      const sync = (): void => {
+        const c = a.cameraNumbers();
+        const zt = `${fmtInt(c.dist)} m`, ct = `X ${fmtInt(c.x)} · Z ${fmtInt(c.z)}`;
+        if (zoom.textContent !== zt) zoom.textContent = zt;
+        if (centre.textContent !== ct) centre.textContent = ct;
+      };
+      sync();
+      this.readoutTimer = window.setInterval(() => { if (this.popId === 'camera') sync(); else clearInterval(this.readoutTimer); }, 250);
+      this.pop.replaceChildren(el('div', 'v2-pop-title', t('camera.label')), body, dl);
+      return;
     } else {
       body.classList.add('help');
       const keyList = (title: string, rows: Array<[string, string]>): HTMLElement => {

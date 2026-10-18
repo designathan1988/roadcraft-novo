@@ -157,3 +157,5 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .about-list { margin: 6px 0 0; padding-left: 18px; color: var(--v-muted); font-size: 12px; }
 .about-text summary { margin-top: 6px; color: var(--v-accent); font-size: 12px; cursor: pointer; }
 .about-text pre { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 8px; border-radius: 8px; background: var(--v-bg-solid); color: var(--v-muted); font-size: 11px; white-space: pre-wrap; user-select: text; }
+/* People creator: "as it comes" swatch. */
+.v2-swatch.any { background: linear-gradient(135deg, transparent 46%, var(--v-muted) 48%, var(--v-muted) 52%, transparent 54%); }
