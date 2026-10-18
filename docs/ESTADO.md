@@ -29,7 +29,7 @@ Atualizado: 2026-10-18, 19h30.
 | Prédios com o visual do Roadcraft + construtor completo | `src/jobs/buildingGen.ts`, `src/render/city.ts`, `src/render/inside.ts`, `src/world/arch.ts`, `src/world/design.ts`, `src/ui/creator.ts`, `data/lots-roadcraft` | a começar |
 | Pessoas do Roadcraft (MakeHuman cozido, LOD, paletas na GPU) | novo `src/render/people/**`, `public/models/people`, gancho em `render/vehicles.ts` (só o ramo das pessoas) | a começar |
 | Vias, terreno, vegetação, veículos, luz e pós com o visual do Roadcraft | `src/jobs/roadMesh.ts`, `roadPaint.ts`, `src/render/{roads,terrain,props,propMeshes,impostor,vehicles,post,scene,weather,particles,cloudPuffs}.ts`, `src/jobs/props.ts`, `src/world/ground.ts` | a começar |
-| Funcionalidades que faltam ou estão abaixo do Roadcraft (`docs/RECURSOS.md`) | `src/tools/**`, `src/sim/**`, `src/roads/**`, `src/world/{lotEdit,transit,items,growth,world}.ts`, `src/save.ts`, `src/jobs/{lots,storage}.ts`, `test/**` | a começar |
+| Funcionalidades que faltam ou estão abaixo do Roadcraft (`docs/RECURSOS.md`) | `src/tools/**`, `src/sim/**`, `src/roads/**`, `src/world/{lotEdit,transit,items,growth,world}.ts`, `src/save.ts`, `src/jobs/{lots,storage}.ts`, `test/**` | em andamento (ramo `claude/funcionalidades-roadcraft-8bee43`): verificar.mjs 146/146 (71 + 58 + 17) |
 
 ## Regras que valem em toda frente (resumo; o resto em `CLAUDE.md` e `docs/ARQUITETURA.md`)
 - Registro pequeno em tabela SoA; malha gerada em worker; página só envia; um material por camada; peças
