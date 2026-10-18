@@ -1,14 +1,15 @@
 import { Game, status } from './game.ts';
-import { currentLang, startTranslation } from './ui/i18n.ts';
+import { initLang, storedLang, t } from './ui/i18n.ts';
 
 async function boot(): Promise<void> {
-  // ?lang=en força o inglês (fotos e testes)
+  // ?lang=en forces English (photos and tests)
   const q = new URLSearchParams(location.search).get('lang');
-  startTranslation(q === 'en' || q === 'pt' ? q : currentLang());
+  initLang(q === 'en' ? 'en' : q === 'pt' ? 'pt-BR' : storedLang());
+  document.title = t('ui.title');
+  document.getElementById('loading-text')!.textContent = t('map.loading');
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   if (!crossOriginIsolated) {
-    document.getElementById('loading-text')!.textContent =
-      'A página precisa de isolamento de origem (COOP/COEP). Abra pelo servidor do jogo (npm start) ou pelo executável.';
+    document.getElementById('loading-text')!.textContent = t('ui.error.isolation');
     return;
   }
   const game = new Game(canvas);
@@ -17,7 +18,7 @@ async function boot(): Promise<void> {
   } catch (err) {
     console.error(err);
     status.value = 'falhou';
-    game.hud.fatal(`Não foi possível iniciar: ${err instanceof Error ? err.message : String(err)}`);
+    game.hud.fatal(t('ui.error.start', { message: err instanceof Error ? err.message : String(err) }));
   }
 }
 

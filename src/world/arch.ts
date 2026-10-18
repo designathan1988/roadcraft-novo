@@ -1,6 +1,6 @@
-// Estilos de arquitetura: a gramática de cada fachada (cores, janela, sacada,
-// coroamento, base, pilares, telhado). O gerador de prédios (worker) escolhe
-// pelo bairro e pela semente; o shader lê os parâmetros da janela pelo índice.
+// Architectural styles: the grammar of each facade (colours, window, balcony,
+// crown, base, piers, roof). The building generator (worker) picks one by the
+// neighbourhood and the seed; the shader reads the window parameters by index.
 
 import { fbm } from '../core/rng.ts';
 import { Zone } from '../roads/zones.ts';
@@ -11,36 +11,36 @@ export const ArchId = {
 } as const;
 export const ARCH_COUNT = 13;
 
-/** Janela no shader. */
+/** Window as the shader draws it. */
 export const Win = { Punched: 0, French: 1, Ribbon: 2, Curtain: 3, Tall: 4 } as const;
-/** Sacada. */
+/** Balcony. */
 export const Balcony = { None: 0, Every: 1, Alternate: 2, Continuous: 3 } as const;
-/** Coroamento. */
+/** Crown. */
 export const Crown = { Parapet: 0, Cornice: 1, Stepped: 2, Slab: 3 } as const;
 
 export interface Arch {
   name: string;
   walls: number[];
   trim: number;
-  /** Cor da base (térreo em pedra/revestimento), ou -1. */
+  /** Base colour (ground floor in stone/cladding), or -1. */
   base: number;
   win: number;
-  /** Janela: folga lateral (fração da coluna), peitoril e verga (fração do andar). */
+  /** Window: side margin (fraction of the column), sill and head (fraction of the storey). */
   winSide: number; winLow: number; winHigh: number;
   shutters: boolean;
-  /** Moldura clara em volta da janela. */
+  /** Light moulding around the window. */
   frame: boolean;
   balcony: number;
   crown: number;
-  /** Pilares salientes a cada n colunas (0 = sem). */
+  /** Piers standing out every n columns (0 = none). */
   piers: number;
-  /** Faixa saliente a cada n andares (0 = sem). */
+  /** Band standing out every n storeys (0 = none). */
   bands: number;
-  /** Largura da coluna (m). */
+  /** Column width (m). */
   module: number;
-  /** Pé-direito (m). */
+  /** Storey height (m). */
   floorH: number;
-  /** Recuos no topo (escalonamento). */
+  /** Setbacks at the top (stepping). */
   setbacks: number;
   roof: 'flat' | 'hip' | 'gable';
 }
@@ -87,16 +87,16 @@ export const ARCHES: Arch[] = [
     balcony: Balcony.None, crown: Crown.Cornice, piers: 1, bands: 0, module: 3.4, floorH: 4.2, setbacks: 0, roof: 'flat' },
 ];
 
-/** Parâmetros da janela por estilo, para o shader: (folga lateral, peitoril, verga, bits: 1 venezianas, 2 moldura). */
+/** Window parameters per style, for the shader: (side margin, sill, head, bits: 1 shutters, 2 moulding). */
 export function archWindowTable(): Array<[number, number, number, number]> {
   return ARCHES.map((a) => [a.winSide, a.winLow, a.winHigh, (a.shutters ? 1 : 0) + (a.frame ? 2 : 0)]);
 }
 
-/** Função do prédio (0 = comum, o crescimento escolhe pela zona). */
+/** Building function (0 = ordinary; growth picks by zone). */
 export const Fn = {
   None: 0, School: 1, Church: 2, Hospital: 3, Clinic: 4, Square: 5, Park: 6, GasStation: 7, Supermarket: 8,
   CityHall: 9, Police: 10, FireStation: 11, Mall: 12, SportsCourt: 13,
-  // funções que vieram depois: o prédio sai do criador (projeto pronto por função), menos o cemitério e o parquinho
+  // functions added later: the building comes from the creator (a ready design per function), except the cemetery and the playground
   Council: 14, Courthouse: 15, PostOffice: 16, University: 17, Library: 18, Museum: 19, Prison: 20, Cemetery: 21, BusStation: 22,
   Bank: 23, Pharmacy: 24, Bakery: 25, Restaurant: 26, SnackBar: 27, Bar: 28, Cinema: 29, Hotel: 30, Gym: 31, Club: 32, Office: 33, Playground: 34,
 } as const;
@@ -105,7 +105,7 @@ export const FN_NAMES = ['', 'Escola', 'Igreja', 'Hospital', 'Posto de saúde', 
   'Câmara de Vereadores', 'Fórum', 'Correios', 'Faculdade', 'Biblioteca', 'Museu', 'Presídio', 'Cemitério', 'Rodoviária',
   'Agência bancária', 'Farmácia', 'Padaria', 'Restaurante', 'Lanchonete', 'Bar', 'Cinema', 'Hotel', 'Academia', 'Clube', 'Escritórios', 'Parquinho'];
 
-/** Sorteio por zona: [função, peso]. */
+/** Draw by zone: [function, weight]. */
 const FN_BY_ZONE: Array<Array<[number, number]>> = [
   [],
   [[Fn.School, 25], [Fn.Church, 14], [Fn.Square, 22], [Fn.Clinic, 10], [Fn.Park, 15], [Fn.SportsCourt, 10], [Fn.Supermarket, 4]],
@@ -115,8 +115,8 @@ const FN_BY_ZONE: Array<Array<[number, number]>> = [
 ];
 
 /**
- * Função de um lote: no máximo um prédio especial por célula (o lote maior),
- * sorteado pela célula — determinístico, sem varrer nada.
+ * A lot's function: at most one special building per cell (the largest lot),
+ * drawn from the cell: deterministic, scanning nothing.
  */
 export function civicFor(cell: number, zone: number, isBiggest: boolean, area: number): number {
   if (!isBiggest || area < 500) return Fn.None;
@@ -132,8 +132,8 @@ export function civicFor(cell: number, zone: number, isBiggest: boolean, area: n
 }
 
 /**
- * Chaminé de galpão, pela semente (a mesma conta no gerador e na fumaça):
- * [x local, z local, altura do topo acima do chão mais alto do lote] ou null.
+ * Warehouse chimney, by the seed (the same sum in the generator and in the smoke):
+ * [local x, local z, top height above the lot's highest ground] or null.
  */
 export function chimneyOf(seed: number, W: number, D: number, floors: number): [number, number, number] | null {
   let h = (seed ^ 0x5bd1e995) >>> 0;
@@ -144,19 +144,19 @@ export function chimneyOf(seed: number, W: number, D: number, floors: number): [
 }
 
 /**
- * Estilo pelo bairro (ruído largo: a quadra inteira lê como uma época) e pela semente.
- * Antigo: colonial, art déco; médio: modernista, tijolinho, tropical; novo: contemporâneo, vidro.
+ * Style by neighbourhood (broad noise: the whole block reads as one era) and by the seed.
+ * Old: colonial, art deco; middle: modernist, brick, tropical; new: contemporary, glass.
  */
 export function pickArch(zone: number, floors: number, x: number, z: number, style: number): number {
   return archFor(zone, floors, eraAt(x, z), style);
 }
 
-/** Época do bairro no ponto (ruído de 900 m): o mesmo para o lote e os vizinhos dele. */
+/** Era of the neighbourhood at a point (900 m noise): the same for a lot and its neighbours. */
 export function eraAt(x: number, z: number): number { return fbm(x / 900, z / 900, 777, 2); }
 
-/** Estilo pela época do bairro e pela semente (`style`; 128 + estilo = escolhido pelo jogador). */
+/** Style by the neighbourhood's era and by the seed (`style`; 128 + style = picked by the player). */
 export function archFor(zone: number, floors: number, era: number, style: number): number {
-  // estilo escolhido pelo jogador: 128 + estilo
+  // picked by the player: 128 + style
   if (style >= 128 && style - 128 < ARCHES.length) return style - 128;
   const k = style / 127;
   if (zone === Zone.Industrial) return ArchId.Industrial;
@@ -172,4 +172,39 @@ export function archFor(zone: number, floors: number, era: number, style: number
   if (era > 0.25) return floors <= 5 && k < 0.6 ? ArchId.Colonial : k < 0.85 ? ArchId.ArtDeco : ArchId.Brick;
   if (era < -0.2) return k < 0.65 ? ArchId.Contemporary : ArchId.Tropical;
   return k < 0.3 ? ArchId.Modernist : k < 0.55 ? ArchId.Brick : k < 0.8 ? ArchId.Tropical : ArchId.Contemporary;
+}
+
+/**
+ * Facade patterns (Roadcraft 4.0 `facadePatterns.ts`): a coherent composition laid over a style. The facade id the
+ * vertex carries is style + ARCH_COUNT × pattern; the window table below has one row per id.
+ */
+export const Pattern = { Residential: 0, Storefront: 1, Office: 2, Industrial: 3, Arcade: 4, Gallery: 5, ArtDeco: 6, ArtDecoCrown: 7, Observation: 8 } as const;
+export const PATTERN_COUNT = 9;
+/** Per pattern: window width factor (on the side margin), sill and head shifts, bay rule (4 = every third bay blank, 8 = only every third bay glazed). */
+export const PATTERNS: Array<{ name: string; side: number; low: number; high: number; bays: number }> = [
+  { name: 'residential', side: 1, low: 0, high: 0, bays: 0 },
+  { name: 'storefront', side: 0.6, low: -0.04, high: 0.04, bays: 0 },
+  { name: 'office', side: 0.35, low: 0.04, high: 0.02, bays: 0 },
+  { name: 'industrial', side: 1, low: 0.3, high: 0, bays: 8 },
+  { name: 'arcade', side: 1, low: 0, high: 0, bays: 0 },
+  { name: 'gallery', side: 1.15, low: 0, high: 0, bays: 0 },
+  { name: 'artDeco', side: 1.25, low: -0.08, high: 0.06, bays: 4 },
+  { name: 'artDecoCrown', side: 1.25, low: -0.08, high: 0.06, bays: 4 },
+  { name: 'observation', side: 0.35, low: -0.1, high: 0.08, bays: 0 },
+];
+/** Facade id → style and pattern. */
+export const facadeArch = (id: number): number => id % ARCH_COUNT;
+export const facadePattern = (id: number): number => Math.floor(id / ARCH_COUNT) % PATTERN_COUNT;
+
+/** Window table per facade id (style × pattern): (side margin, sill, head, bits: 1 shutters, 2 moulding, 4/8 bay rule). */
+export function facadeWindowTable(): Array<[number, number, number, number]> {
+  const out: Array<[number, number, number, number]> = [];
+  for (let p = 0; p < PATTERN_COUNT; p++) for (const a of ARCHES) {
+    const P = PATTERNS[p], curtain = a.win === Win.Curtain;
+    const side = curtain ? a.winSide : Math.max(0.03, Math.min(0.4, a.winSide * P.side));
+    const low = curtain ? a.winLow : Math.max(0.02, Math.min(0.8, a.winLow + P.low));
+    const high = curtain ? a.winHigh : Math.max(low + 0.12, Math.min(0.97, a.winHigh + P.high));
+    out.push([side, low, high, (a.shutters && !P.bays ? 1 : 0) + (a.frame ? 2 : 0) + (curtain ? 0 : P.bays)]);
+  }
+  return out;
 }

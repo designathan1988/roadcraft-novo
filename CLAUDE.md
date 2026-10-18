@@ -8,7 +8,9 @@ como o motor abre hoje.** Fale com o jogador em português do Brasil. Commits em
 
 - `npm run dev` (Vite com COOP/COEP, porta 5173) · `npm run build` = `tsc && vite build` · `npm test` =
   `node --test test/*.test.ts` · `node tools/fotos.mjs` = 4 fotos padrão com a GPU (rua, bairro, cidade, noite),
-  sobre `dist/` · `node tools/verificar.mjs` = 146 verificações dentro do jogo.
+  sobre `dist/` · `node tools/verificar.mjs` = 146 verificações dentro do jogo · `npm run budget` = contagens
+  (chamadas, triângulos, MB) em 5 vistas contra `tools/budget.json`; reprova o que passa do limite. Roda antes de
+  todo commit que mexe no que se desenha; a linha de base só muda em `main`, com `--baseline`, depois de revisão.
 - Documentos: `docs/ARQUITETURA.md` (o motor e por que ele escala), `docs/RECURSOS.md` (a lista do que o jogo
   tem que ter, com estado), `docs/LICOES.md` (o que destruiu as quatro versões anteriores; não repetir),
   `docs/PESQUISA-CIDADE-GRANDE.md` e `docs/PESQUISA-WEB-2026-10-18.md` (fontes). Os `docs/historico-*` são os

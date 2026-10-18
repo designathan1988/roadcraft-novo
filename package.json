@@ -16,6 +16,8 @@
     "shot": "vite build && tools/shot.sh",
     "package:win": "vite build && node tools/package.mjs win32",
     "package:linux": "vite build && node tools/package.mjs linux",
+    "budget": "node tools/budget.mjs",
+    "fotos": "node tools/fotos.mjs",
     "cook:people": "node tools/cook-people.mjs"
   },
   "dependencies": {

@@ -11,14 +11,47 @@ import type { World } from '../world/world.ts';
 import { CellLayer, type LayerSource } from './cellLayer.ts';
 import { T, lodFadeMask, useCompactVertex, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { ARCHES, archWindowTable } from '../world/arch.ts';
+import { ARCHES, ARCH_COUNT, facadeWindowTable } from '../world/arch.ts';
 import { cutMask } from './inside.ts';
 import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
+import { FINISH_BY_MAT, FINISH_COUNT, FINISH_LOOKS, FINISH_SIZE } from '../jobs/buildingFinishes.ts';
 
 const {
   attribute, vec3, vec4, float, int, mix, clamp, fract, fwidth, smoothstep, floor, mod, select, hash, min, abs,
-  positionWorld, cameraPosition, sRGBTransferEOTF, dot, max, step, normalize, pow, texture, vec2,
+  positionWorld, cameraPosition, sRGBTransferEOTF, dot, max, step, normalize, pow, texture, vec2, cross, transformNormalToView,
 } = T;
+
+/**
+ * The 13 building finishes as two texture arrays (layer = finish id − 1): albedo tone + roughness, normal + metalness.
+ * Neutral until the bake worker answers (mean tone, flat normal): the same image as without textures.
+ */
+function finishArray(fill: [number, number, number, number]): THREE.DataArrayTexture {
+  const n = FINISH_SIZE * FINISH_SIZE * FINISH_COUNT, data = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) data.set(fill, i * 4);
+  const t = new THREE.DataArrayTexture(data, FINISH_SIZE, FINISH_SIZE, FINISH_COUNT);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return t;
+}
+export const FINISH_ALBEDO = finishArray([128, 128, 128, 230]);
+export const FINISH_NORMAL = finishArray([128, 128, 255, 0]);
+let finishBaked = false;
+/** Starts the bake (once): a worker fills both arrays and they go up to the GPU again, with mipmaps. */
+function bakeFinishesOnce(): void {
+  if (finishBaked || typeof Worker === 'undefined') return;
+  finishBaked = true;
+  const w = new Worker(new URL('../jobs/buildingFinishWorker.ts', import.meta.url), { type: 'module', name: 'finishes' });
+  w.onmessage = (e: MessageEvent<{ albedo: Uint8Array; normal: Uint8Array }>) => {
+    (FINISH_ALBEDO.image.data as Uint8Array).set(e.data.albedo); FINISH_ALBEDO.needsUpdate = true;
+    (FINISH_NORMAL.image.data as Uint8Array).set(e.data.normal); FINISH_NORMAL.needsUpdate = true;
+    w.terminate();
+  };
+}
+/** Per finish: (1 / tile size in m, normal strength, 0, 0). Index = finish id (0 unused). */
+const FINISH_LOOK = T.uniformArray(Array.from({ length: FINISH_COUNT + 1 }, (_, k) => new THREE.Vector4(k ? 1 / FINISH_LOOKS[k].worldSize : 0, k ? FINISH_LOOKS[k].normalScale : 0, 0, 0)), 'vec4');
+const FINISH_AUTO = T.uniformArray(FINISH_BY_MAT.map((f) => new THREE.Vector4(f, 0, 0, 0)), 'vec4');
 
 /** Ruído de reboco feito uma vez (128², repete sem emenda): R grão fino + manchas, G escorrido (esticado em y). */
 function wallNoise(): THREE.DataTexture {
@@ -109,7 +142,7 @@ function band(lo: Node, hi: Node, x: Node, w: Node): Node {
 
 /** Material único dos prédios. Materiais pelo canal alfa da cor (BMAT no gerador). */
 /** Janela e acabamento por estilo, para o shader. */
-const ARCH_WIN = T.uniformArray(archWindowTable().map(([a, b, c, d]) => new THREE.Vector4(a, b, c, d)), 'vec4');
+const ARCH_WIN = T.uniformArray(facadeWindowTable().map(([a, b, c, d]) => new THREE.Vector4(a, b, c, d)), 'vec4');
 const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a.trim).convertSRGBToLinear(); return new THREE.Vector4(c.r, c.g, c.b, 1); }), 'vec4');
 
 export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
@@ -118,8 +151,14 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   // dither da troca de nível e o corte do "ver por dentro"
   m.maskNode = lodFadeMask().and(cutMask());
 
+  bakeFinishesOnce();
   const col = attribute('col', 'vec4');
-  const mat = floor(col.w.mul(255).add(0.5));
+  const matByte = floor(col.w.mul(255).add(0.5));
+  const mat = mod(matByte, 16);
+  // acabamento: nibble alto do byte de material (0 = o padrão do material)
+  const finV = floor(matByte.div(16));
+  const fin = select(finV.greaterThan(0.5), finV, FINISH_AUTO.element(int(mat)).x);
+  const hasFin = step(float(0.5), fin);
   // gramado do lote com o mesmo gramado assado do terreno
   const lawn = step(abs(mat.sub(7)), float(0.5));
   const base = sRGBTransferEOTF(col.xyz).mul(mix(vec3(1, 1, 1), texture(GRASS_TEX, positionWorld.xz.div(GRASS_TILE)).xyz.mul(2), lawn));
@@ -159,6 +198,11 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const ap = ARCH_WIN.element(archId);
   const ww = ap.x, wLow = ap.y, wHigh = ap.z;
   const hasShutters = mod(ap.w, 2), hasFrame = mod(floor(ap.w.div(2)), 2);
+  // facade pattern bay rule: 4 = every third bay blank (art deco piers), 8 = only every third bay glazed (industrial)
+  const skip3 = mod(floor(ap.w.div(4)), 2), only3 = mod(floor(ap.w.div(8)), 2);
+  const cm = mod(cu, 3);
+  const bayOn = float(1).sub(max(skip3.mul(step(abs(cm.sub(1)), float(0.5))), only3.mul(step(float(0.5), cm))).mul(float(1).sub(inShop)));
+  const avgBay = float(1).sub(skip3.mul(1 / 3)).sub(only3.mul(2 / 3));
   const punched = band(ww, float(1).sub(ww), fx, wu).mul(band(wLow, wHigh, fy, wy));
   const houseWin = punched;
   const strip = band(ww, float(1).sub(ww), fx, wu).mul(band(wLow, wHigh, fy, wy));
@@ -174,7 +218,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const shopWin = band(float(0.05), float(0.95), fx, wu).mul(band(float(0.05), float(0.76), fy, wy));
   const sign = band(float(0.8), float(0.95), fy, wy).mul(band(float(0.02), float(0.98), fx, wu));
   win = select(inShop.greaterThan(0.5), shopWin, win);
-  win = win.mul(hasWin).mul(step(float(0), yy).max(inShop));
+  win = win.mul(hasWin).mul(step(float(0), yy).max(inShop)).mul(bayOn);
   const signMask = sign.mul(inShop).mul(hasWin).mul(step(float(0.35), rnd2));
 
   // interior falso: raio da câmera dentro de uma sala do tamanho da janela
@@ -236,7 +280,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   // longe: média da fachada antes de a janela ficar com poucos pixels (o padrão fino tremia com o TRAA)
   const detail = clamp(float(1.3).sub(max(wu, wy).mul(4.5)), 0, 1);
   const avgWin = select(kind.lessThan(0.5), float(0.6 * 0.56), select(kind.lessThan(1.5), float(0.74), select(kind.lessThan(2.5), float(0.2), float(0.2))))
-    .mul(hasWin).mul(step(float(0), yy).max(inShop));
+    .mul(hasWin).mul(step(float(0), yy).max(inShop)).mul(mix(avgBay, float(1), inShop));
   const avgLit = mix(float(0.15), float(0.62), sty).max(inShop);
   const winAmt = mix(avgWin, win, detail);
   // de longe, à noite: média das janelas mais fraca e amarela (forte demais deixava a fachada inteira marrom)
@@ -246,29 +290,41 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const wallC = select(isCurtain.greaterThan(0.5), base.mul(0.55), base);
   const signC = mix(vec3(0.85, 0.2, 0.15), vec3(0.15, 0.4, 0.85), rnd).mul(mix(float(1), float(0.6), step(float(0.5), rnd2)));
   // moldura e venezianas (só onde há janela de verdade, não na cortina de vidro)
-  const archMask = hasWin.mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(step(float(0), yy)).mul(float(1).sub(inShop)).mul(detail);
-  const trimC = ARCH_TRIM.element(archId).xyz;
+  const archMask = bayOn.mul(hasWin).mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(step(float(0), yy)).mul(float(1).sub(inShop)).mul(detail);
+  const trimC = ARCH_TRIM.element(int(mod(floor(fac.x.add(0.5)), ARCH_COUNT))).xyz;
   const shutterC = mix(mix(vec3(0.12, 0.3, 0.18), vec3(0.18, 0.28, 0.45), step(float(0.5), sty)), vec3(0.35, 0.22, 0.12), step(float(0.8), sty));
   const frameAmt = clamp(frameOuter.sub(win), 0, 1).mul(hasFrame).mul(archMask);
   const shutterAmt = shutter.mul(archMask);
   let wallFinal: Node = mix(mix(wallC, trimC, frameAmt), shutterC, shutterAmt);
   const P = positionWorld;
+  // acabamento: UV em metros no plano da face (u na horizontal da face, v subindo; na laje, x e z)
+  const look = FINISH_LOOK.element(int(floor(fin.add(0.5))));
+  const faceH = vec2(n.z, n.x.negate());
+  const flatFace = step(dot(faceH, faceH), float(0.0025));
+  const tAx = normalize(mix(vec3(faceH.x, 0, faceH.y), vec3(1, 0, 0), flatFace));
+  const bAx = cross(n, tAx);
+  const fuvM = vec2(dot(P, tAx), dot(P, bAx)).mul(look.x);
+  const layer = int(max(fin.sub(1), float(0)));
+  const finA = texture(FINISH_ALBEDO, fuvM).depth(layer);
+  const finN = texture(FINISH_NORMAL, fuvM).depth(layer);
+  const finTone = mix(vec3(1, 1, 1), finA.xyz.mul(2), hasFin);
   const wn = texture(WALL_NOISE, vec2(P.x.add(P.z), P.y).mul(0.11));
   const grain = wn.r.mul(2).sub(1);
   const isFacade = hasWin.max(vertical.mul(isWall));
-  const plain = float(1).sub(isCurtain);
-  const winCol = band(ww, float(1).sub(ww), fx, wu).mul(hasWin).mul(float(1).sub(inShop)).mul(step(float(0), yy));
+  const plain = float(1).sub(isCurtain).mul(float(1).sub(hasFin));
+  const winCol = band(ww, float(1).sub(ww), fx, wu).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy));
   // escorrido de chuva sob a janela (mais escuro perto do peitoril)
   const streakN = wn.g;
   const streak = winCol.mul(step(fy, wLow)).mul(smoothstep(float(0), wLow, fy)).mul(streakN).mul(0.16).mul(step(kind, float(0.5)).max(step(float(1.5), kind)));
   // laje: friso escuro no piso de cada andar (só nas fachadas de janelas soltas)
   const slab = band(float(-0.012), float(0.03), fy, wy).mul(step(kind, float(0.5))).mul(hasWin).mul(float(1).sub(inShop)).mul(step(float(0.5), yy));
   // peitoril claro (pega o sol de cima) e a sombra dele logo abaixo
-  const sillW = band(ww.sub(0.04), float(1).sub(ww).add(0.04), fx, wu).mul(hasWin).mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(step(kind, float(0.5)).max(step(float(1.5), kind)));
+  const sillW = band(ww.sub(0.04), float(1).sub(ww).add(0.04), fx, wu).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(step(kind, float(0.5)).max(step(float(1.5), kind)));
   const sill = sillW.mul(band(wLow.sub(float(0.06)), wLow, fy, wy));
   const sillShadow = sillW.mul(band(wLow.sub(float(0.12)), wLow.sub(float(0.06)), fy, wy));
   const wallK = float(1).add(grain.mul(0.11).mul(plain)).sub(streak).sub(slab.mul(0.22)).sub(sillShadow.mul(0.3));
-  wallFinal = mix(wallFinal.mul(wallK), mix(trimC, vec3(0.86, 0.84, 0.8), 0.5), sill.mul(isFacade).mul(detail).mul(plain));
+  const sillAmt = sill.mul(isFacade).mul(detail).mul(float(1).sub(isCurtain));
+  wallFinal = mix(wallFinal.mul(wallK).mul(finTone), mix(trimC, vec3(0.86, 0.84, 0.8), 0.5), sillAmt);
   // recuo de verdade pelo ângulo de visão: o vidro fica ~22 cm para dentro; onde a abertura (na parede) não
   // mostra o vidro, aparece a parede do vão (em sombra), do lado oposto ao olhar
   const inward = max(dot(V, n.negate()), float(0.15));
@@ -283,8 +339,14 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   m.colorNode = vec4(albedo, 1);
   m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
 
-  const rough = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
+  const rough0 = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
+  const rough = mix(rough0, finA.w, hasFin);
   m.roughnessNode = mix(rough, float(0.12), winAmt);
-  m.metalnessNode = select(mat.equal(5), float(0.35), float(0)).mul(float(1).sub(winAmt));
+  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), finN.w.mul(hasFin)).mul(float(1).sub(winAmt));
+  // relevo do acabamento (fora do vidro), na base da face
+  const nm = finN.xyz.mul(2).sub(1);
+  const nk = look.y.mul(hasFin).mul(float(1).sub(winAmt)).mul(float(1).sub(sillAmt));
+  const nW = normalize(tAx.mul(nm.x.mul(nk)).add(bAx.mul(nm.y.mul(nk))).add(n.mul(nm.z)));
+  m.normalNode = transformNormalToView(nW);
   return m;
 }

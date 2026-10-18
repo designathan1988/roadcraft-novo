@@ -1,0 +1,62 @@
+{
+  "street": {
+    "view": "street",
+    "draws": 459,
+    "tris": 2934076,
+    "buildings": 37516,
+    "segs": 20965,
+    "cityMB": 68,
+    "roadsMB": 208,
+    "cars": 6445,
+    "micro": 214,
+    "peds": 4301
+  },
+  "district": {
+    "view": "district",
+    "draws": 186,
+    "tris": 1259544,
+    "buildings": 37516,
+    "segs": 20965,
+    "cityMB": 69,
+    "roadsMB": 209,
+    "cars": 12205,
+    "micro": 696,
+    "peds": 8179
+  },
+  "city": {
+    "view": "city",
+    "draws": 548,
+    "tris": 3386460,
+    "buildings": 37516,
+    "segs": 20965,
+    "cityMB": 77,
+    "roadsMB": 202,
+    "cars": 14021,
+    "micro": 1405,
+    "peds": 12847
+  },
+  "map": {
+    "view": "map",
+    "draws": 956,
+    "tris": 5900174,
+    "buildings": 37516,
+    "segs": 20965,
+    "cityMB": 61,
+    "roadsMB": 159,
+    "cars": 14021,
+    "micro": 1855,
+    "peds": 17500
+  },
+  "night": {
+    "view": "night",
+    "draws": 476,
+    "tris": 3135770,
+    "buildings": 37516,
+    "segs": 20965,
+    "cityMB": 87,
+    "roadsMB": 211,
+    "cars": 14020,
+    "micro": 2072,
+    "peds": 22167
+  }
+}
