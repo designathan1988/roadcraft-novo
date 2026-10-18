@@ -27,7 +27,30 @@ export interface BoxColumns {
   zone: Uint8Array; floors: Uint8Array; style: Uint8Array;
   /** Função do prédio (0 = comum). */
   fn: Uint8Array;
+  /**
+   * Polygon lot (save version 7). shapeN[i] = number of corners (0 = the lot is the rectangle w × d). The corners
+   * are in `shape`, SHAPE_STRIDE int16 per building: (x, z) pairs in decimetres in the lot frame (x along the
+   * front, z towards the front, the same frame as w/d and `lotToWorld` in world/lotEdit.ts), counter-clockwise seen
+   * from above (x right, z up), simple (no crossing edges), all inside the rectangle ±w/2 × ±d/2. Up to SHAPE_MAX
+   * corners; a curved side arrives already sampled into corners. The building generator fits the building into it.
+   */
+  shapeN: Uint8Array;
+  shape: Int16Array;
+  /** City minute the building was built or last renovated (World.clock); decay is derived from it. */
+  built: Float32Array;
+  /**
+   * How run-down it is, in tenths: 0 (new) to 10 (falling apart). Roadcraft's ageing: 5 days of grace, then 30
+   * days to fall apart without maintenance (world/decay.ts). Filled by the page when it gathers the boxes; the
+   * cell is marked dirty only when a building passes a tenth. The drawing reads it (stains, broken windows…).
+   */
+  decay: Uint8Array;
 }
+
+/** Most corners of a polygon lot, and int16 per building in BoxColumns.shape. */
+export const SHAPE_MAX = 16;
+export const SHAPE_STRIDE = SHAPE_MAX * 2;
+/** Decimetres per unit of BoxColumns.shape. */
+export const SHAPE_SCALE = 10;
 
 /** Malha compacta pronta para a GPU. Posições relativas à origem, em snorm16 × escala. */
 export interface PackedMesh {
@@ -100,13 +123,16 @@ export type FromWorker =
 
 /** Lista de buffers de colunas, para transferir. */
 export function boxTransfer(b: BoxColumns): ArrayBuffer[] {
-  return [b.x, b.z, b.w, b.d, b.h, b.rot, b.color, b.seed, b.zone, b.floors, b.style].map((a) => a.buffer as ArrayBuffer);
+  return boxColumnList(b).map((a) => a.buffer as ArrayBuffer);
 }
 
-/** Colunas na ordem do salvamento (versão 3). */
-export function boxColumnList(b: BoxColumns): Array<Float32Array | Uint32Array | Uint8Array> {
-  return [b.x, b.z, b.w, b.d, b.h, b.rot, b.color, b.seed, b.zone, b.floors, b.style, b.fn];
+/** Columns in save order (version 3: 11, 4: + fn, 7: + shapeN, shape, built, decay). */
+export function boxColumnList(b: BoxColumns): Array<Float32Array | Uint32Array | Uint8Array | Int16Array> {
+  return [b.x, b.z, b.w, b.d, b.h, b.rot, b.color, b.seed, b.zone, b.floors, b.style, b.fn, b.shapeN, b.shape, b.built, b.decay];
 }
+
+/** Elements per building of a column (shape has SHAPE_STRIDE, the rest 1). */
+export function columnStride(b: BoxColumns, col: ArrayBufferView): number { return col === b.shape ? SHAPE_STRIDE : 1; }
 
 export function emptyBoxes(n: number): BoxColumns {
   return {
@@ -116,6 +142,7 @@ export function emptyBoxes(n: number): BoxColumns {
     rot: new Float32Array(n), color: new Uint32Array(n),
     seed: new Uint32Array(n), zone: new Uint8Array(n), floors: new Uint8Array(n), style: new Uint8Array(n),
     fn: new Uint8Array(n),
+    shapeN: new Uint8Array(n), shape: new Int16Array(n * SHAPE_STRIDE), built: new Float32Array(n), decay: new Uint8Array(n),
   };
 }
 

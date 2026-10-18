@@ -37,7 +37,7 @@ Os três 🟡 (automático pelo fluxo, lote em polígono, fachada vão a vão) f
 | Estacionamento por lado | `inspector.parkingLeft/Right` | ✅ | No inspetor: escolho vagas à esquerda/direita e a via muda sem trocar de perfil manualmente. |
 | Rotatória com raio | editor/roundabout.ts | ✅ | Clico: rotatória; [ e ] mudam o raio. |
 | Mobiliário automático das vias (completo/básico/nenhum) | `roadFurniture.*` | ✅ | Escolho "Nenhum": vias novas saem sem postes, bancos e árvores na calçada. |
-| Estilo de pintura (Brasil/EUA/Europa/Clássica) | `menu.paint`, `paint.*` | ✅ | Troco para EUA: a linha central fica amarela. |
+| Estilo de pintura (Brasil/EUA/Europa/Clássica) | `menu.paint`, `paint.*` | ✅ e salvo com o mapa (`hudActions.mapPaint`; o mapa abre na pintura em que foi salvo) | Troco para EUA: a linha central fica amarela. |
 | Teclas da via reconfiguráveis | `roadKeys.*` | ✅ (nas Opções) | Nas opções, troco a tecla de subir a via e ela passa a valer. |
 | Regras de construção com motivo | editor/editRules.ts (`hint.rule.*`) | ✅ | Via sobre outra ou ângulo fechado: recusa com o motivo no aviso. |
 | Economia: preço por largura e comprimento, devolve ao demolir | editor/roads/economy.ts | ✅ como o Roadcraft (`roads/tuning.ts`, `roads/economy.ts`): R$/m² de pista 150, canteiro 40, calçada 80 × modo (chão 1×, aterro 1,4×, trincheira 1,8×, ponte 2,5×, túnel 6×, gravado no trecho ao construir), demolir devolve 25 %, sem saldo recusa sem deixar nada, cidade gerada não é cobrada, caixa inicial R$ 20 mi. Foto `test-results/recursos/economia.png`: avenida no chão R$ 1.332.000, a mesma em ponte R$ 3.330.000, demolir 2 trechos devolveu R$ 83.250, sem saldo "dinheiro insuficiente" | O caixa desce ao construir e volta um quarto ao demolir. |
@@ -87,9 +87,9 @@ Os três 🟡 (automático pelo fluxo, lote em polígono, fachada vão a vão) f
 | Pincel de zona | `zone.brush` | ✅ | Arrasto ao longo da via e a zona aparece. |
 | Zonear a quadra inteira | `zone.fill` | ✅ | Modo Quadra: um clique zoneia todos os lotes da quadra. |
 | Desenhar lote (retângulo) | `zone.lot.shape.rect` | ✅ | Três cliques: o lote e o prédio aparecem. |
-| Lote em polígono | `zone.lot.shape.polygon` | 🟡 o lote vira o menor retângulo que contém o polígono (prédios são retangulares) | Clico 5 pontos e Enter: lote de 5 lados com prédio dentro. |
+| Lote em polígono | `zone.lot.shape.polygon` | 🟡 o lote é o polígono de verdade (até 16 cantos, anti-horário, em decímetros no referencial do lote; salvamento versão 7 abre os antigos), o clique dentro/fora segue o polígono, dividir/juntar/mover canto/curvar lado trabalham nele (foto `lote-poligono.png`, contorno marcado com muro pelo roteiro). Falta a sessão de prédios fazer a mureta e o prédio seguirem `BoxColumns.shape` | Clico 5 pontos e Enter: lote de 5 lados com prédio dentro. |
 | Mover cantos do lote | `zone.lot.edit` | ✅ | Arrasto um canto: o lote muda e o prédio é refeito. |
-| Dividir lote (lado a lado, frente e fundos, N partes) | `zone.lot.split`, `zone.split.*` | ✅ (falta "por linha") | Divido em 3: viram três lotes, cada um com seu prédio. |
+| Dividir lote (lado a lado, frente e fundos, N partes) | `zone.lot.split`, `zone.split.*` | ✅ e "por linha" (dois cliques atravessando o lote: dois lotes cortados na linha; `hudActions.lotLine`) e "curvar lado" (`hudActions.lotCurve`) | Divido em 3: viram três lotes, cada um com seu prédio. |
 | Juntar lotes | `zone.lot.join` | ✅ | Clico em dois vizinhos: viram um lote com um prédio maior. |
 | Apagar lotes e construções | `zone.lot.delete` | ✅ | Clico num lote: some com o prédio; desfaz volta. |
 | Definir frente do lote | `zone.lot.front` | ✅ | Clico num lado: o prédio vira de frente para ele. |

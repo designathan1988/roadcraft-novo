@@ -57,4 +57,4 @@ export const TERRAIN_MAX_Y = 400;
 export const SEA_LEVEL = 0;
 
 /** Versão do formato de salvamento. */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;

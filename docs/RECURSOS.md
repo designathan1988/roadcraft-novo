@@ -24,7 +24,10 @@ Quem termina um item põe ✅, o commit e o nome da foto.
   faixa com validação; materiais da pista (asfalto, concreto, paralelepípedo, bloquete, pedra portuguesa, grama).
 - Edições: melhorar (Shift = rua inteira), conta-gotas, mover nó, dividir, unir, inverter, duplicar, zebra e
   semáforo de meio de quadra, retorno no canteiro, vagas por lado, balão de retorno, transição de largura, nome e
-  numeração de rua, placas automáticas de velocidade, desgaste do asfalto.
+  numeração de rua (✅ nome gerado por rua e numeração métrica, par à direita: `roads/streetNames.ts`; o painel
+  do prédio mostra "Rua São Bento, 253", foto `desgaste.png`; placa de rua sem texto recebe o nome), placas
+  automáticas de velocidade, desgaste do asfalto. Placa = regra ✅: Pare/Dê a preferência posta na calçada junto
+  a um braço de cruzamento muda a regra dele (`roads/signRule.ts`). Pintura regional salva com o mapa ✅.
 - Cruzamentos: controle (auto, semáforo, placas, pare em todas, preferência, minirrotatória, sem), regra por
   perna, semáforo adaptativo/fixo com fases, defasagem, onda verde, ônibus; movimentos proibidos; conectores
   manuais; altura do nó; automático pelo fluxo com trava.
@@ -43,11 +46,15 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 
 ## 4. Zonas, lotes e crescimento — ✅ no motor
 - Zonas R/C/I/misto × densidade; pincel, quadra inteira, tirar; lotes propostos ao longo das vias.
-- Lote à mão: retângulo, polígono (🟡 vira retângulo), curvar lado, mover cantos, dividir (lado a lado, frente e
-  fundos, por linha ❌, N partes), juntar, frente, apagar.
+- Lote à mão: retângulo, polígono, curvar lado, mover cantos, dividir (lado a lado, frente e fundos, por linha,
+  N partes), juntar, frente, apagar. ✅ na lógica (polígono de até 16 cantos no registro, salvamento versão 7,
+  foto `lote-poligono.png`); 🟡 o prédio e a mureta ainda saem pelo retângulo envolvente: a sessão de prédios lê
+  `BoxColumns.shapeN/shape` (formato em `jobs/protocol.ts`).
 - Crescimento: vizinhos diferentes, marcos a ~22 % das torres (`data/lots-roadcraft/*.json`, 38 projetos — ❌
   converter para o gerador), esquina com jardim, portões, estacionamento nos fundos, encosta com split-level,
-  garagem, terraços e docas (❌ aqui), paletas brasileiras, desgaste e reforma (❌ aqui).
+  garagem, terraços e docas (❌ aqui), paletas brasileiras, desgaste e reforma (✅ na lógica: 5 dias de graça,
+  30 dias até cair aos pedaços, Shift+clique reforma, `decay` 0..10 no registro, foto `desgaste.png`; o visual
+  do desgaste é da sessão de prédios).
 
 ## 5. Construtor de prédios — 🟡 (planta, volumes, telhados, acabamentos, peças de telhado, modelos, ver por dentro)
 - Falta do Roadcraft: booleanas (união, subtração, interseção), extrudar/inset/offset/chanfro, primitivas, planta
