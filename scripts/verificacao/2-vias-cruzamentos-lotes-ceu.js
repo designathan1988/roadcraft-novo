@@ -22,6 +22,9 @@
   const P = (x, z) => ({ x, y: 0, z });
   const rt = g.roadTool;
   const X = 1500, Z = 1500;
+  // as ferramentas são verificadas em modo livre (o caixa dos preços do Roadcraft acaba no meio do roteiro); a economia
+  // tem a verificação própria, com o caixa ligado só nela
+  w.unlimited = true;
   const segNear = (x, z) => net.nearestSeg(x, z, 12)?.[0] ?? -1;
   const click = (tool, pts, setup) => { g.setTool(tool); rt.setMode(tool); setup && setup(); for (const p of pts) { rt.hover(P(p[0], p[1])); rt.click(P(p[0], p[1])); } };
   await g.view(X, Z, 0, 50, 500, 11);
@@ -50,10 +53,13 @@
   await check('rotatória com raio', () => { a.road(X - 300, Z - 900, X + 300, Z - 900, 'Avenida'); a.road(X, Z - 1200, X, Z - 600 - 10, 'Avenida'); rt.ringRadius = 30; const s = segs(); click('roundabout', [[X, Z - 900]]); return segs() > s || 'sem rotatória'; });
   await check('mobiliário automático marcado na via', () => { rt.furniture = 2; a.road(X + 400, Z - 300, X + 600, Z - 300, 'Rua local'); rt.furniture = 0; const s = segNear(X + 500, Z - 300); return s >= 0 && (sc.flags[s] >> 1 & 3) !== 0 || `flags ${sc.flags[s]}`; });
   await check('regras de construção dão o motivo', () => { const r = a.road(X - 300, Z - 900, X + 300, Z - 900, 'Avenida'); return typeof r === 'string' && r !== 'ok' && r.length > 3 || `aceitou uma via em cima de outra (${r})`; });
-  await check('economia: construir cobra, demolir devolve', () => {
+  await check('economia: construir cobra, demolir devolve um quarto, sem saldo recusa', () => {
+    w.unlimited = false; w.money = 10_000_000;
     const m0 = w.money; a.road(X + 400, Z + 200, X + 600, Z + 200, 'Avenida'); const m1 = w.money;
     const n = a.demolish(X + 450, Z + 190, X + 550, Z + 210); const m2 = w.money;
-    return m1 < m0 && n > 0 && m2 > m1 || `dinheiro ${m0} -> ${m1} -> ${m2}, demolidos ${n}`;
+    w.money = 100; const s0 = segs(); const r = a.road(X + 400, Z + 260, X + 600, Z + 260, 'Avenida'); const refused = segs() === s0 && w.money === 100 && r !== 'ok';
+    w.unlimited = true;
+    return m1 < m0 && n > 0 && m2 > m1 && m2 - m1 < (m0 - m1) * 0.3 && refused || `dinheiro ${m0} -> ${m1} -> ${m2}, demolidos ${n}, sem saldo: ${r}`;
   });
 
   // ---------------- cruzamento
@@ -104,5 +110,5 @@
   await check('saúde do jogo (F9)', async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); await wait(300); const ok = /quadro|ms|memória/i.test(document.body.innerText); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); return ok || 'painel F9 não apareceu'; });
   await check('salvamento automático', async () => { g.unsaved = true; g.autosaveAt = 0; await wait(2500); return g.unsaved === false || 'não salvou sozinho'; });
 
-  console.log('VERIFICAÇÃO2 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
+  console.log('VERIFICAÇÃO2 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()

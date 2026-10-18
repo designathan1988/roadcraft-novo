@@ -19,6 +19,9 @@
   };
   const segs = () => w.roads.segs.size, blds = () => w.buildings.size, items = () => w.items.size;
   const X = 1500, Z = 1500;
+  // as ferramentas são verificadas em modo livre (o caixa dos preços do Roadcraft acaba no meio do roteiro); a economia
+  // tem a verificação própria, com o caixa ligado só nela
+  w.unlimited = true;
 
   // ---------------- interface: cada ferramenta e um clique no mapa
   const c = g.canvas;
@@ -111,5 +114,5 @@
   // ---------------- desfazer tudo
   await check('desfazer tudo sem erro', () => { let n = 0; while (g.commands.undo() && n < 500) n++; return true; });
 
-  console.log('VERIFICAÇÃO ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
+  console.log('VERIFICAÇÃO ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()
