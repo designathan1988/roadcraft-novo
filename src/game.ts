@@ -370,6 +370,15 @@ export class Game {
         else if (seg >= 0) { const sp = segPreview(net, seg); this.preview.circle.visible = false; this.preview.show(sp.quad, sp.half, [0, 1], [sp.ya, sp.yb], true, 0x5aa8ff); }
         else { this.preview.hide(); this.preview.circle.visible = false; }
       },
+      nameStreet: (seg, name) => {
+        const w = this.world, chain = streetChain(w, seg);
+        const before = chain.map((x) => w.streetNames.get(x));
+        this.commands.run({
+          label: 'nome da rua',
+          apply: () => { for (const x of chain) w.streetNames.set(x, name); this.textSigns.version++; this.unsaved = true; },
+          invert: () => { chain.forEach((x, i) => { const b = before[i]; if (b === undefined) w.streetNames.delete(x); else w.streetNames.set(x, b); }); this.textSigns.version++; },
+        });
+      },
     });
     this.commands.onPush = (c) => {
       const l = c.label;

@@ -141,3 +141,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .inspector .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
 .inspector .check input { accent-color: var(--v-accent); }
 .inspector .legs { display: grid; gap: 6px; }
+/* The creator (buildings session) inside the slot: name and control side by side, checks in a row. */
+.v2-building-slot > .creator { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 4px 8px; align-items: center; width: 100%; }
+.v2-building-slot > .creator > .label { color: var(--v-muted); font-size: 11.5px; font-weight: 600; }
+.v2-building-slot > .creator > select { height: 28px; padding: 0 6px; border: 1px solid var(--v-line); border-radius: 7px; background: var(--v-bg-solid); color: var(--v-text); font: inherit; color-scheme: dark; }
+.v2-building-slot > .creator > .check, .v2-building-slot > .creator > button { grid-column: 1 / -1; }
+.v2-building-slot > .creator > .inline, .v2-building-slot > .creator > input[type=color] { grid-column: 2; }
