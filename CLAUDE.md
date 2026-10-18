@@ -14,6 +14,12 @@ como o motor abre hoje.** Fale com o jogador em português do Brasil. Commits em
   `docs/PESQUISA-CIDADE-GRANDE.md` e `docs/PESQUISA-WEB-2026-10-18.md` (fontes). Os `docs/historico-*` são os
   registros dos projetos antigos, só para consulta.
 
+## Idioma
+- **Todo o código em inglês**: identificadores, comentários, nomes de arquivo, mensagens de erro, testes. O motor
+  herdado veio em português; cada frente traduz os arquivos que toca (nomes exportados mudam com todos os usos, no
+  mesmo commit). Textos que o jogador lê ficam nos dicionários (`src/ui/i18n.ts`), pt-BR e en.
+- Com o jogador, nos documentos de `docs/` e nos commits: português do Brasil.
+
 ## O que é verdade neste projeto
 - **Dizer que funciona exige ter visto.** "Pronto" é: tsc limpo, testes verdes, foto aberta com Read nesta mesma
   resposta mostrando a coisa funcionando, e o nome do arquivo da foto na mensagem. Sem foto é "compila, não vi".
