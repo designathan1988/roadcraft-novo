@@ -221,7 +221,9 @@ export class TerrainRenderer {
       const coarseV = texture(this.paintCoarse, uvV).depth(layerV).level(0);
       const cover = max(max(fineV.x, fineV.y), smoothstep(0, 0.25, max(coarseV.x, coarseV.y)));
       const spacing = step.mul(morph.add(1));
-      const sink = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3));
+      // under the roads the terrain also drops 0.4 m at the finest level: the 4 m grid does not follow the junction
+      // fans and corners, and it surfaced through the asphalt in the middle of junctions (the road skirts reach 0.7 m)
+      const sink = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3).add(smoothstep(0.35, 0.7, cover).mul(0.4)));
       const y = heightAt(mxz).sub(sink);
       // normal por diferenças centrais na escala do nível
       const e = max(step, float(HEIGHT_SPACING));
