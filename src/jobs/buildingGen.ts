@@ -18,6 +18,16 @@ import { FIN } from './buildingFinishes.ts';
 export const GEN_VERSION = 15;
 /** Camada de detalhe: para onde vão as peças 3D das janelas enquanto o gerador roda num descarte. */
 let detailOut: MeshBuilder | null = null;
+/** Peças repetidas (pool de props): para onde vão enquanto o gerador roda no modo peças (lod −2). */
+export type PartEmit = (variant: number, x: number, y: number, z: number, yaw: number, scale: number) => void;
+let partsOut: PartEmit | null = null;
+/** Variantes de peça de fachada (mobiliário 8..15 no pool de props). */
+export const PART = { WallAc: 8, RoofAc: 9, Vase: 10, Clothesline: 11, Dish: 12, Vent: 13, Chair: 14, Tank: 15 } as const;
+/** Emite uma peça na posição local (lx, y, lz) com a frente para a normal local (nlx, nlz). */
+function part(f: Frame, variant: number, lx: number, y: number, lz: number, nlx: number, nlz: number, scale = 1): void {
+  if (!partsOut) return;
+  partsOut(variant, wx(f, lx, lz), y, wz(f, lx, lz), Math.atan2(f.s, f.c) + Math.atan2(nlx, nlz), scale);
+}
 /** Lajes: manta clara, cimento, piche, cinza escuro, telhado verde. */
 const ROOF_FLATS = [0x8f8b84, 0xa8a49b, 0x5d5f61, 0x77736c, 0x6f8a55, 0xb9b2a6];
 
@@ -86,6 +96,8 @@ function parapet(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, 
   const i: Array<[number, number]> = [[x0 + t, z1 - t], [x1 - t, z1 - t], [x1 - t, z0 + t], [x0 + t, z0 + t]];
   const inN: Array<[number, number]> = [[0, -1], [-1, 0], [0, 1], [1, 0]];
   const inner = shadeHex(col, 0.85);
+  // rufo: capa de concreto 5 cm para fora, por cima da mureta
+  prism(mb, f, x0 - 0.05, x1 + 0.05, z0 - 0.05, z1 + 0.05, y + h, y + h + 0.08, 0xd6d3cc, BMAT.Plain, 50, 0xd6d3cc, BMAT.Plain, true);
   for (let k = 0; k < 4; k++) {
     const [ax, az] = i[k], [bx, bz] = i[(k + 1) & 3];
     const NX = nx(f, inN[k][0], inN[k][1]), NZ = nz(f, inN[k][0], inN[k][1]);
@@ -275,7 +287,12 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
     const floors = Math.max(1, b.floors[i]);
     const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
     const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows: lod <= 1 ? lotParking(b, i) : [] };
-    if (lod < 0) {
+    if (lod === -2) {
+      // modo peças: o gerador roda num descarte e só as peças repetidas saem (part → partsOut)
+      const sink = new MeshBuilder(false, true);
+      sink.curBase = f.base;
+      g.mb = sink; g.lod = 0;
+    } else if (lod < 0) {
       // camada de detalhe: o gerador roda inteiro num descarte (mesmo sorteio, mesmas medidas) e cada parede com
       // janelas desenhadas manda as peças 3D para a malha de verdade (prism → windowDetail)
       const sink = new MeshBuilder(false, true);
@@ -301,6 +318,15 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
     applyFinishes(mb, v0, finishTable(arch, b.seed[i], b.fn[i], zone, ds));
   }
   return mb.pack(originX, originZ, extent);
+}
+
+/**
+ * Peças repetidas dos prédios (ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água) para o pool de
+ * props: o mesmo gerador, no modo peças, com o mesmo sorteio da malha. Roda no job de peças da célula.
+ */
+export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit): void {
+  partsOut = emit;
+  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; }
 }
 
 /**
@@ -488,6 +514,7 @@ function house(g: Gen): void {
   } else if (a.roof === 'hip') hip(mb, f, x0, x1, z0, z1, top, r.range(1.6, 2.6), roofCol, a.trim);
   else gable(mb, f, x0, x1, z0, z1, top, r.range(1.8, 3.0), roofCol, wallCol, bw >= bd);
   if (lod > 0) return;
+  door(mb, f, Math.max(x0 + 1.2, Math.min(x1 - 1.2, off + (hash2(g.seed, 0xd0) & 1 ? -1 : 1) * bw * 0.22)), z1, hi + 0.4, a.trim, false);
   // varanda na frente (bangalô e casa colonial): laje, pilares e telhadinho
   if ((g.arch === ArchId.Bungalow || g.arch === ArchId.ColonialHouse) && D / 2 - z1 > 3.2) {
     const pw = Math.min(bw - 1, r.range(4, 7)), px0 = off - pw / 2 + r.range(-1, 1) * (bw - pw) / 2;
@@ -512,7 +539,8 @@ function house(g: Gen): void {
     }
   }
   // caixa d'água no telhado
-  if (!modern && r.next() < 0.5) { blank(mb); prism(mb, f, x0 + 1, x0 + 2.2, z0 + 1, z0 + 2.2, top, top + 1.4, 0x3d6aa0, BMAT.Plain, 50, 0x3d6aa0, BMAT.Plain); }
+  if (!modern && r.next() < 0.5) part(f, PART.Tank, x0 + 1.6, top + 0.3, z0 + 1.6, 0, 1);
+  else if (modern) part(f, PART.Tank, x0 + 1.6, top + 0.35, z0 + 1.6, 0, 1);
   // piscina no quintal dos fundos (como nas casas do roadcraft): borda clara e água
   const backD = z0 - 1.2 - (-D / 2 + 1.2);
   if (!sobrado && backD >= 4.2 && W >= 9 && r.next() < 0.45) {
@@ -596,6 +624,7 @@ function block(g: Gen): void {
     const y = y0 + groundH + (fl - 1) * fh;
     ring(mb, f, x0, x1, z0, z1, y - 0.12, y + 0.08, 0.14, trim);
   }
+  if (lod === 0) facadeRelief(g, x0, x1, z0, z1, y0, groundH, fh, lower, colW, wallCol, shop);
   // lojas: toldo de lona por vão (ruas antigas, como no roadcraft) ou marquise de concreto (prédios modernos)
   if (shop) {
     blank(mb);
@@ -624,9 +653,11 @@ function block(g: Gen): void {
       if (a.balcony === Balcony.Continuous) {
         blank(mb);
         prism(mb, f, x0, x1, z1, z1 + depth, y - 0.18, y, 0xe2e0da, BMAT.Plain, 50, 0xd6d3cc, BMAT.Plain, true);
-        prism(mb, f, x0, x1, z1 + depth - 0.06, z1 + depth, y, y + 1.05, railCol, glassRail ? BMAT.Curtain : BMAT.Metal, 50, railCol, BMAT.Metal);
+        if (glassRail) prism(mb, f, x0, x1, z1 + depth - 0.06, z1 + depth, y, y + 1.05, railCol, BMAT.Curtain, 50, railCol, BMAT.Metal);
+        else railing(mb, f, x0, x1, z1 + depth, y, railCol);
         // vasos/plantas no estilo tropical
         if (g.arch === ArchId.Tropical) for (let c = 0; c < cols; c += 2) prism(mb, f, x0 + c * cw + 0.3, x0 + c * cw + 1.1, z1 + 0.2, z1 + 0.9, y, y + 0.7, 0x4f7a34, BMAT.Grass, 50, 0x4f7a34, BMAT.Grass);
+        for (let c = 0; c < cols; c++) balconyLife(f, g.seed, c, fl, x0 + c * cw, x0 + (c + 1) * cw, z1, depth, y);
         continue;
       }
       for (let c = 0; c < cols; c++) {
@@ -634,7 +665,9 @@ function block(g: Gen): void {
         const cx0 = x0 + c * cw + cw * a.winSide * 0.6, cx1 = x0 + (c + 1) * cw - cw * a.winSide * 0.6;
         blank(mb);
         prism(mb, f, cx0, cx1, z1, z1 + depth, y - 0.15, y, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true);
-        prism(mb, f, cx0, cx1, z1 + depth - 0.06, z1 + depth, y, y + 1.0, railCol, BMAT.Metal, 50, railCol, BMAT.Metal);
+        railing(mb, f, cx0, cx1, z1 + depth, y, railCol);
+        if (depth > 0) { prism(mb, f, cx0, cx0 + 0.05, z1, z1 + depth, y + 0.95, y + 1.0, railCol, BMAT.Metal, 50, railCol, BMAT.Metal); prism(mb, f, cx1 - 0.05, cx1, z1, z1 + depth, y + 0.95, y + 1.0, railCol, BMAT.Metal, 50, railCol, BMAT.Metal); }
+        balconyLife(f, g.seed, c, fl, cx0, cx1, z1, depth, y);
       }
     }
   }
@@ -647,7 +680,13 @@ function block(g: Gen): void {
       const c = r.int(0, cols), fl = r.int(1, lower);
       const cx = x0 + (c + 0.5) * (bw / cols) + r.range(-0.3, 0.3);
       const y = y0 + groundH + (fl - 1) * fh + fh * 0.12;
-      prism(mb, f, cx - 0.4, cx + 0.4, z1, z1 + 0.45, y, y + 0.5, 0xd9dad6, BMAT.Metal, 50, 0xc9cac6, BMAT.Metal);
+      part(f, PART.WallAc, cx, y, z1, 0, 1);
+    }
+    // e nos fundos (sorteio próprio: não mexe no da frente)
+    const hb = hash2(g.seed, 0xac);
+    for (let k = 0; k < (hb & 7); k++) {
+      const c = hash2(g.seed, k, 0xb1) % cols, fl = 1 + hash2(g.seed, k, 0xb2) % Math.max(1, lower - 1);
+      part(f, PART.WallAc, x0 + (c + 0.5) * (bw / cols), y0 + groundH + (fl - 1) * fh + fh * 0.12, z0, 0, -1);
     }
   }
   // telhado: casa de máquinas, caixa d'água, aparelhos, antena
@@ -657,8 +696,10 @@ function block(g: Gen): void {
   if (r.next() < 0.8) prism(mb, f, mx + 0.5, mx + 3.5, tz0 + 2.5, tz0 + 5.5, roofY + 3.0, roofY + 4.4, 0x6d7478, BMAT.Plain, 50, 0x6d7478, BMAT.RoofFlat);
   for (let k = 0; k < r.int(1, 5); k++) {
     const ax = r.range(tx0 + 1, tx1 - 2), az = r.range(tz0 + 1, tz1 - 2);
-    prism(mb, f, ax, ax + 1.2, az, az + 0.9, roofY, roofY + 0.9, 0xd4d4d0, BMAT.Metal, 50, 0xbfbfbb, BMAT.Metal);
+    part(f, PART.RoofAc, ax + 0.6, roofY, az + 0.45, k & 1 ? 1 : 0, k & 1 ? 0 : 1);
   }
+  // antena parabólica nos prédios de moradia
+  if (zone !== Zone.Commercial && hash2(g.seed, 0xd1) % 10 < 5) part(f, PART.Dish, tx1 - 1.2, roofY, tz1 - 1.2, 0, 1);
   if (r.next() < 0.3) prism(mb, f, mx + 1.9, mx + 2.1, tz0 + 3.9, tz0 + 4.1, roofY + 3, roofY + 8, 0x8a8e92, BMAT.Metal, 50, 0x8a8e92, BMAT.Metal);
   roofClutter(mb, f, r, tx0, tx1, tz0, tz1, roofY, mx);
   // chão do lote e o estacionamento (vagas nos fundos e nas laterais; os carros são peças)
@@ -691,6 +732,8 @@ function windowDetail(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: num
   blank(mb);
   // peitoril e verga de pedra clara (como no prédio de verdade), puxando um pouco para o acabamento do estilo
   const sillCol = mixHex(0xe4dfd4, trim, 0.15), headCol = mixHex(0xd9d3c7, trim, 0.2);
+  const frameCol = FRAME_COLORS[arch] ?? 0xe6e6e2;
+  const molded = (ARCHES[arch] ?? ARCHES[0]).frame, moldCol = mixHex(0xeeeae2, trim, 0.4);
   const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
   const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
   for (let k = 0; k < 4; k++) {
@@ -706,6 +749,19 @@ function windowDetail(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: num
         // só as faces que aparecem (metade da malha: menos para subir à GPU quando a quadra chega)
         ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0 - 0.04, u1 + 0.04, yb - 0.09, yb, 0.16, sillCol, LEDGE_SILL);
         ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0, u1, yt, yt + 0.11, 0.07, headCol, LEDGE_HEAD);
+        // moldura de argamassa em volta do vão (estilos com moldura)
+        if (molded) {
+          ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0 - 0.1, u0 + 0.02, yb, yt + 0.11, 0.035, moldCol, LEDGE_JAMB);
+          ledge(mb, f, ax, az, dx, dz, nxl, nzl, u1 - 0.02, u1 + 0.1, yb, yt + 0.11, 0.035, moldCol, LEDGE_JAMB);
+        }
+        // caixilho: marco em volta do vão, montante no meio das janelas largas e travessa nas altas
+        const a0 = (c + ww) * cw, a1 = (c + 1 - ww) * cw, t = 0.06;
+        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a0 + t, yb, yt, 0.05, frameCol, LEDGE_JAMB);
+        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a1 - t, a1, yb, yt, 0.05, frameCol, LEDGE_JAMB);
+        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a1, yt - t, yt, 0.05, frameCol, LEDGE_BAR);
+        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a1, yb, yb + t, 0.05, frameCol, LEDGE_BAR);
+        if (a1 - a0 > 1.1) { const m = (a0 + a1) / 2; ledge(mb, f, ax, az, dx, dz, nxl, nzl, m - 0.025, m + 0.025, yb, yt, 0.04, frameCol, LEDGE_JAMB); }
+        if (yt - yb > 1.7) { const y = yb + (yt - yb) * 0.72; ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a1, y - 0.025, y + 0.025, 0.04, frameCol, LEDGE_BAR); }
       }
     }
   }
@@ -726,7 +782,13 @@ function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
 }
 
 /** Faces de uma peça saliente: 1 frente, 2 topo, 4 base, 8 pontas. */
-const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4;
+const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4, LEDGE_JAMB = 1 | 8, LEDGE_BAR = 1 | 2 | 4;
+/** Cor do caixilho por estilo: alumínio branco, preto nos contemporâneos, madeira nas casas antigas. */
+const FRAME_COLORS: number[] = [];
+FRAME_COLORS[ArchId.Colonial] = 0xf2efe8; FRAME_COLORS[ArchId.ArtDeco] = 0x4a4f53; FRAME_COLORS[ArchId.Modernist] = 0xe8e8e4;
+FRAME_COLORS[ArchId.Contemporary] = 0x2c3034; FRAME_COLORS[ArchId.Brick] = 0xf2efe8; FRAME_COLORS[ArchId.Tropical] = 0xe8e8e4;
+FRAME_COLORS[ArchId.Industrial] = 0x5c6064; FRAME_COLORS[ArchId.ColonialHouse] = 0x6b4a32; FRAME_COLORS[ArchId.Bungalow] = 0xf4f4f0;
+FRAME_COLORS[ArchId.ModernHouse] = 0x2c3034; FRAME_COLORS[ArchId.Sobrado] = 0x7a5538; FRAME_COLORS[ArchId.Civic] = 0x3f4448;
 
 /** Peça saliente na parede: de u0 a u1 ao longo da parede, de y0 a y1, saindo `out` metros (faces escolhidas). */
 function ledge(mb: MeshBuilder, f: Frame, ax: number, az: number, dx: number, dz: number, nxl: number, nzl: number,
@@ -768,8 +830,7 @@ function roofClutter(mb: MeshBuilder, f: Frame, r: Rng, x0: number, x1: number, 
   for (let k = 0; k < r.int(2, 6); k++) {
     const ax = r.range(x0 + 0.8, x1 - 1), az = r.range(z0 + 0.8, z1 - 1);
     if (!free(ax, az, 0.4)) continue;
-    prism(mb, f, ax, ax + 0.25, az, az + 0.25, y, y + 0.7, 0x9a9c9e, BMAT.Metal, 50, -1, 0);
-    prism(mb, f, ax - 0.08, ax + 0.33, az - 0.08, az + 0.33, y + 0.7, y + 0.8, 0x7c7f82, BMAT.Metal, 50, 0x7c7f82, BMAT.Metal);
+    part(f, PART.Vent, ax + 0.12, y, az + 0.12, 0, 1);
   }
   // claraboias (vidro escuro numa moldura)
   if (r.next() < 0.45) for (let k = 0; k < r.int(1, 4); k++) {
@@ -1019,10 +1080,14 @@ function tower(g: Gen): void {
   if (lod > 0) return;
   for (let k = 0; k < 3; k++) {
     const ax = r.range(-pw / 2 + 2, pw / 2 - 3), az = r.range(z0 + 2, z1 - 3);
-    prism(mb, f, ax, ax + 1.5, az, az + 1.0, yP, yP + 1.1, 0xd4d4d0, BMAT.Metal, 50, 0xbfbfbb, BMAT.Metal);
+    part(f, PART.RoofAc, ax + 0.75, yP, az + 0.5, 0, 1, 1.2);
   }
-  // marquise na entrada
+  // marquise na entrada e pilastras de pedra na frente do embasamento
   prism(mb, f, -4, 4, z1, z1 + 3, hi + 0.2 + 3.6, hi + 0.2 + 3.85, 0x5a5f63, BMAT.Metal, 50, 0x5a5f63, BMAT.Metal, true);
+  {
+    const n = Math.max(2, Math.round(pw / 6.4)), step = pw / n, pc = shadeHex(podiumCol, 0.92);
+    for (let k = 0; k <= n; k++) { const x = -pw / 2 + k * step; if (Math.abs(x) < 4.4) continue; prism(mb, f, x - 0.35, x + 0.35, z1 - 0.05, z1 + 0.5, f.base, yP - 0.1, pc, BMAT.Plain, 50, pc, BMAT.Plain); }
+  }
   yard(mb, heights, f, W, D, 0xa29c92, BMAT.Paving);
 }
 
@@ -1362,4 +1427,79 @@ export function finishTable(arch: number, seed: number, fn: number, zone: number
 function applyFinishes(mb: MeshBuilder, v0: number, table: Uint8Array): void {
   const m = mb.mat;
   for (let i = v0; i < mb.v; i++) { const k = m[i]; if (k < 16) m[i] = k | (table[k] << 4); }
+}
+
+/** Vida na sacada (peças do pool): vaso no canto, cadeira, varal; pelo hash da sacada (não usa o sorteio do prédio). */
+function balconyLife(f: Frame, seed: number, c: number, fl: number, x0: number, x1: number, z1: number, depth: number, y: number): void {
+  if (!partsOut) return;
+  const h = hash2(seed ^ 0x5ac, c * 131 + fl, 0x77);
+  const k = h % 100;
+  if (k < 28) part(f, PART.Vase, x1 - 0.35, y, z1 + depth - 0.35, 0, 1, 0.85 + ((h >>> 8) & 7) * 0.05);
+  if (k >= 18 && k < 40) part(f, PART.Chair, x0 + 0.5 + ((h >>> 12) & 3) * 0.15, y, z1 + depth * 0.5, (h >>> 14) & 1 ? 1 : -1, 0.3);
+  if (k >= 70 && k < 82 && x1 - x0 > 2) part(f, PART.Clothesline, (x0 + x1) / 2, y, z1 + depth * 0.45, 0, 1, Math.min(1.6, (x1 - x0 - 0.6) / 1.8));
+}
+
+/**
+ * Relevo da fachada no nível 0 (prédio baixo de apartamentos ou misto): friso de laje em cada andar, brises verticais
+ * nos contemporâneos, pilastras entre as vitrines das lojas antigas e a porta de entrada dos prédios de moradia.
+ */
+function facadeRelief(g: Gen, x0: number, x1: number, z0: number, z1: number, y0: number, groundH: number, fh: number,
+  lower: number, colW: number, wallCol: number, shop: boolean): void {
+  const { mb, f, a, seed } = g;
+  blank(mb);
+  const h = hash2(seed, 0xfa);
+  // friso de laje (quem não tem faixas do estilo): 14 cm, 6 cm para fora
+  if (!a.bands && a.win !== Win.Curtain) {
+    const fc = shadeHex(wallCol, 0.9);
+    for (let fl = 1; fl < lower; fl++) {
+      const y = y0 + groundH + (fl - 1) * fh;
+      ring(mb, f, x0, x1, z0, z1, y - 0.07, y + 0.07, 0.06, fc);
+    }
+  }
+  // brise vertical (lâminas de concreto) na frente dos contemporâneos, metade deles
+  if (g.arch === ArchId.Contemporary && h % 2 === 0 && lower >= 3) {
+    const cols = Math.max(1, Math.round((x1 - x0) / colW)), cw = (x1 - x0) / cols, bc = shadeHex(wallCol, 1.08);
+    for (let c = 0; c <= cols; c++) {
+      const x = x0 + c * cw;
+      prism(mb, f, x - 0.05, x + 0.05, z1 - 0.02, z1 + 0.55, y0 + groundH, y0 + groundH + (lower - 1) * fh, bc, BMAT.Plain, 50, bc, BMAT.Plain);
+    }
+  }
+  // pilastras entre as vitrines (ruas antigas)
+  const classic = g.arch === ArchId.Colonial || g.arch === ArchId.Brick || g.arch === ArchId.ArtDeco;
+  if (shop && classic) {
+    const bays = Math.max(1, Math.round((x1 - x0) / colW)), bwid = (x1 - x0) / bays, pc = shadeHex(a.trim, 0.94);
+    for (let k = 0; k <= bays; k++) { const x = x0 + k * bwid; prism(mb, f, x - 0.18, x + 0.18, z1 - 0.02, z1 + 0.16, f.base, y0 + groundH - 0.3, pc, BMAT.Plain, 50, pc, BMAT.Plain); }
+  }
+  if (!shop) door(mb, f, 0, z1, y0, a.trim, true);
+}
+
+/** Porta de entrada na parede z = z1 (local), centrada em x: marco, folha de madeira e, nos prédios, marquise. */
+function door(mb: MeshBuilder, f: Frame, x: number, z1: number, y: number, trim: number, canopy: boolean): void {
+  blank(mb);
+  const w = canopy ? 1.8 : 1.0, hgt = canopy ? 2.6 : 2.2;
+  prism(mb, f, x - w / 2 - 0.12, x + w / 2 + 0.12, z1 - 0.02, z1 + 0.08, y - 0.05, y + hgt + 0.12, trim, BMAT.Plain, 50, trim, BMAT.Plain);
+  prism(mb, f, x - w / 2, x + w / 2, z1, z1 + 0.11, y, y + hgt, canopy ? 0x2f3438 : 0x5a3c26, canopy ? BMAT.Metal : BMAT.Plain, 50, -1, 0);
+  if (canopy) prism(mb, f, x - w / 2 - 0.6, x + w / 2 + 0.6, z1, z1 + 1.3, y + hgt + 0.25, y + hgt + 0.45, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true);
+  // soleira
+  prism(mb, f, x - w / 2 - 0.15, x + w / 2 + 0.15, z1, z1 + 0.45, y - 0.15, y + 0.04, 0xbdb7ab, BMAT.Paving, 50, 0xbdb7ab, BMAT.Paving);
+}
+
+/**
+ * Guarda-corpo de metal ao longo de z (local), de x0 a x1, sobre a laje em y: corrimão, travessa de baixo e
+ * montantes a cada ~1,2 m na malha; na camada de detalhe (perto), os balaústres a cada 12 cm.
+ */
+function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y: number, col: number): void {
+  blank(mb);
+  prism(mb, f, x0, x1, z - 0.06, z, y + 0.98, y + 1.05, col, BMAT.Metal, 50, col, BMAT.Metal);
+  prism(mb, f, x0, x1, z - 0.05, z - 0.01, y + 0.1, y + 0.15, col, BMAT.Metal, 50, col, BMAT.Metal);
+  const n = Math.max(1, Math.round((x1 - x0) / 1.2));
+  for (let k = 0; k <= n; k++) { const x = x0 + 0.03 + (x1 - x0 - 0.06) * k / n; prism(mb, f, x - 0.03, x + 0.03, z - 0.06, z, y, y + 0.98, col, BMAT.Metal, 50, -1, 0); }
+  const det = detailOut;
+  if (!det) return;
+  blank(det);
+  const m = Math.floor((x1 - x0) / 0.12);
+  for (let k = 1; k < m; k++) {
+    const x = x0 + (x1 - x0) * k / m;
+    ledge(det, f, x0, z - 0.05, 1, 0, 0, 1, x - x0 - 0.012, x - x0 + 0.012, y + 0.15, y + 0.98, 0.024, col, LEDGE_JAMB);
+  }
 }

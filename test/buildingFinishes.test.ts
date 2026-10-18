@@ -60,3 +60,21 @@ test('gerador: acabamento no nibble alto do material, material no baixo', () => 
   }
   assert.ok(withFin > m.vertexCount / 4, `${withFin} de ${m.vertexCount}`);
 });
+
+test('peças de fachada: mesmo sorteio da malha, determinísticas, variantes 8..15', async () => {
+  const { buildBuildingParts, PART } = await import('../src/jobs/buildingGen.ts');
+  const w = new World();
+  for (const t of [44, 45, 54, 55]) generateTerrainTile(w.heights, t, 1);
+  const b = emptyBoxes(4);
+  [[Zone.Residential, 7], [Zone.Mixed, 6], [Zone.Commercial, 16], [Zone.Residential, 1]].forEach(([zone, floors], i) => {
+    b.x[i] = 40 + i * 50; b.z[i] = 60; b.w[i] = 24; b.d[i] = 34; b.zone[i] = zone; b.floors[i] = floors; b.seed[i] = 911 + i * 77; b.style[i] = 10 + i * 30;
+  });
+  b.count = 4;
+  const run = () => { const out: number[] = []; buildBuildingParts(w.heights, b, (v, x, y, z, yaw, s) => out.push(v, x, y, z, yaw, s)); return out; };
+  const a = run(), c = run();
+  assert.deepEqual(a, c);
+  assert.ok(a.length / 6 > 5, `${a.length / 6} peças`);
+  const kinds = new Set<number>();
+  for (let k = 0; k < a.length; k += 6) { assert.ok(a[k] >= 8 && a[k] <= 15); kinds.add(a[k]); }
+  assert.ok(kinds.has(PART.WallAc) || kinds.has(PART.RoofAc), [...kinds].join(','));
+});

@@ -243,6 +243,41 @@ function furniture(): PropDef {
     // floreira
     part(box(1.0, 0.5, 1.0), 0x9d8f7c, v(FURN.Planter)),
     part(ball(0.55, 1), 0x4f7a34, v(FURN.Planter), 0, 0.65, 0, 1, 0.7, 1),
+    // ---- peças de fachada dos prédios (sessão prédios): origem no pé da parede, +z para fora
+    // ar-condicionado de parede (condensadora com grade e mãos-francesas)
+    part(box(0.8, 0.55, 0.3), 0xe4e4e0, v(FURN.WallAc), 0, 0.04, 0.17),
+    part(box(0.36, 0.36, 0.02), 0x8d9296, v(FURN.WallAc), 0.14, 0.13, 0.33),
+    part(box(0.04, 0.04, 0.34), 0x8a8e92, v(FURN.WallAc), -0.3, 0, 0.17),
+    part(box(0.04, 0.04, 0.34), 0x8a8e92, v(FURN.WallAc), 0.3, 0, 0.17),
+    // condensadora de telhado (caixa com ventilador em cima)
+    part(box(1.2, 0.9, 0.9), 0xd4d4d0, v(FURN.RoofAc), 0, 0, 0),
+    part(box(1.22, 0.5, 0.92), 0xbfc1c0, v(FURN.RoofAc), 0, 0.15, 0),
+    part(cyl(0.34, 0.34, 0.06, 14), 0x3c3f42, v(FURN.RoofAc), 0, 0.9, 0),
+    part(box(0.05, 0.12, 0.7), 0x8a8e92, v(FURN.RoofAc), 0, 0.92, 0),
+    // vaso de barro com planta
+    part(cyl(0.16, 0.22, 0.38, 10), 0xa65a3c, v(FURN.Vase)),
+    part(ball(0.3, 1), 0x4f7a34, v(FURN.Vase), 0, 0.62, 0, 1, 0.9, 1),
+    // varal de chão com roupa (ao longo da parede)
+    part(box(0.03, 1.4, 0.03), 0xc9ccce, v(FURN.Clothesline), -0.9, 0, 0),
+    part(box(0.03, 1.4, 0.03), 0xc9ccce, v(FURN.Clothesline), 0.9, 0, 0),
+    ...[-0.12, 0, 0.12].map((z) => part(box(1.8, 0.015, 0.015), 0xd8dadc, v(FURN.Clothesline), 0, 1.38, z)),
+    part(box(0.42, 0.55, 0.02), 0xf2f2ee, v(FURN.Clothesline), -0.5, 0.83, 0),
+    part(box(0.36, 0.45, 0.02), 0x3d6aa0, v(FURN.Clothesline), 0.05, 0.93, 0.12),
+    part(box(0.3, 0.6, 0.02), 0xc8402c, v(FURN.Clothesline), 0.55, 0.78, -0.12),
+    // antena parabólica
+    part(box(0.05, 0.75, 0.05), 0x8a8e92, v(FURN.Dish), 0, 0, 0),
+    part(ball(0.38, 1), 0xe8e8e4, v(FURN.Dish), 0, 0.85, 0.12, 1, 1, 0.22),
+    part(box(0.03, 0.03, 0.35), 0x8a8e92, v(FURN.Dish), 0, 0.85, 0.3),
+    // exaustor eólico (cano e turbina)
+    part(cyl(0.12, 0.12, 0.6, 8), 0xa9adb0, v(FURN.Vent)),
+    part(ball(0.22, 1), 0xc9ccce, v(FURN.Vent), 0, 0.72, 0, 1, 0.75, 1),
+    // cadeira de plástico
+    part(box(0.45, 0.05, 0.45), 0xf2f2ee, v(FURN.Chair), 0, 0.42, 0),
+    part(box(0.45, 0.45, 0.04), 0xf2f2ee, v(FURN.Chair), 0, 0.47, -0.21),
+    ...[[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]].map(([x, z]) => part(box(0.035, 0.42, 0.035), 0xe6e6e2, v(FURN.Chair), x, 0, z)),
+    // caixa d'água de fibra (azul) com tampa
+    part(cyl(0.62, 0.72, 0.85, 14), 0x2f6fb5, v(FURN.Tank)),
+    part(cyl(0.64, 0.64, 0.07, 14), 0x285e98, v(FURN.Tank), 0, 0.85, 0),
   ];
   return { lods: [merge(parts), null, null], dist: [140, 0, 0], radius: 1.5 };
 }
