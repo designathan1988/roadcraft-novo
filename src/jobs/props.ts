@@ -18,8 +18,9 @@ import type { BoxColumns, PropColumns, RoadGraph } from './protocol.ts';
 import { lotParking } from './buildingGen.ts';
 
 /** Tipos de peça (4 bits; 15 = vaga livre). */
-export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15 } as const;
-export const PROP_TYPES = 16;
+export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17 } as const;
+/** Types 16..23 belong to the roads/vegetation work, 24..30 to the buildings work (see the shared notes). */
+export const PROP_TYPES = 18;
 /** Mobiliário (variante da peça Furniture). */
 export const FURN = { Hydrant: 0, Postbox: 1, Phone: 2, Drain: 3, Bollard: 4, Planter: 5 } as const;
 /** Muros e cercas (variante da peça Barrier); a peça vai de z = 0 a 1 e o shader estica. */
@@ -129,15 +130,15 @@ function placeItems(heights: Float32Array, a: Float32Array, out: Out): void {
 /** Escala guardada em 6 bits: 0,5 a 2,0. */
 export function propScale(q: number): number { return 0.5 + q / 42; }
 
-/** Árvores por bioma: [chance base, parte de arbustos, parte de pinheiros, escala]. */
-const BIOME_TREES: Array<[number, number, number, number]> = [
-  [0.18, 0.15, 0.27, 1], // sem ecossistema
-  [0.1, 0.45, 0.02, 0.7], // cerrado: baixas e tortas, muito arbusto
-  [0.3, 0.12, 0.08, 1.15], // mata atlântica
-  [0.42, 0.08, 0.02, 1.4], // amazônia
-  [0.06, 0.6, 0.0, 0.6], // caatinga
-  [0.03, 0.3, 0.1, 0.9], // pampa
-  [0.12, 0.3, 0.02, 1.0], // pantanal
+/** Trees by biome: [base chance, share of shrubs, share of cypresses, scale, share of palms]. */
+const BIOME_TREES: Array<[number, number, number, number, number]> = [
+  [0.18, 0.15, 0.27, 1, 0.02], // no ecosystem
+  [0.1, 0.45, 0.02, 0.7, 0.04], // cerrado: low and crooked, much shrub
+  [0.3, 0.12, 0.08, 1.15, 0.1], // Atlantic forest
+  [0.42, 0.08, 0.02, 1.4, 0.12], // Amazon
+  [0.06, 0.6, 0.0, 0.6, 0.03], // caatinga
+  [0.03, 0.3, 0.1, 0.9, 0], // pampa
+  [0.12, 0.3, 0.02, 1.0, 0.1], // pantanal
 ];
 
 /** O que o chão diz às peças: pintura/floresta, água e bioma. */
@@ -340,7 +341,8 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         const u = side === 1 ? e.u1 - 0.9 : e.u0 + 0.9; // perto do meio-fio
         const x = f.px + lx * u, z = f.pz + lz * u;
         if (!onGround(x, z, f.y)) continue;
-        out.add(PROP.Tree, x, f.y + CURB_H, z, rng.next() * 6.283, rng.int(0, 4), rng.range(0.75, 1.2), rng.nextU32());
+        // street trees: the mixed broadleaf, a third of them oaks (shade trees)
+        out.add(rng.next() < 0.33 ? PROP.Oak : PROP.Tree, x, f.y + CURB_H, z, rng.next() * 6.283, rng.int(0, 4), rng.range(0.75, 1.2), rng.nextU32());
       }
       // bancos e lixeiras na calçada do comércio
       if (zone === Zone.Commercial || zone === Zone.Mixed) {
@@ -367,8 +369,10 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         const u = (median.u0 + median.u1) / 2;
         const x = f.px + lx * u, z = f.pz + lz * u;
         if (!onGround(x, z, f.y)) continue;
-        const conifer = rng.next() < 0.25;
-        out.add(conifer ? PROP.Conifer : PROP.Tree, x, f.y + CURB_H, z, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.15), rng.nextU32());
+        // medians: palms on the wide avenues (Brazilian style), cypresses and broadleaves elsewhere
+        const pick = rng.next();
+        const kind = median.u1 - median.u0 >= 4 && pick < 0.45 ? PROP.Palm : pick < 0.6 ? PROP.Conifer : PROP.Tree;
+        out.add(kind, x, f.y + CURB_H, z, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.15), rng.nextU32());
       }
     }
   }
@@ -414,8 +418,8 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         const [x, z] = at(r.range(-W / 2 + 2.5, W / 2 - 2.5), -D / 2 + r.range(2.2, 3.6));
         const y = heightAt(heights, x, z);
         if (y < SEA_LEVEL + 0.3) continue;
-        const conifer = r.next() < 0.3;
-        out.add(conifer ? PROP.Conifer : PROP.Tree, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.6, 1.0), r.nextU32());
+        const pick = r.next();
+        out.add(pick < 0.3 ? PROP.Conifer : pick < 0.65 ? PROP.Oak : PROP.Tree, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.6, 1.0), r.nextU32());
       }
     }
     // arbustos junto à frente
@@ -485,9 +489,9 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         const r = rng.next();
         if (species === 1 && forest > 0.2) { out.add(PROP.Tree, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.3) * B[3], rng.nextU32()); continue; }
         if (species === 2 && forest > 0.2) { out.add(PROP.Conifer, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.4) * B[3], rng.nextU32()); continue; }
-        if (species === 3 && forest > 0.2) { out.add(PROP.Ground, px, y, pz, rng.next() * 6.283, 11, rng.range(0.8, 1.3), rng.nextU32()); continue; }
+        if (species === 3 && forest > 0.2) { out.add(PROP.Palm, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.2), rng.nextU32()); continue; }
         if (r < B[1]) out.add(PROP.Bush, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.5), rng.nextU32());
-        else out.add(r < B[1] + B[2] ? PROP.Conifer : PROP.Tree, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.7, 1.3) * B[3], rng.nextU32());
+        else out.add(r < B[1] + B[2] ? PROP.Conifer : r < B[1] + B[2] + B[4] ? PROP.Palm : (rng.next() < 0.4 ? PROP.Oak : PROP.Tree), px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.7, 1.3) * B[3], rng.nextU32());
       }
     }
   }
