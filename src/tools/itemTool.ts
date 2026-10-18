@@ -3,7 +3,9 @@
 // objetos junto ao meio-fio, os muros nas costas da calçada.
 
 import type * as THREE from 'three/webgpu';
-import type { CommandStack } from '../core/commands.ts';
+import type { Command, CommandStack } from '../core/commands.ts';
+import { SIGN_STOP, signRuleCommand } from '../roads/signRule.ts';
+import { addressAt } from '../roads/streetNames.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { SegFlag } from '../roads/flags.ts';
@@ -14,6 +16,11 @@ import { Item, ItemsCommand, MAX_RUN, isBarrier, isEffect } from '../world/items
 import type { World } from '../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
+
+/** Two commands already applied, as one undo step. */
+function both(a: Command, b: Command): Command {
+  return { label: a.label, apply: () => { a.apply(); b.apply(); }, invert: () => { b.invert(); a.invert(); } };
+}
 
 export const STREET_ITEMS: Array<[number, string]> = [
   [Item.Tree, 'Árvore'], [Item.Conifer, 'Pinheiro'], [Item.Palm, 'Palmeira'], [Item.Bush, 'Arbusto'], [Item.Bench, 'Banco'], [Item.Bin, 'Lixeira'],
@@ -113,9 +120,12 @@ export class ItemTool {
     if (shift) {
       const id = items.nearest(hit.x, hit.z, 3);
       if (id >= 0 && isBarrier(items.t.cols.type[id]) === (this.mode === 'barrier')) {
+        const ic = items.t.cols, sx = ic.x0[id], sz = ic.z0[id], kind = ic.type[id], variant = ic.variant[id];
         const c = new ItemsCommand(items, 'remover item');
         c.remove(id);
-        this.commands.push(c);
+        // a Stop/Give-way sign taken away gives its junction arm back to the automatic rule
+        const rule = kind === Item.Sign ? signRuleCommand(this.world, sx, sz, variant, false) : '';
+        if (typeof rule !== 'string') { rule.apply(); this.commands.push(both(c, rule)); } else this.commands.push(c);
       }
       return;
     }
@@ -125,10 +135,17 @@ export class ItemTool {
       // objetos: x1 = rumo, z1 = altura (0 = do chão)
       // elementos (fumaça, fogo…): variante = força
       c.add([sp.x, sp.z, sp.yaw, sp.onWalk ? sp.y : 0, this.item, this.item === Item.Sign ? this.sign : isElement(this.item) ? 4 : 0]);
-      this.commands.push(c);
+      // "a sign is a rule": a Stop/Give-way sign next to a junction arm sets that arm's rule (one undo for both)
+      const rule = this.item === Item.Sign ? signRuleCommand(this.world, sp.x, sp.z, this.sign, true) : '';
+      if (typeof rule !== 'string') { rule.apply(); this.commands.push(both(c, rule)); this.hud.toast(this.sign === SIGN_STOP ? 'Placa de Pare: quem chega por esta via para no cruzamento.' : 'Dê a preferência: quem chega por esta via dá a vez no cruzamento.'); }
+      else { this.commands.push(c); if (rule) this.hud.toast(rule[0].toUpperCase() + rule.slice(1) + '.'); }
       if (this.item === Item.Sign && this.signText.trim()) {
         const near = this.world.roads.nearestSeg(sp.x, sp.z, 30);
         this.onText?.(this.signText.trim().slice(0, 32), sp.x, sp.z, near ? near[0] : -1, this.sign === 2);
+      } else if (this.item === Item.Sign && this.sign === 2) {
+        // street sign without a typed name: it shows the street's name (generated or the one the player gave)
+        const name = addressAt(this.world, sp.x, sp.z, 30)?.name;
+        if (name) this.onText?.(name, sp.x, sp.z, -1, false);
       }
       return;
     }

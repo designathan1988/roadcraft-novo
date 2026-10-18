@@ -15,7 +15,7 @@ import { CommandStack } from './core/commands.ts';
 import { CELL_COUNT, Dirty, TILE_COUNT, cellId, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
 import { JobPool } from './jobs/pool.ts';
 import { packTileHeights } from './jobs/storage.ts';
-import { boxTransfer, roadGraphTransfer, type BoxColumns, type RoadSave } from './jobs/protocol.ts';
+import { SHAPE_SCALE, SHAPE_STRIDE, boxTransfer, roadGraphTransfer, type BoxColumns, type RoadSave } from './jobs/protocol.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
 import { createRoads, createTrafficLook, setPaintStyle, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
@@ -56,7 +56,9 @@ import { InsideView } from './render/inside.ts';
 import { Blast } from './render/blast.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
-import { deleteLot, joinLots, lotAt, lotToWorld, moveLotCorner, nearestCorner, polygonRect, setLotFront, splitLot } from './world/lotEdit.ts';
+import { curveLotSide, deleteLot, joinLots, lotAt, lotToWorld, moveLotCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotByLine } from './world/lotEdit.ts';
+import type { FeatureActions } from './tools/featureActions.ts';
+import { addressAt } from './roads/streetNames.ts';
 import { Ground, GroundStroke, RiverCommand } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
@@ -71,7 +73,8 @@ import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParam
 import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
-import { packSlot, unpackToSlot } from './mapFile.ts';
+import { packSlot, quarantineSlot, unpackToSlot } from './mapFile.ts';
+import { repairDanglingEnds } from './roads/repair.ts';
 
 const SLOT = 'cidade-1';
 /** Trechos cabíveis no mapa de ocupação (2 sentidos por trecho). */
@@ -95,7 +98,7 @@ export class Game {
   readonly commands = new CommandStack();
   readonly hud: Hud;
   /** As ações dos botões do painel (os roteiros de teste chamam o mesmo que o botão). */
-  hudActions!: HudActions;
+  hudActions!: HudActions & FeatureActions;
   /** Medição (?perf): onde foi o tempo dos quadros lentos. */
   perfLog: string[] | null = null;
   private parts!: SceneParts;
@@ -248,6 +251,7 @@ export class Game {
       else if (e.data.type === 'probeNode') this.inspector?.showNodeProbe(e.data);
       else if (e.data.type === 'hit') this.onHit(e.data.people, e.data.vehicles);
       else if (e.data.type === 'autoControl') this.world.roads.setFlow(e.data.node, e.data.flow);
+      else if (e.data.type === 'manoeuvres') { const r = this.manoeuvreWait; this.manoeuvreWait = null; r?.(e.data); }
       else { console.error('simulação:', e.data.message); this.health?.add('erro', `simulação: ${e.data.message.split(String.fromCharCode(10))[0]}`); }
     };
     this.sim.postMessage({ type: 'init', poses: posesSab, heights: this.world.heightsSab, occupancy: this.occupancySab, signals: this.signalsSab, tickHz: 20 } satisfies ToSim);
@@ -270,7 +274,7 @@ export class Game {
       else if (op.t === 'clear') { arr.fill(0); this.trafficLook.arrows.needsUpdate = true; }
     });
 
-    this.hud = new Hud(this.hudActions = {
+    this.hud = new Hud(this.hudActions = Object.assign(this.featureActions(), {
       tool: (t) => this.setTool(t),
       item: (k) => { this.itemTool.item = k; },
       signType: (k) => { this.itemTool.sign = k; },
@@ -355,7 +359,7 @@ export class Game {
       ring: (f) => this.roadTool.ringBy(f),
       terminal: (on) => { this.transitTerminal = on; },
       health: () => this.health.toggle(),
-    });
+    } satisfies HudActions));
     this.roadTool = new RoadTool(this.world, this.commands, this.preview, this.hud);
     this.itemTool = new ItemTool(this.world, this.commands, this.preview, this.hud);
     this.zoneTool = new ZoneTool(this.world, this.commands);
@@ -580,6 +584,8 @@ export class Game {
     if (this.skyMode === 'dia') this.hour = 12;
     else if (this.skyMode === 'noite') this.hour = 22;
     else if (!this.paused) this.hour = (this.hour + dt * this.clockSpeed / 60) % 24;
+    // city clock in minutes (building decay); the sky mode only fixes the light
+    if (!this.paused) this.world.advanceClock(dt * this.clockSpeed);
     if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if (this.unsaved && !this.busy && this.world.roads.segs.size) void this.save(true); }
     const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
@@ -748,14 +754,20 @@ export class Game {
     const moved = Math.hypot(t.x - this.doorsAt.x, t.z - this.doorsAt.z) > 80;
     if (!moved && w.buildings.size === this.doorsAt.count) return;
     this.doorsAt = { x: t.x, z: t.z, count: w.buildings.size };
-    const R = 450, pts: number[] = [];
+    const R = 450, pts: number[] = [], docks: number[] = [];
     w.buildingIndex.query(t.x - R, t.z - R, t.x + R, t.z + R, (id) => {
       if (pts.length >= 6000 || col.floors[id] === 0) return;
       const k = col.d[id] / 2 - 0.3, s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
       pts.push(col.x[id] + s * k, col.z[id] + c * k);
+      // warehouse loading dock (trucks back into it): inside the gate, lot frame (−w/2 + 10, d/2 − 6), facing the street
+      if (col.zone[id] === Zone.Industrial && docks.length < 1500) {
+        const [dx, dz] = lotToWorld({ x: col.x[id], z: col.z[id], rot: col.rot[id] }, -col.w[id] / 2 + 10, col.d[id] / 2 - 6);
+        docks.push(dx, dz, col.rot[id]);
+      }
     });
-    const arr = new Float32Array(pts);
+    const arr = new Float32Array(pts), dk = new Float32Array(docks);
     this.sim.postMessage({ type: 'doors', pts: arr } satisfies ToSim, [arr.buffer]);
+    this.sim.postMessage({ type: 'docks', pts: dk } satisfies ToSim, [dk.buffer]);
   }
 
   /** Setas das pontas dos trechos nos nós com conexões de faixa ajustadas (só os nós que mudaram). */
@@ -904,7 +916,7 @@ export class Game {
         if (this.tool === 'inspect') { if (hit) this.inspector.pick(hit.x, hit.z); }
         else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
         else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey);
-        else if (this.tool === 'building') this.clickBuilding(hit);
+        else if (this.tool === 'building') this.clickBuilding(hit, e.shiftKey);
         else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey || this.transitTerminal);
         else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
         else if (this.tool === 'sky') { if (hit) this.clickSky(hit.x, hit.z); }
@@ -1117,7 +1129,9 @@ export class Game {
       const plan = planRoad(this.world, a, null, b, Math.max(0, id), elevation);
       if (!plan.ok) return plan.reason;
       const j = buildRoad(this.world, plan, a, b, Math.max(0, id), this.roadTool.segFlags());
-      if (j.settle()) this.commands.push(j);
+      const price = j.price;
+      if (!j.settle()) return `dinheiro insuficiente: custa R$ ${price.toLocaleString('pt-BR')}`;
+      this.commands.push(j);
       return 'ok';
     },
     zone: (x: number, z: number, r: number, zone: number) => { this.zoneTool.zone = zone; this.zoneTool.radius = r; this.zoneTool.begin(); this.zoneTool.dab(x, z); this.zoneTool.end(); },
@@ -1185,6 +1199,30 @@ export class Game {
     /** Altura do terreno em (x, z). */
     ground: (x: number, z: number) => heightAt(this.world.heights, x, z),
     junction: (x: number, z: number, ctl: number) => { const n = this.world.roads.nearestNode(x, z, 20); if (n >= 0) this.world.roads.setJunction(n, { ctl }); },
+    /** Polygon lot from flat corners [x0, z0, x1, z1, …] (the first side is the front); returns its id or the refusal. */
+    lotPoly: (pts: number[], use = 1) => {
+      this.lotUse = use; this.polyPts = [];
+      for (let i = 0; i + 1 < pts.length; i += 2) this.polyPts.push([pts[i], pts[i + 1]]);
+      const before = this.world.buildings.end, size = this.world.buildings.size;
+      const r = polygonLot(this.polyPts);
+      this.finishPoly();
+      if (typeof r === 'string') return r;
+      if (this.world.buildings.size === size) return 'não criou';
+      // the new lot is the last id handed out (or one reused from the free list): find it at its centre
+      return lotAt(this.world, r.x, r.z) >= 0 ? lotAt(this.world, r.x, r.z) : before;
+    },
+    /** Split the lot under the line (ax, az)-(bx, bz) along it. */
+    lotLine: (ax: number, az: number, bx: number, bz: number) => { this.lotExtra = 'line'; this.lotExtraPts = []; this.clickLotExtra({ x: ax, z: az } as THREE.Vector3); this.clickLotExtra({ x: bx, z: bz } as THREE.Vector3); this.lotExtra = null; },
+    /** Curve the side of a lot near (x, z) through (px, pz). */
+    lotCurve: (x: number, z: number, px: number, pz: number) => { this.lotExtra = 'curve'; this.lotExtraPts = []; this.clickLotExtra({ x, z } as THREE.Vector3); this.clickLotExtra({ x: px, z: pz } as THREE.Vector3); this.lotExtra = null; },
+    /** Renovate the building at (x, z) (Shift+click). */
+    renovate: (x: number, z: number) => this.renovate(lotAt(this.world, x, z)),
+    /** Manoeuvres going on in the simulation (parking, pulling out, trucks at docks, kerb stops), for photos and tests. */
+    manoeuvres: () => new Promise<Extract<FromSim, { type: 'manoeuvres' }>>((resolve) => { this.manoeuvreWait = resolve; this.sim.postMessage({ type: 'probeManoeuvres' } satisfies ToSim); }),
+    /** Address (street name and metric number) of the point (x, z), or null away from streets. */
+    address: (x: number, z: number) => addressAt(this.world, x, z),
+    /** Advance the city clock by `minutes` (decay and anything else on the city clock). */
+    passTime: (minutes: number) => this.world.advanceClock(minutes),
   };
 
   /** Rio: mostra o trecho do último ponto até o cursor. */
@@ -1406,7 +1444,7 @@ export class Game {
     const z = col.zone[id];
     this.creator?.show(hasDesign(col.color[id]) ? decodeDesign(col.color[id], col.h[id]) : null, col.floors[id]);
     if (this.creator) this.creator.el.style.display = this.tool === 'building' && col.floors[id] > 0 ? '' : 'none';
-    this.hud.setBuilding({ fn: col.fn[id], zone: z, floors: col.floors[id], arch: col.style[id] >= 128 ? col.style[id] - 128 : -1 });
+    this.hud.setBuilding({ fn: col.fn[id], zone: z, floors: col.floors[id], arch: col.style[id] >= 128 ? col.style[id] - 128 : -1, address: this.hudActions.addressOf(), decay: col.decay[id] });
   }
 
   private showSelection(): void {
@@ -1557,6 +1595,7 @@ export class Game {
 
   private setLotMode(m: LotMode): void {
     this.lotMode = m;
+    this.lotExtra = null; this.lotExtraPts = [];
     this.lotPts = m === 'rect' ? [] : null;
     this.polyPts.length = 0; this.joinFirst = -1; this.cornerDrag = null;
     this.preview.hideAll();
@@ -1633,10 +1672,10 @@ export class Game {
   }
 
   private finishPoly(): void {
-    const r = polygonRect(this.polyPts);
+    const r = polygonLot(this.polyPts);
     this.polyPts.length = 0;
     this.preview.hideAll();
-    if (!r) { this.hud.toast('Não cabe um lote aí.'); return; }
+    if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
     const seed = (Math.random() * 2 ** 31) >>> 0, zone = this.lotUse;
     const j = new RoadJournal(this.world, 'lote desenhado');
     j.addBuilding({ ...r, h: 0, color: 0, seed, zone, fn: this.newFn, floors: floorsFor(zone, 0, new Rng(seed)), style: this.newArch >= 0 ? 128 + this.newArch : seed & 127 });
@@ -1664,8 +1703,71 @@ export class Game {
     this.commands.push(r);
   }
 
-  private clickBuilding(hit: THREE.Vector3 | null): void {
+  private manoeuvreWait: ((m: Extract<FromSim, { type: 'manoeuvres' }>) => void) | null = null;
+  /** Lot modes added by the gameplay front (split by line, curve side) and the points clicked so far. */
+  private lotExtra: 'line' | 'curve' | null = null;
+  private lotExtraPts: Array<[number, number]> = [];
+
+  private featureActions(): FeatureActions {
+    const hints = { line: 'Clique dois pontos de uma linha que atravesse o lote: ele vira dois.', curve: 'Clique perto de um lado do lote e depois onde esse lado deve passar: ele vira curva.' };
+    const enter = (m: 'line' | 'curve') => { this.setTool('building'); this.lotExtra = m; this.lotExtraPts = []; this.hud.setHint(hints[m]); };
+    return {
+      lotLine: () => enter('line'),
+      lotCurve: () => enter('curve'),
+      lotExtraOff: () => { this.lotExtra = null; this.lotExtraPts = []; },
+      renovate: () => this.renovate(this.selected),
+      decayOf: () => this.selected >= 0 && this.world.buildings.alive[this.selected] ? this.world.buildings.cols.decay[this.selected] / 10 : -1,
+      addressOf: () => {
+        const id = this.selected, w = this.world, c = w.buildings.cols;
+        if (id < 0 || !w.buildings.alive[id]) return '';
+        // the door: middle of the lot's front
+        const [x, z] = lotToWorld({ x: c.x[id], z: c.z[id], rot: c.rot[id] }, 0, c.d[id] / 2);
+        const a = addressAt(w, x, z);
+        return a ? `${a.name}, ${a.number}` : '';
+      },
+      streetNameAt: (x, z) => { const a = addressAt(this.world, x, z, 30); return a ? a.name : ''; },
+      mapPaint: (style) => { this.settings.paint = style; setPaintStyle(style); this.unsaved = true; },
+    };
+  }
+
+  /** Split by line or curve side: the second click does it. */
+  private clickLotExtra(hit: THREE.Vector3): void {
+    const pts = this.lotExtraPts;
+    pts.push([hit.x, hit.z]);
+    if (pts.length < 2) return;
+    const [[ax, az], [bx, bz]] = pts;
+    this.lotExtraPts = [];
+    let r: RoadJournal | string;
+    if (this.lotExtra === 'line') {
+      // the lot the line crosses: under its middle, or under either end
+      const id = [lotAt(this.world, (ax + bx) / 2, (az + bz) / 2), lotAt(this.world, ax, az), lotAt(this.world, bx, bz)].find((i) => i >= 0) ?? -1;
+      r = id < 0 ? 'a linha não passa por nenhum lote' : splitLotByLine(this.world, id, ax, az, bx, bz);
+    } else {
+      const id = lotAt(this.world, ax, az);
+      r = id < 0 ? 'clique primeiro perto de um lado, dentro do lote' : curveLotSide(this.world, id, ax, az, bx, bz);
+    }
+    if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
+    this.commands.push(r);
+    this.hud.toast(this.lotExtra === 'line' ? 'Lote dividido pela linha.' : 'Lado curvado.');
+  }
+
+  /** Renovation (Roadcraft Shift+click): the building is new again; undo brings the old age back. */
+  private renovate(id: number): void {
+    const w = this.world;
+    if (id < 0 || !w.buildings.alive[id] || w.buildings.cols.floors[id] === 0) { this.hud.toast('Escolha um prédio para reformar.'); return; }
+    const before = w.buildings.cols.built[id], now = w.clock;
+    if (w.buildings.cols.decay[id] === 0 && now - before < 1) { this.hud.toast('Esse prédio já está novo.'); return; }
+    this.commands.run({
+      label: 'reformar prédio',
+      apply: () => { if (w.buildings.alive[id]) w.setBuilt(id, now); },
+      invert: () => { if (w.buildings.alive[id]) w.setBuilt(id, before); },
+    });
+    this.hud.toast('Prédio reformado: novo de novo.');
+  }
+
+  private clickBuilding(hit: THREE.Vector3 | null, shift = false): void {
     if (!hit) return;
+    if (this.lotExtra) { this.clickLotExtra(hit); return; }
     if (this.lotMode !== 'edit' && this.lotMode !== 'rect') { this.clickLotTool(hit); return; }
     if (this.lotPts) { this.clickLot(hit); return; }
     // prédio sob o clique?
@@ -1680,7 +1782,7 @@ export class Game {
         if (d < bd) { bd = d; best = id; }
       }
     });
-    if (best >= 0) { this.select(best); return; }
+    if (best >= 0) { if (shift) this.renovate(best); this.select(best); return; }
     // lote livre: constrói
     const lot = this.growth.lotAt(hit.x, hit.z);
     if (!lot) { this.hud.toast('Clique num prédio ou num lote vazio (zoneie as vias primeiro).'); return; }
@@ -1893,7 +1995,7 @@ export class Game {
 
   private insertBoxes(b: BoxColumns): void {
     for (let i = 0; i < b.count; i++) {
-      this.world.addBuilding({ x: b.x[i], z: b.z[i], w: b.w[i], d: b.d[i], h: b.h[i], rot: b.rot[i], color: b.color[i], seed: b.seed[i], zone: b.zone[i], floors: b.floors[i], style: b.style[i], fn: b.fn[i] });
+      this.world.addBuilding({ x: b.x[i], z: b.z[i], w: b.w[i], d: b.d[i], h: b.h[i], rot: b.rot[i], color: b.color[i], seed: b.seed[i], zone: b.zone[i], floors: b.floors[i], style: b.style[i], fn: b.fn[i], built: b.built[i], shape: b.shapeN[i] ? Array.from(b.shape.subarray(i * SHAPE_STRIDE, i * SHAPE_STRIDE + b.shapeN[i] * 2), (v) => v / SHAPE_SCALE) : undefined });
     }
   }
 
@@ -1922,7 +2024,7 @@ export class Game {
       })));
       const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: w.tileInSave, camera: this.rig.state(), hour: this.hour, transit: this.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.unlimited ? NaN : w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
         extra: JSON.stringify({ sky: this.skyMode, weather: this.weatherCtl, water: this.waterCtl, clouds: this.clouds, fog: fogLevel.value, terminals: this.transit.terminals,
-          signs: [...w.signTexts], streets: [...w.streetNames] }) });
+          signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: this.settings.paint ?? 'br' }) });
       await new Promise<void>((resolve) => this.pool.submit('saveMeta', { slot: SLOT, meta }, () => resolve(), { priority: -1 }));
       if (auto) this.hud.toast('Salvo automaticamente.');
       else this.hud.toast(tiles.length ? `Salvo (${tiles.length} ladrilhos, ${(bytes / 1024 / 1024).toFixed(1)} MB).` : 'Salvo.');
@@ -1941,7 +2043,8 @@ export class Game {
     let meta;
     try { meta = decodeMeta(raw); } catch (err) {
       if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { reloadWithMap(err.tiles, 'carregar'); return; }
-      this.hud.toast(String(err)); return;
+      const q = await quarantineSlot(SLOT).catch(() => null);
+      this.hud.toast(q ? `Não deu para ler o mapa (${(err as Error).message}). Ele foi guardado intacto em "${q}".` : String(err)); return;
     }
     this.busy = true;
     this.hud.showLoading('Carregando a cidade…');
@@ -1968,7 +2071,10 @@ export class Game {
     try {
       const extra = meta.extra ? JSON.parse(meta.extra) as { sky?: SkyMode; weather?: WeatherCtl | null; water?: { waves: number; foam: number; current: number } } : {};
       this.setWater(extra.water ?? { waves: 0.3, foam: 0.4, current: 0.5 });
-      const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]> };
+      const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]>; clock?: number; paint?: string };
+      w.clock = ex.clock ?? 0;
+      // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
+      if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
       w.signTexts.clear(); for (const [k, v] of ex.signs ?? []) w.signTexts.set(k, v);
       w.streetNames.clear(); for (const [k, v] of ex.streets ?? []) w.streetNames.set(k, v);
       this.textSigns.version++;
@@ -1978,13 +2084,23 @@ export class Game {
       this.setWeather(extra.weather ?? null);
     } catch { /* salvamento antigo */ }
     w.tileInSave.set(meta.tiles);
-    let left = TILE_COUNT;
+    let left = TILE_COUNT, corrupt = 0;
     await new Promise<void>((resolve) => {
       const done = () => { if (--left === 0) resolve(); };
       for (let t = 0; t < TILE_COUNT; t++) {
         const cells = cellsOfTile(t);
         if (meta.tiles[t]) {
           this.pool.submit('loadTile', { slot: SLOT, tile: t }, (r) => {
+            if (r.corrupt) {
+              // unreadable tile: its terrain comes back from the seed; the save goes to quarantine below
+              corrupt++;
+              this.pool.submit('terrainGen', { seed: w.seed, tile: t }, (g) => {
+                w.tileMin[t] = g.min; w.tileMax[t] = g.max; w.layerDirty.add(t);
+                for (const c of cells) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
+                done();
+              }, { key: `terrain:${t}`, priority: 0 });
+              return;
+            }
             if (r.found) {
               w.tileMin[t] = r.min; w.tileMax[t] = r.max;
               if (r.boxes) this.insertBoxes(r.boxes);
@@ -2010,9 +2126,18 @@ export class Game {
     // vias: todos os nós antes dos trechos (trechos ligam ladrilhos)
     for (const r of roads) w.roads.loadNodes(r);
     for (const r of roads) w.roads.loadSegs(r);
+    // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
+    for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
     try {
       for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
     } catch { /* salvamento sem cruzamentos escolhidos */ }
+    // old maps: dead ends lying inside another road become junctions
+    const repaired = repairDanglingEnds(w);
+    if (corrupt) {
+      const q = await quarantineSlot(SLOT).catch(() => null);
+      this.hud.toast(`${corrupt} ${corrupt === 1 ? 'pedaço do mapa estava ilegível e voltou' : 'pedaços do mapa estavam ilegíveis e voltaram'} do relevo original${q ? `; o salvamento original foi guardado intacto em "${q}"` : ''}.`);
+    }
+    if (repaired) this.hud.toast(`Mapa reparado: ${repaired} ${repaired === 1 ? 'ponta solta dentro de outra via virou cruzamento' : 'pontas soltas dentro de outras vias viraram cruzamentos'}.`);
     w.saveDirty.fill(0);
     this.rig.restore(meta.camera);
     this.hud.setView(this.rig.mode);

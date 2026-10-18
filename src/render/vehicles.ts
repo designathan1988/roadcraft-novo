@@ -10,6 +10,7 @@ import { POSE_STRIDE, type PoseReader } from '../sim/poses.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
+import { PeopleRenderer } from './people/crowd.ts';
 
 const {
   attribute, vec2, vec3, vec4, float, abs, cos, sin, mix, transformNormalToView, normalize,
@@ -260,11 +261,13 @@ function bikeModel(): THREE.BufferGeometry {
   bar(0, 0.35, -0.55, 0, 0.75, -0.12, 0.022, -1); bar(0, 0.35, -0.55, 0, 0.4, 0.05, 0.022, -1);
   bar(0, 0.4, 0.05, 0, 0.75, -0.12, 0.022, -1); bar(0, 0.75, -0.12, 0, 0.82, 0.42, 0.022, -1); bar(0, 0.35, 0.55, 0, 0.92, 0.42, 0.02, 0x2a2b2d);
   box(0, 0.92, 0.38, 0.5, 0.03, 0.04, 0x2a2b2d); box(0, 0.8, -0.16, 0.12, 0.05, 0.24, 0x1b1b1b);
-  // ciclista: pernas, tronco inclinado, braços, cabeça com capacete
+  // ciclista (só sem as pessoas cozidas, src/render/people): lugar 1 dos ocupantes, aceso pela cor
+  const rider = parts.length;
   box(0.11, 0.42, -0.08, 0.1, 0.42, 0.14, 0x2c3140); box(-0.11, 0.42, 0.02, 0.1, 0.42, 0.14, 0x2c3140);
   const t = new THREE.BoxGeometry(0.34, 0.55, 0.22); t.rotateX(0.55); t.translate(0, 1.12, 0.02); parts.push(tagged(t, 0x56677a));
   box(0.17, 1.06, 0.26, 0.07, 0.07, 0.36, 0x56677a); box(-0.17, 1.06, 0.26, 0.07, 0.07, 0.36, 0x56677a);
   const head = new THREE.IcosahedronGeometry(0.12, 1); head.translate(0, 1.5, 0.22); parts.push(tagged(head, -1));
+  for (let i = rider; i < parts.length; i++) (parts[i].getAttribute('glow').array as Float32Array).fill(OCC + 1);
   return mergeGeometries(parts)!;
 }
 
@@ -469,6 +472,8 @@ export class VehicleRenderer {
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   private sphere = new THREE.Sphere(new THREE.Vector3(), 7);
+  /** Pedestres e ciclistas cozidos (src/render/people); até carregarem, os bonecos simples. */
+  readonly people = new PeopleRenderer();
 
   constructor(reader: PoseReader) {
     this.reader = reader;
@@ -484,6 +489,8 @@ export class VehicleRenderer {
     // longe (caixas até 1,7 km): sem sombra (menos de um pixel, e eram até 30 mil nas três passadas de sombra)
     this.mid = new Batch(model(BOX), CAP_MID, true, false);
     for (const b of [...this.near, ...this.nearFar, this.mid]) this.group.add(b.mesh);
+    this.group.add(this.people.group);
+    void this.people.load();
   }
 
   /** Medições: não desenha as pessoas. */
@@ -521,6 +528,8 @@ export class VehicleRenderer {
     for (const b of this.near) b.count = 0;
     for (const b of this.nearFar) b.count = 0;
     this.mid.count = 0;
+    const people = this.people.ready ? this.people : null;
+    people?.begin(camera);
     const n = r.count;
     if (n > 0) {
       // instante do quadro (o do rAF), não o do meio do quadro: senão o passo varia com o trabalho antes daqui
@@ -556,10 +565,11 @@ export class VehicleRenderer {
         const info = d[o + 8], lights = Math.floor(info / 65536), base = info - lights * 65536;
         const kind = Math.floor(base / 256), low = base - kind * 256;
         const style = kind === 0 ? (low >> 4) & 7 : 0;
-        const color = (kind === 0 ? low & 15 : low & 127) + lights * 16;
+        const color = (kind === 0 ? low & 15 : low & 127) + lights * 16 + (kind === 5 && !people ? 128 : 0);
         // pessoas e bicicletas: pequenas, modelo só até PERSON_NEAR e caixa até PERSON_MID
         const person = kind === 3, small = person || kind === 5;
         if ((small && dist > PERSON_MID) || (person && this.hidePeople)) continue;
+        if (people && small) { people.push(d, o, x, y, z, yaw, px, py, pz, pyaw, dist, r.dt, !person); if (person) continue; }
         // perto/meio com troca pontilhada numa faixa de 30 m (pessoas: 10 m)
         const fadeNear = small ? Math.min(1, Math.max(0, (PERSON_NEAR + 5 - dist) / 10)) : Math.min(1, Math.max(0, (NEAR + 15 - dist) / 30));
         const alpha = d[o + 9];
@@ -571,6 +581,7 @@ export class VehicleRenderer {
       this.trackFollow(fbest < 12 * 12);
     }
     this.lastNow = frameNow;
+    people?.end();
     for (const b of this.near) b.commit();
     for (const b of this.nearFar) b.commit();
     this.mid.commit();

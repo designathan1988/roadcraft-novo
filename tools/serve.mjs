@@ -1,4 +1,4 @@
-// Servidor local mínimo com COOP/COEP (para SharedArrayBuffer). Sem dependências.
+// Minimal local server with COOP/COEP (for SharedArrayBuffer). No dependencies.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,7 +11,7 @@ const types = {
   '.map': 'application/json', '.json': 'application/json', '.css': 'text/css',
   '.wasm': 'application/wasm', '.png': 'image/png', '.ktx2': 'image/ktx2', '.svg': 'image/svg+xml',
 };
-// Serve o build (dist/).
+// Serves the build (dist/).
 const allowed = [''];
 
 http.createServer((req, res) => {

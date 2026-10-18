@@ -3,6 +3,8 @@
 // O registro cresce em jogo (perfis feitos no editor): a página registra e
 // manda a lista para os workers; o trecho guarda só o id (Uint8).
 
+import { ROAD_TUNING } from './tuning.ts';
+
 export type StripKind = 'sidewalk' | 'curb' | 'parking' | 'bike' | 'lane' | 'median' | 'shoulder' | 'barrier';
 
 /** Setas de conversão de uma faixa (bits); 0 = automático pela posição. */
@@ -193,7 +195,6 @@ export const MAX_LINES = 8;
 export const BUILTIN_COUNT = BUILTIN.length;
 
 const ASPHALT: ReadonlySet<StripKind> = new Set(['lane', 'parking', 'bike', 'shoulder']);
-const RAISED: ReadonlySet<StripKind> = new Set(['sidewalk', 'median', 'barrier']);
 
 export const PROFILES: Profile[] = [];
 export const PROFILE_INFO: ProfileInfo[] = [];
@@ -308,10 +309,17 @@ function derive(p: Profile): ProfileInfo {
   const r = edges[0], l = edges[edges.length - 1];
   const walkRight = r && r.strip.kind === 'sidewalk' ? (r.u0 + r.u1) / 2 : NaN;
   const walkLeft = l && l.strip.kind === 'sidewalk' ? (l.u0 + l.u1) / 2 : NaN;
-  // custo: largura pavimentada e o que é elevado (meio-fio, canteiro, mureta)
-  const raised = edges.filter((e) => RAISED.has(e.strip.kind)).reduce((s, e) => s + e.u1 - e.u0, 0);
+  // price per metre at grade (Roadcraft): m² of carriageway, median and footway × price per m² (`roads/tuning.ts`)
   const rail = p.strips.some((x) => x.rail);
-  const cost = Math.round(total * 55 + raised * 25 + fwd.length * 40 + back.length * 40 + (p.surface === Surface.Cobble ? total * 20 : 0) + (rail ? (fwd.length + back.length) * 900 : 0));
+  const area = { carriageway: 0, median: 0, footway: 0 };
+  for (const e of edges) {
+    const k = e.strip.kind, w = e.u1 - e.u0;
+    if (k === 'sidewalk' || k === 'curb') area.footway += w;
+    else if (k === 'median' || k === 'barrier') area.median += w;
+    else area.carriageway += w;
+  }
+  const ppm = ROAD_TUNING.economy.perSquareMetre;
+  const cost = Math.round(area.carriageway * ppm.carriageway + area.median * ppm.median + area.footway * ppm.footway);
   return {
     ...p, edges,
     right: total / 2, left: total / 2,

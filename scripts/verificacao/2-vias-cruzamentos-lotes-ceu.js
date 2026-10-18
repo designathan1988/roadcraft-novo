@@ -15,6 +15,7 @@
       else if (errs.length > e0) res.push(`FALHOU ${name}: erro no console: ${errs.slice(e0).join(' | ')}`);
       else res.push(`OK ${name}`);
     } catch (e) { res.push(`FALHOU ${name}: ${e && e.message || e}`); }
+    console.log('VER ' + res[res.length - 1]); // na hora: se o roteiro travar, a última linha diz onde
   };
   const net = w.roads, sc = net.segs.cols;
   const segs = () => net.segs.size, blds = () => w.buildings.size, items = () => w.items.size;
@@ -103,6 +104,5 @@
   await check('saúde do jogo (F9)', async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); await wait(300); const ok = /quadro|ms|memória/i.test(document.body.innerText); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); return ok || 'painel F9 não apareceu'; });
   await check('salvamento automático', async () => { g.unsaved = true; g.autosaveAt = 0; await wait(2500); return g.unsaved === false || 'não salvou sozinho'; });
 
-  console.log('VERIFICAÇÃO2 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
-  for (const r of res) console.log('VER ' + r);
+  console.log('VERIFICAÇÃO2 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()
