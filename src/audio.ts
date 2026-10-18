@@ -1,18 +1,18 @@
-// Som ambiente sintetizado (sem arquivos): chuva, vento, zumbido do trânsito,
-// passarinhos de dia e trovões. Tudo sai de um ruído branco em laço passando
-// por filtros; o volume de cada camada vem do estado do jogo a cada quadro.
+// Synthesized ambient sound (no files): rain, wind, traffic hum,
+// daytime birds and thunder. Everything comes from a looping white noise run
+// through filters; each layer's volume comes from the game state every frame.
 
 export interface AmbientState {
   /** 0..1 */
   rain: number;
   wind: number;
-  /** Carros perto da câmera (0..1). */
+  /** Cars near the camera (0..1). */
   traffic: number;
-  /** Altura da câmera em metros (longe = abafado). */
+  /** Camera height in meters (far = muffled). */
   height: number;
-  /** 0 noite .. 1 dia. */
+  /** 0 night .. 1 day. */
   day: number;
-  /** Árvores perto (0..1). */
+  /** Trees nearby (0..1). */
   green: number;
 }
 
@@ -28,7 +28,7 @@ export class Ambient {
   private birdTimer = 2;
   volume = 0.6;
 
-  /** O navegador só deixa tocar depois de um gesto: chamado no primeiro clique/tecla. */
+  /** The browser only allows playback after a gesture: called on the first click/key. */
   start(): void {
     if (this.ctx) { void this.ctx.resume(); return; }
     let ctx: AudioContext;
@@ -71,13 +71,13 @@ export class Ambient {
     const t = ctx.currentTime;
     const near = 1 / (1 + Math.max(0, s.height - 20) / 180);
     this.rain.gain.setTargetAtTime(s.rain * 0.35, t, 0.4);
-    // rajadas: o vento sobe e desce devagar
+    // gusts: the wind slowly rises and falls
     const gust = 0.65 + 0.35 * Math.sin(t * 0.37) * Math.sin(t * 0.13 + 1);
     this.wind.gain.setTargetAtTime((0.03 + s.wind * 0.3) * gust * (0.5 + 0.5 * (1 - near)), t, 0.6);
     this.windF!.frequency.setTargetAtTime(260 + 260 * gust * (0.5 + s.wind), t, 0.6);
     this.hum.gain.setTargetAtTime(s.traffic * 0.32 * near, t, 0.5);
     this.humF!.frequency.setTargetAtTime(160 + 160 * near, t, 0.5);
-    // passarinhos: de dia, perto do chão, com árvores e sem chuva
+    // birds: by day, near the ground, with trees and no rain
     this.birdTimer -= dt;
     if (this.birdTimer <= 0) {
       this.birdTimer = 1.5 + Math.random() * 5;
@@ -104,7 +104,7 @@ export class Ambient {
     }
   }
 
-  /** Efeitos curtos: construir (baque e cascalho), demolir (estrondo e entulho), clique. */
+  /** Short effects: build (thud and gravel), demolish (crash and rubble), click. */
   sfx(kind: 'build' | 'demolish' | 'click' | 'place' | 'undo' | 'shot' | 'boom'): void {
     const ctx = this.ctx;
     if (!ctx || !this.noise || ctx.state !== 'running') return;
@@ -135,8 +135,8 @@ export class Ambient {
     }
   }
 
-  /** Trovão: estalo (se perto) e ronco grave, atrasado pela distância (som a 343 m/s). */
-  /** Volume do trovão (0..1), do painel de clima. */
+  /** Thunder: crack (if near) and low rumble, delayed by distance (sound at 343 m/s). */
+  /** Thunder volume (0..1), from the weather panel. */
   thunderVolume = 1;
 
   thunder(dist: number): void {
@@ -153,7 +153,7 @@ export class Ambient {
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, t0);
     g.gain.linearRampToValueAtTime(0.9 * loud, t0 + (dist < 1200 ? 0.02 : 0.25));
-    // ronco com tremidas
+    // rumble with tremors
     for (let k = 1; k < 6; k++) g.gain.linearRampToValueAtTime((0.35 + Math.random() * 0.45) * loud * (1 - k / 7), t0 + k * 0.5 + Math.random() * 0.3);
     g.gain.exponentialRampToValueAtTime(0.0008, t0 + 5.5);
     src.connect(lp); lp.connect(g); g.connect(this.master!);

@@ -1444,7 +1444,7 @@ export class Game {
     const z = col.zone[id];
     this.creator?.show(hasDesign(col.color[id]) ? decodeDesign(col.color[id], col.h[id]) : null, col.floors[id]);
     if (this.creator) this.creator.el.style.display = this.tool === 'building' && col.floors[id] > 0 ? '' : 'none';
-    this.hud.setBuilding({ fn: col.fn[id], zone: z, floors: col.floors[id], arch: col.style[id] >= 128 ? col.style[id] - 128 : -1 });
+    this.hud.setBuilding({ fn: col.fn[id], zone: z, floors: col.floors[id], arch: col.style[id] >= 128 ? col.style[id] - 128 : -1, address: this.hudActions.addressOf(), decay: col.decay[id] });
   }
 
   private showSelection(): void {

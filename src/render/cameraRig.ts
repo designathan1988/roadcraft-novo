@@ -1,12 +1,12 @@
-// Câmera de construtor de cidades: perspectiva (livre ou de cima) e isométrica.
-// Gira, arrasta pelo chão e aproxima até o cursor, da vista do mapa inteiro
-// até a altura de uma pessoa na calçada.
+// City-builder camera: perspective (free or top-down) and isometric.
+// Rotates, drags along the ground and zooms toward the cursor, from the whole-map view
+// down to the height of a person on the sidewalk.
 //
-// Como a do roadcraft (`view/cameraMotion.ts`): o estado (alvo, rumo, inclinação, distância) é a verdade e a
-// câmera é refeita dele a cada quadro; a suavização fica nas ENTRADAS (velocidade das teclas, zoom e giro
-// pendentes), nunca numa câmera "atrás" do estado. O ponto do chão agarrado (arrasto) ou sob o cursor (roda) fica
-// exatamente sob o cursor em cada quadro. Antes, o alvo pulava para o fim e a distância vinha suavizando atrás:
-// o ponto sob o cursor escorregava e voltava a cada giro da roda (a imagem "tremia").
+// Like roadcraft's (`view/cameraMotion.ts`): the state (target, heading, pitch, distance) is the truth and the
+// camera is rebuilt from it every frame; smoothing lives in the INPUTS (key velocity, pending zoom and turn),
+// never in a camera "behind" the state. The grabbed ground point (drag) or the one under the cursor (wheel) stays
+// exactly under the cursor every frame. Before, the target jumped to the end and the distance smoothed behind it:
+// the point under the cursor slipped and came back on every wheel notch (the image "shook").
 
 import * as THREE from 'three/webgpu';
 import { MAP_HALF } from '../config.ts';
@@ -21,19 +21,19 @@ const MAX_PITCH = THREE.MathUtils.degToRad(89.5);
 const ISO_PITCH = THREE.MathUtils.degToRad(30);
 const EYE = 1.6;
 
-/** Teclas: quanto tempo a velocidade leva para chegar e para parar (constante de tempo, s). */
+/** Keys: how long the speed takes to ramp up and to stop (time constant, s). */
 const EASE_S = 0.1;
-/** Um giro da roda é gasto nesta constante de tempo (s). */
+/** One wheel notch is spent over this time constant (s). */
 const ZOOM_EASE_S = 0.085;
-/** Giro de 45° do isométrico (Q/E) e o norte da bússola. */
+/** Isometric 45° turn (Q/E) and the compass north. */
 const TURN_EASE_S = 0.12;
-/** Altura do alvo acompanhando o chão (morros não dão tranco). */
+/** Target height following the ground (hills do not jolt). */
 const GROUND_EASE_S = 0.12;
-/** Inércia ao soltar o arrasto: a velocidade cai nesta constante de tempo (s). */
+/** Inertia on releasing the drag: the speed decays with this time constant (s). */
 const COAST_DECAY_S = 0.45;
-/** Janela das amostras do arrasto para a velocidade ao soltar (ms). */
+/** Window of drag samples used for the release velocity (ms). */
 const FLING_MS = 100;
-/** Velocidades das teclas: giro (rad/s), inclinação (rad/s), zoom (log por s). */
+/** Key speeds: turn (rad/s), tilt (rad/s), zoom (log per s). */
 const TURN_PER_S = 1.6, TILT_PER_S = 1.2, ZOOM_PER_S = 2;
 
 type Axis = 'fwd' | 'right' | 'turn' | 'tilt' | 'zoom';
@@ -47,8 +47,8 @@ const KEYS: Record<string, [Axis, 1 | -1]> = {
 const AXES: Axis[] = ['fwd', 'right', 'turn', 'tilt', 'zoom'];
 
 /**
- * Inclinação que a câmera toma sozinha pela distância (roadcraft `cameraProfile.ts`): 48° de longe, quase na
- * horizontal (6°) na altura de quem anda na calçada. O zoom soma a diferença à inclinação do jogador.
+ * Pitch the camera takes on its own by distance (roadcraft `cameraProfile.ts`): 48° from afar, nearly
+ * horizontal (6°) at the height of someone walking on the sidewalk. Zoom adds the difference to the player's pitch.
  */
 function profileTilt(dist: number): number {
   const half = dist * Math.tan(THREE.MathUtils.degToRad(22.5));
@@ -62,37 +62,37 @@ export class CameraRig {
   readonly ortho: THREE.OrthographicCamera;
   mode: ViewMode = 'persp';
 
-  /** Estado: o alvo no chão, o rumo, a inclinação e a distância. A câmera é refeita disto a cada quadro. */
+  /** State: the target on the ground, the heading, the pitch and the distance. The camera is rebuilt from this every frame. */
   readonly target = new THREE.Vector3(0, 0, 0);
   yaw = THREE.MathUtils.degToRad(35);
   pitch = THREE.MathUtils.degToRad(50);
   dist = 2200;
-  /** Altura do alvo desenhada (segue o chão suavizada). */
+  /** Drawn target height (follows the ground, smoothed). */
   private y = 0;
-  /** Inclinação desenhada: no isométrico vai para 30° suavizada. */
+  /** Drawn pitch: in isometric it eases to 30°. */
   private drawPitch = this.pitch;
 
-  /** Altura do veículo seguido (null = alvo no chão). */
+  /** Height of the followed vehicle (null = target on the ground). */
   followY: number | null = null;
 
-  /** Topo do que é sólido no ponto (prédios), ou −∞: a câmera nunca fica dentro (puxada para a frente). */
+  /** Top of what is solid at the point (buildings), or −∞: the camera never ends up inside (pulled forward). */
   solid: ((x: number, z: number) => number) | null = null;
-  /** Distância livre até o olho (suavizada): menor que `dist` quando um prédio está entre o alvo e o olho. */
+  /** Free distance to the eye (smoothed): less than `dist` when a building is between the target and the eye. */
   private pull = Infinity;
 
-  /** Câmera atrás do veículo: alvo nele, olhando para onde ele vai. Refaz a câmera na hora (sem um quadro de atraso). */
+  /** Camera behind the vehicle: target on it, looking where it is heading. Rebuilds the camera right away (no frame of delay). */
   followPose(x: number, y: number, z: number, yaw: number, dt: number): void {
     this.target.set(x, y, z);
     let d = yaw + Math.PI - this.yaw;
     d = ((d + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-    // no primeiro quadro já fica atrás; depois acompanha as curvas pelo tempo (não por quadro)
+    // on the first frame it is already behind; afterwards it follows turns over time (not per frame)
     this.yaw += this.followY === null ? d : d * (1 - Math.exp(-dt * 2.5));
     this.followY = y;
     this.y = y;
     this.syncCamera();
   }
 
-  /** Posição do olho (para LOD e seleção), também no modo isométrico. */
+  /** Eye position (for LOD and picking), also in isometric mode. */
   readonly eye = new THREE.Vector3();
   private heights: Float32Array;
   private aspect = 1;
@@ -105,13 +105,13 @@ export class CameraRig {
   private held = new Map<string, [Axis, 1 | -1]>();
   private shift = false;
   private vel: Record<Axis, number> = { fwd: 0, right: 0, turn: 0, tilt: 0, zoom: 0 };
-  /** Zoom ainda por gastar (log do fator; > 0 afasta) e o ponto do chão que ele segura sob o cursor. */
+  /** Zoom still to spend (log of the factor; > 0 zooms out) and the ground point it holds under the cursor. */
   private pendingZoom = 0;
   private zoomNdc = new THREE.Vector2();
   private zoomGrab: THREE.Vector3 | null = null;
-  /** Giro ainda por gastar (rad). */
+  /** Turn still to spend (rad). */
   private pendingTurn = 0;
-  /** Inércia do arrasto (m/s no chão). */
+  /** Drag inertia (m/s on the ground). */
   private coast = new THREE.Vector2();
   private panSamples: Array<[number, number, number]> = [];
 
@@ -139,10 +139,10 @@ export class CameraRig {
     if (m === 'iso') this.pendingTurn = Math.round(this.yaw / (Math.PI / 4)) * (Math.PI / 4) - this.yaw;
   }
 
-  /** Vista de cima (perspectiva, olhando para baixo). */
+  /** Top-down view (perspective, looking down). */
   topDown(): void { this.mode = 'persp'; this.pitch = MAX_PITCH; }
 
-  /** Gira suavemente até o rumo (bússola: norte). */
+  /** Turns smoothly to the heading (compass: north). */
   turnTo(yaw: number): void {
     let d = yaw - this.yaw;
     d = ((d + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
@@ -152,7 +152,7 @@ export class CameraRig {
   keyDown(code: string): void {
     if (code === 'ShiftLeft' || code === 'ShiftRight') { this.shift = true; return; }
     if (this.mode === 'iso' && (code === 'KeyQ' || code === 'KeyE')) {
-      // isométrico: um oitavo de volta por toque, gasto suave
+      // isometric: an eighth of a turn per tap, spent smoothly
       this.pendingTurn += code === 'KeyQ' ? Math.PI / 4 : -Math.PI / 4;
       return;
     }
@@ -173,9 +173,9 @@ export class CameraRig {
     this.syncCamera();
   }
 
-  /** Um giro da roda: aproxima (factor < 1) ou afasta, segurando o ponto do chão sob o cursor. */
+  /** One wheel notch: zooms in (factor < 1) or out, holding the ground point under the cursor. */
   zoomAt(factor: number, ndcX: number, ndcY: number): void {
-    // ponto novo (ou parado): agarra o chão sob o cursor; o que sobrou do giro anterior vai para ele
+    // new point (or stopped): grab the ground under the cursor; what is left of the previous notch goes to it
     if (this.pendingZoom === 0 || Math.hypot(ndcX - this.zoomNdc.x, ndcY - this.zoomNdc.y) > 0.004) {
       this.zoomNdc.set(ndcX, ndcY);
       this.zoomGrab = this.pick(ndcX, ndcY)?.clone() ?? null;
@@ -184,7 +184,7 @@ export class CameraRig {
     this.coast.set(0, 0);
   }
 
-  /** Arrasto pelo chão: o ponto agarrado acompanha o cursor, sem suavização. */
+  /** Drag along the ground: the grabbed point follows the cursor, without smoothing. */
   private grab: THREE.Vector3 | null = null;
   beginPan(ndcX: number, ndcY: number): void {
     this.grab = this.pick(ndcX, ndcY)?.clone() ?? null;
@@ -200,7 +200,7 @@ export class CameraRig {
   }
   endPan(): void {
     this.grab = null;
-    // inércia: velocidade pelos mínimos quadrados das amostras dos últimos 100 ms
+    // inertia: velocity by least squares over the samples of the last 100 ms
     const s = this.panSamples, now = performance.now();
     const recent = s.filter((p) => now - p[0] <= FLING_MS);
     this.coast.set(0, 0);
@@ -213,14 +213,14 @@ export class CameraRig {
       for (const [t, x, z] of recent) { const dt = t - mt; stt += dt * dt; stx += dt * (x - mx); stz += dt * (z - mz); }
       if (stt > 1e-6) {
         this.coast.set(stx / stt * 1000, stz / stt * 1000);
-        // inércia só de um gesto rápido (um arrasto lento que parou não desliza)
+        // inertia only from a fast gesture (a slow drag that stopped does not glide)
         if (this.coast.length() < this.dist * 0.15) this.coast.set(0, 0);
       }
     }
     s.length = 0;
   }
 
-  /** Move o alvo para o ponto do chão `p` ficar sob a coordenada de tela (duas passadas: o chão sob o alvo muda). */
+  /** Moves the target so the ground point `p` sits under the screen coordinate (two passes: the ground under the target changes). */
   private hold(p: THREE.Vector3, ndcX: number, ndcY: number): void {
     for (let pass = 0; pass < 2; pass++) {
       this.syncCamera();
@@ -241,7 +241,7 @@ export class CameraRig {
     this.target.z = THREE.MathUtils.clamp(this.target.z, -MAP_HALF, MAP_HALF);
   }
 
-  /** Um quadro: teclas por velocidade suavizada com deslocamento exato no passo (não depende da taxa de quadros). */
+  /** One frame: keys by smoothed velocity with exact displacement over the step (independent of frame rate). */
   update(dt: number): void {
     const goal: Record<Axis, number> = { fwd: 0, right: 0, turn: 0, tilt: 0, zoom: 0 };
     for (const [axis, sign] of this.held.values()) goal[axis] += sign;
@@ -263,7 +263,7 @@ export class CameraRig {
       this.target.z += -fx * s + fz * c;
       this.clampTarget();
     }
-    // inércia do arrasto
+    // drag inertia
     if (!this.grab && (this.coast.x !== 0 || this.coast.y !== 0)) {
       const k = Math.exp(-dt / COAST_DECAY_S);
       const f = COAST_DECAY_S * (1 - k);
@@ -284,14 +284,14 @@ export class CameraRig {
     }
     if (travel.zoom !== 0) this.setDist(this.dist * Math.exp(-travel.zoom * ZOOM_PER_S));
 
-    // o alvo acompanha o chão (ou o veículo seguido, que pode estar numa ponte)
+    // the target follows the ground (or the followed vehicle, which may be on a bridge)
     if (this.followY === null) this.target.y = heightAt(this.heights, this.target.x, this.target.z);
     else this.target.y = this.followY;
     this.y += (this.target.y - this.y) * (1 - Math.exp(-dt / GROUND_EASE_S));
     const pitchGoal = this.mode === 'iso' ? ISO_PITCH : this.pitch;
     this.drawPitch += (pitchGoal - this.drawPitch) * (1 - Math.exp(-dt / TURN_EASE_S));
 
-    // roda: gasta o zoom pendente segurando o ponto agarrado sob o mesmo lugar da tela
+    // wheel: spends the pending zoom holding the grabbed point under the same screen spot
     if (this.pendingZoom !== 0) {
       const spend = Math.abs(this.pendingZoom) < 1e-4 ? this.pendingZoom : this.pendingZoom * (1 - Math.exp(-dt / ZOOM_EASE_S));
       this.pendingZoom -= spend;
@@ -304,7 +304,7 @@ export class CameraRig {
     this.syncCamera();
   }
 
-  /** Distância nova pelo zoom; a inclinação acompanha o perfil (perto do chão, a vista vai para a horizontal). */
+  /** New distance from zoom; the pitch follows the profile (near the ground, the view goes horizontal). */
   private setDist(d: number): void {
     const nd = THREE.MathUtils.clamp(d, MIN_DIST, MAX_DIST);
     if (this.mode !== 'iso' && this.followY === null) {
@@ -315,8 +315,8 @@ export class CameraRig {
   }
 
   /**
-   * Prédio entre o alvo e o olho (só perto: a vista de cima nunca entra): o olho vem para a frente dele.
-   * Entra rápido (0,08 s) e volta devagar (0,35 s), para a imagem não pular ao passar pela quina.
+   * Building between the target and the eye (only when near: the top-down view never enters): the eye comes in front of it.
+   * Goes in fast (0.08 s) and comes back slowly (0.35 s), so the image does not jump when passing a corner.
    */
   private updatePull(dt: number): void {
     let want = Infinity;
@@ -325,7 +325,7 @@ export class CameraRig {
       const ux = Math.sin(this.yaw) * cp, uy = sp, uz = Math.cos(this.yaw) * cp;
       const lookY = this.y + Math.min(EYE, this.dist * 0.3);
       const N = 16;
-      // alvo dentro de um prédio (apontando para ele): o raio começa lá dentro; só puxa num prédio depois que sai
+      // target inside a building (pointing at it): the ray starts inside; it only pulls on a building after leaving
       let leaving = lookY < this.solid(this.target.x, this.target.z) + 0.8;
       for (let i = 1; i <= N; i++) {
         const t = (this.dist * i) / N;
@@ -348,9 +348,9 @@ export class CameraRig {
     const pitch = this.drawPitch, yaw = this.yaw, dist = Math.min(this.dist, this.pull);
     const tx = this.target.x, ty = this.y, tz = this.target.z;
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
-    const dir = this.v.set(Math.sin(yaw) * cp, sp, Math.cos(yaw) * cp); // do alvo para o olho
+    const dir = this.v.set(Math.sin(yaw) * cp, sp, Math.cos(yaw) * cp); // from the target to the eye
     this.eye.set(tx + dir.x * dist, ty + dir.y * dist, tz + dir.z * dist);
-    // nunca abaixo do chão: no mínimo na altura dos olhos
+    // never below the ground: at least at eye height
     const g = heightAt(this.heights, this.eye.x, this.eye.z) + EYE;
     if (this.eye.y < g) this.eye.y = g;
     const look = this.look.set(tx, ty + Math.min(EYE, dist * 0.3), tz);
@@ -360,8 +360,8 @@ export class CameraRig {
     p.lookAt(look);
     p.updateMatrixWorld();
 
-    // isométrica: perto do que se vê, com a faixa de profundidade justa (antes ficava a 30 km com 50 km de
-    // faixa: ~3 mm de resolução e as camadas finas brigavam)
+    // isometric: close to what is seen, with a tight depth range (it used to sit 30 km away with a 50 km
+    // range: ~3 mm of resolution and thin layers z-fought)
     const o = this.ortho;
     const halfH = dist * Math.tan(THREE.MathUtils.degToRad(this.persp.fov / 2));
     o.top = halfH; o.bottom = -halfH; o.left = -halfH * this.aspect; o.right = halfH * this.aspect;
@@ -373,13 +373,13 @@ export class CameraRig {
     o.updateMatrixWorld();
   }
 
-  /** Ponto do terreno sob a coordenada de tela normalizada (-1..1). */
+  /** Terrain point under the normalized screen coordinate (-1..1). */
   pick(ndcX: number, ndcY: number): THREE.Vector3 | null {
     const cam = this.camera;
     this.ray.setFromCamera(this.ndc.set(ndcX, ndcY), cam);
     const o = this.ray.ray.origin, d = this.ray.ray.direction;
     const h = this.heights;
-    // passo adaptativo pela folga até o chão, depois bisseção
+    // adaptive step by the clearance to the ground, then bisection
     let t = 0, prev = 0;
     for (let i = 0; i < 400 && t < 60000; i++) {
       const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
@@ -395,13 +395,13 @@ export class CameraRig {
       prev = t;
       t += Math.max(0.5, t * 0.002, gap * 0.5);
     }
-    // não tocou: plano na altura do alvo
+    // no hit: plane at the target height
     if (Math.abs(d.y) < 1e-6) return null;
     const tp = (this.target.y - o.y) / d.y;
     return tp > 0 ? new THREE.Vector3(o.x + d.x * tp, this.target.y, o.z + d.z * tp) : null;
   }
 
-  /** Estado para salvar. */
+  /** State to save. */
   state(): Float64Array {
     return new Float64Array([this.target.x, this.target.z, this.yaw, this.pitch, this.dist, this.mode === 'iso' ? 1 : 0]);
   }

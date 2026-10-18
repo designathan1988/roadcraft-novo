@@ -42,6 +42,7 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.build.next': 'Próximo lote desenhado',
   'ui.floors.one': '{count} andar',
   'ui.floors.other': '{count} andares',
+  'building.decay': 'Desgaste {pct} % (Shift+clique reforma)',
   'ui.weather.mode': 'Tempo',
   'ui.weather.auto': 'Muda sozinho',
   'ui.weather.manual': 'Ajustado aqui',
