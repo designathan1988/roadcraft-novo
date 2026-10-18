@@ -15,6 +15,7 @@ import { SimNet, Turn, laneCount, laneDir, laneId, laneIdx, laneSeg, laneSpeed }
 import { Router } from './routing.ts';
 import { FlowAdvisor } from './advisor.ts';
 import { bez, bezD } from '../roads/geometry.ts';
+import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
@@ -92,6 +93,8 @@ const vehSchema = {
   brk: Uint8Array, exitC: Int32Array,
   // na vaga ao lado da faixa (0 = na faixa, 1 = na vaga): entrando nela ao chegar ou saindo dela ao começar
   pk: Float32Array,
+  // manoeuvre (sim/manoeuvres.ts, −1 = none) and the lane position (front) where it ends
+  mv: Int32Array, ms: Float32Array,
 };
 
 /** Linha de ônibus como a simulação a vê: paradas resolvidas em faixas. */
@@ -239,6 +242,7 @@ export class Traffic {
     if (this.occupancy) this.occupancy.fill(0);
     this.segWear.fill(0);
     this.parkers.clear();
+    this.mvs.clear();
   }
 
   /** Trecho novo (o id pode ser de um demolido): asfalto novo. */
@@ -361,6 +365,181 @@ export class Traffic {
 
   /** Carros encostando na vaga (fora das listas das faixas: quem vem atrás passa). */
   private parkers = new Set<number>();
+  /** Manoeuvres near the camera (Reeds-Shepp): into the bay, out of it, a truck backing into a dock. */
+  readonly mvs = new Manoeuvres();
+  /** Loading docks near the camera from the page: (x, z, yaw facing the street) per warehouse; their nearest nodes. */
+  docks: Float32Array<ArrayBufferLike> = new Float32Array(0);
+  private dockNodes: number[] = [];
+  /** A passenger gets out at (x, z) on the kerb (the worker makes a pedestrian there). */
+  onDropOff: (x: number, z: number) => void = () => {};
+  /** Counters for the measurements: kerb drop-offs, trucks at docks. */
+  kerbStops = 0;
+  docked = 0;
+  private mvA = new Float64Array(4);
+  private mvB = new Float64Array(4);
+
+  /** The manoeuvres going on, for the page (inspection, photos): [x, z, kind, share done] each, and the counters. */
+  manoeuvreList(): { list: number[]; planned: number; kerbStops: number; docked: number } {
+    const t = this.mvs.t, mc = t.cols, list: number[] = [], p = this.mvA;
+    for (let m = 0; m < t.end; m++) {
+      if (!t.alive[m]) continue;
+      this.mvs.pose(m, p);
+      list.push(p[0], p[1], mc.kind[m], mc.d[m] / Math.max(1e-3, mc.total[m]));
+    }
+    // cars at the kerb (kind 4 here: the page tells them apart)
+    const c = this.veh.cols;
+    for (let i = 0; i < this.microN; i++) {
+      const v = this.micro[i];
+      if (c.dying[v] !== 4 || c.lane[v] < 0) continue;
+      this.sim.lanePoint(c.lane[v], c.s[v], p);
+      list.push(p[0], p[2], 4, Math.min(1, c.dwell[v] / 6));
+    }
+    return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked };
+  }
+
+  /** Docks sent by the page; each gets the node trucks drive to. */
+  setDocks(pts: Float32Array): void {
+    this.docks = pts;
+    const nodes = new Set<number>();
+    for (let k = 0; k + 2 < pts.length; k += 3) { const n = this.sim.net.nearestNode(pts[k], pts[k + 1], 80); if (n >= 0) nodes.add(n); }
+    this.dockNodes = [...nodes];
+  }
+
+  private nearCam(lane: number): boolean {
+    const sc = this.sim.net.segs.cols, sg = laneSeg(lane);
+    return Math.hypot(sc.mx[sg] - this.camX, sc.mz[sg] - this.camZ) <= MANOEUVRE_RADIUS;
+  }
+
+  /** Centre pose of a vehicle whose front is at s on the lane, moved du metres to the driver's left: [x, y, z, yaw]. */
+  private centrePose(lane: number, s: number, len: number, du: number, out: Float64Array): void {
+    const sim = this.sim;
+    sim.lanePoint(lane, Math.max(0, Math.min(sim.laneLen(lane), s)), out);
+    const yaw = out[3];
+    out[0] += Math.cos(yaw) * du - Math.sin(yaw) * len / 2;
+    out[2] += -Math.sin(yaw) * du - Math.cos(yaw) * len / 2;
+  }
+
+  /**
+   * Arrived near the end of its trip: a truck backs into a warehouse dock, some cars stop at the kerb to drop a
+   * passenger, the others drive into a bay beside the kerb (Reeds-Shepp, near the camera) or, farther away, slide
+   * into it. 0 = keep driving, 1 = handled, 2 = it goes away.
+   */
+  private arrive(v: number, lane: number, toEnd: number): number {
+    const c = this.veh.cols;
+    if (c.micro[v] && this.nearCam(lane)) {
+      if (c.kind[v] === 2 && this.tryDock(v, lane)) return 1;
+      if (c.kind[v] === 0 && this.tryKerbStop(v, lane)) return 1;
+      if (c.kind[v] === 0 && this.tryParkManoeuvre(v, lane)) return 1;
+    }
+    if (toEnd >= 12) return 0;
+    return this.startParking(v, lane) ? 1 : 2;
+  }
+
+  /** Bay beside the right lane: drive into it along a Reeds-Shepp path; those behind wait while it is in the lane. */
+  private tryParkManoeuvre(v: number, lane: number): boolean {
+    const c = this.veh.cols, sim = this.sim;
+    if (laneIdx(lane) !== 0) return false;
+    const pu = parkU(sim.net.segs.cols.profile[laneSeg(lane)], laneDir(lane));
+    if (Number.isNaN(pu)) return false;
+    const len = c.len[v], bayFront = c.s[v] + len + 3;
+    if (bayFront > sim.laneLen(lane) - 4) return false;
+    const du = (pu - sim.laneU(lane)) * laneDir(lane);
+    const a = this.mvA, b = this.mvB;
+    this.centrePose(lane, c.s[v], len, 0, a);
+    this.centrePose(lane, bayFront, len, du, b);
+    const m = this.mvs.start(v, MKind.Park, a[0], a[2], a[3], b[0], b[2], b[3], a[1], 5, 12);
+    if (m < 0) return false;
+    c.mv[v] = m; c.ms[v] = bayFront; c.dying[v] = 3; c.dwell[v] = 0; c.pk[v] = 0;
+    return true;
+  }
+
+  /** Truck: the nearest dock within 70 m, backed into with the rear at the dock, facing the street. */
+  private tryDock(v: number, lane: number): boolean {
+    const c = this.veh.cols, d = this.docks, len = c.len[v];
+    if (!d.length) return false;
+    const a = this.mvA;
+    this.centrePose(lane, c.s[v], len, 0, a);
+    let best = -1, bd = 70;
+    for (let k = 0; k + 2 < d.length; k += 3) { const dist = Math.hypot(d[k] - a[0], d[k + 1] - a[2]); if (dist < bd) { bd = dist; best = k; } }
+    if (best < 0) return false;
+    const yaw = d[best + 2], bx = d[best] + Math.sin(yaw) * len / 2, bz = d[best + 1] + Math.cos(yaw) * len / 2;
+    const m = this.mvs.start(v, MKind.Dock, a[0], a[2], a[3], bx, bz, yaw, a[1], 9, 45);
+    if (m < 0) return false;
+    c.mv[v] = m; c.ms[v] = -1; c.dying[v] = 3; c.dwell[v] = 0;
+    this.docked++;
+    return true;
+  }
+
+  /** Some cars (4 in 10, by their id) stop at the kerb with the hazard lights on, a passenger gets out, and they go on. */
+  private tryKerbStop(v: number, lane: number): boolean {
+    const c = this.veh.cols;
+    if (laneIdx(lane) !== 0 || ((Math.imul(v, 2654435761) >>> 0) % 10) >= 4) return false;
+    if (!PROFILE_INFO[this.sim.net.segs.cols.profile[laneSeg(lane)]].walk) return false;
+    c.dying[v] = 4; c.dwell[v] = 0; c.served[v] = 0;
+    this.kerbStops++;
+    return true;
+  }
+
+  /** At the kerb: brake, edge to the kerb, let the passenger out, then pick a new trip and pull out. */
+  private kerbStep(v: number, lane: number, dt: number): void {
+    const c = this.veh.cols, sim = this.sim;
+    const nv = Math.max(0, c.v[v] - 3 * dt);
+    c.s[v] = Math.min(sim.laneLen(lane) - 0.3, c.s[v] + (c.v[v] + nv) * 0.5 * dt);
+    c.v[v] = nv; c.brk[v] = 1;
+    c.pk[v] = Math.min(1, c.pk[v] + dt / 2);
+    if (nv > 0) return;
+    c.dwell[v] += dt;
+    if (c.dwell[v] > 1.5 && !c.served[v]) {
+      c.served[v] = 1;
+      const p = this.mvA;
+      // the door side: the middle of the sidewalk on the right
+      const info = PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(lane)]], dir = laneDir(lane);
+      const wu = dir > 0 ? info.walkRight : info.walkLeft;
+      this.centrePose(lane, c.s[v], c.len[v], Number.isNaN(wu) ? -3 : (wu - sim.laneU(lane)) * dir, p);
+      this.onDropOff(p[0], p[2]);
+    }
+    if (c.dwell[v] > 6) {
+      const b = this.zonedNode(this.zoneWeights(false));
+      c.dying[v] = 0; c.served[v] = 0; c.dwell[v] = 1.3; // the bay-leaving slide takes the car back to the lane
+      if (b < 0) { c.dying[v] = 1; return; }
+      c.dest[v] = b;
+      this.replanFrom(v, sim.laneTo(lane));
+    }
+  }
+
+  /** Moves the manoeuvres; a parking car or docking truck leaves the lane lists once it is out of the lane. */
+  private stepManoeuvres(dt: number): void {
+    const t = this.mvs.t, mc = t.cols, c = this.veh.cols, sim = this.sim, p = this.mvA, q = this.mvB;
+    for (let m = 0; m < t.end; m++) {
+      if (!t.alive[m]) continue;
+      const v = mc.veh[m];
+      if (!this.veh.alive[v] || c.mv[v] !== m) { this.mvs.end(m); continue; }
+      const lane = c.lane[v];
+      if (!c.micro[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) {
+        this.mvs.end(m); c.mv[v] = -1;
+        if (c.dying[v] === 3) c.dying[v] = 1;
+        continue;
+      }
+      const kind = mc.kind[m];
+      const done = this.mvs.advance(m, dt);
+      c.brk[v] = this.mvs.moving(m) ? 0 : 1;
+      c.v[v] = 0;
+      if (kind === MKind.Unpark) {
+        if (done) { this.mvs.end(m); c.mv[v] = -1; c.s[v] = Math.min(sim.laneLen(lane) - 0.5, c.ms[v]); c.pk[v] = 0; c.dwell[v] = 9; }
+        continue;
+      }
+      if (c.dying[v] !== 3) continue;
+      this.mvs.pose(m, p);
+      this.centrePose(lane, c.s[v], c.len[v], 0, q);
+      const lat = Math.abs((p[0] - q[0]) * Math.cos(q[3]) - (p[1] - q[2]) * Math.sin(q[3]));
+      if (done || lat > (kind === MKind.Dock ? 3.2 : 1.8)) {
+        this.unlink(v);
+        this.setLaneCount(lane, -1);
+        c.dying[v] = 2; c.dwell[v] = 0;
+        this.parkers.add(v);
+      }
+    }
+  }
 
   /**
    * Chegou: se a faixa da direita tem vaga ao lado, o carro sai da fila (quem vem atrás passa), freia encostando
@@ -384,6 +563,16 @@ export class Traffic {
     for (const v of this.parkers) {
       const lane = c.lane[v];
       if (!this.veh.alive[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) { this.parkers.delete(v); if (this.veh.alive[v]) this.despawn(v); continue; }
+      // on a manoeuvre: it drives itself (stepManoeuvres); once at the end it stays (a truck at the dock longer), then goes
+      if (c.mv[v] >= 0) {
+        if (this.mvs.moving(c.mv[v]) || this.mvs.t.cols.d[c.mv[v]] < this.mvs.t.cols.total[c.mv[v]] - 1e-3) continue;
+        c.dwell[v] += dt;
+        if (c.dwell[v] > (c.kind[v] === 2 ? 25 : PARK_STAY + 2)) {
+          c.fade[v] -= dt * 1.2;
+          if (c.fade[v] <= 0) { this.parkers.delete(v); this.arrived++; this.despawn(v); }
+        }
+        continue;
+      }
       const nv = Math.max(0, c.v[v] - PARK_DECEL * dt);
       c.s[v] = Math.min(sim.laneLen(lane) - 0.3, c.s[v] + (c.v[v] + nv) * 0.5 * dt);
       c.v[v] = nv;
@@ -684,6 +873,11 @@ export class Traffic {
     if (b < 0) return;
     const v = this.veh.alloc();
     this.initVehicle(v);
+    // part of the trucks carry cargo to a warehouse dock near the camera (they back into it on arrival)
+    if (this.veh.cols.kind[v] === 2 && this.dockNodes.length && this.rng.next() < 0.6) {
+      const d = this.dockNodes[this.rng.int(0, this.dockNodes.length)];
+      if (d !== a && net.nodes.alive[d] && Math.hypot(nc.x[d] - nc.x[a], nc.z[d] - nc.z[a]) < 3000) b = d;
+    }
     if (!this.plan(v, a, b)) { this.veh.release(v); return; }
     const seg = this.segBetween(a, this.routeAt(v, 1));
     if (seg < 0) { this.veh.release(v); return; }
@@ -721,6 +915,13 @@ export class Traffic {
     c.v[v] = 0; c.pk[v] = 1; c.dwell[v] = 0; c.held[v] = 0; c.fade[v] = 0;
     this.addMicro(v);
     this.insert(v, false, lane);
+    // pull out of the bay along a Reeds-Shepp path (held in place until it is back in the lane)
+    const du = (parkU(sc.profile[sg], laneDir(lane)) - sim.laneU(lane)) * laneDir(lane);
+    const a = this.mvA, b = this.mvB, len = c.len[v];
+    this.centrePose(lane, s, len, du, a);
+    this.centrePose(lane, s + 7, len, 0, b);
+    const m = this.mvs.start(v, MKind.Unpark, a[0], a[2], a[3], b[0], b[2], b[3], a[1], 5, 4);
+    if (m >= 0) { c.mv[v] = m; c.ms[v] = s + 7; }
     return true;
   }
 
@@ -737,7 +938,7 @@ export class Traffic {
       c.color[v] |= style << 4;
       c.len[v] = CAR_STYLE_LEN[style];
     }
-    c.brk[v] = 0; c.exitC[v] = -1; c.pk[v] = 0;
+    c.brk[v] = 0; c.exitC[v] = -1; c.pk[v] = 0; c.mv[v] = -1; c.ms[v] = 0;
     c.micro[v] = 0; c.dying[v] = 0; c.fade[v] = 1; c.has[v] = 0;
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
     c.v[v] = 0;
@@ -749,6 +950,7 @@ export class Traffic {
     const c = this.veh.cols;
     if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); }
     this.wagonPrev.delete(v);
+    if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
     const parked = c.dying[v] === 2;
     if (c.micro[v]) { if (!parked) this.unlink(v); this.removeMicro(v); }
     if (c.lane[v] >= 0 && !parked) this.setLaneCount(c.lane[v], -1);
@@ -1211,6 +1413,9 @@ export class Traffic {
 
   private moveOnLane(v: number, lane: number, dt: number): void {
     const c = this.veh.cols, sim = this.sim;
+    // manoeuvring while still in the lane: stopped there, so those behind wait (or change lanes)
+    if (c.dying[v] === 3) { c.v[v] = 0; c.brk[v] = 1; return; }
+    if (c.dying[v] === 4) { this.kerbStep(v, lane, dt); return; }
     const L = sim.laneLen(lane);
     const p = sim.net.segs.cols.profile[laneSeg(lane)];
     const v0 = laneSpeed(p) * c.vf[v];
@@ -1237,7 +1442,9 @@ export class Traffic {
     }
     if (c.dying[v]) { /* saindo */ }
     else if (this.atDestination(v) && c.line[v] < 0) {
-      if (L - c.s[v] < 12) { if (this.startParking(v, lane)) return; c.dying[v] = 1; }
+      // near the camera cars and trucks decide 30 m before the end (room for the manoeuvre); the rest at 12 m
+      const room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.nearCam(lane) ? 30 : 12;
+      if (L - c.s[v] < room) { const r = this.arrive(v, lane, L - c.s[v]); if (r === 1) return; if (r === 2) c.dying[v] = 1; }
     } else {
       let ns = this.nextSeg(v);
       if (ns < 0 && !c.dying[v]) { this.replanFrom(v, sim.laneTo(lane)); ns = this.nextSeg(v); }
@@ -1284,13 +1491,14 @@ export class Traffic {
     let a = this.idm(c.v[v], v0, gap, vl, c.kind[v] ? A_HEAVY : A_MAX);
     if (c.dying[v]) a = Math.min(a, 0); // quem chegou some sem frear na frente dos outros
     if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // na vaga, esperando para sair
+    if (c.mv[v] >= 0) a = -9; // pulling out of the bay: held until the manoeuvre is back in the lane
     if (atStop) a = Math.min(a, -2);
     a = Math.max(-9, a);
     const nv = Math.max(0, c.v[v] + a * dt);
     c.exitC[v] = conn;
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;
     // saindo da vaga: o desenho desliza da guia para a faixa (a simulação já o tem na faixa)
-    if (c.pk[v] > 0 && !c.dying[v] && (c.dwell[v] += dt) > 1.2) c.pk[v] = Math.max(0, c.pk[v] - dt / PARK_SIDE_S);
+    if (c.pk[v] > 0 && !c.dying[v] && c.mv[v] < 0 && (c.dwell[v] += dt) > 1.2) c.pk[v] = Math.max(0, c.pk[v] - dt / PARK_SIDE_S);
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
     c.v[v] = nv;
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2);
@@ -1855,7 +2063,9 @@ export class Traffic {
     if (this.lineCheck <= 0) { this.lineCheck = 2; this.keepBuses(); }
     this.updateSignals(dt);
     this.processMeso();
+    this.mvs.beginStep();
     this.stepMicro(dt);
+    this.stepManoeuvres(dt);
     this.stepParkers(dt);
   }
 
@@ -1927,8 +2137,22 @@ export class Traffic {
         }
       }
       if (c.kind[v] === 4) { n = this.writeTrain(v, data, stride, n, p); continue; }
+      let centred = false;
+      if (c.mv[v] >= 0) {
+        // on a manoeuvre: the pose is the vehicle centre on the Reeds-Shepp path; signal towards where it goes
+        const mp = this.mvA;
+        this.mvs.pose(c.mv[v], mp);
+        p[0] = mp[0]; p[2] = mp[1]; p[3] = mp[2];
+        centred = true;
+        lights |= this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT;
+      } else if (c.dying[v] === 4 && c.conn[v] < 0) {
+        // at the kerb: 0.9 m to the right, hazard lights while stopped
+        const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
+        p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
+        if (c.v[v] < 0.1 && ((this.time * 1.5) % 1) < 0.5) lights |= LIGHT_LEFT | LIGHT_RIGHT;
+      }
       // na vaga ou a caminho dela (deslocamento em u, no sentido do trecho): entrando, seta da direita; saindo, da esquerda
-      if (c.pk[v] > 0 && c.conn[v] < 0) {
+      if (!centred && c.dying[v] !== 4 && c.pk[v] > 0 && c.conn[v] < 0) {
         const lane = c.lane[v], dir = laneDir(lane);
         const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
         const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
@@ -1936,7 +2160,7 @@ export class Traffic {
         if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
       }
       // ponto de referência no meio do veículo
-      const back = c.len[v] / 2;
+      const back = centred ? 0 : c.len[v] / 2;
       p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
       const o = n * stride;
       if (!c.has[v]) { c.px[v] = p[0]; c.py[v] = p[1]; c.pz[v] = p[2]; c.pyaw[v] = p[3]; c.has[v] = 1; }

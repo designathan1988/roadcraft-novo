@@ -248,6 +248,7 @@ export class Game {
       else if (e.data.type === 'probeNode') this.inspector?.showNodeProbe(e.data);
       else if (e.data.type === 'hit') this.onHit(e.data.people, e.data.vehicles);
       else if (e.data.type === 'autoControl') this.world.roads.setFlow(e.data.node, e.data.flow);
+      else if (e.data.type === 'manoeuvres') { const r = this.manoeuvreWait; this.manoeuvreWait = null; r?.(e.data); }
       else { console.error('simulação:', e.data.message); this.health?.add('erro', `simulação: ${e.data.message.split(String.fromCharCode(10))[0]}`); }
     };
     this.sim.postMessage({ type: 'init', poses: posesSab, heights: this.world.heightsSab, occupancy: this.occupancySab, signals: this.signalsSab, tickHz: 20 } satisfies ToSim);
@@ -722,14 +723,20 @@ export class Game {
     const moved = Math.hypot(t.x - this.doorsAt.x, t.z - this.doorsAt.z) > 80;
     if (!moved && w.buildings.size === this.doorsAt.count) return;
     this.doorsAt = { x: t.x, z: t.z, count: w.buildings.size };
-    const R = 450, pts: number[] = [];
+    const R = 450, pts: number[] = [], docks: number[] = [];
     w.buildingIndex.query(t.x - R, t.z - R, t.x + R, t.z + R, (id) => {
       if (pts.length >= 6000 || col.floors[id] === 0) return;
       const k = col.d[id] / 2 - 0.3, s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
       pts.push(col.x[id] + s * k, col.z[id] + c * k);
+      // warehouse loading dock (trucks back into it): inside the gate, lot frame (−w/2 + 10, d/2 − 6), facing the street
+      if (col.zone[id] === Zone.Industrial && docks.length < 1500) {
+        const [dx, dz] = lotToWorld({ x: col.x[id], z: col.z[id], rot: col.rot[id] }, -col.w[id] / 2 + 10, col.d[id] / 2 - 6);
+        docks.push(dx, dz, col.rot[id]);
+      }
     });
-    const arr = new Float32Array(pts);
+    const arr = new Float32Array(pts), dk = new Float32Array(docks);
     this.sim.postMessage({ type: 'doors', pts: arr } satisfies ToSim, [arr.buffer]);
+    this.sim.postMessage({ type: 'docks', pts: dk } satisfies ToSim, [dk.buffer]);
   }
 
   /** Setas das pontas dos trechos nos nós com conexões de faixa ajustadas (só os nós que mudaram). */
@@ -1183,6 +1190,8 @@ export class Game {
     lotCurve: (x: number, z: number, px: number, pz: number) => { this.lotExtra = 'curve'; this.lotExtraPts = []; this.clickLotExtra({ x, z } as THREE.Vector3); this.clickLotExtra({ x: px, z: pz } as THREE.Vector3); this.lotExtra = null; },
     /** Renovate the building at (x, z) (Shift+click). */
     renovate: (x: number, z: number) => this.renovate(lotAt(this.world, x, z)),
+    /** Manoeuvres going on in the simulation (parking, pulling out, trucks at docks, kerb stops), for photos and tests. */
+    manoeuvres: () => new Promise<Extract<FromSim, { type: 'manoeuvres' }>>((resolve) => { this.manoeuvreWait = resolve; this.sim.postMessage({ type: 'probeManoeuvres' } satisfies ToSim); }),
     /** Address (street name and metric number) of the point (x, z), or null away from streets. */
     address: (x: number, z: number) => addressAt(this.world, x, z),
     /** Advance the city clock by `minutes` (decay and anything else on the city clock). */
@@ -1669,6 +1678,7 @@ export class Game {
     this.commands.push(r);
   }
 
+  private manoeuvreWait: ((m: Extract<FromSim, { type: 'manoeuvres' }>) => void) | null = null;
   /** Lot modes added by the gameplay front (split by line, curve side) and the points clicked so far. */
   private lotExtra: 'line' | 'curve' | null = null;
   private lotExtraPts: Array<[number, number]> = [];

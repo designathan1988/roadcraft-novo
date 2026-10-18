@@ -39,7 +39,10 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 
 ## 3. Trânsito — ✅ no motor (micro perto, meso longe)
 - IDM + MOBIL; 8 tipos de veículo com medidas reais; luz de freio e setas; ocupantes; sombra de mancha; estacionar
-  na guia (🟡 sem manobra A*); caminhões em docas de galpão com manobra de ré (❌ aqui); paradas no meio-fio.
+  na guia com manobra ✅, caminhões em docas de galpão com manobra de ré e o trânsito esperando ✅, paradas no
+  meio-fio deixando passageiro ✅ (Reeds-Shepp `sim/reedsShepp.ts`, `sim/manoeuvres.ts`: só a 350 m da câmera,
+  4 planos por passo; fotos `manobra-doca.png`, `manobra-vaga.png`, `manobra-meio-fio.png`). A doca fica no
+  portão do galpão (lote (−w/2 + 10, d/2 − 6)): a sessão de prédios desenha a doca ali.
 - Demanda baixa/normal/pico; % de tráfego e pessoas; pausa e velocidades; mapa de congestionamento; métricas;
   seguir veículo; pedestres nas calçadas e saindo das portas; bicicletas.
 - Ônibus (pontos, terminais, linhas), trem e metrô (trilhos, estações, linhas).
