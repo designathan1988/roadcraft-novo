@@ -1,11 +1,17 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-18, 20h30.
+Atualizado: 2026-10-18, 21h05.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
   vias item 2 (`d73736e`); `npm run budget` com linha de base (`f8099a1`). Visto no teste e devolvido à sessão de
   vias: céu do horizonte ainda claro na vista de rua baixa. As outras frentes continuam nos ramos `claude/*`.
+- 21h05: pessoas itens 1-2 (`99572ce`), prédios itens 1-3 (`85cc319`), funcionalidades itens 1-9 (`989d4b3`),
+  interface: nome Roadcraft e Sobre com licenças (`933af65`); núcleo, Electron e ferramentas em inglês, limite do
+  bairro 2× e `PROMPT-CONTINUAR.md` (`d13353b`). Verificado em `main`: tsc limpo, 95 testes, `npm run budget` ok
+  nas 5 vistas; `verificar.mjs` 136/146: 9 falhas do inspetor de cruzamento devolvidas à interface, 1 de
+  crescimento (densidade alta) devolvida a funcionalidades. Pesquisa dos prédios em andamento
+  (`docs/PESQUISA-PREDIOS.md`).
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
