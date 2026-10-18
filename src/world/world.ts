@@ -1,5 +1,5 @@
-// Estado do mundo que vive na página: alturas (compartilhadas com os workers),
-// tabelas tipadas, índice espacial e marcação de sujeira.
+// World state that lives on the page: heights (shared with the workers),
+// typed tables, spatial index and dirty marking.
 
 import { StreetItems } from './items.ts';
 import { NO_WATER, createGroundBuffers } from './ground.ts';
@@ -12,7 +12,7 @@ import { RoadNetwork } from '../roads/network.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
 import { ImpossibleNodes } from '../roads/impossible.ts';
 
-/** Prédios. No marco 1 só caixas genéricas; o gerador procedural entra no marco 4. */
+/** Buildings. Milestone 1 has only generic boxes; the procedural generator arrives in milestone 4. */
 export const buildingSchema = {
   x: Float32Array, z: Float32Array,
   w: Float32Array, d: Float32Array, h: Float32Array,
@@ -20,7 +20,7 @@ export const buildingSchema = {
   color: Uint32Array,
   seed: Uint32Array,
   zone: Uint8Array, floors: Uint8Array, style: Uint8Array,
-  /** Função (escola, igreja, hospital…; 0 = comum). */
+  /** Function (school, church, hospital…; 0 = ordinary). */
   fn: Uint8Array,
   cell: Int32Array,
   /** Corners of a polygon lot (0 = rectangle); the corners live in World.lotShape (see BoxColumns.shape). */
@@ -29,7 +29,7 @@ export const buildingSchema = {
   built: Float32Array, decay: Uint8Array, due: Float64Array,
 };
 
-/** Campos de um prédio (o resto vem do gerador). */
+/** A building's fields (the rest comes from the generator). */
 export interface BuildingRec {
   x: number; z: number; w: number; d: number; h: number; rot: number; color: number; seed: number; zone: number; floors: number; style: number; fn?: number;
   /** City minute built (default: now). */
@@ -51,48 +51,48 @@ export const START_MONEY = ROAD_TUNING.economy.startingFunds;
 export class World {
   seed = 1;
   gameId = 0;
-  /** Dinheiro em caixa (R$). Vias custam pela largura, comprimento e estrutura. */
+  /** Cash on hand (R$). Roads cost by width, length and structure. */
   money: number = START_MONEY;
-  /** Modo livre: nada é cobrado. */
+  /** Sandbox mode: nothing is charged. */
   unlimited = false;
   readonly heightsSab: SharedArrayBuffer;
   readonly heights: Float32Array;
-  /** Chão pintado (RGBA por amostra de 4 m, ver world/ground.ts) e água (8 m). */
+  /** Painted ground (RGBA per 4 m sample, see world/ground.ts) and water (8 m). */
   readonly groundSab: SharedArrayBuffer;
   readonly ground32: Uint32Array;
   readonly waterSab: SharedArrayBuffer;
   readonly water: Float32Array;
-  /** Camadas de chão e de água a reenviar; ladrilhos que têm água. */
+  /** Ground and water layers to re-upload; tiles that have water. */
   readonly groundDirty = new Set<number>();
   readonly waterDirty = new Set<number>();
   readonly tileWater = new Uint8Array(TILE_COUNT);
-  /** Bioma do mapa (cores e árvores). */
+  /** Map biome (colors and trees). */
   biome = 0;
-  /** Altura mínima/máxima conservadora por ladrilho (para recorte). */
+  /** Conservative min/max height per tile (for culling). */
   readonly tileMin = new Float32Array(TILE_COUNT);
   readonly tileMax = new Float32Array(TILE_COUNT);
-  /** Camadas da textura de altura que precisam ser reenviadas. */
+  /** Height texture layers that need re-uploading. */
   readonly layerDirty = new Set<number>();
-  /** Ladrilhos alterados desde o último salvamento. */
+  /** Tiles changed since the last save. */
   readonly saveDirty = new Uint8Array(TILE_COUNT);
-  /** Ladrilhos que existem no salvamento atual. */
+  /** Tiles present in the current save. */
   readonly tileInSave = new Uint8Array(TILE_COUNT);
 
   readonly dirty = new DirtyCells();
   readonly buildings = new Table(buildingSchema, 1 << 16);
-  /** Textos das placas do jogador, pela posição (signKey), e nomes de rua por trecho. */
+  /** Player sign texts, by position (signKey), and street names by segment. */
   readonly signTexts = new Map<string, string>();
   readonly streetNames = new Map<number, string>();
   readonly buildingIndex = new SpatialIndex(1 << 16);
-  /** Versão dos dados de cada célula (sobe a cada mudança). */
+  /** Data version of each cell (bumped on every change). */
   readonly cellVersion = new Uint32Array(CELL_COUNT);
-  /** Prédios por célula. */
+  /** Buildings per cell. */
   readonly cellBuildings = new Uint32Array(CELL_COUNT);
 
   readonly roads: RoadNetwork;
   /** Nodes where two neighbouring roads meet under 25° (the top bar's warning), kept from the network's changes. */
   readonly impossible: ImpossibleNodes;
-  /** Itens de rua postos pelo jogador. */
+  /** Street items placed by the player. */
   readonly items: StreetItems;
   /** Polygon lot corners, SHAPE_STRIDE int16 (decimetres, lot frame) per building id. */
   lotShape = new Int16Array((1 << 16) * SHAPE_STRIDE);
@@ -173,7 +173,7 @@ export class World {
     return before;
   }
 
-  /** Marca células sujas e o que depende delas (salvamento, versão). */
+  /** Marks dirty cells and what depends on them (save, version). */
   touchRect(minX: number, minZ: number, maxX: number, maxZ: number, kinds: number): void {
     if (kinds & (Dirty.Roads | Dirty.Buildings | Dirty.Terrain)) kinds |= Dirty.Props;
     this.dirty.markRect(minX, minZ, maxX, maxZ, kinds);
@@ -190,18 +190,18 @@ export class World {
     this.saveDirty[tileOfCell(cid)] = 1;
   }
 
-  /** Moradores e empregos (contas O(1) a cada prédio que entra, sai ou muda). */
+  /** Residents and jobs (O(1) updates for every building added, removed or changed). */
   residents = 0;
   jobs = 0;
 
-  /** Moradores e vagas de trabalho de um prédio, pela zona, área e andares. */
+  /** Residents and jobs of a building, by zone, area and floors. */
   static capacity(zone: number, w: number, d: number, floors: number): [number, number] {
-    const area = w * d * 0.6 * floors; // área útil aproximada (lote vazio: 0 andares, ninguém)
+    const area = w * d * 0.6 * floors; // approximate usable area (empty lot: 0 floors, nobody)
     switch (zone) {
-      case 1: return [Math.round(area / 28), 0]; // residencial
-      case 2: return [0, Math.round(area / 18)]; // comercial
+      case 1: return [Math.round(area / 28), 0]; // residential
+      case 2: return [0, Math.round(area / 18)]; // commercial
       case 3: return [0, Math.round(area / 45)]; // industrial
-      case 4: return [Math.round(area / 40), Math.round(area / 40)]; // misto
+      case 4: return [Math.round(area / 40), Math.round(area / 40)]; // mixed
       default: return [0, 0];
     }
   }
@@ -254,7 +254,7 @@ export class World {
     this.addBuilding(World.recOf(r), r[0]);
   }
 
-  /** Muda andares/estilo (edição do jogador). */
+  /** Changes floors/style (player edit). */
   editBuilding(id: number, floors: number, style: number, fn = this.buildings.cols.fn[id]): void {
     const c = this.buildings.cols;
     this.count(id, -1);
@@ -263,7 +263,7 @@ export class World {
     this.touchCell(c.cell[id], Dirty.Buildings);
   }
 
-  /** Projeto do criador (campos color e h) e andares: a malha do prédio é refeita. */
+  /** Creator design (color and h fields) and floors: the building mesh is rebuilt. */
   setDesign(id: number, color: number, h: number, floors: number): void {
     const c = this.buildings.cols;
     this.count(id, -1);
@@ -282,7 +282,7 @@ export class World {
     this.buildings.release(id);
   }
 
-  /** Copia os prédios de uma célula (ou de um ladrilho) para colunas transferíveis. */
+  /** Copies the buildings of a cell (or a tile) into transferable columns. */
   gatherBoxes(cells: number[]): BoxColumns {
     let n = 0;
     for (const c of cells) n += this.cellBuildings[c];
@@ -304,7 +304,7 @@ export class World {
     return out;
   }
 
-  /** Chão sem pintura e sem água (mapa novo, carregar). */
+  /** Ground with no paint and no water (new map, load). */
   clearGround(): void {
     this.ground32.fill(0);
     this.water.fill(NO_WATER);

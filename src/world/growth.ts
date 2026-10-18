@@ -1,5 +1,5 @@
-// Lotes por célula (feitos nos workers) e crescimento: prédios nascem sozinhos
-// nos lotes livres das zonas. Trabalho por quadro limitado e constante.
+// Per-cell lots (built in the workers) and growth: buildings appear on their own
+// in the free lots of the zones. Bounded, constant work per frame.
 
 import { CELL_SIZE, MAP_CELLS } from '../config.ts';
 import { CELL_COUNT, Dirty, cellId, cellOriginX, cellX } from '../core/grid.ts';
@@ -14,11 +14,11 @@ import { LANDMARKS, encodeDesign } from './design.ts';
 import { hash2 } from '../core/rng.ts';
 import type { BuildingRec, World } from './world.ts';
 
-/** Andares por zona e via da frente (avenidas dão prédios mais altos). */
+/** Floors by zone and frontage road (avenues give taller buildings). */
 export function floorsFor(zoneId: number, profile: number, r: Rng): number {
   const avenue = (PROFILE_INFO[profile]?.priority ?? 0) >= 2;
   const zone = baseZone(zoneId), dens = zoneDensity(zoneId);
-  // densidade baixa: casas e sobrados; alta: torres
+  // low density: houses and townhouses; high: towers
   if (dens === 0) return zone === Zone.Residential ? r.int(1, 3) : r.int(1, 4);
   if (dens === 2) return zone === Zone.Residential ? r.int(8, avenue ? 26 : 18) : r.int(10, avenue ? 40 : 28);
   switch (zone) {
@@ -38,12 +38,12 @@ export class Growth {
   private world: World;
   private pool: JobPool;
   private lots = new Map<number, LotColumns>();
-  /** Células com lotes, para sortear sem varrer o mapa. */
+  /** Cells with lots, to draw from without scanning the map. */
   private cells: number[] = [];
   private cellPos = new Int32Array(CELL_COUNT).fill(-1);
   private rng = new Rng(9182);
   private acc = 0;
-  /** Prédios por segundo (0 = parado). */
+  /** Buildings per second (0 = stopped). */
   rate = 25;
 
   constructor(world: World, pool: JobPool) {
@@ -51,7 +51,7 @@ export class Growth {
     this.pool = pool;
   }
 
-  /** Células sujas de lotes: pede os lotes de novo. */
+  /** Cells with dirty lots: requests their lots again. */
   processDirty(): void {
     const cells = this.world.dirty.drain(Dirty.Lots);
     const net = this.world.roads;
@@ -85,7 +85,7 @@ export class Growth {
 
   lotsOf(c: number): LotColumns | undefined { return this.lots.get(c); }
 
-  /** Algum prédio ocupa o lote? */
+  /** Does any building occupy the lot? */
   private occupied(l: LotColumns, i: number): boolean {
     const col = this.world.buildings.cols;
     const r = Math.max(l.w[i], l.d[i]) / 2;
@@ -210,8 +210,8 @@ export class Growth {
   }
 
   /**
-   * Marco (catálogo do roadcraft): parte das torres comerciais de planta quase quadrada ganha um projeto pronto
-   * (redonda de vidro, agulha art déco, octogonal de cobre...), nunca o mesmo marco a menos de 250 m.
+   * Landmark (Roadcraft catalog): some commercial towers with a near-square footprint get a ready-made design
+   * (round glass, art deco spire, copper octagon...), never the same landmark within 250 m.
    */
   private landmark(rec: BuildingRec): void {
     if ((rec.zone !== Zone.Commercial && rec.zone !== Zone.Mixed) || rec.floors < 8) return;
@@ -234,9 +234,9 @@ export class Growth {
   }
 
   /**
-   * Estilo do prédio novo: entre o da semente e três alternativas, o mais diferente dos vizinhos (roadcraft
-   * `zoning.ts` `unlikeness`): outro estilo de arquitetura vale mais, altura parecida e cor igual (mesma semente de
-   * estilo) valem menos, e quem está mais longe pesa menos. A época do bairro é a do lote para todos (ruído de 900 m).
+   * Style of the new building: among the seed's style and three alternatives, the one most unlike its neighbours
+   * (Roadcraft `zoning.ts` `unlikeness`): a different architecture style scores more, similar height and the same color
+   * (same style seed) score less, and farther neighbours weigh less. The neighbourhood era is the lot's for all (900 m noise).
    */
   private unlikeStyle(x: number, z: number, zone: number, floors: number, seed: number): number {
     const REACH = 30;
@@ -258,7 +258,7 @@ export class Growth {
         const sig = (other === arch ? 0 : 2) + Math.min(1.5, Math.abs(cols.floors[id] - floors) / 3) + (cols.style[id] === style ? 0 : 0.5);
         least = Math.min(least, sig + 2.5 * d / REACH);
       }
-      // a semente tem uma pequena preferência (o bairro não vira um sorteio)
+      // the seed gets a small preference (the neighbourhood does not become a lottery)
       const score = least + (k === 0 ? 0.3 : 0);
       if (score > bestScore) { bestScore = score; best = style; }
     }
@@ -267,7 +267,7 @@ export class Growth {
 
   place(l: LotColumns, i: number): number { return this.world.addBuilding(this.recordFor(l, i)); }
 
-  /** Lote livre que contém o ponto. */
+  /** Free lot containing the point. */
   lotAt(x: number, z: number): { lots: LotColumns; i: number } | null {
     const c = cellId(cellX(x), cellX(z));
     for (const cc of [c, c - 1, c + 1, c - MAP_CELLS, c + MAP_CELLS]) {

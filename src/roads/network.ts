@@ -1,6 +1,6 @@
-// Rede viária: nós e trechos em tabelas SoA, adjacência densa, índice espacial.
-// Toda mudança passa por addNode/addSeg/removeSeg/removeNode, que marcam as
-// células sujas (o trecho, os nós e os vizinhos que dependem dos nós).
+// Road network: nodes and segments in SoA tables, dense adjacency, spatial index.
+// Every change goes through addNode/addSeg/removeSeg/removeNode, which mark the
+// dirty cells (the segment, the nodes and the neighbours that depend on the nodes).
 
 import { CELL_SIZE, CELLS_PER_TILE, MAP_TILES } from '../config.ts';
 import { CELL_COUNT, Dirty, SpatialIndex, cellId, cellX } from '../core/grid.ts';
@@ -9,7 +9,7 @@ import { NODE_REC, SEG_REC, type RoadGraph, type RoadSave } from '../jobs/protoc
 import { bez, bezLength, closestT, type Quad } from './geometry.ts';
 
 export const MAX_DEG = 8;
-/** Trechos são divididos ao desenhar para nunca passar disto (o índice usa o ponto médio). */
+/** Segments are split while drawing so they never exceed this (the index uses the midpoint). */
 export const MAX_SEG_LEN = 112;
 const SEG_MARGIN = MAX_SEG_LEN / 2 + 40;
 
@@ -20,14 +20,14 @@ export const segSchema = {
   a: Int32Array, b: Int32Array, cx: Float32Array, cz: Float32Array,
   profile: Uint8Array, flags: Uint8Array, len: Float32Array, cell: Int32Array,
   mx: Float32Array, mz: Float32Array,
-  /** Zona de cada lado (esquerda/direita no sentido a → b). */
+  /** Zone on each side (left/right in the a → b direction). */
   zl: Uint8Array, zr: Uint8Array,
 };
 
-/** Quem recebe a marcação de células sujas (o mundo na página; nada no worker). */
+/** Receiver of dirty-cell marks (the world on the page; nothing in the worker). */
 export interface CellToucher { touchCell(cid: number, kinds: number): void }
 
-/** Mudança na rede, para espelhar em outro lugar. */
+/** A network change, to mirror elsewhere. */
 export type NetOp =
   | { t: 'addNode'; rec: NodeRec }
   | { t: 'remNode'; id: number }
@@ -38,8 +38,8 @@ export type NetOp =
   | { t: 'junction'; id: number; spec: JunctionSpec | null }
   | { t: 'clear' };
 
-/** Dados de um nó, para registrar em comandos. */
-export interface NodeRec { id: number; x: number; z: number; y: number; /** controle escolhido pelo jogador */ j?: JunctionSpec }
+/** A node's data, for recording in commands. */
+export interface NodeRec { id: number; x: number; z: number; y: number; /** control chosen by the player */ j?: JunctionSpec }
 export interface SegRec { id: number; a: number; b: number; cx: number; cz: number; profile: number; flags: number; zl?: number; zr?: number }
 export { Zone } from './zones.ts';
 import { effectiveControl, type JunctionSpec, isMidNode } from './control.ts';
@@ -53,14 +53,14 @@ export class RoadNetwork {
   readonly nodeIndex = new SpatialIndex(1 << 14);
   readonly segIndex = new SpatialIndex(1 << 14);
   adj = new Int32Array((1 << 14) * MAX_DEG).fill(-1);
-  /** Trechos (pelo ponto médio) e nós por célula. */
+  /** Segments (by midpoint) and nodes per cell. */
   readonly cellCount = new Uint32Array(CELL_COUNT);
   private world: CellToucher;
-  /** Ouvintes das mudanças (o worker de simulação espelha a rede por aqui). */
+  /** Change listeners (the simulation worker mirrors the network through here). */
   readonly listeners: Array<(op: NetOp) => void> = [];
-  /** Cruzamentos com controle escolhido pelo jogador (os outros são automáticos). */
+  /** Junctions with a player-chosen control (the others are automatic). */
   readonly junctions = new Map<number, JunctionSpec>();
-  /** O que o fluxo medido pela simulação pede nos cruzamentos no automático (Flow; só na página, não vai para o sim). */
+  /** What the flow measured by the simulation asks for at automatic junctions (Flow; page only, not sent to the sim). */
   readonly flow = new Map<number, number>();
 
   constructor(world: CellToucher) {
@@ -81,7 +81,7 @@ export class RoadNetwork {
     return q;
   }
 
-  // ------------------------------------------------------------ mudanças
+  // ------------------------------------------------------------ changes
 
   addNode(rec: Omit<NodeRec, 'id'> & { id?: number }): number {
     const t = this.nodes;
@@ -101,7 +101,7 @@ export class RoadNetwork {
 
   removeNode(id: number): void {
     if (!this.nodes.alive[id]) return;
-    if (this.nodes.cols.deg[id] !== 0) throw new Error('nó ainda ligado');
+    if (this.nodes.cols.deg[id] !== 0) throw new Error('node still connected');
     this.touchNode(id);
     this.cellCount[this.nodes.cols.cell[id]]--;
     this.nodeIndex.remove(id);
@@ -113,7 +113,7 @@ export class RoadNetwork {
 
   addSeg(rec: Omit<SegRec, 'id'> & { id?: number }): number {
     const t = this.segs;
-    if (this.nodes.cols.deg[rec.a] >= MAX_DEG || this.nodes.cols.deg[rec.b] >= MAX_DEG) throw new Error('nó com ligações demais');
+    if (this.nodes.cols.deg[rec.a] >= MAX_DEG || this.nodes.cols.deg[rec.b] >= MAX_DEG) throw new Error('node has too many connections');
     let id: number;
     if (rec.id !== undefined) { t.allocAt(rec.id); id = rec.id; } else id = t.alloc();
     const c = t.cols;
@@ -143,7 +143,7 @@ export class RoadNetwork {
     this.segIndex.remove(id);
     this.cellCount[c.cell[id]]--;
     this.segs.release(id);
-    // os vizinhos dos nós mudam de forma
+    // the nodes' neighbours change shape
     this.touchNode(rec.a);
     this.touchNode(rec.b);
     this.emit({ t: 'remSeg', id });
@@ -156,19 +156,19 @@ export class RoadNetwork {
     return j ? { id, x: c.x[id], z: c.z[id], y: c.y[id], j } : { id, x: c.x[id], z: c.z[id], y: c.y[id] };
   }
 
-  /** O automático pelo fluxo trocou o controle do nó (aviso da simulação): repinta, sem voltar para o sim. */
+  /** Flow-based automatic mode switched the node's control (notice from the simulation): repaint, without sending back to the sim. */
   setFlow(id: number, flow: number): void {
     if (!this.nodes.alive[id] || (this.flow.get(id) ?? 0) === flow) return;
     if (flow) this.flow.set(id, flow); else this.flow.delete(id);
     this.touchNode(id);
   }
 
-  /** Controle do cruzamento escolhido pelo jogador (null = automático). */
+  /** Junction control chosen by the player (null = automatic). */
   setJunction(id: number, spec: JunctionSpec | null): void {
     // a missing node (−1 from a search that found nothing, or one already removed) is refused clearly
     if (!(id >= 0) || !this.nodes.alive[id]) throw new Error(`setJunction: node ${id} does not exist`);
     if (spec) this.junctions.set(id, spec); else this.junctions.delete(id);
-    // escolha nova: a simulação mede de novo
+    // new choice: the simulation measures again
     this.flow.delete(id);
     this.touchNode(id);
     this.emit({ t: 'junction', id, spec });
@@ -185,7 +185,7 @@ export class RoadNetwork {
     this.emit({ t: 'profile', id, profile });
   }
 
-  /** Zona de um lado do trecho (0 = esquerda, 1 = direita). */
+  /** Zone of one side of the segment (0 = left, 1 = right). */
   setZone(id: number, side: number, zone: number): void {
     (side === 0 ? this.segs.cols.zl : this.segs.cols.zr)[id] = zone;
     const sc = this.segs.cols;
@@ -195,7 +195,7 @@ export class RoadNetwork {
     this.emit({ t: 'zone', id, side, zone });
   }
 
-  /** Muda a cada edição (caches de quem lê a rede, como o balão das pontas sem saída). */
+  /** Changes on every edit (caches of network readers, such as the dead-end turning bulb). */
   version = 0;
   private emit(op: NetOp): void { this.version++; for (const l of this.listeners) l(op); }
 
@@ -207,7 +207,7 @@ export class RoadNetwork {
   private unlink(n: number, s: number): void {
     const o = n * MAX_DEG;
     for (let k = 0; k < MAX_DEG; k++) if (this.adj[o + k] === s) {
-      // mantém compacto
+      // keep it compact
       const last = o + this.nodes.cols.deg[n] - 1;
       this.adj[o + k] = this.adj[last];
       this.adj[last] = -1;
@@ -216,7 +216,7 @@ export class RoadNetwork {
     }
   }
 
-  /** Trechos ligados a um nó. */
+  /** Segments connected to a node. */
   segsOf(n: number, out: number[] = []): number[] {
     out.length = 0;
     const o = n * MAX_DEG, d = this.nodes.cols.deg[n];
@@ -224,13 +224,13 @@ export class RoadNetwork {
     return out;
   }
 
-  // ------------------------------------------------------- marcação de sujeira
+  // ------------------------------------------------------- dirty marking
 
   private mark(x: number, z: number): void {
     this.world.touchCell(cellId(cellX(x), cellX(z)), Dirty.Roads | Dirty.RoadPaint | Dirty.Lots);
   }
 
-  /** Um nó mudou: a célula dele e a de cada trecho ligado (o recuo deles muda). */
+  /** A node changed: its cell and the cell of each connected segment (their setback changes). */
   private touchNode(n: number): void {
     const nc = this.nodes.cols;
     this.mark(nc.x[n], nc.z[n]);
@@ -239,7 +239,7 @@ export class RoadNetwork {
     for (let k = 0; k < d; k++) {
       const s = this.adj[o + k];
       this.mark(sc.mx[s], sc.mz[s]);
-      // o outro nó também usa a forma deste trecho
+      // the other node also uses this segment's shape
       const other = sc.a[s] === n ? sc.b[s] : sc.a[s];
       this.mark(nc.x[other], nc.z[other]);
     }
@@ -248,14 +248,14 @@ export class RoadNetwork {
   private touchSeg(s: number): void {
     const sc = this.segs.cols;
     this.mark(sc.mx[s], sc.mz[s]);
-    // pontas sem saída perto: o balão delas pode aparecer ou sumir
+    // nearby dead ends: their turning bulb may appear or disappear
     const r = sc.len[s] / 2 + BULB_R + 20, nc = this.nodes.cols;
     this.nodeIndex.query(sc.mx[s] - r, sc.mz[s] - r, sc.mx[s] + r, sc.mz[s] + r, (n) => { if (nc.deg[n] === 1) this.mark(nc.x[n], nc.z[n]); });
     this.touchNode(sc.a[s]);
     this.touchNode(sc.b[s]);
   }
 
-  // ------------------------------------------------------------ consultas
+  // ------------------------------------------------------------ queries
 
   nearestNode(x: number, z: number, radius: number): number {
     let best = -1, bd = radius * radius;
@@ -267,7 +267,7 @@ export class RoadNetwork {
     return best;
   }
 
-  /** Trecho mais próximo dentro do raio da borda: [trecho, t, distância] ou null. */
+  /** Nearest segment within the radius of its edge: [segment, t, distance] or null. */
   nearestSeg(x: number, z: number, radius: number, accept?: (s: number) => boolean): [number, number, number] | null {
     let best: [number, number, number] | null = null;
     const q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
@@ -280,7 +280,7 @@ export class RoadNetwork {
     return best;
   }
 
-  /** Trechos que podem tocar o retângulo (pelo ponto médio + margem). */
+  /** Segments that may touch the rectangle (by midpoint + margin). */
   forSegsNear(minX: number, minZ: number, maxX: number, maxZ: number, fn: (s: number) => void): void {
     const sc = this.segs.cols;
     const m = SEG_MARGIN;
@@ -291,7 +291,7 @@ export class RoadNetwork {
     });
   }
 
-  /** Trechos e nós de uma célula (pelo ponto médio / posição). */
+  /** Segments and nodes of a cell (by midpoint / position). */
   cellContents(cid: number, segsOut: number[], nodesOut: number[]): void {
     const sc = this.segs.cols, nc = this.nodes.cols;
     this.segIndex.queryCell(cid, (s) => { if (sc.cell[s] === cid) segsOut.push(s); });
@@ -299,8 +299,8 @@ export class RoadNetwork {
   }
 
   /**
-   * Pedaço da rede para um worker: os trechos e nós a montar, mais todos os
-   * trechos ligados aos nós envolvidos (definem os recuos e esquinas).
+   * Piece of the network for a worker: the segments and nodes to build, plus all the
+   * segments connected to the involved nodes (they define the setbacks and corners).
    */
   gather(ownSegs: number[], ownNodes: number[]): RoadGraph {
     const sc = this.segs.cols, nc = this.nodes.cols;
@@ -330,7 +330,7 @@ export class RoadNetwork {
       nctl: new Uint8Array(nn), srule: new Uint8Array(ns),
     };
     nodeList.forEach((n, i) => { g.nx[i] = nc.x[n]; g.nz[i] = nc.z[n]; g.ny[i] = nc.y[n]; g.nid[i] = n; });
-    // controle dos cruzamentos e a regra de cada ponta (placas, pintura)
+    // junction control and the rule at each end (signs, paint)
     for (const n of nodeList) {
       if (nc.deg[n] === 1) { if (bulbAt(this, n)) g.nctl[nodeIdx.get(n)!] = NODE_BULB; continue; }
       if (nc.deg[n] < 3 && !(nc.deg[n] === 2 && isMidNode(this.junctions.get(n)?.ctl ?? 0))) continue;
@@ -352,7 +352,7 @@ export class RoadNetwork {
     return g;
   }
 
-  /** Vias de um ladrilho para salvar: nós pela posição, trechos pelo nó a. */
+  /** Roads of a tile for saving: nodes by position, segments by node a. */
   saveTile(tile: number, tileOf: (x: number, z: number) => number): RoadSave {
     const nc = this.nodes.cols, sc = this.segs.cols;
     const nodes: number[] = [], segs: number[] = [];
@@ -370,7 +370,7 @@ export class RoadNetwork {
     return { nodes: new Float32Array(nodes), segs: new Float32Array(segs) };
   }
 
-  /** Recria nós (primeiro) ou trechos (depois) salvos, com os mesmos ids. */
+  /** Recreates saved nodes (first) or segments (after), with the same ids. */
   loadNodes(r: RoadSave): void {
     for (let k = 0; k < r.nodes.length; k += NODE_REC) this.addNode({ id: r.nodes[k], x: r.nodes[k + 1], z: r.nodes[k + 2], y: r.nodes[k + 3] });
   }
@@ -396,6 +396,6 @@ export class RoadNetwork {
     this.emit({ t: 'clear' });
   }
 
-  /** Lado da célula, para quem consulta por célula. */
+  /** Cell side length, for per-cell queries. */
   static readonly cellSize = CELL_SIZE;
 }

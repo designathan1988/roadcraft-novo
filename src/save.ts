@@ -1,5 +1,5 @@
-// Metadados do salvamento: semente, id da partida, quais ladrilhos existem
-// no arquivo, a câmera, a hora e as linhas de ônibus. Os ladrilhos em si são gravados pelos workers.
+// Save metadata: seed, game id, which tiles exist in the file, the camera,
+// the hour and the bus lines. The tiles themselves are written by the workers.
 
 import { SAVE_VERSION } from './config.ts';
 import { TILE_COUNT } from './core/grid.ts';
@@ -9,25 +9,25 @@ const MAGIC_META = 0x314d4443; // 'CDM1'
 export interface SaveMeta {
   seed: number;
   gameId: number;
-  tiles: Uint8Array; // 1 = ladrilho gravado
+  tiles: Uint8Array; // 1 = tile saved
   camera: Float64Array;
-  /** Hora do dia (opcional em salvamentos antigos). */
+  /** Hour of day (optional in old saves). */
   hour?: number;
-  /** Linhas de ônibus (Transit.encode). */
+  /** Bus lines (Transit.encode). */
   transit?: Float64Array;
-  /** Perfis de via feitos pelo jogador (JSON). */
+  /** Road profiles made by the player (JSON). */
   profiles?: string;
-  /** Dinheiro em caixa (NaN = modo livre). */
+  /** Cash on hand (NaN = sandbox mode). */
   money?: number;
-  /** Cruzamentos com controle escolhido (JSON de [nó, spec]). */
+  /** Junctions with a chosen control (JSON of [node, spec]). */
   junctions?: string;
-  /** Bioma do mapa. */
+  /** Map biome. */
   biome?: number;
-  /** Ajustes do mapa que vieram depois (céu, tempo, nuvens…): JSON livre; salvamentos antigos não têm. */
+  /** Map settings added later (sky, weather, clouds…): free-form JSON; old saves lack it. */
   extra?: string;
 }
 
-/** O salvamento é de outro tamanho de mapa: a página recarrega nesse tamanho. */
+/** The save is for another map size: the page reloads at that size. */
 export class MapSizeError extends Error {
   readonly tiles: number;
   constructor(tiles: number) { super(`salvamento de um mapa de ${tiles} km`); this.tiles = tiles; }
