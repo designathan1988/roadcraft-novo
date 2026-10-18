@@ -3,7 +3,8 @@
 
 import { HEIGHT_TILE_RES, MAP_TILES, SAVE_VERSION, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { heightIndex } from '../world/heights.ts';
-import { SEG_REC, SEG_REC_V2, boxColumnList, emptyBoxes, type BoxColumns, type RoadSave } from './protocol.ts';
+import { SEG_REC, SEG_REC_V2, boxColumnList, columnStride, emptyBoxes, type BoxColumns, type RoadSave } from './protocol.ts';
+import { generatedBuilt } from '../world/decay.ts';
 
 const MAGIC_TILE = 0x31544443; // 'CDT1'
 const HEIGHT_Q = 100; // centímetros
@@ -18,7 +19,7 @@ export const HEIGHT_MAX_Q = quantizeHeight(TERRAIN_MAX_Y);
 export function encodeTile(tile: number, heights: Uint16Array, boxes: BoxColumns, roads: RoadSave, ground: Uint32Array = new Uint32Array(0), water: Float32Array = new Float32Array(0)): Uint8Array {
   const n = boxes.count;
   const cols = boxColumnList(boxes);
-  const colBytes = cols.reduce((sum, c) => sum + n * c.BYTES_PER_ELEMENT, 0);
+  const colBytes = cols.reduce((sum, c) => sum + n * columnStride(boxes, c) * c.BYTES_PER_ELEMENT, 0);
   const items = roads.items ?? new Float32Array(0);
   const bytes = 16 + heights.byteLength + 4 + colBytes + 8 + roads.nodes.byteLength + roads.segs.byteLength + 4 + items.byteLength + 8 + ground.byteLength + water.byteLength;
   const buf = new ArrayBuffer(bytes);
@@ -32,7 +33,7 @@ export function encodeTile(tile: number, heights: Uint16Array, boxes: BoxColumns
   o += heights.byteLength;
   dv.setUint32(o, n, true); o += 4;
   for (const col of cols) {
-    const b = n * col.BYTES_PER_ELEMENT;
+    const b = n * columnStride(boxes, col) * col.BYTES_PER_ELEMENT;
     new Uint8Array(buf, o, b).set(new Uint8Array(col.buffer, col.byteOffset, b));
     o += b;
   }
@@ -68,13 +69,15 @@ export function decodeTile(data: Uint8Array): { tile: number; heights: Uint16Arr
   o += hn * 2;
   const n = dv.getUint32(o, true); o += 4;
   const boxes = emptyBoxes(n);
-  // versão < 3: só as 7 primeiras colunas (caixas genéricas); < 4: sem a função
-  const cols = boxColumnList(boxes).slice(0, version >= 4 ? 12 : version >= 3 ? 11 : 7);
+  // version < 3: only the first 7 columns (generic boxes); < 4: no function; < 7: no polygon, built or decay
+  const cols = boxColumnList(boxes).slice(0, version >= 7 ? 16 : version >= 4 ? 12 : version >= 3 ? 11 : 7);
   for (const col of cols) {
-    const b = n * col.BYTES_PER_ELEMENT;
+    const b = n * columnStride(boxes, col) * col.BYTES_PER_ELEMENT;
     new Uint8Array(col.buffer).set(data.subarray(o, o + b));
     o += b;
   }
+  // older saves: each building gets the spread "built" of a generated one (the town does not age all at once)
+  if (version < 7) for (let i = 0; i < n; i++) boxes.built[i] = generatedBuilt(boxes.seed[i]);
   const roads: RoadSave = { nodes: new Float32Array(0), segs: new Float32Array(0) };
   if (version >= 2) {
     const nn = dv.getUint32(o, true); o += 4;

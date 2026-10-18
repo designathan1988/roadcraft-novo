@@ -14,6 +14,7 @@ import { MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './netw
 import { SegFlag } from './flags.ts';
 import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
+import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPrice, withKind } from './economy.ts';
 import type { JunctionSpec } from './control.ts';
 
 // --------------------------------------------------------------- diário
@@ -49,31 +50,33 @@ export class RoadJournal implements Command {
   /** Quanto foi cobrado (negativo = devolvido). */
   charge = 0;
 
-  /** Valor de um trecho como está: comprimento × preço do perfil × estrutura (ponte 3×, túnel 4×). */
+  /** Value of a segment as it stands: length × price of its cross-section × how it is built (`roads/economy.ts`). */
   private segValue(id: number, profile = this.net.segs.cols.profile[id]): number {
-    const net = this.net, sc = net.segs.cols, nc = net.nodes.cols;
-    const a = sc.a[id], b = sc.b[id];
-    const q = net.quad(id);
-    const p = new Float64Array(2);
-    let k = 0;
-    for (const t of [0.25, 0.5, 0.75]) {
-      bez(q, t, p);
-      const y = nc.y[a] + (nc.y[b] - nc.y[a]) * t, g = heightAt(this.world.heights, p[0], p[1]);
-      k += y - g > 4 ? 3 : g - y > 5 ? 4 : y - g > 1.5 || g - y > 1.5 ? 1.4 : 1;
-    }
-    return sc.len[id] * PROFILE_INFO[profile].cost * k / 3;
+    const sc = this.net.segs.cols;
+    let kind = kindOfFlags(sc.flags[id]);
+    if (kind < 0) kind = this.kindNow(sc.a[id], sc.b[id], this.net.quad(id));
+    return segmentPrice(profile, sc.len[id], kind);
   }
 
-  /**
-   * Cobra o que o diário construiu (demolir devolve metade). Sem dinheiro, desfaz e devolve false.
-   * Chamado uma vez, logo depois das operações ao vivo.
-   */
-  /** Quanto custaria (antes de settle). */
-  get price(): number { return Math.round(this.value); }
+  /** Build kind of a segment from a to b over the terrain as it is now (five samples along it). */
+  private kindNow(a: number, b: number, q: Quad): number {
+    const nc = this.net.nodes.cols, p = new Float64Array(2), kinds: number[] = [];
+    for (const t of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      bez(q, t, p);
+      kinds.push(buildKindAt(nc.y[a] + (nc.y[b] - nc.y[a]) * t, heightAt(this.world.heights, p[0], p[1])));
+    }
+    return dominantKind(kinds);
+  }
 
+  /** What the edit would cost (positive) or give back (negative), before settle. */
+  get price(): number { return chargeFor(this.value); }
+
+  /**
+   * Charges what the journal built (demolishing gives back a share, `roads/tuning.ts`). Without enough money it
+   * undoes itself and returns false. Called once, right after the live operations.
+   */
   settle(): boolean {
-    const v = this.value;
-    const charge = this.world.unlimited ? 0 : Math.round(v > 0 ? v : v * 0.5);
+    const charge = this.world.unlimited ? 0 : chargeFor(this.value);
     if (charge > 0 && charge > this.world.money) { this.invert(); this.ops.length = 0; this.value = 0; return false; }
     this.charge = charge;
     this.world.money -= charge;
@@ -106,6 +109,12 @@ export class RoadJournal implements Command {
   /** Registra um nó que já foi posto na rede (mover nó: mesmo id em outro lugar). */
   recordAddNode(id: number): void { this.ops.push({ t: 'addNode', rec: this.net.nodeRec(id) }); }
   addSeg(rec: Omit<SegRec, 'id'>): number {
+    // a new road records how it is built over the terrain before it is conformed (the refund reads the same)
+    if (kindOfFlags(rec.flags) < 0) {
+      const nc = this.net.nodes.cols;
+      const q: Quad = { x0: nc.x[rec.a], z0: nc.z[rec.a], cx: rec.cx, cz: rec.cz, x1: nc.x[rec.b], z1: nc.z[rec.b] };
+      rec = { ...rec, flags: withKind(rec.flags, this.kindNow(rec.a, rec.b, q)) };
+    }
     const id = this.net.addSeg(rec);
     this.ops.push({ t: 'addSeg', rec: this.net.segRec(id) });
     this.value += this.segValue(id);
@@ -838,7 +847,7 @@ export function joinAt(world: World, n: number): RoadJournal {
   const segs = net.segsOf(n, []);
   if (segs.length !== 2) return j;
   const [s1, s2] = segs;
-  if (sc.profile[s1] !== sc.profile[s2] || sc.flags[s1] !== sc.flags[s2] || (sc.flags[s1] & SegFlag.Ring)) return j;
+  if (sc.profile[s1] !== sc.profile[s2] || (sc.flags[s1] & ~KIND_MASK) !== (sc.flags[s2] & ~KIND_MASK) || (sc.flags[s1] & SegFlag.Ring)) return j;
   if (sc.len[s1] + sc.len[s2] > MAX_SEG_LEN * 2) return j;
   // pontas em ordem (s1 chega ao nó, s2 sai dele), respeitando o sentido de mão única
   const p = sc.a[s1] === n ? sc.b[s1] : sc.a[s1], q = sc.a[s2] === n ? sc.b[s2] : sc.a[s2];

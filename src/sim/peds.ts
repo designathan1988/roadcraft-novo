@@ -253,9 +253,14 @@ export class Peds {
    * segue a rota dali (até um nó ao acaso a até 900 m).
    */
   private spawnFromDoor(): boolean {
-    const net = this.sim.net, sc = net.segs.cols, nc = net.nodes.cols, sim = this.sim;
     const k = this.rng.int(0, this.doors.length >> 1);
-    const x = this.doors[k * 2], z = this.doors[k * 2 + 1];
+    return this.spawnFromPoint(this.doors[k * 2], this.doors[k * 2 + 1]);
+  }
+
+  /** Someone starts walking at (x, z) (a door, or a passenger getting out of a car at the kerb): to the sidewalk, then on. */
+  spawnFromPoint(x: number, z: number): boolean {
+    if (this.t.size >= MAX_PEDS) return false;
+    const net = this.sim.net, sc = net.segs.cols, nc = net.nodes.cols, sim = this.sim;
     const hit = net.nearestSeg(x, z, 30, (s) => PROFILE_INFO[sc.profile[s]].walk);
     if (!hit) return false;
     const [s, t] = hit;

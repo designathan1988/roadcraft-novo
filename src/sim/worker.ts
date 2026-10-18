@@ -13,6 +13,9 @@ export type ToSim =
   | { type: 'camera'; x: number; z: number }
   /** Portas dos prédios perto da câmera (x, z): os pedestres saem delas. */
   | { type: 'doors'; pts: Float32Array }
+  /** Warehouse loading docks near the camera: (x, z, yaw facing the street) each. */
+  | { type: 'docks'; pts: Float32Array }
+  | { type: 'probeManoeuvres' }
   | { type: 'ops'; ops: Float64Array; extra?: string[] }
   | { type: 'density'; value: number }
   | { type: 'demand'; hour: number; demand: number; traffic: number; people: number }
@@ -28,6 +31,8 @@ export type FromSim =
   | { type: 'probe'; seg: number; vehicles: number; speed: number; queue: number; capacity: number }
   | { type: 'probeNode'; node: number; passed: number; time: number }
   | { type: 'hit'; people: number; vehicles: number }
+  /** Manoeuvres going on (answer to 'probeManoeuvres'): [x, z, kind (sim/manoeuvres MKind), share done] each; counters. */
+  | { type: 'manoeuvres'; list: number[]; planned: number; kerbStops: number; docked: number }
   /** O automático trocou o controle do nó pelo fluxo medido (Flow: 1 semáforo, 2 placas). A página pode
    *  passar o mesmo `flow` para `effectiveControl` (pintura, placas, cabeças de semáforo, inspetor). */
   | { type: 'autoControl'; node: number; flow: number }
@@ -51,6 +56,8 @@ traffic.pedCrossing = (n) => peds.crossing(n);
 peds.pickTrip = () => traffic.pickTrip();
 peds.onStop = (l, a, b) => traffic.pedAtStop(l, a, b);
 traffic.onAlight = (node, n) => peds.spawnAt(node, n);
+// a car stopping at the kerb lets a passenger out: a pedestrian from that point
+traffic.onDropOff = (x, z) => { peds.spawnFromPoint(x, z); };
 traffic.advisor.onChange = (node, flow) => scope.postMessage({ type: 'autoControl', node, flow });
 
 let writer: PoseWriter | null = null;
@@ -118,6 +125,7 @@ scope.onmessage = (e) => {
     case 'speed': speed = m.value; break;
     case 'camera': traffic.camX = peds.camX = m.x; traffic.camZ = peds.camZ = m.z; break;
     case 'doors': peds.doors = m.pts; break;
+    case 'docks': traffic.setDocks(m.pts); break;
     case 'density': traffic.density = m.value; break;
     case 'demand': traffic.hour = m.hour; traffic.demand = m.demand; traffic.trafficShare = m.traffic; peds.share = m.people; break;
     case 'profiles': setCustomProfiles(m.list); break;
@@ -125,6 +133,7 @@ scope.onmessage = (e) => {
     case 'probe': scope.postMessage({ type: 'probe', seg: m.seg, ...traffic.probe(m.seg) }); break;
     case 'people': { const n = sim.net.nearestNode(m.x, m.z, 200); if (n >= 0) peds.spawnAt(n, m.count, m.color); break; }
     case 'hit': scope.postMessage({ type: 'hit', people: peds.hit(m.x, m.z, m.r, m.one), vehicles: m.one ? 0 : traffic.blast(m.x, m.z, m.r) }); break;
+    case 'probeManoeuvres': scope.postMessage({ type: 'manoeuvres', ...traffic.manoeuvreList() }); break;
     case 'probeNode': scope.postMessage({ type: 'probeNode', node: m.node, passed: traffic.nodePass[m.node] ?? 0, time: traffic.time }); break;
     case 'ops': {
       const n = m.ops.length / 8;

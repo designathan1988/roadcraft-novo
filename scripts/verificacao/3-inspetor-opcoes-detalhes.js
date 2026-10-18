@@ -14,6 +14,7 @@
       else if (errs.length > e0) res.push(`FALHOU ${name}: erro no console: ${errs.slice(e0).join(' | ')}`);
       else res.push(`OK ${name}`);
     } catch (e) { res.push(`FALHOU ${name}: ${e && e.message || e}`); }
+    console.log('VER ' + res[res.length - 1]); // na hora: se o roteiro travar, a última linha diz onde
   };
   const net = w.roads, sc = net.segs.cols, rt = g.roadTool;
   const P = (x, z) => ({ x, y: a.ground(x, z), z });
@@ -40,6 +41,5 @@
   await check('idioma inglês', () => { const t0 = document.body.innerText.includes('Câmera'); return t0 || 'texto base ausente'; });
   await check('novo mapa', async () => { const c0 = window.confirm; window.confirm = () => true; const p = H.newMap(); window.confirm = c0; await wait(3000); return true; });
 
-  console.log('VERIFICAÇÃO3 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
-  for (const r of res) console.log('VER ' + r);
+  console.log('VERIFICAÇÃO3 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()
