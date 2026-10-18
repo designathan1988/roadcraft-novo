@@ -10,7 +10,9 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 - Dock de baixo com 7 categorias e teclas: Vias (1), Zonas (Z), Construir (H), Paisagem (T), Transporte (O),
   Demolir (B), Informação (I); gaveta de cada uma com abas e opções; dicas de ferramenta; dicas para toque.
 - Barra de cima: céu (dia, noite, ciclo), relógio, dinheiro, aviso de nós impossíveis, contagens, velocidade
-  (pausa, 1×, 2×, 4×), Interior, Camadas, Simulação, Câmera, desfazer, refazer, Ajuda, Menu.
+  (pausa, 1×, 2×, 4×), Interior, Camadas, Simulação, Câmera, desfazer, refazer, Ajuda, Menu. A contagem dos nós
+  impossíveis existe na lógica ✅ (`roads/impossible.ts`, `hudActions.impossibleNodes/impossibleAngle/impossibleList`;
+  foto `nos-impossiveis.png`: 36 na cidade gerada de 10 km, o mostrado com 17°): falta a interface ligar.
 - Menu: novo, abrir, salvar mapa; Gráficos; Idioma (pt-BR, en); Pintura regional; Sobre.
 - Painéis: inspetor de via, de nó e de cruzamento (`ui/roads/*`), catálogo de vias com cartões desenhados, editor de
   seção transversal (Streetmix), painel de conectores de faixa, painel do cruzamento, workspace do construtor
