@@ -327,8 +327,47 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         }
       }
     }
-    // árvores de calçada (largas o bastante) e de canteiro; básico = só postes e placas
     const zoneOf = (side: number) => baseZone(side === 0 ? g.szl[s] : g.szr[s]);
+    // automatic street furniture (Roadcraft's "complete / basic / none"): basic = hydrants only (infrastructure);
+    // complete = also postboxes and phones on commercial streets, planters and bins by the crossings, benches on
+    // residential streets. Hydrants by the curb before the first street tree; the rest against the buildings.
+    if (!ring) {
+      for (const [e, side] of [[swR, 1], [swL, 0]] as const) {
+        if (!e || e.u1 - e.u0 < 1.8) continue;
+        const zone = zoneOf(side);
+        const lx0 = (v: number) => frame(v);
+        const kerbU = side === 1 ? e.u1 - 0.45 : e.u0 + 0.45;
+        const wallU = side === 1 ? e.u0 + 0.55 : e.u1 - 0.55;
+        const put = (type: number, variant: number, v: number, u: number, face: boolean) => {
+          if (v <= s0 + 2 || v >= s1 - 2 || nearLamp(v)) return;
+          const f = lx0(v);
+          const lx = f.tz, lz = -f.tx;
+          const x = f.px + lx * u, z = f.pz + lz * u;
+          if (!onGround(x, z, f.y)) return;
+          const yaw = face ? (side === 1 ? Math.atan2(lx, lz) : Math.atan2(-lx, -lz)) : Math.atan2(f.tx, f.tz);
+          out.add(type, x, f.y + CURB_H, z, yaw, variant, 1, rng.nextU32());
+        };
+        // hydrant: one side of the street, about every 90 m (both levels)
+        if (side === 1 && s1 - s0 > 20) for (let v = s0 + 9; v < s1 - 6; v += 90) put(PROP.Furniture, FURN.Hydrant, v, kerbU, true);
+        if (furn !== 0) continue;
+        const commercial = zone === Zone.Commercial || zone === Zone.Mixed;
+        if (commercial && s1 - s0 > 50) {
+          put(PROP.Furniture, FURN.Postbox, s0 + 24 + rng.range(0, 6), wallU, true);
+          if (side === 0) put(PROP.Furniture, FURN.Phone, s1 - 26 - rng.range(0, 6), wallU, true);
+          // planters flanking the crossing at each end
+          put(PROP.Furniture, FURN.Planter, s0 + 5.5, wallU, false);
+          put(PROP.Furniture, FURN.Planter, s1 - 5.5, wallU, false);
+        }
+        if (zone === Zone.Residential && s1 - s0 > 70 && e.u1 - e.u0 >= 2.3) {
+          const v = (s0 + s1) / 2 + rng.range(-8, 8);
+          put(PROP.Bench, 0, v, wallU, true);
+          put(PROP.Bin, 0, v + 2.2, wallU, true);
+        }
+        // a bin by the crossing on every street of the complete level
+        if (zone !== Zone.Industrial && s1 - s0 > 24) put(PROP.Bin, 0, s0 + 3.2, wallU, true);
+      }
+    }
+    // árvores de calçada (largas o bastante) e de canteiro; básico = só postes e placas
     for (const [e, side] of [[swR, 1], [swL, 0]] as const) {
       if (!e || ring || furn === 1 || e.u1 - e.u0 < 2.3) continue;
       const zone = zoneOf(side);
