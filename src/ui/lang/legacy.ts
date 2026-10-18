@@ -92,7 +92,7 @@ export const LEGACY_EN: Record<string, string> = {
   'Janelas': 'Windows', 'Ala': 'Wing', 'Do acabamento': 'From the finish', 'Faixa de vidro': 'Glass band', 'Janelas largas': 'Wide windows', 'Janelas estreitas': 'Narrow windows', 'Parede cega': 'Blank wall',
   'Sem ala': 'No wing', 'Ala à esquerda': 'Wing on the left', 'Ala à direita': 'Wing on the right', 'Alas dos dois lados': 'Wings on both sides',
   // menu and options
-  'Cidade': 'City', 'Semente': 'Seed', 'Tamanho do mapa': 'Map size', 'Gerar cidade nova': 'Generate a new city',
+  'Cidade': 'City', 'esse arquivo não é um mapa do Roadcraft': 'this file is not a Roadcraft map', 'Semente': 'Seed', 'Tamanho do mapa': 'Map size', 'Gerar cidade nova': 'Generate a new city',
   'Começar num mapa vazio': 'Start on an empty map', 'Carregar o último jogo': 'Load the last game',
   'Vias, trânsito e cidades inteiras de 10 a 24 km.': 'Roads, traffic and whole cities from 10 to 24 km.',
   'Qualidade': 'Quality', 'Baixo': 'Low', 'Médio': 'Medium', 'Alto': 'High', 'Ultra': 'Ultra', 'Personalizado': 'Custom',

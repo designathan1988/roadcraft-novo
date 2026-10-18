@@ -39,7 +39,7 @@ export async function packSlot(slot: string): Promise<Blob | null> {
 export async function unpackToSlot(slot: string, file: Blob): Promise<number> {
   const buf = new Uint8Array(await file.arrayBuffer());
   const head = new TextEncoder().encode(MAGIC);
-  for (let i = 0; i < head.length; i++) if (buf[i] !== head[i]) throw new Error('esse arquivo não é um mapa do Cidade');
+  for (let i = 0; i < head.length; i++) if (buf[i] !== head[i]) throw new Error('esse arquivo não é um mapa do Roadcraft');
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   let o = head.length;
   const count = dv.getUint32(o, true); o += 4;
