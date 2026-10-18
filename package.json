@@ -18,7 +18,8 @@
     "package:linux": "vite build && node tools/package.mjs linux",
     "budget": "node tools/budget.mjs",
     "fotos": "node tools/fotos.mjs",
-    "cook:people": "node tools/cook-people.mjs"
+    "cook:people": "node tools/cook-people.mjs",
+    "icon": "node tools/make-icon.mjs"
   },
   "dependencies": {
     "steamworks.js": "^0.4.0",
