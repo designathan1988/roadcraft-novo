@@ -19,7 +19,8 @@
     "budget": "node tools/budget.mjs",
     "fotos": "node tools/fotos.mjs",
     "cook:people": "node tools/cook-people.mjs",
-    "icon": "node tools/make-icon.mjs"
+    "icon": "node tools/make-icon.mjs",
+    "package:web": "vite build && node tools/package-web.mjs"
   },
   "dependencies": {
     "steamworks.js": "^0.4.0",
