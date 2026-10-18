@@ -26,6 +26,10 @@ Atualizado: 2026-10-18, 22h15.
   (`docs/PESQUISA-PREDIOS.md`, plano em 12 passos, entregue à sessão de prédios junto com o defeito do pool de
   props: cada peça de fachada processa ~3.624 vértices); `PROMPT-ANALISE.md` (contexto + pedido de análise).
   98 testes, budget ok.
+- 22h15: produto (`9482eff`): `npm run package:win` (executável Roadcraft, 168,6 MB em zip; conferido pela sessão
+  coordenadora: cidade de 10 km pronta em 15,8 s no `.exe`, 4 fotos em `test-results/fotos-pacote/`),
+  `npm run package:web` (zip de 22,5 MB, ainda exige Node), `fotos:pacote`/`fotos:navegador`. Visto no teste:
+  na vista cidade os prédios longe são caixas lisas de cor chapada (devolvido à sessão de prédios).
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
