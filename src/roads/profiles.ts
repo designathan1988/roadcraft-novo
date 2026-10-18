@@ -345,7 +345,8 @@ export const TABLE_W = MAX_LINES * 2 + 2;
 /**
  * Tabela RGBA float do shader, uma linha por perfil:
  * [0..7] linhas (u, largura, tipo, cor); [8..15] faixas (u, sentido, largura, setas + 8·ônibus);
- * [16] postes (tem canteiro, u direita, u esquerda, u do canteiro); [17] (piso, 0, 0, 0).
+ * [16] postes (tem canteiro, u direita, u esquerda, u do canteiro); [17] (piso, u do meio-fio direito, u do
+ * meio-fio esquerdo, 0).
  */
 export function writeProfileRow(t: Float32Array, id: number): void {
   const p = PROFILE_INFO[id];
@@ -369,4 +370,9 @@ export function writeProfileRow(t: Float32Array, id: number): void {
   const q = o + MAX_LINES * 2 * 4;
   t[q] = hasMed; t[q + 1] = right; t[q + 2] = left; t[q + 3] = med ? (med.u0 + med.u1) / 2 : 0;
   t[q + 4] = p.surface ?? 0;
+  // [17].y/.z: u of the outer curbs' road-side faces (right, left; ±99 = none): gutter, drains and tactile paving
+  const curbs = p.edges.filter((e) => e.strip.kind === 'curb');
+  const rc = curbs.find((e) => e.u1 < 0), lc = [...curbs].reverse().find((e) => e.u0 > 0);
+  t[q + 5] = rc && rc === curbs[0] ? rc.u1 : -99;
+  t[q + 6] = lc && lc === curbs[curbs.length - 1] ? lc.u0 : 99;
 }

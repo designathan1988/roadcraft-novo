@@ -1,38 +1,51 @@
-// Inspecionar: clique num cruzamento para escolher o controle (semáforo, placas,
-// pare, preferência), as regras de cada via, os tempos do semáforo, a onda
-// verde, a prioridade ao ônibus e os movimentos permitidos; clique numa via
-// para ver o perfil, copiar ou demolir. Cada mudança é um comando (desfaz).
+// The inspector in the selection column (Roadcraft's road, node and junction panels). A road: its profile drawn
+// from above, lanes, length, live traffic (vehicles, speed, queue), and its actions (duplicate, demolish, split,
+// reverse, zebra and signal crossings, U-turn, parking by side, name and numbering, eyedropper, whole street). A
+// node of two roads: height, join, crossings. A junction: control, rule of each leg, signal phases, offset, green
+// wave, bus priority, lane connectors (blue comes in, green goes out), movements, height, lock the automatic
+// choice. Every change is a command (undoable). The panel is built when the selection or the network changes;
+// the live numbers only rewrite their own text.
 
 import type { CommandStack } from '../core/commands.ts';
 import { RoadJournal, addCrossing, addUTurn, changeProfiles, roadBetweenJunctions, demolishSeg, duplicateRoad, joinAt, reverseRoad, splitAt, streetChain } from '../roads/build.ts';
-import { CTL_NAMES, Ctl, Rule, RULE_NAMES, dirOut, effectiveControl, signalStages, type JunctionSpec } from '../roads/control.ts';
+import { Ctl, Rule, dirOut, effectiveControl, signalStages, type JunctionSpec } from '../roads/control.ts';
 import { PROFILE_INFO, withParking } from '../roads/profiles.ts';
 import { armAngle } from '../roads/geometry.ts';
 import { laneExits } from '../roads/laneLinks.ts';
 import type { World } from '../world/world.ts';
+import { el } from './dom.ts';
+import { svg } from './icons.ts';
+import { fmtDec, fmtInt, money, plural, t } from './i18n.ts';
+import { profileName, topSwatch } from './roadCatalog.ts';
 
 export interface InspectActions {
-  /** Pede à simulação os números ao vivo do trecho (a resposta volta em showProbe). */
+  /** Asks the simulation for the road's live numbers (the answer comes back in showProbe). */
   probe(seg: number): void;
-  /** Pede o contador de passagens do nó (resposta em showNodeProbe). */
+  /** Asks for the node's pass counter (answer in showNodeProbe). */
   probeNode(node: number): void;
-  /** Desenhar com o perfil da via. */
+  /** Draw with this profile (the eyedropper). */
   useProfile(id: number): void;
-  toast(t: string): void;
-  /** Marca o que está sendo inspecionado (nó ou trecho; -1 = nada). */
+  toast(text: string): void;
+  /** Marks what is inspected (node or road; −1 = nothing). */
   mark(node: number, seg: number): void;
+  /** Names the whole street of a road (one undo step). */
+  nameStreet(seg: number, name: string): void;
 }
 
-const CHOICES = [Ctl.Auto, Ctl.Signal, Ctl.Priority, Ctl.AllStop, Ctl.YieldAll, Ctl.Mini, Ctl.None];
+const CHOICES: Array<[number, string]> = [[Ctl.Auto, 'junction.control.auto'], [Ctl.Signal, 'junction.control.signal'], [Ctl.Priority, 'junction.control.priority'],
+  [Ctl.AllStop, 'junction.control.stop'], [Ctl.YieldAll, 'junction.control.yield'], [Ctl.Mini, 'junction.control.mini'], [Ctl.None, 'junction.control.none']];
+const CTL_KEY: Record<number, string> = Object.fromEntries(CHOICES.map(([c, k]) => [c, k]));
+const DIRS = ['compass.n', 'compass.ne', 'compass.e', 'compass.se', 'compass.s', 'compass.sw', 'compass.w', 'compass.nw'];
+const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
 
-/** Nome curto de um braço pela direção (bússola: −z é norte). */
-function legName(world: World, n: number, s: number): string {
+/** A leg named by where it goes (compass: −z is north). */
+function legName(world: World, n: number, s: number, withProfile = false): string {
   const [dx, dz] = dirOut(world.roads, n, s);
   const a = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-  const names = ['Norte', 'Nordeste', 'Leste', 'Sudeste', 'Sul', 'Sudoeste', 'Oeste', 'Noroeste'];
-  const arrows = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
   const k = Math.round(a / 45) % 8;
-  return `${arrows[k]} ${names[k]} · ${PROFILE_INFO[world.roads.segs.cols.profile[s]].name}`;
+  const dir = t(DIRS[k]);
+  const base = `${ARROWS[k]} ${dir.charAt(0).toUpperCase()}${dir.slice(1)}`;
+  return withProfile ? `${base} · ${profileName(PROFILE_INFO[world.roads.segs.cols.profile[s]])}` : base;
 }
 
 export class Inspector {
@@ -42,61 +55,72 @@ export class Inspector {
   private world: World;
   private commands: CommandStack;
   private a: InspectActions;
+  private probeTimer = 0;
+  private live: Record<string, HTMLElement> = {};
+  private flowFirst: { passed: number; time: number } | null = null;
+  /** The incoming lane picked in the connectors: [road, lane]. */
+  private laneIn: [number, number] | null = null;
 
   constructor(world: World, commands: CommandStack, a: InspectActions) {
     this.world = world; this.commands = commands; this.a = a;
-    this.el = document.createElement('div');
-    this.el.className = 'inspector hidden';
+    this.el = el('div', 'inspector hidden');
     this.el.addEventListener('pointerdown', (e) => e.stopPropagation());
-    this.el.addEventListener('wheel', (e) => e.stopPropagation());
-    document.getElementById('hud')!.append(this.el);
+    this.el.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+    (document.querySelector('.v2-side') ?? document.getElementById('hud')!).append(this.el);
   }
 
-  /** Escolhe o que está sob o cursor: cruzamento perto, senão a via. */
+  get isOpen(): boolean { return this.node >= 0 || this.seg >= 0; }
+
+  /** Picks what is under the cursor: a junction near it, else the road. */
   pick(x: number, z: number): void {
     const net = this.world.roads;
     const n = net.nearestNode(x, z, 16);
     const nc = net.nodes.cols;
-    // cruzamento; ou nó de duas vias bem perto do clique (unir, altura)
     if (n >= 0 && (nc.deg[n] >= 3 || (nc.deg[n] === 2 && Math.hypot(nc.x[n] - x, nc.z[n] - z) < 6))) { this.node = n; this.seg = -1; }
     else {
       const s = net.nearestSeg(x, z, 14);
       this.node = -1; this.seg = s ? s[0] : -1;
     }
+    this.laneIn = null;
     this.render();
   }
 
-  close(): void { this.node = -1; this.seg = -1; this.el.classList.add('hidden'); this.a.mark(-1, -1); clearInterval(this.probeTimer); this.probeEl = null; this.flowEl = null; }
+  close(): void {
+    this.node = -1; this.seg = -1; this.laneIn = null;
+    this.el.classList.add('hidden');
+    this.a.mark(-1, -1);
+    clearInterval(this.probeTimer);
+    this.live = {};
+  }
 
-  /** Algo mudou (desfazer, edição): refaz o painel se o alvo ainda existe. */
+  /** Something changed (undo, an edit): rebuilt if the target still exists. */
   refresh(): void {
     const net = this.world.roads;
     if (this.node >= 0 && (!net.nodes.alive[this.node] || net.nodes.cols.deg[this.node] < 2)) this.node = -1;
     if (this.seg >= 0 && !net.segs.alive[this.seg]) this.seg = -1;
-    if (this.node < 0 && this.seg < 0) { this.close(); return; }
+    if (this.node < 0 && this.seg < 0) { if (!this.el.classList.contains('hidden')) this.close(); return; }
     this.render();
   }
 
-  private flowEl: HTMLElement | null = null;
-  private flowFirst: { passed: number; time: number } | null = null;
+  private setLive(key: string, text: string): void { const e = this.live[key]; if (e && e.textContent !== text) e.textContent = text; }
 
-  /** Fluxo do cruzamento: diferença do contador entre duas leituras (veículos por hora). */
+  /** The junction's flow: the difference of its counter between two readings (vehicles an hour). */
   showNodeProbe(p: { node: number; passed: number; time: number }): void {
-    if (p.node !== this.node || !this.flowEl) return;
+    if (p.node !== this.node) return;
     const f = this.flowFirst;
-    if (!f || p.passed < f.passed) { this.flowFirst = { passed: p.passed, time: p.time }; this.flowEl.textContent = 'Medindo o fluxo…'; return; }
+    if (!f || p.passed < f.passed) { this.flowFirst = { passed: p.passed, time: p.time }; return; }
     const dt = p.time - f.time;
     if (dt < 5) return;
-    this.flowEl.textContent = `Fluxo: ${Math.round((p.passed - f.passed) / dt * 3600)} veíc./h (medido nos últimos ${Math.round(dt)} s)`;
+    this.setLive('flow', t('junction.perHour', { n: fmtInt((p.passed - f.passed) / dt * 3600) }));
   }
 
-  private probeEl: HTMLElement | null = null;
-  private probeTimer = 0;
-
-  /** Números ao vivo do trecho inspecionado (vindos da simulação). */
+  /** The road's live numbers (from the simulation). */
   showProbe(p: { seg: number; vehicles: number; speed: number; queue: number; capacity: number }): void {
-    if (p.seg !== this.seg || !this.probeEl) return;
-    this.probeEl.textContent = `${p.vehicles} veículos agora · ${Math.round(p.speed * 3.6)} km/h · fila de ${p.queue} · cabem ${p.capacity}`;
+    if (p.seg !== this.seg) return;
+    this.setLive('vehicles', fmtInt(p.vehicles));
+    this.setLive('speed', `${fmtInt(p.speed * 3.6)} km/h`);
+    this.setLive('queue', fmtInt(p.queue));
+    this.setLive('capacity', plural('inspector.capacityValue', p.capacity));
   }
 
   private apply(spec: JunctionSpec | null, label = 'controle do cruzamento'): void {
@@ -108,75 +132,77 @@ export class Inspector {
 
   private spec(): JunctionSpec { return { ...(this.world.roads.junctions.get(this.node) ?? { ctl: Ctl.Auto }) }; }
 
+  private head(kind: string, title: string): void {
+    const h = el('div', 'insp-head');
+    const names = el('div');
+    names.append(el('div', 'insp-kind', kind), el('h3', '', title));
+    const close = el('button', 'v2-icon');
+    close.type = 'button';
+    close.title = t('inspector.close');
+    close.innerHTML = svg('close', 16);
+    close.addEventListener('click', (e) => { e.stopPropagation(); this.close(); });
+    h.append(names, close);
+    this.el.append(h);
+  }
+
   private render(): void {
-    const el = this.el;
-    el.innerHTML = '';
+    const box = this.el;
+    box.replaceChildren();
+    this.live = {};
+    clearInterval(this.probeTimer);
     if (this.node < 0 && this.seg < 0) { this.close(); return; }
-    el.classList.remove('hidden');
+    box.classList.remove('hidden');
     this.a.mark(this.node, this.seg);
-    const head = document.createElement('div');
-    head.className = 'insp-head';
-    const title = document.createElement('h3');
-    head.append(title, btn('×', () => this.close(), '', 'Fechar (Esc)'));
-    el.append(head);
-    if (this.seg >= 0) { title.textContent = 'Via'; this.renderSeg(); return; }
+    if (this.seg >= 0) { this.renderSeg(); return; }
     const net = this.world.roads, n = this.node;
-    // mesma ordem anti-horária dos braços da simulação (as fases contam nela)
+    // the same counter-clockwise order of legs as the simulation (the phases count in it)
     const segs = net.segsOf(n, []).sort((a, b) => armAngle(...dirOut(net, n, a)) - armAngle(...dirOut(net, n, b)));
+    const height = el('div');
+    height.append(row(label(t('inspector.heightNode')), value(`${fmtDec(net.nodes.cols.y[n])} m`)),
+      actions(btn(t('junction.lower'), () => this.raise(-0.5)), btn(t('junction.raise'), () => this.raise(0.5))));
     if (segs.length === 2) {
-      // nó no meio da via: altura e unir as duas
-      title.textContent = 'Ponto da via';
-      el.append(row(label(`Altura: ${net.nodes.cols.y[n].toFixed(1).replace('.', ',')} m`),
-        btn('Descer 0,5 m', () => this.raise(-0.5)), btn('Subir 0,5 m', () => this.raise(0.5))));
+      this.head(t('inspector.node'), t('inspector.heightPoint'));
+      box.append(height);
       const sp0 = net.junctions.get(n);
-      if (sp0 && sp0.ctl === Ctl.UTurn) {
-        el.append(note('Retorno no canteiro.'));
-        el.append(row(btn('Fechar o retorno', () => this.apply(null, 'fechar retorno'))));
-      }
+      if (sp0 && sp0.ctl === Ctl.UTurn) box.append(note(t('hint.uturn.placed')), actions(btn(t('ui.insp.closeUturn'), () => this.apply(null, 'fechar retorno'))));
       if (sp0 && (sp0.ctl === Ctl.Zebra || sp0.ctl === Ctl.PedSignal)) {
-        el.append(note(sp0.ctl === Ctl.Zebra ? 'Faixa de pedestres: zebra (pedestre tem preferência).' : 'Faixa de pedestres: com semáforo.'));
-        el.append(row(btn('Remover faixa', () => this.apply(null, 'remover faixa'))));
+        box.append(note(t(sp0.ctl === Ctl.Zebra ? 'inspector.crossingZebra' : 'inspector.crossingSignal')), actions(btn(t('inspector.removeCrossing'), () => this.apply(null, 'remover faixa'))));
       }
-      el.append(row(btn('Unir as duas vias', () => {
+      box.append(actions(btn(t('inspector.joinAligned'), () => {
         const j = joinAt(this.world, n);
-        if (j.empty) { this.a.toast('Essas vias não se unem: perfis diferentes, sentidos opostos ou longas demais juntas.'); return; }
-        this.commands.push(j); this.a.toast('Vias unidas.'); this.close();
-      }, '', 'Junta as duas vias deste ponto numa só')));
+        if (j.empty) { this.a.toast(t('ui.insp.joinFail')); return; }
+        this.commands.push(j); this.a.toast(t('ui.insp.joined')); this.close();
+      }, 'primary')));
       return;
     }
-    title.textContent = `Cruzamento · ${segs.length} vias`;
+    this.head(t('inspector.junction'), plural('ui.insp.roads', segs.length));
     const spec = net.junctions.get(n);
     const eff = effectiveControl(net, n, net.junctions.get(n), net.flow.get(n));
-    if (eff.ctl === Ctl.Ring) { el.append(note('Faz parte de uma rotatória: quem está no anel tem a preferência.')); return; }
-
-    // altura do nó
-    el.append(row(label(`Altura: ${net.nodes.cols.y[n].toFixed(1).replace('.', ',')} m`),
-      btn('Descer 0,5 m', () => this.raise(-0.5)), btn('Subir 0,5 m', () => this.raise(0.5))));
-    // controle
-    el.append(section('Controle do cruzamento'));
-    const sel = select(CHOICES.map((c) => [c, CTL_NAMES[c]]), spec?.ctl ?? Ctl.Auto, (v) => {
-      if (v === Ctl.Auto) this.apply(null);
-      else this.apply({ ...this.spec(), ctl: v });
-    });
-    el.append(sel);
-    if (!spec || spec.ctl === Ctl.Auto) {
-      el.append(note(`Escolhido pela importância das vias: ${CTL_NAMES[eff.ctl].toLowerCase()}.`));
-      el.append(row(btn('Travar esta escolha', () => this.apply({ ...this.spec(), ctl: eff.ctl }, 'travar controle'), '', 'Fixa o controle atual: ele não muda mais se as vias em volta mudarem')));
-    } else el.append(row(btn('Voltar ao automático', () => this.apply(null))));
-    // fluxo medido na simulação (veículos por hora que passaram pelo nó)
-    this.flowEl = note('Medindo o fluxo…');
+    if (eff.ctl === Ctl.Ring) { box.append(note(t('ui.insp.ring'))); return; }
+    // the numbers
+    const grid = el('div', 'inspect-grid');
+    grid.append(cardOf(t('inspector.control'), t(CTL_KEY[eff.ctl] ?? 'control.none')), cardOf(t('inspector.volume'), '…', (e) => { this.live.flow = e; }));
+    box.append(grid, height);
     this.flowFirst = null;
-    el.append(this.flowEl);
-    clearInterval(this.probeTimer);
     this.a.probeNode(n);
     this.probeTimer = window.setInterval(() => { if (this.node === n) this.a.probeNode(n); else clearInterval(this.probeTimer); }, 2000);
 
-    // regra de cada via (placas)
+    // control
+    box.append(section(t('junction.control')));
+    box.append(select(CHOICES.map(([c, k]) => [c, t(k)]), spec?.ctl ?? Ctl.Auto, (v) => {
+      if (v === Ctl.Auto) this.apply(null); else this.apply({ ...this.spec(), ctl: v });
+    }));
+    if (!spec || spec.ctl === Ctl.Auto) {
+      box.append(note(t('ui.insp.autoChoice', { choice: t(CTL_KEY[eff.ctl] ?? 'control.none').toLowerCase() })));
+      box.append(actions(btn(t('ui.insp.lock'), () => this.apply({ ...this.spec(), ctl: eff.ctl }, 'travar controle'))));
+    } else box.append(note(t('junction.locked')), actions(btn(t('junction.unlock'), () => this.apply(null))));
+
+    // rule of each leg (signs)
     if (eff.ctl === Ctl.Priority || eff.ctl === Ctl.AllStop) {
-      el.append(section('Regra de cada via'));
+      box.append(section(t('junction.legs')));
       for (const s of segs) {
         const r = eff.legs.get(s) ?? Rule.Free;
-        el.append(row(label(legName(this.world, n, s)), select([[Rule.Main, RULE_NAMES[Rule.Main]], [Rule.Yield, RULE_NAMES[Rule.Yield]], [Rule.Stop, RULE_NAMES[Rule.Stop]]], r, (v) => {
+        box.append(row(label(legName(this.world, n, s, true)), select([[Rule.Main, t('junction.rule.priority')], [Rule.Yield, t('junction.rule.yield')], [Rule.Stop, t('junction.rule.stop')]], r, (v) => {
           const sp = this.spec();
           if (sp.ctl === Ctl.Auto) sp.ctl = eff.ctl;
           sp.legs = [...(sp.legs ?? []).filter(([x]) => x !== s), [s, v]];
@@ -185,76 +211,91 @@ export class Inspector {
       }
     }
 
-    // semáforo
+    // signal
     if (eff.ctl === Ctl.Signal) {
       const stages: number[] = [];
-      const order = segs.map((s) => dirOut(net, n, s));
-      const count = signalStages(order, stages);
-      el.append(section('Semáforo'));
-      el.append(row(label('Tempos'), select([[0, 'Adaptativo (pela fila)'], [1, 'Tempo fixo']], spec?.fixed ? 1 : 0, (v) => {
+      const count = signalStages(segs.map((s) => dirOut(net, n, s)), stages);
+      box.append(section(t('junction.signal')));
+      box.append(row(label(t('junction.signalMode')), select([[0, t('junction.mode.adaptive')], [1, t('junction.mode.fixed')]], spec?.fixed ? 1 : 0, (v) => {
         const sp = this.spec(); if (sp.ctl === Ctl.Auto) sp.ctl = Ctl.Signal;
         sp.fixed = v === 1; this.apply(sp, 'tempos do semáforo');
       })));
       for (let k = 0; k < count; k++) {
-        const legs = segs.filter((_, i) => stages[i] === k).map((s) => legName(this.world, n, s).split(' · ')[0]).join(' e ');
+        const legs = segs.filter((_, i) => stages[i] === k).map((s) => legName(this.world, n, s)).join(' · ');
         const g = spec?.greens?.[k] ?? 20;
-        const setG = (d: number) => {
+        const setG = (d: number): void => {
           const sp = this.spec(); if (sp.ctl === Ctl.Auto) sp.ctl = Ctl.Signal;
           sp.fixed = true;
           const greens = Array.from({ length: count }, (_, i) => sp.greens?.[i] ?? 20);
           greens[k] = Math.max(6, Math.min(90, greens[k] + d));
           sp.greens = greens; this.apply(sp, 'verde do semáforo');
         };
-        el.append(row(label(`Fase ${k + 1} (${legs})`), btn('−', () => setG(-5), '', 'Verde mais curto'), value(`${g} s`), btn('+', () => setG(5), '', 'Verde mais longo')));
+        box.append(row(label(`${t('junction.stage', { n: k + 1 })} (${legs})`), btn('−', () => setG(-5), '', t('junction.shorter')), value(`${g} s`), btn('+', () => setG(5), '', t('junction.longer'))));
       }
       const off = spec?.offset ?? 0;
-      el.append(row(label('Defasagem'), btn('−', () => { const sp = this.spec(); sp.ctl = Ctl.Signal; sp.fixed = true; sp.offset = off - 2; this.apply(sp, 'defasagem'); }, '', 'Mais cedo'),
-        value(`${off} s`), btn('+', () => { const sp = this.spec(); sp.ctl = Ctl.Signal; sp.fixed = true; sp.offset = off + 2; this.apply(sp, 'defasagem'); }, '', 'Mais tarde')));
-      el.append(row(btn('Onda verde na via principal', () => this.greenWave())));
-      const bus = document.createElement('label');
-      bus.className = 'check';
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!spec?.bus;
+      const setOff = (d: number): void => { const sp = this.spec(); sp.ctl = Ctl.Signal; sp.fixed = true; sp.offset = off + d; this.apply(sp, 'defasagem'); };
+      box.append(row(label(t('junction.offset')), btn('−', () => setOff(-2), '', t('junction.earlier')), value(`${off} s`), btn('+', () => setOff(2), '', t('junction.later'))));
+      box.append(actions(btn(t('junction.greenWave'), () => this.greenWave())));
+      const bus = el('label', 'check');
+      const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!spec?.bus;
       cb.addEventListener('change', () => { const sp = this.spec(); if (sp.ctl === Ctl.Auto) sp.ctl = Ctl.Signal; sp.bus = cb.checked; this.apply(sp, 'prioridade ao ônibus'); });
-      bus.append(cb, document.createTextNode(' Prioridade ao ônibus'));
-      el.append(bus);
+      bus.append(cb, el('span', '', t('junction.busPriority')));
+      box.append(bus);
     }
 
-    // conexões de faixa: cada faixa que chega e as saídas que ela pode tomar
-    el.append(section('Conexões de faixa'));
-    el.append(note(spec?.lanes?.length ? 'Ajustadas à mão. A seta pintada em cada faixa mostra as saídas dela.' : 'Automáticas (pelas setas de cada faixa). Clique numa saída para ligar ou desligar.'));
+    // lane connectors: the lanes coming in (blue), then where the picked one may go (green)
+    box.append(section(`${t('connectors.title')} · ${t(spec?.lanes?.length ? 'connectors.custom' : 'connectors.auto')}`));
+    const ins = el('div', 'legs');
+    let any = false;
     for (const from of segs) {
       const ex = laneExits(net, n, from, spec);
       if (!ex.length) continue;
-      ex.forEach((lane, a) => {
-        const r = row(label(`${legName(this.world, n, from).split(' · ')[0]}, faixa ${a + 1}${ex.length > 1 ? (a === 0 ? ' (direita)' : a === ex.length - 1 ? ' (esquerda)' : '') : ''}:`));
-        // todas as saídas possíveis do nó (as automáticas e as outras)
-        for (const to of segs) {
-          if (to === from) continue;
-          const on = lane.exits.some(([s2]) => s2 === to);
-          const b = btn(`${on ? '✓' : '·'} ${legName(this.world, n, to).split(' · ')[0]}`, () => {
-            const sp = this.spec();
-            const now = lane.exits.map(([s2]) => s2);
-            const next = on ? now.filter((s2) => s2 !== to) : [...now, to];
-            if (!next.length) { this.a.toast('Essa é a última saída da faixa: ela não pode ficar sem caminho.'); return; }
-            sp.lanes = [...(sp.lanes ?? []).filter(([s2, i2]) => !(s2 === from && i2 === a)), [from, a, next]];
-            this.apply(sp, 'conexão de faixa');
-          }, on ? '' : 'banned', on ? 'Ligada: clique para desligar' : 'Desligada: clique para ligar');
-          r.append(b);
-        }
-        el.append(r);
+      any = true;
+      const r = row(label(legName(this.world, n, from)));
+      ex.forEach((lane, li) => {
+        const on = this.laneIn !== null && this.laneIn[0] === from && this.laneIn[1] === li;
+        const c = chip(`${t('profile.element.lane')} ${li + 1}`, `in${on ? ' on' : ''}`, () => { this.laneIn = on ? null : [from, li]; this.render(); });
+        c.title = lane.exits.map(([s]) => legName(this.world, n, s)).join(', ');
+        r.append(c);
       });
+      ins.append(r);
     }
-    if (spec?.lanes?.length) el.append(row(btn('Restaurar automáticas', () => { const sp = this.spec(); delete sp.lanes; this.apply(sp, 'conexões automáticas'); })));
+    if (!any) box.append(note(t('connectors.none')));
+    else {
+      box.append(ins);
+      if (!this.laneIn) box.append(note(t('connectors.pickIn')));
+      else {
+        const [from, li] = this.laneIn;
+        const lane = laneExits(net, n, from, spec)[li];
+        if (lane) {
+          box.append(note(t('connectors.pickOut')));
+          const outs = row(label(`${legName(this.world, n, from)} · ${t('profile.element.lane')} ${li + 1} →`));
+          for (const to of segs) {
+            if (to === from) continue;
+            const isOn = lane.exits.some(([s2]) => s2 === to);
+            outs.append(chip(legName(this.world, n, to), `out${isOn ? '' : ' off'}`, () => {
+              const sp = this.spec();
+              const now = lane.exits.map(([s2]) => s2);
+              const next = isOn ? now.filter((s2) => s2 !== to) : [...now, to];
+              if (!next.length) { this.a.toast(t('connectors.lastExit')); return; }
+              sp.lanes = [...(sp.lanes ?? []).filter(([s2, i2]) => !(s2 === from && i2 === li)), [from, li, next]];
+              this.apply(sp, 'conexão de faixa');
+            }));
+          }
+          box.append(outs);
+        }
+      }
+      if (spec?.lanes?.length) box.append(actions(btn(t('connectors.reset'), () => { const sp = this.spec(); delete sp.lanes; this.apply(sp, 'conexões automáticas'); })));
+    }
 
-    // movimentos
-    el.append(section('Movimentos permitidos'));
-    el.append(note('Clique para proibir ou permitir.'));
+    // movements
+    box.append(section(t('junction.movements')));
     for (const from of segs) {
-      const r = row(label(`De ${legName(this.world, n, from).split(' · ')[0]}:`));
+      const r = row(label(legName(this.world, n, from)));
       for (const to of segs) {
         if (to === from) continue;
         const ban = (spec?.bans ?? []).some((_, i, b) => i % 2 === 0 && b[i] === from && b[i + 1] === to);
-        const b = btn(`${ban ? '✕' : '✓'} ${legName(this.world, n, to).split(' · ')[0]}`, () => {
+        const c = chip(legName(this.world, n, to), `out${ban ? ' off' : ''}`, () => {
           const sp = this.spec();
           const bans = (sp.bans ?? []).slice();
           let found = -1;
@@ -262,29 +303,30 @@ export class Inspector {
           if (found >= 0) bans.splice(found, 2); else bans.push(from, to);
           sp.bans = bans;
           this.apply(sp, 'movimento proibido');
-        }, ban ? 'banned' : '', ban ? 'Proibido: clique para permitir' : 'Permitido: clique para proibir');
-        r.append(b);
+        });
+        c.title = t(ban ? 'junction.moveBlocked' : 'junction.moveAllowed');
+        r.append(c);
       }
-      el.append(r);
+      box.append(r);
     }
   }
 
-  /** Registra uma edição de via (cobra; sem dinheiro desfaz e avisa). */
+  /** Records a road edit (charged; without the money it is undone and said). */
   private edit(j: RoadJournal, ok: string): void {
     if (j.empty) return;
     const price = j.price;
-    if (!j.settle()) { this.a.toast(`Dinheiro insuficiente: custa R$ ${price.toLocaleString('pt-BR')}.`); return; }
+    if (!j.settle()) { this.a.toast(t('ui.insp.noMoney', { price: money(price) })); return; }
     this.commands.push(j);
     this.a.toast(ok);
     this.refresh();
   }
 
-  /** Faixa de pedestres no meio do trecho (um passo de desfazer). */
+  /** A pedestrian crossing in the middle of the road (one undo step). */
   private crossing(s: number, ctl: number): void {
     const r = addCrossing(this.world, s, 0.5, ctl);
     if (typeof r === 'string') { this.a.toast(r); return; }
     this.commands.push(r);
-    this.a.toast(ctl === Ctl.Zebra ? 'Faixa zebra: pedestre tem preferência.' : 'Faixa com semáforo.');
+    this.a.toast(t(ctl === Ctl.Zebra ? 'inspector.crossingZebra' : 'inspector.crossingSignal'));
     this.close();
   }
 
@@ -295,15 +337,13 @@ export class Inspector {
     this.render();
   }
 
-  /** Onda verde: semáforos seguidos da via principal em tempo fixo, defasados pelo tempo de viagem. */
+  /** Green wave: the main road's signals in fixed time, offset by the travel time. */
   private greenWave(): void {
     const net = this.world.roads, n = this.node, sc = net.segs.cols, nc = net.nodes.cols;
     const segs = net.segsOf(n, []);
-    // via principal: a de maior preferência
     let main = segs[0];
     for (const s of segs) if ((PROFILE_INFO[sc.profile[s]].priority ?? 0) > (PROFILE_INFO[sc.profile[main]].priority ?? 0)) main = s;
     const chain = streetChain(this.world, main);
-    // nós da cadeia em ordem ao longo da via
     const nodes = new Set<number>();
     for (const s of chain) { nodes.add(sc.a[s]); nodes.add(sc.b[s]); }
     const base = this.spec();
@@ -318,82 +358,133 @@ export class Inspector {
       j.setJunction(m, { ...(old ?? {}), ctl: Ctl.Signal, fixed: true, greens, offset: -Math.round(d / speed) });
       count++;
     }
-    if (count < 2) { this.a.toast('A via principal não tem outro semáforo para coordenar.'); return; }
+    if (count < 2) { this.a.toast(t('junction.greenWaveNone')); return; }
     this.commands.push(j);
-    this.a.toast(`Onda verde em ${count} semáforos.`);
+    this.a.toast(t('ui.insp.greenWave', { n: count }));
     this.render();
   }
 
   private renderSeg(): void {
-    const el = this.el, s = this.seg, net = this.world.roads, sc = net.segs.cols;
+    const box = this.el, s = this.seg, w = this.world, net = w.roads, sc = net.segs.cols;
     const info = PROFILE_INFO[sc.profile[s]];
     const width = info.left + info.right;
-    this.probeEl = note('Medindo o trânsito…');
-    clearInterval(this.probeTimer);
+    this.head(t('inspector.road'), w.streetNames.get(s) ?? profileName(info));
+    // the profile seen from above, as the catalogue draws it
+    const art = el('img', 'profile-art');
+    art.src = topSwatch(info, width, 300, 56);
+    art.alt = '';
+    box.append(art, note(`${profileName(info)} · ${fmtDec(width)} m · ${t(info.oneWay ? 'catalog.oneWay' : 'catalog.twoWay')} · ${money(info.cost)}/m`));
+    const grid = el('div', 'inspect-grid');
+    grid.append(
+      cardOf(t('inspector.lanes'), String(info.lanesFwd + info.lanesBack)),
+      cardOf(t('inspector.length'), `${fmtInt(sc.len[s])} m`),
+      cardOf(t('inspector.vehicles'), '…', (e) => { this.live.vehicles = e; }),
+      cardOf(t('inspector.meanSpeed'), '…', (e) => { this.live.speed = e; }),
+      cardOf(t('inspector.queue'), '…', (e) => { this.live.queue = e; }),
+      cardOf(t('inspector.speed'), `${info.speed} km/h`),
+    );
+    box.append(grid);
+    const cap = note('');
+    this.live.capacity = cap;
+    box.append(cap);
     this.a.probe(s);
     this.probeTimer = window.setInterval(() => { if (this.seg === s) this.a.probe(s); else clearInterval(this.probeTimer); }, 1000);
-    el.append(
-      row(label('Trânsito')), this.probeEl,
-      ...(this.world.streetNames.has(s) ? [row(label('Rua'), value(this.world.streetNames.get(s)!))] : []),
-      row(label('Perfil'), value(info.name)),
-      row(label('Largura'), value(`${width.toFixed(1).replace('.', ',')} m`)),
-      row(label('Faixas'), value(`${info.lanesFwd + info.lanesBack} (${info.oneWay ? 'mão única' : 'mão dupla'})`)),
-      row(label('Velocidade'), value(`${info.speed} km/h`)),
-      row(label('Comprimento'), value(`${Math.round(sc.len[s])} m`)),
-      row(label('Preço'), value(`R$ ${info.cost.toLocaleString('pt-BR')}/m`)),
-      row(...(info.oneWay ? [btn('Inverter mão única', () => this.edit(reverseRoad(this.world, s), 'Sentido invertido.'), '', 'Os carros passam a andar no outro sentido nesta via (até os cruzamentos)')] : []),
-        btn('Dividir no meio', () => this.edit(splitAt(this.world, s, 0.5), 'Via dividida em duas.'), '', 'Põe um ponto no meio do trecho'),
-        ...(info.edges.some((e) => e.strip.kind === 'median') && !info.oneWay ? [btn('Retorno no canteiro', () => {
-          const r = addUTurn(this.world, s, 0.5);
-          if (typeof r === 'string') { this.a.toast(r); return; }
-          this.commands.push(r); this.a.toast('Retorno aberto no canteiro.'); this.close();
-        }, '', 'Abre o canteiro no meio do trecho: quem passou do destino faz o retorno ali')] : []),
-        btn('Faixa zebra', () => this.crossing(s, Ctl.Zebra), '', 'Faixa de pedestres no meio do trecho: os carros dão a vez a quem atravessa'),
-        btn('Faixa com semáforo', () => this.crossing(s, Ctl.PedSignal), '', 'Faixa de pedestres com semáforo no meio do trecho'),
-        btn('Duplicar ao lado', () => {
-          const r = duplicateRoad(this.world, s);
-          if (typeof r === 'string') { this.a.toast(`Não dá para duplicar aqui: ${r}.`); return; }
-          this.edit(r, 'Via duplicada ao lado.');
-        }, '', 'Uma via igual, paralela, à direita desta (até os cruzamentos)')),
-      ...(info.ring ? [] : [row(label('Vagas'),
-        ...([[true, 'à direita'], [false, 'à esquerda']] as Array<[boolean, string]>).map(([right, name]) => {
-          const order = right ? info.strips : info.strips.slice().reverse();
-          let k = 0;
-          while (k < order.length && (order[k].kind === 'sidewalk' || order[k].kind === 'curb')) k++;
-          const has = order[k]?.kind === 'parking';
-          return btn(`${has ? '✓' : '·'} ${name}`, () => {
-            const to = withParking(sc.profile[s], right, !has);
-            if (to < 0) { this.a.toast('Perfis demais neste mapa (máximo 256).'); return; }
-            this.edit(changeProfiles(this.world, roadBetweenJunctions(this.world, s), to), has ? 'Vagas retiradas.' : 'Vagas paralelas à guia.');
-          }, has ? '' : 'banned', has ? 'Tirar as vagas deste lado (até os cruzamentos)' : 'Pôr vagas paralelas à guia deste lado (até os cruzamentos)');
-        }))]),
-      row(btn('Desenhar com este perfil', () => this.a.useProfile(sc.profile[s]), 'main', 'Conta-gotas: desenhar outras vias iguais'),
-        btn('Demolir', () => {
-          const j = demolishSeg(this.world, s);
-          if (j.settle()) { this.commands.push(j); if (j.charge) this.a.toast(`Devolvido R$ ${(-j.charge).toLocaleString('pt-BR')}`); }
-          this.close();
-        })),
+
+    // name and numbering of the whole street
+    box.append(section(t('ui.insp.street')));
+    const chain = streetChain(w, s);
+    let from = 0;
+    for (const c of chain) { if (c === s) break; from += sc.len[c]; }
+    const name = el('input', 'v2-search');
+    name.type = 'text'; name.maxLength = 40; name.value = w.streetNames.get(s) ?? '';
+    name.placeholder = t('sign.street.placeholder').replace(/,.*$/, '');
+    name.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') name.blur(); });
+    name.addEventListener('change', () => { const v = name.value.trim(); if (v && v !== w.streetNames.get(s)) this.a.nameStreet(s, v); });
+    box.append(name, note(t('inspector.numbers', { from: fmtInt(1 + Math.floor(from)), to: fmtInt(Math.ceil(from + sc.len[s])) })));
+
+    // actions
+    box.append(section(t('ui.insp.actions')));
+    const hasMedian = info.edges.some((e) => e.strip.kind === 'median') && !info.oneWay;
+    const acts = actions(
+      btn(t('inspector.duplicate'), () => {
+        const r = duplicateRoad(w, s);
+        if (typeof r === 'string') { this.a.toast(t('ui.insp.noDuplicate', { why: r })); return; }
+        this.edit(r, t('ui.insp.duplicated'));
+      }, '', t('inspector.duplicateHint')),
+      btn(t('inspector.splitMiddle'), () => this.edit(splitAt(w, s, 0.5), t('ui.insp.split'))),
+      btn(t('inspector.reverse'), () => this.edit(reverseRoad(w, s), t('ui.insp.reversed')), '', '', !info.oneWay),
+      btn(t('inspector.addZebra'), () => this.crossing(s, Ctl.Zebra)),
+      btn(t('inspector.addSignalCrossing'), () => this.crossing(s, Ctl.PedSignal)),
+      btn(t('ui.insp.uturn'), () => {
+        const r = addUTurn(w, s, 0.5);
+        if (typeof r === 'string') { this.a.toast(r); return; }
+        this.commands.push(r); this.a.toast(t('hint.uturn.placed')); this.close();
+      }, '', hasMedian ? '' : t('hint.uturn.noMedian'), !hasMedian),
+      btn(`${t('profile.toStreet', { count: chain.length })}`, () => this.edit(changeProfiles(w, chain, sc.profile[s]), t('hint.profile.toStreet')), '', t('profile.toStreetTip'), chain.length < 2),
+      btn(t('profile.drawWith'), () => this.a.useProfile(sc.profile[s]), 'primary', t('profile.drawWithTip')),
+      btn(t('inspector.demolish'), () => {
+        const j = demolishSeg(w, s);
+        if (j.settle()) { this.commands.push(j); if (j.charge) this.a.toast(t('ui.insp.refund', { value: money(-j.charge) })); }
+        this.close();
+      }, 'danger'),
     );
+    box.append(acts);
+
+    // parking by side (up to the junctions)
+    if (!info.ring) {
+      box.append(section(t('ui.insp.parking')));
+      const r = row();
+      for (const [right, key] of [[false, 'inspector.parkingLeft'], [true, 'inspector.parkingRight']] as Array<[boolean, string]>) {
+        const order = right ? info.strips : info.strips.slice().reverse();
+        let k = 0;
+        while (k < order.length && (order[k].kind === 'sidewalk' || order[k].kind === 'curb')) k++;
+        const has = order[k]?.kind === 'parking';
+        const c = chip(t(key), `out${has ? '' : ' off'}`, () => {
+          const to = withParking(sc.profile[s], right, !has);
+          if (to < 0) { this.a.toast(t('ui.catalog.tooMany')); return; }
+          this.edit(changeProfiles(w, roadBetweenJunctions(w, s), to), t(has ? 'ui.insp.parkingOff' : 'ui.insp.parkingOn'));
+        });
+        c.title = t(has ? 'parking.none' : 'parking.parallel');
+        r.append(c);
+      }
+      box.append(r);
+    }
   }
 }
 
-function btn(text: string, fn: () => void, cls = '', title = ''): HTMLButtonElement {
-  const b = document.createElement('button');
-  b.textContent = text;
-  if (cls) b.className = cls;
+function btn(text: string, fn: () => void, cls = '', title = '', disabled = false): HTMLButtonElement {
+  const b = el('button', `ins-btn${cls ? ` ${cls}` : ''}`, text);
+  b.type = 'button';
   if (title) b.title = title;
+  b.disabled = disabled;
   b.addEventListener('click', (e) => { e.stopPropagation(); fn(); b.blur(); });
   return b;
 }
-function label(t: string): HTMLElement { const e = document.createElement('span'); e.className = 'label'; e.textContent = t; return e; }
-function value(t: string): HTMLElement { const e = document.createElement('span'); e.className = 'value'; e.textContent = t; return e; }
-function note(t: string): HTMLElement { const e = document.createElement('div'); e.className = 'note'; e.textContent = t; return e; }
-function section(t: string): HTMLElement { const e = document.createElement('h4'); e.textContent = t; return e; }
-function row(...c: HTMLElement[]): HTMLElement { const e = document.createElement('div'); e.className = 'row'; e.append(...c); return e; }
+function chip(text: string, cls: string, fn: () => void): HTMLButtonElement {
+  const b = el('button', `chip ${cls}`);
+  b.type = 'button';
+  b.append(el('i'), el('span', '', text));
+  b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+  return b;
+}
+function label(text: string): HTMLElement { return el('span', 'label', text); }
+function value(text: string): HTMLElement { return el('span', 'value', text); }
+function note(text: string): HTMLElement { return el('div', 'note', text); }
+function section(text: string): HTMLElement { return el('h4', '', text); }
+function row(...c: HTMLElement[]): HTMLElement { const e = el('div', 'ins-row'); e.append(...c); return e; }
+function actions(...c: HTMLElement[]): HTMLElement { const e = el('div', 'inspect-actions'); e.append(...c); return e; }
+function cardOf(name: string, text: string, keep?: (e: HTMLElement) => void): HTMLElement {
+  const c = el('div', 'inspect-card');
+  const v = el('strong', '', text);
+  c.append(el('span', '', name), v);
+  keep?.(v);
+  return c;
+}
 function select(opts: Array<[number, string]>, v: number, fn: (v: number) => void): HTMLSelectElement {
-  const s = document.createElement('select');
-  for (const [k, t] of opts) { const o = document.createElement('option'); o.value = String(k); o.textContent = t; s.append(o); }
+  const s = el('select');
+  for (const [k, text] of opts) { const o = el('option', '', text); o.value = String(k); s.append(o); }
   s.value = String(v);
   s.addEventListener('change', () => { fn(Number(s.value)); s.blur(); });
+  s.addEventListener('keydown', (e) => e.stopPropagation());
   return s;
 }

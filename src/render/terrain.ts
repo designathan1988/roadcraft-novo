@@ -221,7 +221,9 @@ export class TerrainRenderer {
       const coarseV = texture(this.paintCoarse, uvV).depth(layerV).level(0);
       const cover = max(max(fineV.x, fineV.y), smoothstep(0, 0.25, max(coarseV.x, coarseV.y)));
       const spacing = step.mul(morph.add(1));
-      const sink = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3));
+      // under the roads the terrain also drops 0.4 m at the finest level: the 4 m grid does not follow the junction
+      // fans and corners, and it surfaced through the asphalt in the middle of junctions (the road skirts reach 0.7 m)
+      const sink = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3).add(smoothstep(0.35, 0.7, cover).mul(0.4)));
       const y = heightAt(mxz).sub(sink);
       // normal por diferenças centrais na escala do nível
       const e = max(step, float(HEIGHT_SPACING));
@@ -251,7 +253,7 @@ export class TerrainRenderer {
       const dirt = sRGBTransferEOTF(vec3(0.52, 0.45, 0.36));
       const rock = sRGBTransferEOTF(vec3(0.47, 0.46, 0.44));
       const sand = sRGBTransferEOTF(vec3(0.72, 0.66, 0.52));
-      let c = mix(grassA, grassB, clamp(big.add(mid.mul(0.22).mul(fadeMid)), 0, 1));
+      let c = mix(grassA, grassB, clamp(big.add(mid.mul(0.22).mul(fadeMid)), 0, 1)).mul(0.78);
       // gramado assado (tufos, terra nas falhas, manchas secas; `surfaceBake.ts`) em duas escalas para não repetir;
       // o mipmap leva a média de longe
       const g1 = texture(GRASS_TEX, p.xz.div(GRASS_TILE)).xyz.mul(2);
@@ -355,12 +357,12 @@ export class TerrainRenderer {
     // correnteza: o ruído escorre na direção do vento; ondas: mais forte e mais rápido; espuma: cristas brancas
     const flow = vec2(0.91, 0.41).mul(T.time.mul(currentU.mul(0.35).add(0.12)));
     const ripple = mx_noise_float(p.xz.mul(waveU.mul(0.08).add(0.1)).add(flow)).mul(0.5).add(0.5);
-    const deep = sRGBTransferEOTF(vec3(0.06, 0.16, 0.18)), shallow = sRGBTransferEOTF(vec3(0.24, 0.4, 0.36));
+    const deep = sRGBTransferEOTF(vec3(0.03, 0.09, 0.11)), shallow = sRGBTransferEOTF(vec3(0.14, 0.26, 0.24));
     const depth = clamp(vDepth.div(3), 0, 1);
     const crest = smoothstep(float(1).sub(foamU.mul(0.35)), float(1.02), ripple).mul(waveU).mul(foamU);
     const foam = clamp(smoothstep(foamU.mul(0.5).add(0.15), 0.0, vDepth).mul(ripple.mul(0.6).add(0.4)).add(crest), 0, 1);
     m.colorNode = vec4(mix(mix(shallow, deep, depth), vec3(0.85, 0.88, 0.86), foam), 1);
-    m.roughnessNode = mix(float(0.08), float(0.3), ripple.mul(waveU.add(0.4)));
+    m.roughnessNode = mix(float(0.16), float(0.34), ripple.mul(waveU.add(0.4)));
     m.metalnessNode = float(0);
     m.maskNode = p.y.greaterThan(float(-1500));
     return m;
