@@ -1,6 +1,11 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-18, 19h30.
+Atualizado: 2026-10-18, 20h30.
+
+## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
+- 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
+  vias item 2 (`d73736e`); `npm run budget` com linha de base (`f8099a1`). Visto no teste e devolvido à sessão de
+  vias: céu do horizonte ainda claro na vista de rua baixa. As outras frentes continuam nos ramos `claude/*`.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
