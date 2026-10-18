@@ -12,6 +12,7 @@ import { Ctl, Rule, dirOut, effectiveControl, signalStages, type JunctionSpec } 
 import { PROFILE_INFO, withParking } from '../roads/profiles.ts';
 import { armAngle } from '../roads/geometry.ts';
 import { laneExits } from '../roads/laneLinks.ts';
+import { streetName, streetOf } from '../roads/streetNames.ts';
 import type { World } from '../world/world.ts';
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
@@ -30,6 +31,8 @@ export interface InspectActions {
   mark(node: number, seg: number): void;
   /** Names the whole street of a road (one undo step). */
   nameStreet(seg: number, name: string): void;
+  /** The street name the gameplay front gives a point (generated names), when it has one. */
+  streetName?(x: number, z: number): string;
 }
 
 const CHOICES: Array<[number, string]> = [[Ctl.Auto, 'junction.control.auto'], [Ctl.Signal, 'junction.control.signal'], [Ctl.Priority, 'junction.control.priority'],
@@ -368,7 +371,10 @@ export class Inspector {
     const box = this.el, s = this.seg, w = this.world, net = w.roads, sc = net.segs.cols;
     const info = PROFILE_INFO[sc.profile[s]];
     const width = info.left + info.right;
-    this.head(t('inspector.road'), w.streetNames.get(s) ?? profileName(info));
+    // the whole street, ordered from its start (roads/streetNames.ts): its name, typed or generated, and numbering
+    const whole = streetOf(w, s);
+    const street = streetName(w, s, whole);
+    this.head(t('inspector.road'), street || profileName(info));
     // the profile seen from above, as the catalogue draws it
     const art = el('img', 'profile-art');
     art.src = topSwatch(info, width, 300, 56);
@@ -394,10 +400,10 @@ export class Inspector {
     box.append(section(t('ui.insp.street')));
     const chain = streetChain(w, s);
     let from = 0;
-    for (const c of chain) { if (c === s) break; from += sc.len[c]; }
+    for (let k = 0; k < whole.segs.length && whole.segs[k] !== s; k++) from += whole.lens[k];
     const name = el('input', 'v2-search');
     name.type = 'text'; name.maxLength = 40; name.value = w.streetNames.get(s) ?? '';
-    name.placeholder = t('sign.street.placeholder').replace(/,.*$/, '');
+    name.placeholder = street;
     name.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') name.blur(); });
     name.addEventListener('change', () => { const v = name.value.trim(); if (v && v !== w.streetNames.get(s)) this.a.nameStreet(s, v); });
     box.append(name, note(t('inspector.numbers', { from: fmtInt(1 + Math.floor(from)), to: fmtInt(Math.ceil(from + sc.len[s])) })));

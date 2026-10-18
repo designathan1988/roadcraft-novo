@@ -237,4 +237,8 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.about.files': "{n} arquivos · {licence} · {author}",
   'ui.about.showLicence': "Ver o texto da licença",
   'ui.about.noAssets': "Esta versão não traz pacotes de arte de terceiros.",
+  'ui.build.decay': "Desgaste",
+  'ui.build.renovate': "Reformar",
+  'ui.build.renovateTip': "Reformar o prédio: fica novo de novo (Shift+clique faz o mesmo)",
+  'ui.about.author.proxies': "MakeHuman system assets (comunidade MakeHuman, makehumancommunity.org)",
 };
