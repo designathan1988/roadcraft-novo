@@ -29,7 +29,10 @@ const copyDir = (from, to, base = '') => {
 copyDir(path.join(root, 'dist'), path.join(out, 'dist'));
 fs.mkdirSync(path.join(out, 'tools'), { recursive: true });
 fs.copyFileSync(path.join(root, 'tools', 'serve.mjs'), path.join(out, 'tools', 'serve.mjs'));
-for (const f of ['jogar.bat', 'jogar.sh']) fs.copyFileSync(path.join(root, f), path.join(out, f));
+// line ends fixed whatever the checkout did: sh refuses CRLF, cmd wants it
+const text = (f) => fs.readFileSync(path.join(root, f), 'utf8').replace(/\r\n/g, '\n');
+fs.writeFileSync(path.join(out, 'jogar.sh'), text('jogar.sh'));
+fs.writeFileSync(path.join(out, 'jogar.bat'), text('jogar.bat').replace(/\n/g, '\r\n'));
 fs.chmodSync(path.join(out, 'jogar.sh'), 0o755);
 fs.writeFileSync(path.join(out, 'LEIA-ME.txt'), [
   'Roadcraft no navegador',

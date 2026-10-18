@@ -20,7 +20,9 @@
     "fotos": "node tools/fotos.mjs",
     "cook:people": "node tools/cook-people.mjs",
     "icon": "node tools/make-icon.mjs",
-    "package:web": "vite build && node tools/package-web.mjs"
+    "package:web": "vite build && node tools/package-web.mjs",
+    "fotos:pacote": "node tools/fotos-pacote.mjs",
+    "fotos:navegador": "node tools/fotos-pacote.mjs --navegador"
   },
   "dependencies": {
     "steamworks.js": "^0.4.0",
