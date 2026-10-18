@@ -4,6 +4,8 @@ Jogo de construir cidades no navegador e no Steam (TypeScript, Vite 8, three.js 
 Electron 44). Meta do produto: **a aparência e os recursos do Roadcraft, abrindo e rodando cidades de 10 a 24 km
 como o motor abre hoje.** Fale com o jogador em português do Brasil. Commits em português. Nunca dê push sem um sim.
 
+@docs/ESTADO.md
+
 - `npm run dev` (Vite com COOP/COEP, porta 5173) · `npm run build` = `tsc && vite build` · `npm test` =
   `node --test test/*.test.ts` · `node tools/fotos.mjs` = 4 fotos padrão com a GPU (rua, bairro, cidade, noite),
   sobre `dist/` · `node tools/verificar.mjs` = 146 verificações dentro do jogo.
