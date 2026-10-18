@@ -94,6 +94,8 @@ export class ShellState {
   lotMode: LotMode = 'edit';
   /** The lot mode last used under Zones (the Lots tab goes back to it). */
   lastLotMode: LotMode = 'rect';
+  /** A lot mode of the gameplay front in use (split by line, curve side), or none. */
+  lotExtra: 'line' | 'curve' | null = null;
   splitKind: 'side' | 'depth' = 'side';
   splitParts = 2;
   lotUse = 1;
@@ -260,17 +262,22 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
   const LOTS: Array<[LotMode | 'curve', string, string]> = [['rect', 'zone.lot.shape.rect', 'plus'], ['poly', 'zone.lot.shape.polygon', 'lotPolygon'], ['corner', 'zone.lot.edit', 'lotEdit'],
     ['curve', 'zone.lot.curve', 'lotCurve'], ['front', 'zone.lot.front', 'lotFront'], ['split', 'zone.lot.split', 'split'], ['join', 'zone.lot.join', 'join'], ['delete', 'zone.lot.delete', 'lotDelete']];
   for (const [mode, key, icon] of LOTS) {
-    const c = card(t(key), s.lotMode === mode, () => { if (mode === 'curve') return; s.lotMode = mode; s.lastLotMode = mode; a.lotMode(mode); h.render(); }, svg(icon, 30), mode === 'delete' ? 'danger' : '');
-    if (mode === 'curve') soon(c, SOON());
+    const on = mode === 'curve' ? s.lotExtra === 'curve' : s.lotExtra === null && s.lotMode === mode;
+    const c = card(t(key), on, () => {
+      if (mode === 'curve') { if (a.lotCurve) { a.lotCurve(); s.lotExtra = 'curve'; h.render(); } return; }
+      a.lotExtraOff?.(); s.lotExtra = null;
+      s.lotMode = mode; s.lastLotMode = mode; a.lotMode(mode); h.render();
+    }, svg(icon, 30), mode === 'delete' ? 'danger' : '');
+    if (mode === 'curve' && !a.lotCurve) soon(c, SOON());
     lots.append(c);
   }
-  if (s.lotMode === 'split') {
+  if (s.lotMode === 'split' || s.lotExtra === 'line') {
     p.options.append(orow(t('v2.row.cut'), choices([
-      { label: t('zone.split.vertical'), on: s.splitKind === 'side', run: () => { s.splitKind = 'side'; a.lotSplit('side', s.splitParts); h.render(); }, icon: svg('split_vertical', 18) },
-      { label: t('zone.split.horizontal'), on: s.splitKind === 'depth', run: () => { s.splitKind = 'depth'; a.lotSplit('depth', s.splitParts); h.render(); }, icon: svg('split_horizontal', 18) },
-      { label: t('zone.split.line'), on: false, run: () => undefined, icon: svg('split_line', 18), soon: SOON() },
+      { label: t('zone.split.vertical'), on: s.lotExtra === null && s.splitKind === 'side', run: () => { a.lotExtraOff?.(); s.lotExtra = null; s.lotMode = 'split'; a.lotMode('split'); s.splitKind = 'side'; a.lotSplit('side', s.splitParts); h.render(); }, icon: svg('split_vertical', 18) },
+      { label: t('zone.split.horizontal'), on: s.lotExtra === null && s.splitKind === 'depth', run: () => { a.lotExtraOff?.(); s.lotExtra = null; s.lotMode = 'split'; a.lotMode('split'); s.splitKind = 'depth'; a.lotSplit('depth', s.splitParts); h.render(); }, icon: svg('split_horizontal', 18) },
+      { label: t('zone.split.line'), on: s.lotExtra === 'line', run: () => { if (a.lotLine) { a.lotLine(); s.lotExtra = 'line'; h.render(); } }, icon: svg('split_line', 18), soon: a.lotLine ? undefined : SOON() },
     ])));
-    p.options.append(orow(t('v2.row.parts'), choices([2, 3, 4, 5, 6].map((n) => ({
+    if (s.lotExtra !== 'line') p.options.append(orow(t('v2.row.parts'), choices([2, 3, 4, 5, 6].map((n) => ({
       label: `${t('zone.split.into')} ${n}`, on: s.splitParts === n, run: () => { s.splitParts = n; a.lotSplit(s.splitKind, n); h.render(); }, icon: `<b class="v2-num">${n}</b>`,
     })))));
   }
@@ -295,6 +302,8 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
   if (editing) {
     if (b) {
       p.options.append(el('div', 'v2-pop-title', `${b.fn ? loose(FN_NAMES[b.fn]) : t(`zone.name.${b.zone}`)} · ${plural('ui.floors', b.floors)}`));
+      const address = a.addressOf?.() ?? '';
+      if (address) p.options.append(el('div', 'v2-muted building-address', address));
       p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
       p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(Math.max(1, b.floors + d)); })));
       p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
@@ -303,6 +312,13 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
         button(`v2-act${h.insideFloor() >= 0 ? ' on' : ''}`, t('inside.toggle'), () => a.inside('toggle'), svg('interiorView', 16)),
         button('v2-act', t('inside.down'), () => a.inside('down'), svg('floorDown', 16)),
         button('v2-act', t('inside.up'), () => a.inside('up'), svg('floorUp', 16))));
+      const decay = a.decayOf?.() ?? -1;
+      if (decay >= 0) {
+        const renovate = button('v2-pill rp-open', t('ui.build.renovate'), () => { a.renovate?.(); h.render(); }, svg('build', 16));
+        if (!a.renovate) soon(renovate, SOON());
+        renovate.title = t('ui.build.renovateTip');
+        p.options.append(orow(t('ui.build.decay'), el('span', 'v2-stepper-value', `${Math.round(decay * 100)}%`), renovate));
+      }
     } else {
       p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
       p.options.append(subhead(t('ui.build.next')));

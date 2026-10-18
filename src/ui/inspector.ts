@@ -30,6 +30,8 @@ export interface InspectActions {
   mark(node: number, seg: number): void;
   /** Names the whole street of a road (one undo step). */
   nameStreet(seg: number, name: string): void;
+  /** The street name the gameplay front gives a point (generated names), when it has one. */
+  streetName?(x: number, z: number): string;
 }
 
 const CHOICES: Array<[number, string]> = [[Ctl.Auto, 'junction.control.auto'], [Ctl.Signal, 'junction.control.signal'], [Ctl.Priority, 'junction.control.priority'],
@@ -368,7 +370,9 @@ export class Inspector {
     const box = this.el, s = this.seg, w = this.world, net = w.roads, sc = net.segs.cols;
     const info = PROFILE_INFO[sc.profile[s]];
     const width = info.left + info.right;
-    this.head(t('inspector.road'), w.streetNames.get(s) ?? profileName(info));
+    const nc = net.nodes.cols;
+    const street = w.streetNames.get(s) ?? this.a.streetName?.((nc.x[sc.a[s]] + nc.x[sc.b[s]]) / 2, (nc.z[sc.a[s]] + nc.z[sc.b[s]]) / 2) ?? '';
+    this.head(t('inspector.road'), street || profileName(info));
     // the profile seen from above, as the catalogue draws it
     const art = el('img', 'profile-art');
     art.src = topSwatch(info, width, 300, 56);
@@ -396,7 +400,7 @@ export class Inspector {
     let from = 0;
     for (const c of chain) { if (c === s) break; from += sc.len[c]; }
     const name = el('input', 'v2-search');
-    name.type = 'text'; name.maxLength = 40; name.value = w.streetNames.get(s) ?? '';
+    name.type = 'text'; name.maxLength = 40; name.value = street;
     name.placeholder = t('sign.street.placeholder').replace(/,.*$/, '');
     name.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') name.blur(); });
     name.addEventListener('change', () => { const v = name.value.trim(); if (v && v !== w.streetNames.get(s)) this.a.nameStreet(s, v); });

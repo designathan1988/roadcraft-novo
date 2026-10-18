@@ -39,7 +39,30 @@ export interface CityStatus {
   speedKmh: number; tripsPerMin: number; lostPerMin: number; stopped: number; roads: number; nodes: number;
 }
 
-export interface HudActions {
+/**
+ * Capabilities other fronts publish in Game.hudActions (the gameplay front's src/tools/featureActions.ts). They are
+ * optional here: a panel turns its button on when the action exists, and leaves it "being built" otherwise.
+ */
+export interface OptionalActions {
+  /** Lot: split by a line drawn across it (two clicks). */
+  lotLine?(): void;
+  /** Lot: curve a side (click near it, then where it should pass). */
+  lotCurve?(): void;
+  /** Leaves the two lot modes above. */
+  lotExtraOff?(): void;
+  /** Renovates the selected building. */
+  renovate?(): void;
+  /** Decay of the selected building, 0..1 (−1: none). */
+  decayOf?(): number;
+  /** Address of the selected building ("Rua X, 124"), '' when none. */
+  addressOf?(): string;
+  /** Name of the street nearest (x, z), '' away from streets. */
+  streetNameAt?(x: number, z: number): string;
+  /** Regional road paint of this map, saved with it. */
+  mapPaint?(style: string): void;
+}
+
+export interface HudActions extends OptionalActions {
   tool(t: Tool): void;
   radius(r: number): void;
   strength(s: number): void;
@@ -377,6 +400,8 @@ export class Hud {
     }
     this.cat = id;
     this.open = true;
+    // Build edits buildings: a lot mode left on by the Zones tab (split, join...) goes back to editing
+    if (id === 'build' && !['edit', 'rect', 'poly'].includes(this.s.lotMode)) { this.a.lotExtraOff?.(); this.s.lotExtra = null; this.s.lotMode = 'edit'; this.a.lotMode('edit'); }
     const def = CATS.find((c) => c.id === id)!.tool;
     const keep = categoriesOf(this.current).includes(id);
     if (!keep) this.a.tool(this.lastTool.get(id) ?? def);
@@ -498,7 +523,7 @@ export class Hud {
         el('hr'),
         this.row(t('menu.graphicsOptions'), () => a.options(), 'm_quality'),
         this.seg(t('menu.language'), LANGUAGES, lang(), (v) => setLang(v as 'pt-BR' | 'en')),
-        this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => a.paint(v)),
+        this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => { a.paint(v); a.mapPaint?.(v); }),
         el('hr'),
         this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate'),
         this.row(t('action.about'), () => this.about.open(), 'm_about'),
@@ -624,6 +649,7 @@ export class Hud {
   }
   setZone(_z: number): void { /* the shell keeps the zone it chose */ }
   setLotMode(m: LotMode): void {
+    this.s.lotExtra = null;
     if (this.s.lotMode === m) return;
     this.s.lotMode = m;
     if (this.open && (this.cat === 'build' || this.cat === 'zones')) this.render();

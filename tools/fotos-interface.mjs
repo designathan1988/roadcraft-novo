@@ -46,6 +46,8 @@ export const SCENES = {
   'teclas': scene(`const key=(c)=>window.dispatchEvent(new KeyboardEvent('keydown',{code:c,key:c,bubbles:true}));key('KeyT');await W(200);key('F1');await W(200);click('[data-pop=menu]');await W(200);key('Escape');await W(200);key('F1')`),
   'inicio': '(async()=>{await new Promise(r=>setTimeout(r,1500));})()',
   'sobre-licencas': scene(`click('[data-pop=menu]');await W(200);click(byText('.v2-row','^Sobre|^About'));await W(1500);const d=Q('.about-text');if(d)d.open=true;console.log('about aberto: '+!Q('.about').parentElement.hidden)`),
+  'acoes-lotes': scene(`const A=g.hudActions;A.lotLine=()=>{};A.lotCurve=()=>{};A.lotExtraOff=()=>{};A.renovate=()=>{};A.decayOf=()=>0.3;A.addressOf=()=>'Rua Machado de Assis, 124';click('[data-cat=zones]');await W(200);click(byText('.v2-tab','Lotes|Lots'));await W(200);click(byText('.v2-card','Dividir|Split'));await W(200);click(byText('.v2-choice','Por linha|line'))`),
+  'acoes-predio': scene(`const A=g.hudActions;A.lotLine=()=>{};A.lotCurve=()=>{};A.lotExtraOff=()=>{};A.renovate=()=>{};A.decayOf=()=>0.3;A.addressOf=()=>'Rua Machado de Assis, 124';click('[data-cat=build]');await W(200);const b=g.world.buildings,c=b.cols;let best=-1,bd=1e9;for(let i=0;i<b.alive.length;i++){if(!b.alive[i]||c.floors[i]<3)continue;const d=Math.hypot(c.x[i]-g.rig.target.x,c.z[i]-g.rig.target.z);if(d<bd){bd=d;best=i;}}g.select(best)`),
   'ingles': scene(`click('[data-cat=roads]')`),
 };
 
