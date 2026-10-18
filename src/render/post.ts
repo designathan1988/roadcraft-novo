@@ -115,7 +115,7 @@ export class Post {
       let d: Node = clamp(toDisplay(c).add(casDelta(src)), 0, 1);
       const l = dot(d, vec3(0.2126, 0.7152, 0.0722));
       // contrast: an S round the middle grey
-      d = mix(d, smoothstep(0, 1, d), 0.25);
+      d = mix(d, smoothstep(0, 1, d), 0.35);
       // vibrance: the dull colours gain more than the vivid
       const sat = max(max(d.r, d.g), d.b).sub(min(min(d.r, d.g), d.b));
       d = mix(vec3(l, l, l), d, float(1).add(float(1).sub(sat).mul(0.3)));

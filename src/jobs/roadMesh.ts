@@ -327,6 +327,37 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
       const w = inward ? 0.25 : -0.25;
       wall(u, top(CURB_H), top(1.0), !inward, COLOR.concrete, RMAT.Concrete, bridge);
       wall(u + w, top(CURB_H), top(1.0), inward, COLOR.concrete, RMAT.Concrete, bridge);
+      // parapet coping: the top of the wall, a little wider than it
+      let pc: [number, number] | null = null;
+      for (let k = 0; k < n; k++) {
+        const o = k * 5;
+        const lx = F[o + 3], lz = -F[o + 2], y = F[o + 4] + 1.0;
+        const ua = u - (inward ? 0.03 : -0.03), ub = u + w + (inward ? 0.03 : -0.03);
+        const cur: [number, number] = [
+          mb.vert(F[o] + lx * ua, y, F[o + 1] + lz * ua, 0, 1, 0, COLOR.curb, RMAT.Concrete),
+          mb.vert(F[o] + lx * ub, y, F[o + 1] + lz * ub, 0, 1, 0, COLOR.curb, RMAT.Concrete),
+        ];
+        if (pc && bridge(k) && bridge(k - 1)) mb.quad(pc[0], cur[0], cur[1], pc[1], 0, 1, 0);
+        pc = cur;
+      }
+    }
+    // girders: longitudinal beams under the deck (Roadcraft structures.ts), one every ~4 m across
+    if (lod < 2) {
+      const span = last.u1 - first.u0;
+      const nb = Math.max(2, Math.round(span / 4));
+      for (let i = 0; i < nb; i++) {
+        const ug = first.u0 + span * (i + 0.5) / nb;
+        for (let k = 0; k + 1 < n; k++) {
+          if (!bridge(k) || !bridge(k + 1)) continue;
+          const a = k * 5, b = (k + 1) * 5;
+          const ax = F[a] + F[a + 3] * ug, az = F[a + 1] - F[a + 2] * ug;
+          const bx = F[b] + F[b + 3] * ug, bz = F[b + 1] - F[b + 2] * ug;
+          const L = Math.hypot(bx - ax, bz - az);
+          if (L < 0.05) continue;
+          const ym = (F[a + 4] + F[b + 4]) / 2;
+          mb.box((ax + bx) / 2, (az + bz) / 2, ym - DECK - 1.1, ym - DECK, (bx - ax) / L, (bz - az) / L, L / 2 + 0.02, 0.28, COLOR.concrete, RMAT.Concrete, true);
+        }
+      }
     }
     // pilares
     const width = last.u1 - first.u0;
@@ -337,10 +368,12 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
       const lx = f[3], lz = -f[2];
       const offs = width > 16 ? [-width / 4, width / 4] : [0];
       for (const off of offs) {
-        mb.box(f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK, f[2], f[3], 0.8, 0.8, COLOR.concrete, RMAT.Concrete);
+        // round pier near (octagonal prism), square farther
+        if (lod === 0) prism(mb, f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK - 1.1, 0.62, 8, COLOR.concrete, RMAT.Concrete);
+        else mb.box(f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK - 1.1, f[2], f[3], 0.6, 0.6, COLOR.concrete, RMAT.Concrete);
       }
-      // travessa sob a laje
-      mb.box(f[0], f[1], f[4] - DECK - 1, f[4] - DECK, f[2], f[3], 0.7, width / 2 - 0.5, COLOR.concrete, RMAT.Concrete, true);
+      // pier cap (crossbeam) under the girders
+      mb.box(f[0], f[1], f[4] - DECK - 2.1, f[4] - DECK - 1.1, f[2], f[3], 0.8, width / 2 - 0.3, COLOR.concrete, RMAT.Concrete, true);
     }
   }
 
@@ -356,6 +389,28 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
     mb.box(cx, cz, y + 5.8, y + 7.4, dx, dz, 0.6, half, COLOR.concrete, RMAT.Concrete, true);
     for (const sgn of [-1, 1]) {
       mb.box(cx + dz * sgn * half, cz - dx * sgn * half, y - 0.5, y + 5.8, dx, dz, 0.6, 0.6, COLOR.concrete, RMAT.Concrete);
+    }
+    // wing walls: from each side of the portal, splayed 30° out toward the open side, falling from the headwall
+    // to 1.2 m over 7 m (they hold back the slope cut around the mouth)
+    const ow = buried(k) ? 1 : -1;
+    for (const sgn of [-1, 1]) {
+      const x0 = cx + dz * sgn * (half + 0.6), z0 = cz - dx * sgn * (half + 0.6);
+      const x1 = x0 + dx * ow * 7 + dz * sgn * 4, z1 = z0 + dz * ow * 7 - dx * sgn * 4;
+      const wl = Math.hypot(x1 - x0, z1 - z0), tx = (x1 - x0) / wl, tz = (z1 - z0) / wl;
+      const nx = -tz, nz = tx; // one side; the other face gets the opposite normal
+      const t = 0.5;
+      const ox = nx * t / 2, oz = nz * t / 2;
+      for (const side of [1, -1]) {
+        const sx = ox * side, sz = oz * side;
+        const a = mb.vert(x0 + sx, y - 0.5, z0 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
+        const b = mb.vert(x1 + sx, y - 0.5, z1 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
+        const c = mb.vert(x1 + sx, y + 1.2, z1 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
+        const d = mb.vert(x0 + sx, y + 7.4, z0 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
+        mb.quad(a, b, c, d, nx * side, 0, nz * side);
+      }
+      const ta = mb.vert(x0 + ox, y + 7.4, z0 + oz, 0, 1, 0, COLOR.curb, RMAT.Concrete), tb = mb.vert(x1 + ox, y + 1.2, z1 + oz, 0, 1, 0, COLOR.curb, RMAT.Concrete);
+      const tc = mb.vert(x1 - ox, y + 1.2, z1 - oz, 0, 1, 0, COLOR.curb, RMAT.Concrete), td = mb.vert(x0 - ox, y + 7.4, z0 - oz, 0, 1, 0, COLOR.curb, RMAT.Concrete);
+      mb.quad(ta, tb, tc, td, 0, 1, 0);
     }
   }
 
@@ -375,6 +430,18 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
       const d = mb.vert(px + lx * e.u0, y + h, pz + lz * e.u0, dx * out, 0, dz * out, col, RMAT.Curb);
       mb.quad(a, b, c, d, dx * out, 0, dz * out);
     });
+  }
+}
+
+/** Vertical prism of n sides (round pier), radius r, from y0 to y1, with a top. */
+function prism(mb: MeshBuilder, cx: number, cz: number, y0: number, y1: number, r: number, sides: number, rgb: number, mat: number): void {
+  for (let i = 0; i < sides; i++) {
+    const a0 = (i / sides) * Math.PI * 2, a1 = ((i + 1) / sides) * Math.PI * 2, am = (a0 + a1) / 2;
+    const nx = Math.cos(am), nz = Math.sin(am);
+    const p0x = cx + Math.cos(a0) * r, p0z = cz + Math.sin(a0) * r, p1x = cx + Math.cos(a1) * r, p1z = cz + Math.sin(a1) * r;
+    const a = mb.vert(p0x, y0, p0z, nx, 0, nz, rgb, mat), b = mb.vert(p1x, y0, p1z, nx, 0, nz, rgb, mat);
+    const c = mb.vert(p1x, y1, p1z, nx, 0, nz, rgb, mat), d = mb.vert(p0x, y1, p0z, nx, 0, nz, rgb, mat);
+    mb.quad(a, b, c, d, nx, 0, nz);
   }
 }
 

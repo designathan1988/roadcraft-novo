@@ -12,7 +12,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, impostorSources, FACE_LAST, PMAT, type PropDef } from './propMeshes.ts';
+import { buildPropDefs, buildSignAtlas, impostorSources, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, type PropDef } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode } from './impostor.ts';
 import { nightU } from './scene.ts';
 import { PAINTS } from './vehicles.ts';
@@ -75,6 +75,8 @@ export class PropRenderer {
   // atlas dos impostores (cor e normal); trocado pela foto na carga
   private impColor = texture(new THREE.Texture());
   private impNormal = texture(new THREE.Texture());
+  // sign faces (speed limits, stop, yield…), drawn once at load
+  private signAtlas = texture(buildSignAtlas());
   impRT: THREE.RenderTarget[] = [];
 
   constructor(world: World, pool: JobPool, signalsSab: SharedArrayBuffer, isWebGPU: boolean) {
@@ -186,13 +188,16 @@ export class PropRenderer {
     const poolR = gpu ? storage(this.poolAttr, 'vec4', CAP).toReadOnly() : null;
     const extraR = gpu ? storage(this.extraAttr, 'uint', CAP).toReadOnly() : null;
     const vN = varyingProperty('vec3', 'vPropN');
-    const vFade = varyingProperty('float', 'vPropFade');
-    const vComp = varyingProperty('float', 'vPropComp');
-    const vVar = varyingProperty('float', 'vPropVar');
-    const vLit = varyingProperty('float', 'vPropLit');
-    const vImpUV = varyingProperty('vec2', 'vPropImpUV');
-    const vImpCS = varyingProperty('vec2', 'vPropImpCS');
-    const vFlower = varyingProperty('float', 'vPropFlower');
+    // varyings packed in vec4s (WebGPU caps the inter-stage variables; one float each ran out once the sign atlas
+    // came in): A = fade, complementary mask, variant, lit lamp; B = impostor uv, impostor yaw cos/sin;
+    // C = sign atlas uv, sign back face, flower
+    const vA = varyingProperty('vec4', 'vPropA');
+    const vB = varyingProperty('vec4', 'vPropB');
+    const vC = varyingProperty('vec4', 'vPropC');
+    const vFade = vA.x, vComp = vA.y, vVar = vA.z, vLit = vA.w;
+    const vImpUV = vB.xy, vImpCS = vB.zw;
+    const vAtlasUV = vC.xy, vAtlasBack = vC.z, vFlower = vC.w;
+    let fadeN: Node = float(1), compN: Node = float(0), flowerN: Node = float(0), atlasUVN: Node = vec2(0, 0), backN: Node = float(0);
     const pcol = attribute('pcol', 'vec4');
     const sigTex = this.signalTex;
 
@@ -201,12 +206,11 @@ export class PropRenderer {
       if (gpu) {
         const code = visR.element(instanceIndex.add(baseU)).toVar();
         const idx = code.bitAnd(uint(0x3fffff));
-        vFade.assign(float(code.shiftRight(uint(22)).bitAnd(uint(255))).div(255));
-        vComp.assign(float(code.shiftRight(uint(31))));
+        fadeN = float(code.shiftRight(uint(22)).bitAnd(uint(255))).div(255);
+        compN = float(code.shiftRight(uint(31)));
         inst = poolR.element(idx).toVar();
         keyRaw = extraR.element(idx);
       } else {
-        vFade.assign(1); vComp.assign(0);
         inst = attribute('ipose', 'vec4');
         keyRaw = uint(attribute('ikey', 'float'));
       }
@@ -214,11 +218,10 @@ export class PropRenderer {
       const yaw = float(w.bitAnd(uint(4095))).mul(Math.PI * 2 / 4096);
       const variant = float(w.shiftRight(uint(12)).bitAnd(uint(15)));
       const scale = float(w.shiftRight(uint(16)).bitAnd(uint(63))).div(42).add(0.5);
-      vVar.assign(variant);
       // ipê (como as árvores floridas do roadcraft): parte das árvores de variante 3 florida, amarelo, roxo ou rosa
       const isTreeT = step(abs(float(keyRaw.bitAnd(uint(31))).sub(PROP.Tree)), float(0.5));
       const fh = hash(floor(inst.x).add(floor(inst.z).mul(157)));
-      vFlower.assign(isTreeT.mul(step(abs(variant.sub(3)), float(0.5))).mul(step(fh, float(0.3))).mul(floor(fh.mul(10)).add(1)));
+      flowerN = (isTreeT.mul(step(abs(variant.sub(3)), float(0.5))).mul(step(fh, float(0.3))).mul(floor(fh.mul(10)).add(1)));
       const c = cos(yaw), s = sin(yaw);
       // fio: escala = comprimento do vão (m), variante = desnível; z vai de 0 a 1 ao longo do vão
       const isWire = step(abs(pcol.w.mul(255).sub(PMAT.Wire)), float(0.5));
@@ -235,7 +238,21 @@ export class PropRenderer {
       const isBarrier = step(abs(float(keyRaw.bitAnd(uint(31))).sub(PROP.Barrier)), float(0.5));
       const bDy = float(keyRaw.shiftRight(uint(5))).sub(512).mul(0.05);
       const barrierP = vec3(positionLocal.x, positionLocal.y.add(bDy.mul(lz)), lz.mul(span.mul(0.1)));
-      const p = mix(mix(positionLocal.mul(scale), wireP, isWire), barrierP, isBarrier).mul(float(1).sub(wrongFace)).toVar();
+      // sign face: one quad sized per variant (SIGN_FACES), its atlas cell by the variant or, for speed limits, by the
+      // speed in the key (km/h; 0 = 60)
+      const isAtlas = step(abs(mat0.sub(PMAT.Atlas)), float(0.5));
+      const face = uArr(SIGN_FACES.map(([hx, hy, cy, cellK]) => new THREE.Vector4(hx, hy, cy, cellK)), 'vec4').element(int(variant));
+      const atlasP = vec3(positionLocal.x.mul(face.x), face.z.add(positionLocal.y.mul(face.y)), positionLocal.z);
+      const kmh = float(keyRaw.shiftRight(uint(5)));
+      const speedCell = clamp(select(kmh.lessThan(5), float(60), kmh).div(10).round().sub(2), 0, 10);
+      const cellK = select(face.w.lessThan(-0.5), speedCell, face.w);
+      const back = step(normalLocal.z, float(0));
+      const lxA = mix(positionLocal.x, positionLocal.x.negate(), back);
+      atlasUVN = (vec2(T.mod(cellK, SIGN_ATLAS.COLS).add(lxA.mul(0.5).add(0.5)).div(SIGN_ATLAS.COLS),
+        float(1).sub(floor(cellK.div(SIGN_ATLAS.COLS)).add(float(0.5).sub(positionLocal.y.mul(0.5))).div(SIGN_ATLAS.ROWS))));
+      backN = back;
+      const local = mix(positionLocal, atlasP, isAtlas);
+      const p = mix(mix(local.mul(scale), wireP, isWire), barrierP, isBarrier).mul(float(1).sub(wrongFace)).toVar();
       // folhagem balança um pouco com o vento
       const leaf = step(abs(pcol.w.mul(255).sub(PMAT.Leaf)), float(0.5));
       // com vento forte: balanço mais rápido e mais largo, inclinado a favor do vento
@@ -266,7 +283,7 @@ export class PropRenderer {
       const greenOn = armMatch.mul(step(state, float(0.5)));
       const yellowOn = armMatch.mul(step(abs(state.sub(1)), float(0.5)));
       const redOn = float(1).sub(greenOn).sub(yellowOn);
-      vLit.assign(isRed.mul(redOn).add(isYel.mul(yellowOn)).add(isGrn.mul(greenOn)));
+      vA.assign(vec4(fadeN, compN, variant, isRed.mul(redOn).add(isYel.mul(yellowOn)).add(isGrn.mul(greenOn))));
       // impostor: quadrado virado para a câmera com a foto da direção mais próxima
       const isImp = step(abs(mat.sub(PMAT.Impostor)), float(0.5));
       const col = pcol.x.mul(255).add(0.5).floor();
@@ -286,8 +303,8 @@ export class PropRenderer {
       const impPos = centerW.add(right.mul(positionLocal.x.mul(R))).add(upv.mul(positionLocal.y.mul(R)));
       const atlas = vec2(col.mul(IMP_G).add(cell.x).add(positionLocal.x.mul(0.5).add(0.5)).div(IMP_G * IMP_TYPES),
         cell.y.add(positionLocal.y.mul(0.5).add(0.5)).div(IMP_G));
-      vImpUV.assign(atlas);
-      vImpCS.assign(vec2(c, s));
+      vB.assign(vec4(atlas, c, s));
+      vC.assign(vec4(atlasUVN, backN, flowerN));
       return mix(vec3(wx, p.y, wz).add(inst.xyz), impPos, isImp);
     })();
     withPrevious(m);
@@ -309,7 +326,10 @@ export class PropRenderer {
     // pintura dos carros estacionados pela variante
     const isPaint = step(abs(mat.sub(PMAT.Paint)), float(0.5));
     const paint = sRGBTransferEOTF(uArr(PAINTS.map((p) => new THREE.Color(p)), 'color').element(int(vVar.add(0.5))));
-    const base = mix(mix(pcol.xyz, paint, isPaint), impC.xyz, isImpF).mul(mix(tint, mix(vec3(1, 1, 1), tint, step(float(0.5), vVar)), isImpF));
+    const isAtlasF = step(abs(mat.sub(PMAT.Atlas)), float(0.5));
+    const atlasC = this.signAtlas.sample(vAtlasUV);
+    const signFace = mix(atlasC.xyz, pcol.xyz, vAtlasBack);
+    const base = mix(mix(mix(pcol.xyz, paint, isPaint), signFace, isAtlasF), impC.xyz, isImpF).mul(mix(tint, mix(vec3(1, 1, 1), tint, step(float(0.5), vVar)), isImpF));
     const bulbOff = base.mul(0.12);
     // folhagem: cada árvore com o seu tom (mais clara, amarelada ou escura), o topo da copa mais claro e a
     // luz que atravessa as folhas (o lado da sombra não fica preto)
@@ -329,7 +349,7 @@ export class PropRenderer {
     // esmaecimento entre níveis
     const noise = interleavedGradientNoise(screenCoordinate.xy);
     const fadeOk = select(vComp.greaterThan(0.5), noise.greaterThanEqual(float(1).sub(vFade)), noise.lessThan(vFade.add(0.002)));
-    m.maskNode = fadeOk.and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5)));
+    m.maskNode = fadeOk.and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5)));
     return m;
   }
 
