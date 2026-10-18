@@ -223,11 +223,13 @@ function motoModel(): THREE.BufferGeometry {
   box(0, 0.74, 0.97, 0.14, 0.1, 0.03, LIGHT); box(0, 0.76, -0.99, 0.12, 0.08, 0.03, RED);
   box(0.17, 0.78, 0.94, 0.05, 0.05, 0.03, AMBER_L); box(-0.17, 0.78, 0.94, 0.05, 0.05, 0.03, AMBER_R);
   box(0.17, 0.7, -0.97, 0.05, 0.05, 0.03, AMBER_L); box(-0.17, 0.7, -0.97, 0.05, 0.05, 0.03, AMBER_R);
-  // piloto: pernas, tronco inclinado, braços ao guidão, capacete
+  // piloto (só sem as pessoas cozidas, src/render/people): lugar 1 dos ocupantes
+  const rider = parts.length;
   box(0.15, 0.5, 0.05, 0.12, 0.42, 0.3, 0x24262c); box(-0.15, 0.5, 0.05, 0.12, 0.42, 0.3, 0x24262c);
   const t = new THREE.BoxGeometry(0.4, 0.62, 0.24); t.rotateX(0.32); t.translate(0, 1.22, 0.02); parts.push(tagged(t, 0x30343c));
   box(0.22, 1.12, 0.42, 0.09, 0.09, 0.42, 0x30343c); box(-0.22, 1.12, 0.42, 0.09, 0.09, 0.42, 0x30343c);
   const h = new THREE.IcosahedronGeometry(0.15, 1); h.translate(0, 1.66, 0.12); parts.push(tagged(h, -1));
+  for (let i = rider; i < parts.length; i++) (parts[i].getAttribute('glow').array as Float32Array).fill(OCC + 1);
   return mergeGeometries(parts)!;
 }
 
@@ -565,11 +567,14 @@ export class VehicleRenderer {
         const info = d[o + 8], lights = Math.floor(info / 65536), base = info - lights * 65536;
         const kind = Math.floor(base / 256), low = base - kind * 256;
         const style = kind === 0 ? (low >> 4) & 7 : 0;
-        const color = (kind === 0 ? low & 15 : low & 127) + lights * 16 + (kind === 5 && !people ? 128 : 0);
+        // com as pessoas cozidas o piloto da moto é uma delas: os lugares da moto apagam
+        const shown = people && kind === 0 && style === 5 ? lights & 7 : lights;
+        const color = (kind === 0 ? low & 15 : low & 127) + shown * 16 + (kind === 5 && !people ? 128 : 0);
         // pessoas e bicicletas: pequenas, modelo só até PERSON_NEAR e caixa até PERSON_MID
         const person = kind === 3, small = person || kind === 5;
         if ((small && dist > PERSON_MID) || (person && this.hidePeople)) continue;
         if (people && small) { people.push(d, o, x, y, z, yaw, px, py, pz, pyaw, dist, r.dt, !person); if (person) continue; }
+        if (people && kind <= 2 && dist < NEAR) people.occupants(kind, style, x, y, z, yaw, px, py, pz, pyaw, info, lights, dist);
         // perto/meio com troca pontilhada numa faixa de 30 m (pessoas: 10 m)
         const fadeNear = small ? Math.min(1, Math.max(0, (PERSON_NEAR + 5 - dist) / 10)) : Math.min(1, Math.max(0, (NEAR + 15 - dist) / 30));
         const alpha = d[o + 9];

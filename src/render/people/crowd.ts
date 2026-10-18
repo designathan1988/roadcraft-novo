@@ -13,7 +13,8 @@ import * as THREE from 'three/webgpu';
 import { T, withPrevious, type Node } from '../tsl.ts';
 import { rainU } from '../weather.ts';
 import { CLIP, CLIP_PROP, REGION, checkCooked, type CookedPeople } from './format.ts';
-import { pickLook, type LookChoice } from './looks.ts';
+import { hash32, pickLook, type LookChoice } from './looks.ts';
+import { MOTO_PELVIS, aboard, seatsOf } from './occupants.ts';
 
 const {
   Fn, attribute, storage, uniformArray, vertexIndex, uint, float, int, vec3, vec4, cos, sin, floor, fract, mod, min, max,
@@ -226,6 +227,47 @@ export class PeopleRenderer {
     const slope = run > 0.05 && !bike ? Math.max(-0.4, Math.min(0.4, (d[o + 5] - d[o + 1]) / run)) : 0;
     this.levels(px1, dist, x, y, z, yaw, px, py, pz, pyaw, l, alpha, 1, slope);
     return true;
+  }
+
+  /**
+   * People in closed cabins (cars, buses, trucks) are drawn only when the vehicles can be seen into: the vehicles'
+   * glass is opaque today and carries silhouettes; the vehicles' renderer sets this once its glass shows the inside.
+   */
+  seatedInCabins = false;
+  /** Seated people nearer than this (they are small inside a cabin). */
+  static readonly OCCUPANT_NEAR = 45;
+
+  /**
+   * The people aboard a vehicle of the pose buffer: the motorcycle's rider always, the cabins' driver and
+   * passengers (as many as the pose's light bits say) when `seatedInCabins`.
+   */
+  occupants(kind: number, style: number, x: number, y: number, z: number, yaw: number, px: number, py: number, pz: number, pyaw: number, info: number, lights: number, dist: number): void {
+    const m = this.meta!;
+    const c = Math.cos(yaw), s = Math.sin(yaw), pc = Math.cos(pyaw), ps = Math.sin(pyaw);
+    const at = (lx: number, ly: number, lz: number, seat: number, clip: number, rate: number, phase: number) => {
+      const h = hash32((Math.floor(info) >>> 0) * 31 + seat * 7919 + 17);
+      let v = h % m.variations.length;
+      if (m.variations[v].band === 'child' && seat === 0) v = (v + 4) % m.variations.length;
+      const l = this.look;
+      l.variation = v; l.clip = clip; l.hash = h & 0xffffff; l.rate = rate; l.phase = phase;
+      let ox = lx, oy = ly, oz = lz;
+      if (clip === CLIP.sit) { oy -= m.variations[v].sitPelvis[0]; oz -= m.variations[v].sitPelvis[1]; }
+      const wx = x + ox * c + oz * s, wz = z - ox * s + oz * c;
+      const qx = px + ox * pc + oz * ps, qz = pz - ox * ps + oz * pc;
+      this.levels(1.7 * this.pxScale / Math.max(0.5, dist), dist, wx, y + oy, wz, yaw, qx, py + oy, qz, pyaw, l, 1, 1, 0);
+    };
+    if (kind === 0 && style === 5) {
+      // the pedalling pose held still, pedals level: feet on the pegs, hands on the bars, helmet on
+      at(MOTO_PELVIS[0], MOTO_PELVIS[1] - 0.93, MOTO_PELVIS[2] + 0.14, 0, CLIP.pedal, 0, 0.25);
+      return;
+    }
+    if (!this.seatedInCabins || dist > PeopleRenderer.OCCUPANT_NEAR) return;
+    const seats = seatsOf(kind, style);
+    const n = aboard(kind, lights, seats.length);
+    for (let i = 0; i < n; i++) {
+      const [sx, sy, sz] = seats[i];
+      at(sx, sy, sz, i, CLIP.sit, 1, ((hash32(i + 3) >>> 8) & 1023) / 1024);
+    }
   }
 
   /** A person placed directly (seated occupants, the creator's people): `clip` from CLIP. */
