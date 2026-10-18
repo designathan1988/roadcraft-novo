@@ -50,6 +50,10 @@ Quem termina um item põe ✅, o commit e o nome da foto.
   N partes), juntar, frente, apagar. ✅ na lógica (polígono de até 16 cantos no registro, salvamento versão 7,
   foto `lote-poligono.png`); 🟡 o prédio e a mureta ainda saem pelo retângulo envolvente: a sessão de prédios lê
   `BoxColumns.shapeN/shape` (formato em `jobs/protocol.ts`).
+- Crescimento como o Roadcraft ✅ (`world/growth.ts`, foto `crescimento.png`): o próximo lote é o livre mais perto
+  do último que cresceu (a rua enche em sequência), no máximo 3 andares acima do vizinho mais alto a 30 m (no
+  crescimento ao longo do tempo; a cidade gerada nasce madura), uma praça por bairro de 2×2 células, nomes de
+  rua desde a geração (`roads/streetNames.ts`).
 - Crescimento: vizinhos diferentes, marcos a ~22 % das torres (`data/lots-roadcraft/*.json`, 38 projetos — ❌
   converter para o gerador), esquina com jardim, portões, estacionamento nos fundos, encosta com split-level,
   garagem, terraços e docas (❌ aqui), paletas brasileiras, desgaste e reforma (✅ na lógica: 5 dias de graça,
