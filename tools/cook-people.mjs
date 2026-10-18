@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { MeshoptSimplifier } from 'meshoptimizer';
 
 /** Bump whenever the output changes meaning; `src/render/people/format.ts` must carry the same number. */
-export const COOK_VERSION = 1;
+export const COOK_VERSION = 2;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(ROOT, 'public', 'models', 'people');
@@ -421,7 +421,7 @@ function buildBody(cast, capture) {
       tris.push(o[0], o[1], o[2]);
       if (q[3] !== q[2]) tris.push(o[0], o[2], o[3]);
     }
-    parts.push({ name: 'body', pos, col, reg, skin, tris, budget: [2600, 300] });
+    parts.push({ name: 'body', pos, col, reg, skin, tris, budget: [1500, 170, 56] });
   }
   for (const { name, p } of items) {
     const kind = name === cast.hair ? 'hair' : name === cast.hat ? 'hat' : name === cast.shoes ? 'shoes' : 'outfit';
@@ -451,7 +451,7 @@ function buildBody(cast, capture) {
       if (p.meta.transparent && (col[a * 4 + 3] + col[b * 4 + 3] + col[c * 4 + 3]) / 3 < 0.45) continue;
       tris.push(a, b, c);
     }
-    const budget = { hair: [700, 90], hat: [260, 40], shoes: [420, 40], outfit: [2400, 260] }[kind];
+    const budget = { hair: [380, 50, 14], hat: [140, 24, 8], shoes: [220, 24, 8], outfit: [1300, 150, 48] }[kind];
     parts.push({ name, kind, pos, col, reg, skin: skins, tris, budget, twoSided: kind === 'hair' });
   }
   parts.push(...props(bindHead));
@@ -475,7 +475,7 @@ function props(head) {
       pos.push(...p);
     }
     for (const f of [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]) tris.push(f[0], f[1], f[2], f[0], f[2], f[3]);
-    return { name, kind: 'prop', pos, col: Array(8).fill(0).flatMap(() => [...color, 1]), reg: Array(8).fill(region), skin: Array(8).fill({ j: [bone, 0, 0, 0], w: [1, 0, 0, 0] }), tris, budget: [12, 12], twoSided: true };
+    return { name, kind: 'prop', pos, col: Array(8).fill(0).flatMap(() => [...color, 1]), reg: Array(8).fill(region), skin: Array(8).fill({ j: [bone, 0, 0, 0], w: [1, 0, 0, 0] }), tris, budget: [12, 12, 12], twoSided: true };
   };
   const cyl = (name, region, base, axis, r0, r1, h, color, bone, seg = 8, capped = true) => {
     const u = norm(cross(axis, Math.abs(axis[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), w = cross(axis, u);
@@ -487,7 +487,7 @@ function props(head) {
     for (let i = 0; i < seg; i++) { const a = i * 2, b = ((i + 1) % seg) * 2; tris.push(a, b, a + 1, b, b + 1, a + 1); }
     if (capped) { const c0 = pos.length / 3; pos.push(...base); for (let i = 0; i < seg; i++) tris.push(c0, ((i + 1) % seg) * 2, i * 2); }
     const n = pos.length / 3;
-    return { name, kind: 'prop', pos, col: Array(n).fill(0).flatMap(() => [...color, 1]), reg: Array(n).fill(region), skin: Array(n).fill({ j: [bone, 0, 0, 0], w: [1, 0, 0, 0] }), tris, budget: [tris.length / 3, tris.length / 3], twoSided: true };
+    return { name, kind: 'prop', pos, col: Array(n).fill(0).flatMap(() => [...color, 1]), reg: Array(n).fill(region), skin: Array(n).fill({ j: [bone, 0, 0, 0], w: [1, 0, 0, 0] }), tris, budget: [tris.length / 3, tris.length / 3, tris.length / 3], twoSided: true };
   };
   out.push(box('phone', REGION.phone, add(at, mul(side, 0.015)), 0.075, 0.15, 0.012, [0.08, 0.08, 0.09], B.hand_r, [fwd, down, side]));
   out.push(cyl('cup', REGION.cup, add(add(at, mul(side, 0.03)), mul(down, 0.05)), mul(down, -1), 0.032, 0.04, 0.11, [0.93, 0.92, 0.88], B.hand_r));
@@ -783,7 +783,7 @@ async function main() {
   decodeAll([...used]);
   const captures = { male: loadCaptures('male'), female: loadCaptures('female') };
   const vpos = [], vattr = [], index = [], variations = [], palettes = [];
-  const lodTris = [[], []];
+  const lodTris = [[], [], []];
   const clipSets = {};
   let paletteFrames = 0;
   const previews = [];
@@ -791,16 +791,17 @@ async function main() {
     const cap = captures[c.sex];
     const body = buildBody(c, cap);
     // simplify each part to its share, two levels; then keep only the vertices the levels use
-    const lists = [[], []];
+    const lists = [[], [], []];
     const keep = new Map();
     const verts = [];
     for (const part of body.parts) {
       const nrm = normals(part.pos, part.tris);
       const full = Array.from(part.tris);
-      for (let lod = 0; lod < 2; lod++) {
+      for (let lod = 0; lod < 3; lod++) {
+        // the farthest level keeps only the things that read from far: the bag, the umbrella's canopy, the helmet
+        if (lod === 2 && ['phone', 'cup', 'paper', 'pole'].includes(part.name)) continue;
         if (part.kind === 'prop' || part.budget[lod] > 0) {
           let t = part.kind === 'prop' ? Uint32Array.from(full) : simplify(part.pos, full, part.budget[lod]);
-          if (lod === 1 && part.name === 'body') t = Uint32Array.from(t.filter((_, i) => true));
           const emit = (v, flip) => {
             const key = `${part.name}:${v}:${flip ? 1 : 0}`;
             if (!keep.has(key)) {
@@ -812,9 +813,9 @@ async function main() {
             return keep.get(key);
           };
           for (let i = 0; i < t.length; i += 3) {
-            if (part.reg[t[i]] === REGION.eyes && lod === 1) continue;
+            if (part.reg[t[i]] === REGION.eyes && lod > 0) continue;
             lists[lod].push(emit(t[i], false), emit(t[i + 1], false), emit(t[i + 2], false));
-            if (part.twoSided) lists[lod].push(emit(t[i], true), emit(t[i + 2], true), emit(t[i + 1], true));
+            if (part.twoSided && lod < 2) lists[lod].push(emit(t[i], true), emit(t[i + 2], true), emit(t[i + 1], true));
           }
         }
       }
@@ -834,7 +835,7 @@ async function main() {
         (q8[0] | (q8[1] << 8) | (q8[2] << 16) | (q8[3] << 24)) >>> 0);
     }
     const lods = lists.map((l) => { const start = index.length; for (const i of l) index.push(base + i); return [start, l.length / 3]; });
-    lodTris[0].push(lods[0][1]); lodTris[1].push(lods[1][1]);
+    lods.forEach((l, i) => lodTris[i].push(l[1]));
     // clips
     let clipStart = 0;
     const table = [];
@@ -857,7 +858,7 @@ async function main() {
     palettes.push(...pal);
     variations.push({ clipSet: set, paletteStart, sex: c.sex, band: c.band, years: c.years, height: +body.height.toFixed(3), outfit: c.outfit, hair: c.hair, shoes: c.shoes, hat: c.hat, skin: c.skin, lod: lods, sitPelvis: table[2].pelvis.map((x) => +x.toFixed(3)),
       walkAdvance: +(cap.walk === captures.male.walk ? 1.495864 : 1.596625).toFixed(4) * ((body.bindHead[B.pelvis][1]) / 0.9) });
-    console.log(`${vi.toString().padStart(2)} ${c.sex} ${c.band} ${c.outfit} ${c.hair}: ${verts.length} vertices, ${lods[0][1]} / ${lods[1][1]} triangles, ${body.height.toFixed(2)} m`);
+    console.log(`${vi.toString().padStart(2)} ${c.sex} ${c.band} ${c.outfit} ${c.hair}: ${verts.length} vertices, ${lods.map((l) => l[1]).join(' / ')} triangles, ${body.height.toFixed(2)} m`);
     if (PREVIEW) previews.push({ verts, lists, pal, table });
   }
   const pal = new Float32Array(palettes.reduce((s, a) => s + a.length, 0));
@@ -872,12 +873,12 @@ async function main() {
   fs.writeFileSync(path.join(OUT, 'people.bin'), out);
   const meta = {
     format: 'roadcraft5-people', version: COOK_VERSION, bytes: at, bones: BONES, parents: PARENT, regions: REGION,
-    clipSets: [clipSets[0].map(({ pelvis, ...t }) => t), clipSets[1].map(({ pelvis, ...t }) => t)], paletteFrames, maxTris: [Math.max(...lodTris[0]), Math.max(...lodTris[1])],
+    clipSets: [clipSets[0].map(({ pelvis, ...t }) => t), clipSets[1].map(({ pelvis, ...t }) => t)], paletteFrames, maxTris: lodTris.map((t) => Math.max(...t)),
     vertices: vpos.length / 4, layout, variations,
     sources: { makehuman: 'public/models/people (CC0-1.0, LICENSE-MakeHuman-CC0.txt, LICENSES.json)', rocketbox: 'public/models/citizens (MIT, LICENSE-MICROSOFT.txt)' },
   };
   fs.writeFileSync(path.join(OUT, 'people.json'), JSON.stringify(meta, null, 1));
-  console.log(`people.bin ${(at / 1e6).toFixed(1)} MB: ${meta.vertices} vertices, ${index.length / 3} triangles, palettes ${(pal.byteLength / 1e6).toFixed(1)} MB, max ${meta.maxTris[0]} / ${meta.maxTris[1]} triangles a person`);
+  console.log(`people.bin ${(at / 1e6).toFixed(1)} MB: ${meta.vertices} vertices, ${index.length / 3} triangles, palettes ${(pal.byteLength / 1e6).toFixed(1)} MB, max ${meta.maxTris.join(' / ')} triangles a person`);
   if (PREVIEW) writePreviews(previews);
 }
 
@@ -899,6 +900,7 @@ function writePreviews(previews) {
   const dir = path.join(ROOT, 'test-results', 'cook-preview');
   drawPreview(path.join(dir, 'lod0-idle.png'), previews.map((pv) => skinned(pv, 0, 1, 0)));
   drawPreview(path.join(dir, 'lod1-idle.png'), previews.map((pv) => skinned(pv, 1, 1, 0)));
+  drawPreview(path.join(dir, 'lod2-idle.png'), previews.map((pv) => skinned(pv, 2, 1, 0)));
   for (const [ci, name] of [[0, 'walk'], [3, 'walkPhone'], [2, 'sit'], [10, 'pedal'], [7, 'walkUmbrella'], [6, 'drink'], [9, 'walkCarry']]) {
     const sel = previews.slice(0, 16);
     drawPreview(path.join(dir, `${name}-side.png`), sel.flatMap((pv) => [0, 8].map((f) => skinned(pv, 0, ci, f))).slice(0, 16), 160, 300, Math.PI / 2);

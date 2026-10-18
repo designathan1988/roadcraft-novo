@@ -2,7 +2,7 @@
 // what its numbers mean. No three.js here: the tests read it under Node.
 
 /** Must equal `COOK_VERSION` of `tools/cook-people.mjs` and the `version` of `people.json`. */
-export const PEOPLE_COOK_VERSION = 1;
+export const PEOPLE_COOK_VERSION = 2;
 
 /** Region of a vertex (top byte of its colour word): each is tinted its own way. Props show only when held. */
 export const REGION = { skin: 0, hair: 1, top: 2, bottom: 3, shoes: 4, hat: 5, eyes: 6, phone: 8, cup: 9, bag: 10, paper: 11, umbrella: 12, helmet: 13 } as const;
@@ -19,14 +19,14 @@ export interface CookedVariation {
   clipSet: number; paletteStart: number; sex: 'female' | 'male'; band: 'child' | 'young' | 'adult' | 'senior'; years: number;
   height: number; outfit: string; hair: string; shoes: string; hat: string | null; skin: string;
   /** Per level: first index and triangle count in `index`. */
-  lod: [[number, number], [number, number]];
+  lod: [[number, number], [number, number], [number, number]];
   /** Pelvis height and forward offset in the sitting clip, metres. */
   sitPelvis: [number, number];
 }
 export interface CookedSection { byteOffset: number; count: number }
 export interface CookedPeople {
   format: string; version: number; bytes: number; bones: string[]; parents: number[];
-  clipSets: [CookedClip[], CookedClip[]]; paletteFrames: number; maxTris: [number, number]; vertices: number;
+  clipSets: [CookedClip[], CookedClip[]]; paletteFrames: number; maxTris: [number, number, number]; vertices: number;
   layout: { vpos: CookedSection; vattr: CookedSection; index: CookedSection; palette: CookedSection };
   variations: CookedVariation[];
 }
@@ -41,8 +41,11 @@ export function checkCooked(meta: CookedPeople, byteLength: number): string | nu
   for (const v of meta.variations) {
     const frames = meta.clipSets[v.clipSet].reduce((s, c) => s + c.frames, 0);
     if (v.paletteStart + frames > meta.paletteFrames) return 'a variation runs past the palettes';
-    if (v.lod[0][1] > meta.maxTris[0] || v.lod[1][1] > meta.maxTris[1]) return 'a variation has more triangles than the maximum';
-    if (v.lod[0][0] + v.lod[0][1] * 3 > L.index.count || v.lod[1][0] + v.lod[1][1] * 3 > L.index.count) return 'a level runs past the index';
+    if (v.lod.length !== 3 || meta.maxTris.length !== 3) return 'three levels expected';
+    for (let i = 0; i < 3; i++) {
+      if (v.lod[i][1] > meta.maxTris[i]) return 'a variation has more triangles than the maximum';
+      if (v.lod[i][0] + v.lod[i][1] * 3 > L.index.count) return 'a level runs past the index';
+    }
   }
   const names = Object.keys(CLIP);
   for (const set of meta.clipSets) if (set.length !== names.length || set.some((c, i) => c.name !== names[i])) return 'clip order differs from CLIP';

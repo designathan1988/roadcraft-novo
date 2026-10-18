@@ -18,7 +18,7 @@ test('people cooked for this build (version, sizes, sections)', () => {
 test('people cooked within the budget (memory, triangles, variety)', () => {
   const meta = JSON.parse(fs.readFileSync(new URL('people.json', dir), 'utf8')) as CookedPeople;
   assert.ok(meta.bytes < 60e6, `cooked people ${meta.bytes} bytes`);
-  assert.ok(meta.maxTris[0] <= 8000 && meta.maxTris[1] <= 1200, `triangles a person ${meta.maxTris}`);
+  assert.ok(meta.maxTris[0] <= 4500 && meta.maxTris[1] <= 700 && meta.maxTris[2] <= 200, `triangles a person ${meta.maxTris}`);
   assert.ok(meta.variations.length >= 16);
   assert.equal(new Set(meta.variations.map((v) => v.outfit)).size >= 8, true);
   assert.equal(CLIP_PROP.length, Object.keys(CLIP).length);
