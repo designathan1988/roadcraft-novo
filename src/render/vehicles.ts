@@ -15,6 +15,7 @@ import { PeopleRenderer } from './people/crowd.ts';
 const {
   attribute, vec2, vec3, vec4, float, abs, cos, sin, mix, transformNormalToView, normalize,
   interleavedGradientNoise, screenCoordinate, uniformArray, int, floor, sRGBTransferEOTF, max, step, select, mod, time, smoothstep,
+  cameraViewMatrix, fract, hash, clamp, atan, length,
 } = T;
 
 const NEAR = 200;
@@ -55,7 +56,41 @@ function model(parts: Part[]): THREE.BufferGeometry {
 const GLASS = 0x1a2430, TIRE = 0x161616, LIGHT = 0xfff1c8, RED = 0x8a1010;
 /** Setas (âmbar apagado; acendem pelo bit da simulação): esquerda = +x do modelo (o rumo gira de +z para +x). */
 const AMBER_L = 0xb8741a, AMBER_R = 0xb8741b;
-const glowOf = (col: number) => (col === LIGHT ? 1 : col === RED ? 2 : col === AMBER_L ? 3 : col === AMBER_R ? 4 : 0);
+const glowOf = (col: number) => (col === LIGHT ? 1 : col === RED ? 2 : col === AMBER_L ? 3 : col === AMBER_R ? 4 : col === GLASS ? GLASS_GLOW : 0);
+/** Glass (smooth, reflects the sky), exhaust puff, and the wheel parts (100 + 2 × part + front: tyre, hubcap, spoke). */
+const GLASS_GLOW = 5, PUFF = 7, WHEEL = 100;
+
+/** Re-tags a geometry as a wheel part: its colour slot holds the wheel centre (the shader rolls and steers it). */
+function asWheelPart(g: THREE.BufferGeometry, part: number, front: boolean, cx: number, cy: number, cz: number): THREE.BufferGeometry {
+  const n = g.attributes.position.count;
+  const c = g.attributes.color.array as Float32Array, gl = g.attributes.glow.array as Float32Array;
+  for (let i = 0; i < n; i++) { c[i * 3] = cx; c[i * 3 + 1] = cy; c[i * 3 + 2] = cz; gl[i] = WHEEL + part * 2 + (front ? 1 : 0); }
+  return g;
+}
+
+/** A wheel (Roadcraft carBody: tyre, hubcap, five spokes): it rolls with the distance driven and the front ones steer. */
+function wheel(parts: THREE.BufferGeometry[], x: number, y: number, z: number, r: number, width: number, front: boolean): void {
+  const side = Math.sign(x) || 1;
+  const tyre = new THREE.CylinderGeometry(r, r, width, 12, 1, true); tyre.rotateZ(Math.PI / 2); tyre.translate(x, y, z);
+  parts.push(asWheelPart(tagged(tyre, TIRE), 0, front, x, y, z));
+  const wall = new THREE.RingGeometry(r * 0.62, r, 12); wall.rotateY(side > 0 ? Math.PI / 2 : -Math.PI / 2); wall.translate(x + side * width / 2, y, z);
+  parts.push(asWheelPart(tagged(wall, TIRE), 0, front, x, y, z));
+  const cap = new THREE.CircleGeometry(r * 0.62, 10); cap.rotateY(side > 0 ? Math.PI / 2 : -Math.PI / 2); cap.translate(x + side * (width / 2 - 0.01), y, z);
+  parts.push(asWheelPart(tagged(cap, 0xb9bcbf), 1, front, x, y, z));
+  for (let k = 0; k < 5; k++) {
+    const sp = new THREE.BoxGeometry(0.012, r * 0.5, 0.05); sp.translate(0, r * 0.3, 0); sp.rotateX(k * Math.PI * 2 / 5); sp.translate(x + side * (width / 2 - 0.004), y, z);
+    parts.push(asWheelPart(tagged(sp, 0x2a2b2d), 2, front, x, y, z));
+  }
+}
+
+/** Exhaust puff: a little square at the tailpipe, billboarded and animated in the shader (anchor in the colour slot). */
+function puff(parts: THREE.BufferGeometry[], x: number, y: number, z: number): void {
+  const q = new THREE.PlaneGeometry(0.36, 0.36); q.translate(x, y, z);
+  const g = tagged(q, 0x9a9a98);
+  const n = g.attributes.position.count, c = g.attributes.color.array as Float32Array, gl = g.attributes.glow.array as Float32Array;
+  for (let i = 0; i < n; i++) { c[i * 3] = x; c[i * 3 + 1] = y; c[i * 3 + 2] = z; gl[i] = PUFF; }
+  parts.push(g);
+}
 /**
  * Sombra de mancha (roadcraft `blobShadows`) para os veículos além de SHADOW_NEAR, que não entram nas cascatas:
  * retângulo escuro 3 cm acima da pista, com a borda pontilhada (o TRAA suaviza). `glow` = BLOB; a cor leva o canto.
@@ -104,9 +139,11 @@ function tagged(g: THREE.BufferGeometry, col: number, limb = 0): THREE.BufferGeo
 /** Perfil lateral (z para a frente, y para cima) extrudado na largura, centrado em x. */
 function profile(pts: Array<[number, number]>, width: number): THREE.BufferGeometry {
   const sh = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y)));
-  const g = new THREE.ExtrudeGeometry(sh, { depth: width, bevelEnabled: false, curveSegments: 1 });
-  // a forma está no plano xy (x = frente); gira para x = lado, z = frente
-  g.translate(0, 0, -width / 2);
+  // rounded edges as Roadcraft's extruded bodies (carBody.ts extrude with a bevel): the same overall size
+  const bevel = 0.045;
+  const g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2, curveSegments: 1 });
+  // the shape lies in the xy plane (x = forward); turned so x = side, z = forward
+  g.translate(0, 0, -width / 2 + bevel);
   g.rotateY(-Math.PI / 2);
   return g;
 }
@@ -204,11 +241,8 @@ function carModel(k: CarSpec = CAR_SPECS[0]): THREE.BufferGeometry {
   // motorista nas janelas dos dois lados (lugar 1)
   const gy = k.lamp + 0.22, gz = k.glass[1][0] - 0.35;
   for (const side of [1, -1]) occupant(parts, side * (W / 2 + 0.03), gy, gz, side, 1);
-  for (const z of [k.axle, -k.axle]) for (const x of [W / 2 - 0.08, -W / 2 + 0.08]) {
-    // roda octogonal sem as tampas de dentro (não aparecem): a calota é a tampa de fora, clara
-    const w = new THREE.CylinderGeometry(k.wheel, k.wheel, 0.22, 8, 1, true); w.rotateZ(Math.PI / 2); w.translate(x, k.wheel, z); parts.push(tagged(w, TIRE));
-    const cap = new THREE.CircleGeometry(k.wheel * 0.6, 8); cap.rotateY(x > 0 ? Math.PI / 2 : -Math.PI / 2); cap.translate(x + Math.sign(x) * 0.111, k.wheel, z); parts.push(tagged(cap, 0xb9bcbf));
-  }
+  for (const z of [k.axle, -k.axle]) for (const x of [W / 2 - 0.08, -W / 2 + 0.08]) wheel(parts, x, k.wheel, z, k.wheel, 0.22, z > 0);
+  puff(parts, W * 0.3, 0.28, -H - 0.2);
   return mergeGeometries(parts)!;
 }
 
@@ -218,7 +252,7 @@ function motoModel(): THREE.BufferGeometry {
   const box = (x: number, y: number, z: number, w: number, h: number, l: number, col: number) => {
     const b = new THREE.BoxGeometry(w, h, l); b.translate(x, y + h / 2, z); parts.push(tagged(b, col));
   };
-  for (const z of [0.72, -0.72]) { const w = new THREE.CylinderGeometry(0.31, 0.31, 0.12, 10, 1, false); w.rotateZ(Math.PI / 2); w.translate(0, 0.31, z); parts.push(tagged(w, TIRE)); }
+  for (const z of [0.72, -0.72]) wheel(parts, 0.06, 0.31, z, 0.31, 0.12, z > 0);
   box(0, 0.86, 0.72, 0.62, 0.04, 0.04, 0x2a2b2d); // guidão
   box(0, 0.74, 0.97, 0.14, 0.1, 0.03, LIGHT); box(0, 0.76, -0.99, 0.12, 0.08, 0.03, RED);
   box(0.17, 0.78, 0.94, 0.05, 0.05, 0.03, AMBER_L); box(-0.17, 0.78, 0.94, 0.05, 0.05, 0.03, AMBER_R);
@@ -241,8 +275,6 @@ const BUS: Part[] = [
   [0.8, 0.7, -5.91, 0.4, 0.2, 0.02, RED], [-0.8, 0.7, -5.91, 0.4, 0.2, 0.02, RED],
   [1.15, 0.6, 5.92, 0.16, 0.14, 0.02, AMBER_L], [-1.15, 0.6, 5.92, 0.16, 0.14, 0.02, AMBER_R],
   [1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_L], [-1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_R],
-  [1.1, 0, 3.8, 0.3, 0.9, 0.9, TIRE], [-1.1, 0, 3.8, 0.3, 0.9, 0.9, TIRE],
-  [1.1, 0, -3.6, 0.3, 0.9, 0.9, TIRE], [-1.1, 0, -3.6, 0.3, 0.9, 0.9, TIRE],
 ];
 /** Bicicleta com o ciclista (1,8 m): rodas finas, quadro, guidão, ciclista curvado e capacete na cor. */
 function bikeModel(): THREE.BufferGeometry {
@@ -276,6 +308,8 @@ function bikeModel(): THREE.BufferGeometry {
 /** Ônibus com os passageiros nas janelas: 16 lugares alternando os lados, da frente para trás (o 1 é o motorista). */
 function busModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [model(BUS).toNonIndexed()];
+  for (const z of [3.8, -3.6]) for (const x of [1.1, -1.1]) wheel(parts, x, 0.47, z, 0.47, 0.3, z > 0);
+  puff(parts, 0.8, 0.35, -6.1);
   occupant(parts, 1.29, 1.35, 5.0, 1, 1);
   for (let k = 2; k <= 16; k++) {
     const side = k % 2 ? 1 : -1, row = Math.floor((k - 1) / 2);
@@ -287,6 +321,8 @@ function busModel(): THREE.BufferGeometry {
 /** Caminhão com o motorista na cabine. */
 function truckModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [model(TRUCK).toNonIndexed()];
+  for (const z of [3.6, -3.2]) for (const x of [1.1, -1.1]) wheel(parts, x, 0.48, z, 0.48, 0.32, z > 0);
+  puff(parts, 0.9, 0.4, -4.9);
   for (const side of [1, -1]) occupant(parts, side * 1.18, 1.45, 3.85, side, 1);
   return mergeGeometries(parts)!;
 }
@@ -300,8 +336,6 @@ const TRUCK: Part[] = [
   [0.9, 0.55, -4.67, 0.36, 0.16, 0.02, RED], [-0.9, 0.55, -4.67, 0.36, 0.16, 0.02, RED],
   [1.12, 0.75, 4.77, 0.14, 0.12, 0.02, AMBER_L], [-1.12, 0.75, 4.77, 0.14, 0.12, 0.02, AMBER_R],
   [1.12, 0.75, -4.67, 0.14, 0.12, 0.02, AMBER_L], [-1.12, 0.75, -4.67, 0.14, 0.12, 0.02, AMBER_R],
-  [1.1, 0, 3.6, 0.32, 0.95, 0.95, TIRE], [-1.1, 0, 3.6, 0.32, 0.95, 0.95, TIRE],
-  [1.1, 0, -3.2, 0.32, 0.95, 0.95, TIRE], [-1.1, 0, -3.2, 0.32, 0.95, 0.95, TIRE],
 ];
 const SKIN = 0xc89a78, PANTS = 0x2c3140, HAIR = 0x2a1f18;
 /** Vagão de trem/metrô (20 m): caixa pintada na cor da linha, faixa de janelas, teto, truques. */
@@ -422,7 +456,43 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
     const dims = uniformArray(KIND_DIMS.map((d) => new THREE.Vector3(...d)), 'vec3');
     local = local.add(vec3(0, 0.5, 0)).mul(dims.element(k));
   }
-  m.positionNode = rot(local).add(ipos.xyz);
+  const glowV = attribute('glow', 'float');
+  let world: Node = rot(local).add(ipos.xyz);
+  let puffShow: Node = float(1).greaterThan(0);
+  if (!animated) {
+    // wheels roll by the distance driven along the heading and the front ones steer by the turn rate (curvature ×
+    // wheelbase from this frame's and last frame's pose), round their own centre (kept in the colour slot)
+    const isWheel = step(float(WHEEL - 0.5), glowV);
+    const front = mod(glowV.sub(WHEEL), 2).mul(isWheel);
+    const centre = attribute('color', 'vec3');
+    const r = max(centre.y, float(0.1));
+    const travelled = ipos.x.mul(sin(ipos.w)).add(ipos.z.mul(cos(ipos.w)));
+    const a = travelled.div(r).mul(isWheel);
+    let dyaw: Node = ipos.w.sub(iprev.w);
+    dyaw = dyaw.sub(floor(dyaw.div(6.2832).add(0.5)).mul(6.2832));
+    const moved = length(ipos.xz.sub(iprev.xz));
+    const steer = clamp(atan(dyaw.div(max(moved, float(0.05))).mul(2.6)), -0.55, 0.55).mul(step(float(0.02), moved)).mul(front);
+    const ca = cos(a), sa = sin(a), cs = cos(steer), ss = sin(steer);
+    const roll = (v: Node) => vec3(v.x, v.y.mul(ca).sub(v.z.mul(sa)), v.y.mul(sa).add(v.z.mul(ca)));
+    const turn = (v: Node) => vec3(v.x.mul(cs).add(v.z.mul(ss)), v.y, v.x.negate().mul(ss).add(v.z.mul(cs)));
+    const q = local.sub(centre);
+    local = mix(local, centre.add(turn(roll(q))), isWheel);
+    nrm = mix(nrm, turn(roll(nrm)), isWheel);
+    world = rot(local).add(ipos.xyz);
+    // exhaust puff: rises and drifts back from the tailpipe over ~1.3 s, growing and fading (dithered)
+    const isPuff = step(abs(glowV.sub(PUFF)), float(0.5));
+    const life = fract(time.mul(0.75).add(hash(ipos.x.mul(1.7).add(ipos.z.mul(3.1)))));
+    const anchor = attribute('color', 'vec3');
+    const rel = attribute('position', 'vec3').sub(anchor);
+    const corner = rel.xy.mul(float(1).add(life.mul(2)));
+    const camR = vec3(cameraViewMatrix.element(0).x, cameraViewMatrix.element(1).x, cameraViewMatrix.element(2).x);
+    const camU = vec3(cameraViewMatrix.element(0).y, cameraViewMatrix.element(1).y, cameraViewMatrix.element(2).y);
+    const puffPos = rot(anchor.add(vec3(0, life.mul(0.55), life.mul(-0.9)))).add(ipos.xyz).add(camR.mul(corner.x)).add(camU.mul(corner.y));
+    world = mix(world, puffPos, isPuff);
+    const r2 = clamp(length(rel.xy).div(0.18), 0, 1);
+    puffShow = isPuff.lessThan(0.5).or(float(1).sub(life).mul(float(1).sub(r2)).mul(0.45).greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(51, 17)))));
+  }
+  m.positionNode = world;
   withPrevious(m, animated ? undefined : rotBy(iprev.w)(local).add(iprev.xyz));
   m.normalNode = transformNormalToView(normalize(rot(nrm)));
   const palette = uniformArray(PAINTS.map((p) => new THREE.Color(p)), 'color');
@@ -434,14 +504,22 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   const seatsOn = floor(lightBits.div(8)).mul(16 / 7);
   const glowA = attribute('glow', 'float');
   const seat = glowA.sub(OCC);
-  const occOk = seat.lessThan(0.5).or(seat.lessThan(seatsOn.add(0.5)));
+  const occOk = seat.lessThan(0.5).or(seat.greaterThan(16.5)).or(seat.lessThan(seatsOn.add(0.5)));
   // sombra de mancha: escura no meio, some na borda (pontilhado por outro ruído)
   const isBlob = step(abs(glowA.sub(BLOB)), float(0.5));
   const blobR = attribute('color', 'vec3').xy.length().div(1.414);
   const blobOk = isBlob.lessThan(0.5).or(float(1).sub(smoothstep(float(0.35), float(1), blobR)).mul(0.85).greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(7.0, 13.0)))));
-  m.colorNode = vec4(mix(mix(attribute('color', 'vec3'), paint, attribute('paint', 'float')), vec3(0.015, 0.015, 0.02), isBlob), 1);
-  m.roughnessNode = mix(float(0.35), float(0.6), attribute('paint', 'float').oneMinus());
-  m.metalnessNode = attribute('paint', 'float').mul(0.25);
+  // wheel parts and puffs keep a centre in the colour slot: their colour is by part
+  const wPart = floor(glowA.sub(WHEEL).div(2));
+  const wheelC = select(wPart.lessThan(0.5), sRGBTransferEOTF(vec3(0.086, 0.086, 0.086)), select(wPart.lessThan(1.5), sRGBTransferEOTF(vec3(0.73, 0.74, 0.75)), sRGBTransferEOTF(vec3(0.16, 0.17, 0.18))));
+  const isWheelF = step(float(WHEEL - 0.5), glowA);
+  const isPuffF = step(abs(glowA.sub(PUFF)), float(0.5));
+  const isGlass = step(abs(glowA.sub(GLASS_GLOW)), float(0.5));
+  const surf = mix(mix(attribute('color', 'vec3'), paint, attribute('paint', 'float')), wheelC, isWheelF);
+  m.colorNode = vec4(mix(mix(surf, vec3(0.015, 0.015, 0.02), isBlob), vec3(0.45, 0.45, 0.44), isPuffF), 1);
+  // paint with a clear coat look, glass smooth (it shows the sky from the environment), the rest matte
+  m.roughnessNode = mix(mix(float(0.28), float(0.62), attribute('paint', 'float').oneMinus()), float(0.05), isGlass).add(isPuffF);
+  m.metalnessNode = attribute('paint', 'float').mul(0.3);
   if (!scaled) {
     const gl = attribute('glow', 'float');
     const on = max(nightU, rainU.mul(0.7));
@@ -460,7 +538,7 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   const n = interleavedGradientNoise(screenCoordinate.xy);
   const lodOk = select(lod.greaterThanEqual(0), n.lessThan(lod), n.greaterThanEqual(lod.negate().sub(1)));
   // surgir/sumir com outro ruído (o mesmo ruído do nível furaria os mesmos pixels nos dois)
-  m.maskNode = lodOk.and(occOk).and(blobOk).and(alpha.greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(23.0, 41.0)))));
+  m.maskNode = lodOk.and(occOk).and(blobOk).and(puffShow).and(alpha.greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(23.0, 41.0)))));
   return m;
 }
 

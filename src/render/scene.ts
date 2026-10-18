@@ -63,7 +63,7 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<SceneParts
   } catch { /* keep the guaranteed minimum */ }
 
   const scene = new THREE.Scene();
-  const fogColor = new THREE.Color(0xb9cbdc);
+  const fogColor = new THREE.Color(0xa8c3e2);
   scene.fog = new THREE.FogExp2(fogColor, 0.000045);
   scene.background = fogColor;
 
@@ -188,7 +188,7 @@ export const currentU = T.uniform(0.5);
 export const nightU = T.uniform(0);
 
 const GRAY_FOG = new THREE.Color(0x9aa1a8);
-const DAY_FOG = new THREE.Color(0xb9cbdc), DUSK_FOG = new THREE.Color(0xd9a27a), NIGHT_FOG = new THREE.Color(0x0c1220);
+const DAY_FOG = new THREE.Color(0xa8c3e2), DUSK_FOG = new THREE.Color(0xd9a27a), NIGHT_FOG = new THREE.Color(0x0c1220);
 const SUN_DAY = new THREE.Color(0xfff0d2), SUN_LOW = new THREE.Color(0xffa860), MOON = new THREE.Color(0x9fb4d8);
 // a near-neutral sky fill (Roadcraft: a saturated blue tinted every shadow blue at close zoom)
 const HEMI_DAY = new THREE.Color(0xe6e4da), HEMI_NIGHT = new THREE.Color(0x34456a);

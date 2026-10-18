@@ -6,14 +6,15 @@
 // delas sobem para a GPU. Troca de nível esmaece por pontilhado.
 
 import * as THREE from 'three/webgpu';
-import { CELL_COUNT, Dirty, cellOriginX, type DirtyCells } from '../core/grid.ts';
-import { MAP_CELLS } from '../config.ts';
+import { CELL_COUNT, Dirty, cellOriginX, tileId, tileX, type DirtyCells } from '../core/grid.ts';
+import { MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import type { World } from '../world/world.ts';
 import { buildPropDefs, buildSignAtlas, impostorSources, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, type PropDef } from './propMeshes.ts';
-import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode } from './impostor.ts';
+import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
+import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
 import { PAINTS } from './vehicles.ts';
 import { windU } from './weather.ts';
@@ -23,7 +24,7 @@ const {
   Fn, If, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
   attribute, positionLocal, normalLocal, varyingProperty, transformNormalToView, normalize, cos, sin, min, select, length, dot,
   textureLoad, time, interleavedGradientNoise, screenCoordinate, mix, step, abs, fract, hash, sRGBTransferEOTF,
-  texture, vec2, cross, clamp, floor, uniformArray: uArr, cameraPosition, positionWorld: positionWorldP,
+  texture, vec2, cross, clamp, floor, uniformArray: uArr, cameraPosition, positionWorld: positionWorldP, cameraViewMatrix, max,
 } = T;
 
 const CAP = 1 << 20;
@@ -66,6 +67,8 @@ export class PropRenderer {
   /** Texto de estado dos semáforos (nó → 1 + braço * 4 + estado). */
   readonly signalTex: THREE.DataTexture;
   pixelScale = 1;
+  /** Mesh of each type × level (null: no level): levels nothing can reach this frame are not drawn. */
+  private slotMesh: Array<THREE.Mesh | null> = new Array(DRAWS).fill(null);
   private signalSent = 0;
   // modo de compatibilidade (WebGL 2): malhas instanciadas por célula, só perto da câmera
   private fallbackMat: THREE.MeshStandardNodeMaterial | null = null;
@@ -77,6 +80,9 @@ export class PropRenderer {
   private impNormal = texture(new THREE.Texture());
   // sign faces (speed limits, stop, yield…), drawn once at load
   private signAtlas = texture(buildSignAtlas());
+  // leaf clump and palm frond, cut out of the tree cards
+  private leafTex = buildLeafAtlas();
+  private leafAtlas = texture(this.leafTex);
   impRT: THREE.RenderTarget[] = [];
 
   constructor(world: World, pool: JobPool, signalsSab: SharedArrayBuffer, isWebGPU: boolean) {
@@ -85,6 +91,8 @@ export class PropRenderer {
     this.dirty = world.dirty;
     this.enabled = isWebGPU; // recorte em compute: só no WebGPU (no WebGL 2 as peças ficam de fora por ora)
     this.defs = buildPropDefs();
+    // the impostor frames are measured from the tree meshes before the material reads them
+    impostorFrames(impostorSources(this.defs));
     for (let b = CAP / BLOCK - 1; b >= 0; b--) this.freeBlocks.push(b);
     this.poolAttr = new THREE.StorageBufferAttribute(this.data, 4);
     this.extraAttr = new THREE.StorageBufferAttribute(this.extra, 1);
@@ -173,6 +181,7 @@ export class PropRenderer {
       mesh.castShadow = l === 0 && t !== PROP.Wire;
       mesh.receiveShadow = true;
       this.group.add(mesh);
+      this.slotMesh[t * LODS + l] = mesh;
     }));
   }
 
@@ -254,7 +263,8 @@ export class PropRenderer {
       const local = mix(positionLocal, atlasP, isAtlas);
       const p = mix(mix(local.mul(scale), wireP, isWire), barrierP, isBarrier).mul(float(1).sub(wrongFace)).toVar();
       // folhagem balança um pouco com o vento
-      const leaf = step(abs(pcol.w.mul(255).sub(PMAT.Leaf)), float(0.5));
+      const isCard = step(abs(pcol.w.mul(255).sub(PMAT.LeafCard)), float(0.5));
+      const leaf = max(step(abs(pcol.w.mul(255).sub(PMAT.Leaf)), float(0.5)), isCard);
       // com vento forte: balanço mais rápido e mais largo, inclinado a favor do vento
       const sway = sin(time.mul(windU.mul(2.2).add(1.3)).add(inst.x.mul(0.07)).add(inst.z.mul(0.05))).mul(windU.mul(0.09).add(0.03)).add(windU.mul(windU).mul(0.06)).mul(p.y).mul(leaf);
       const wx = p.x.mul(c).add(p.z.mul(s)).add(sway);
@@ -304,8 +314,13 @@ export class PropRenderer {
       const atlas = vec2(col.mul(IMP_G).add(cell.x).add(positionLocal.x.mul(0.5).add(0.5)).div(IMP_G * IMP_TYPES),
         cell.y.add(positionLocal.y.mul(0.5).add(0.5)).div(IMP_G));
       vB.assign(vec4(atlas, c, s));
-      vC.assign(vec4(atlasUVN, backN, flowerN));
-      return mix(vec3(wx, p.y, wz).add(inst.xyz), impPos, isImp);
+      vC.assign(vec4(select(isCard.greaterThan(0.5), attribute('pext', 'vec4').xy, atlasUVN), backN, flowerN));
+      // foliage cards face the camera (the shadow pass's camera too: leafy shadows); corner offset in metres
+      const pext = attribute('pext', 'vec4');
+      const camR = vec3(cameraViewMatrix.element(0).x, cameraViewMatrix.element(1).x, cameraViewMatrix.element(2).x);
+      const camU = vec3(cameraViewMatrix.element(0).y, cameraViewMatrix.element(1).y, cameraViewMatrix.element(2).y);
+      const card = camR.mul(pext.z).add(camU.mul(pext.w)).mul(scale).mul(isCard);
+      return mix(vec3(wx, p.y, wz).add(inst.xyz).add(card), impPos, isImp);
     })();
     withPrevious(m);
     // impostor: normal da foto (espaço da árvore) girada pelo rumo
@@ -317,7 +332,9 @@ export class PropRenderer {
     m.normalNode = transformNormalToView(normalize(mix(vN, impNW, isImpF)));
 
     const mat = pcol.w.mul(255);
-    const isLeaf = step(abs(mat.sub(PMAT.Leaf)), float(0.5));
+    const isCardF = step(abs(mat.sub(PMAT.LeafCard)), float(0.5));
+    const isLeaf = max(step(abs(mat.sub(PMAT.Leaf)), float(0.5)), isCardF);
+    const leafC = this.leafAtlas.sample(vAtlasUV);
     const isGlass = step(abs(mat.sub(PMAT.Glass)), float(0.5));
     const isBulb = step(float(2.5), mat).mul(step(mat, float(5.5)));
     const isMetal = step(abs(mat.sub(PMAT.Metal)), float(0.5));
@@ -329,7 +346,7 @@ export class PropRenderer {
     const isAtlasF = step(abs(mat.sub(PMAT.Atlas)), float(0.5));
     const atlasC = this.signAtlas.sample(vAtlasUV);
     const signFace = mix(atlasC.xyz, pcol.xyz, vAtlasBack);
-    const base = mix(mix(mix(pcol.xyz, paint, isPaint), signFace, isAtlasF), impC.xyz, isImpF).mul(mix(tint, mix(vec3(1, 1, 1), tint, step(float(0.5), vVar)), isImpF));
+    const base = mix(mix(mix(pcol.xyz.mul(mix(vec3(1, 1, 1), leafC.xyz, isCardF)), paint, isPaint), signFace, isAtlasF), impC.xyz, isImpF).mul(mix(tint, mix(vec3(1, 1, 1), tint, step(float(0.5), vVar)), isImpF));
     const bulbOff = base.mul(0.12);
     // folhagem: cada árvore com o seu tom (mais clara, amarelada ou escura), o topo da copa mais claro e a
     // luz que atravessa as folhas (o lado da sombra não fica preto)
@@ -349,14 +366,14 @@ export class PropRenderer {
     // esmaecimento entre níveis
     const noise = interleavedGradientNoise(screenCoordinate.xy);
     const fadeOk = select(vComp.greaterThan(0.5), noise.greaterThanEqual(float(1).sub(vFade)), noise.lessThan(vFade.add(0.002)));
-    m.maskNode = fadeOk.and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5)));
+    m.maskNode = fadeOk.and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5))).and(isCardF.lessThan(0.5).or(leafC.a.greaterThan(0.5)));
     return m;
   }
 
   /** Fotografa as árvores para os impostores (na carga). */
   bake(renderer: THREE.WebGPURenderer): void {
     if (!this.enabled) return;
-    const baked = bakeImpostors(renderer, impostorSources(this.defs));
+    const baked = bakeImpostors(renderer, impostorSources(this.defs), this.leafTex);
     this.impRT = baked.targets;
     this.impColor.value = baked.color;
     this.impNormal.value = baked.normal;
@@ -437,7 +454,7 @@ export class PropRenderer {
         k++;
       }
       const g = new THREE.InstancedBufferGeometry();
-      for (const name of ['position', 'normal', 'pcol']) g.setAttribute(name, base.attributes[name]);
+      for (const name of ['position', 'normal', 'pcol', 'pext']) g.setAttribute(name, base.attributes[name]);
       g.setAttribute('ipose', new THREE.InstancedBufferAttribute(pose, 4));
       g.setAttribute('ikey', new THREE.InstancedBufferAttribute(key, 1));
       g.instanceCount = n;
@@ -480,6 +497,15 @@ export class PropRenderer {
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
     this.defs.forEach((d, t) => d.dist.forEach((x, l) => { this.distArr[t * LODS + l] = d.lods[l] ? x * this.pixelScale : 0; }));
+    // An indirect draw costs a call (and one per shadow cascade) even when the cull leaves it empty: a level whose
+    // band ends nearer than any prop can be is not drawn. Nearest possible prop: the eye's height over the highest
+    // ground of the 3 × 3 tiles round it (+60 m for bridges and rooftops); props beyond those tiles are ≥ 1 km away.
+    const w = this.world;
+    const tx = Math.min(MAP_TILES - 1, Math.max(0, tileX(camPos.x))), tz = Math.min(MAP_TILES - 1, Math.max(0, tileX(camPos.z)));
+    let top = -Infinity;
+    for (let j = Math.max(0, tz - 1); j <= Math.min(MAP_TILES - 1, tz + 1); j++) for (let i = Math.max(0, tx - 1); i <= Math.min(MAP_TILES - 1, tx + 1); i++) top = Math.max(top, w.tileMax[tileId(i, j)]);
+    const nearest = Math.min(TILE_SIZE, camPos.y - top - 60);
+    for (let k = 0; k < DRAWS; k++) { const m = this.slotMesh[k]; if (m) m.visible = this.distArr[k] > nearest; }
     this.usedU.value = this.highBlock * BLOCK;
     renderer.compute(this.reset);
     renderer.compute(this.cull);

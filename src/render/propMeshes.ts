@@ -6,8 +6,9 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
+import { cypressTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 
-export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, Impostor: 30, Paint: 31 } as const;
+export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
 /** Faces por variante: Sign0 … Sign0 + 15. */
 export const FACE_LAST = PMAT.Sign0 + 15;
 /** Partes de placa: acabamento Sign0 + variante (o shader some com as das outras variantes). */
@@ -34,6 +35,8 @@ function part(g: THREE.BufferGeometry, rgb: number, mat: number, tx = 0, ty = 0,
   const c = new THREE.Color(rgb).convertSRGBToLinear();
   for (let i = 0; i < n; i++) { col[i * 4] = c.r; col[i * 4 + 1] = c.g; col[i * 4 + 2] = c.b; col[i * 4 + 3] = mat / 255; }
   ng.setAttribute('pcol', new THREE.BufferAttribute(col, 4));
+  // atlas uv and billboard corner (only the tree cards use it; zero elsewhere)
+  ng.setAttribute('pext', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
   return ng;
 }
 
@@ -48,35 +51,19 @@ const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d).
 const ball = (r: number, detail: number) => new THREE.IcosahedronGeometry(r, detail);
 const cone = (r: number, h: number, seg: number) => new THREE.ConeGeometry(r, h, seg).translate(0, h / 2, 0);
 
-const BARK = 0x6a5238, LEAF = 0x6a9a45, PINE = 0x3f7045, POLE = 0x6d7276, GLASS = 0xfff2cc;
+const POLE = 0x6d7276, GLASS = 0xfff2cc;
 
-function tree(): PropDef {
-  const near = merge([
-    part(cyl(0.22, 0.14, 3.6, 6), BARK, PMAT.Bark),
-    part(ball(2.1, 1), LEAF, PMAT.Leaf, 0, 4.6, 0, 1, 0.9, 1),
-    part(ball(1.6, 1), LEAF, PMAT.Leaf, 1.1, 3.9, 0.5, 1, 0.85, 1),
-    part(ball(1.5, 1), LEAF, PMAT.Leaf, -0.9, 4.1, -0.7, 1, 0.85, 1),
-    part(ball(1.3, 1), LEAF, PMAT.Leaf, 0.2, 5.8, -0.3),
-  ]);
-  const mid = merge([part(box(0.3, 3, 0.3), BARK, PMAT.Bark), part(ball(2.5, 0), LEAF, PMAT.Leaf, 0, 4.6, 0, 1, 0.9, 1)]);
-  return { lods: [near, mid, impostorQuad(PMAT.Impostor, 0)], dist: [230, 700, 3600], radius: 6 };
+/** Trees in Roadcraft's card style (treeMeshes.ts): near, mid, and the octahedral impostor (column = IMP column). */
+function cardTree(build: (lod: 0 | 1) => THREE.BufferGeometry, column: number, radius: number): PropDef {
+  return { lods: [build(0), build(1), impostorQuad(PMAT.Impostor, column)], dist: [200, 650, 3600], radius };
 }
-
-function conifer(): PropDef {
-  const near = merge([
-    part(cyl(0.2, 0.12, 2.2, 6), BARK, PMAT.Bark),
-    part(cone(2.0, 3.4, 9), PINE, PMAT.Leaf, 0, 1.6, 0),
-    part(cone(1.55, 3.0, 9), PINE, PMAT.Leaf, 0, 3.4, 0),
-    part(cone(1.05, 2.6, 9), PINE, PMAT.Leaf, 0, 5.1, 0),
-  ]);
-  const mid = merge([part(box(0.25, 1.8, 0.25), BARK, PMAT.Bark), part(cone(1.9, 6.4, 6), PINE, PMAT.Leaf, 0, 1.4, 0)]);
-  return { lods: [near, mid, impostorQuad(PMAT.Impostor, 1)], dist: [230, 700, 3600], radius: 6 };
-}
+const tree = () => cardTree(mixedTree, 0, 6);
+const conifer = () => cardTree(cypressTree, 1, 6);
+const oak = () => cardTree(oakTree, 2, 7);
+const palm = () => cardTree(palmTree, 3, 7);
 
 function bush(): PropDef {
-  const near = merge([part(ball(0.9, 1), 0x4a7030, PMAT.Leaf, 0, 0.55, 0, 1, 0.7, 1), part(ball(0.6, 1), 0x557a36, PMAT.Leaf, 0.6, 0.45, 0.2, 1, 0.7, 1)]);
-  const mid = merge([part(ball(1.0, 0), 0x4a7030, PMAT.Leaf, 0.2, 0.5, 0, 1, 0.7, 1)]);
-  return { lods: [near, mid, null], dist: [130, 420, 0], radius: 1.6 };
+  return { lods: [shrub(0), shrub(1), null], dist: [130, 420, 0], radius: 1.6 };
 }
 
 const CONCRETE = 0xb4b0a8;
@@ -393,7 +380,7 @@ function barrier(): PropDef {
 
 /** Malhas de perto das árvores, para fotografar os impostores (na ordem das colunas do atlas). */
 export function impostorSources(defs: PropDef[]): THREE.BufferGeometry[] {
-  return [defs[PROP.Tree].lods[0]!, defs[PROP.Conifer].lods[0]!];
+  return [defs[PROP.Tree].lods[0]!, defs[PROP.Conifer].lods[0]!, defs[PROP.Oak].lods[0]!, defs[PROP.Palm].lods[0]!];
 }
 
 /** Carro estacionado: mesmas proporções dos carros da rua; a pintura vem da variante. */
@@ -486,6 +473,8 @@ export function buildPropDefs(): PropDef[] {
   defs[PROP.Pole] = pole();
   defs[PROP.Ground] = ground();
   defs[PROP.Person] = person();
+  defs[PROP.Oak] = oak();
+  defs[PROP.Palm] = palm();
   if (defs.length !== PROP_TYPES) throw new Error('tipos de peça');
   return defs;
 }
