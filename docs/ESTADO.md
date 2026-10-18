@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-18, 21h05.
+Atualizado: 2026-10-18, 21h25.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -12,6 +12,11 @@ Atualizado: 2026-10-18, 21h05.
   nas 5 vistas; `verificar.mjs` 136/146: 9 falhas do inspetor de cruzamento devolvidas à interface, 1 de
   crescimento (densidade alta) devolvida a funcionalidades. Pesquisa dos prédios em andamento
   (`docs/PESQUISA-PREDIOS.md`).
+- 21h25: pessoas completas, itens 3-5 (ocupantes, criador de pessoas com ação em `game.api`, objetos na mão,
+  grupos), budget ok; interface: Sobre com licenças lidas da build, painéis ligados às ações de funcionalidades,
+  inspetor de via com nome e numeração (`b5a35b4`); 98 testes. Causa das 10 falhas do `verificar.mjs` achada
+  pela interface (o roteiro 2 fica sem dinheiro com a economia nova: `a.road` recusa e `setJunction(-1)` quebra)
+  e passada a funcionalidades para corrigir.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
