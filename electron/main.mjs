@@ -38,6 +38,15 @@ if (process.env.CIDADE_SOFTWARE) {
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
 }
 
+// One game at a time: a second copy would share the save storage (OPFS in the user data folder) and both would
+// fail to write. The second one hands over to the first and quits. Screenshot runs pass their own --user-data-dir.
+app.setName('Roadcraft');
+if (!shot && !app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => {
+  const w = BrowserWindow.getAllWindows()[0];
+  if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
+});
+
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
 ]);
@@ -57,6 +66,8 @@ function createWindow() {
     show: !shot,
     backgroundColor: '#0c0f14',
     autoHideMenuBar: true,
+    title: 'Roadcraft',
+    icon: path.join(here, 'icon.png'),
     webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, offscreen: false, preload: path.join(here, 'preload.cjs') },
   });
   win.loadURL(devUrl ?? `app://cidade/index.html${query}`);
