@@ -26,6 +26,7 @@ import { MapSizeError, decodeMeta, encodeMeta } from './save.ts';
 import { createPoseBuffers, PoseReader, viewPoseBuffers } from './sim/poses.ts';
 import { encodeOps } from './sim/lanes.ts';
 import { VehicleRenderer } from './render/vehicles.ts';
+import type { PersonOptions } from './render/people/creator.ts';
 import { PropRenderer } from './render/props.ts';
 import { TransitRenderer } from './render/transit.ts';
 import { Post } from './render/post.ts';
@@ -1090,6 +1091,17 @@ export class Game {
 
   /** Para roteiros de foto e testes: as mesmas ações das ferramentas. */
   readonly api = {
+    /** Criador de pessoas (src/render/people/creator.ts): um grupo de 1 a 20 em (x, z), com desfazer; devolve o id (0 antes de carregar). */
+    people: (x: number, z: number, options: Partial<PersonOptions> = {}) => {
+      const c = this.vehicles.people.creator;
+      if (!c) return 0;
+      c.ground ??= (px: number, pz: number) => heightAt(this.world.heights, px, pz);
+      const cmd = c.placeCommand(x, z, heightAt(this.world.heights, x, z), options);
+      this.commands.run(cmd);
+      return cmd.id;
+    },
+    /** O que a tela do criador oferece (roupas por sexo e idade, cores, modos, objetos); null antes de carregar. */
+    peopleCatalog: () => this.vehicles.people.catalog(),
     river: (pts: Array<[number, number]>, width = 14) => { this.riverPts = pts.slice(); this.riverWidth = width; this.finishRiver(); },
     paint: (x: number, z: number, r: number, kind: number, mode: 'paint' | 'forest' | 'cut' = 'paint', species = 0) => {
       const s = new GroundStroke(this.world);

@@ -15,6 +15,7 @@ import { rainU } from '../weather.ts';
 import { CLIP, CLIP_PROP, REGION, checkCooked, type CookedPeople } from './format.ts';
 import { hash32, pickLook, type LookChoice } from './looks.ts';
 import { MOTO_PELVIS, aboard, seatsOf } from './occupants.ts';
+import { PeopleCreator, creatorCatalog, type PlacedPerson } from './creator.ts';
 
 const {
   Fn, attribute, storage, uniformArray, vertexIndex, uint, float, int, vec3, vec4, cos, sin, floor, fract, mod, min, max,
@@ -51,6 +52,22 @@ export class PeopleRenderer {
   /** px of height per metre at distance 1. */
   private pxScale = 1000;
   private readonly look: LookChoice = { variation: 0, clip: 0, rate: 1, phase: 0, hash: 0 };
+  /** The people the player placed (the creator); null until the cooked people load. */
+  creator: PeopleCreator | null = null;
+  /** What the creator's screen can offer (outfits, colours, modes), once loaded. */
+  catalog() { return this.meta ? creatorCatalog(this.meta) : null; }
+  private readonly frustum = new THREE.Frustum();
+  private readonly pv = new THREE.Matrix4();
+  private readonly sphere = new THREE.Sphere();
+  private readonly eye = new THREE.Vector3();
+  private lastT = 0;
+  private readonly visible = (x: number, y: number, z: number, r: number) => { this.sphere.center.set(x, y, z); this.sphere.radius = r; return this.frustum.intersectsSphere(this.sphere); };
+  private readonly drawPlaced = (p: PlacedPerson) => {
+    const dist = Math.hypot(p.x - this.eye.x, p.y + 1 - this.eye.y, p.z - this.eye.z);
+    const l = this.look;
+    l.variation = p.variation; l.clip = p.clip; l.hash = p.hash; l.rate = 1; l.phase = ((p.hash >>> 7) & 1023) / 1024;
+    this.levels(1.7 * p.scale * this.pxScale / Math.max(0.5, dist), dist, p.x, p.y, p.z, p.yaw, p.px, p.y, p.pz, p.pyaw, l, 1, p.scale, 0);
+  };
   /** Instances drawn last frame per level (for `stats`). */
   readonly drawn = [0, 0, 0];
 
@@ -67,6 +84,7 @@ export class PeopleRenderer {
       if (problem) throw new Error(problem);
       this.build(meta, buf);
       this.meta = meta;
+      this.creator = new PeopleCreator(meta);
       this.ready = true;
       this.warmup();
       return true;
@@ -208,6 +226,9 @@ export class PeopleRenderer {
     this.counts.fill(0);
     const e = (camera as THREE.PerspectiveCamera).projectionMatrix.elements;
     this.pxScale = e[5] * (typeof innerHeight === 'number' ? innerHeight : 1080) / 2;
+    this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
+    this.eye.setFromMatrixPosition(camera.matrixWorld);
   }
 
   /**
@@ -306,6 +327,11 @@ export class PeopleRenderer {
   }
 
   end(): void {
+    if (this.creator?.size) {
+      const t = performance.now() / 1000;
+      this.creator.forEach(this.eye.x, this.eye.z, 700, t, this.lastT > 0 ? Math.min(0.2, t - this.lastT) : 0, this.visible, this.drawPlaced);
+      this.lastT = t;
+    }
     for (let lod = 0; lod < this.geos.length; lod++) {
       const n = this.counts[lod];
       this.geos[lod].instanceCount = n;
