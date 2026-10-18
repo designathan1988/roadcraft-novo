@@ -25,7 +25,7 @@ Atualizado: 2026-10-18, 19h30.
 ## diff inteiro, roda build + testes + fotos e confere as 4 vistas)
 | Frente | Arquivos | Estado |
 |---|---|---|
-| Interface do Roadcraft (dock, barra, painéis, textos, CSS) | `src/ui/**` exceto `creator.ts`, `index.html`, ligação em `game.ts` (`hudActions`) | a começar |
+| Interface do Roadcraft (dock, barra, painéis, textos, CSS) | `src/ui/**` exceto `creator.ts`, `index.html`, ligação em `game.ts` (`hudActions`) | em andamento (worktree `interface-roadcraft-da7d52`): 1 ✅ barra de cima + dock de 7 categorias + gavetas (fotos `test-results/interface/{barra-dock,vias,zonas,paisagem}.png`); 2 a 5 a fazer |
 | Prédios com o visual do Roadcraft + construtor completo | `src/jobs/buildingGen.ts`, `src/render/city.ts`, `src/render/inside.ts`, `src/world/arch.ts`, `src/world/design.ts`, `src/ui/creator.ts`, `data/lots-roadcraft` | a começar |
 | Pessoas do Roadcraft (MakeHuman cozido, LOD, paletas na GPU) | novo `src/render/people/**`, `public/models/people`, gancho em `render/vehicles.ts` (só o ramo das pessoas) | a começar |
 | Vias, terreno, vegetação, veículos, luz e pós com o visual do Roadcraft | `src/jobs/roadMesh.ts`, `roadPaint.ts`, `src/render/{roads,terrain,props,propMeshes,impostor,vehicles,post,scene,weather,particles,cloudPuffs}.ts`, `src/jobs/props.ts`, `src/world/ground.ts` | a começar |

@@ -30,12 +30,12 @@ import { PropRenderer } from './render/props.ts';
 import { TransitRenderer } from './render/transit.ts';
 import { Post } from './render/post.ts';
 import { achieve } from './steam.ts';
-import { OptionsPanel, loadSettings, type Settings } from './ui/options.ts';
+import { OptionsPanel, loadSettings, saveSettings, type Settings } from './ui/options.ts';
 import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { HelpPanel } from './ui/help.ts';
+import { followLanguage } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -48,7 +48,6 @@ import { arrowCode } from './roads/laneLinks.ts';
 import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
-import { FN_NAMES } from './world/arch.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
@@ -65,7 +64,7 @@ import { Growth, floorsFor } from './world/growth.ts';
 import { Rng } from './core/rng.ts';
 import { RoadJournal, addCrossing, addUTurn, buildRoad, streetChain, demolishSeg, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, segPreview, snap, splitAt, bulbAt } from './roads/build.ts';
 import { BULB_R, BULB_WALK } from './roads/junction.ts';
-import { ZONE_NAMES, Zone } from './roads/zones.ts';
+import { Zone } from './roads/zones.ts';
 import { RoadPreview } from './render/preview.ts';
 import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParams } from './world/brush.ts';
 import { START_MONEY, World } from './world/world.ts';
@@ -119,7 +118,10 @@ export class Game {
   private particles!: Particles;
   private settings!: Settings;
   private optionsPanel!: OptionsPanel;
-  private help!: HelpPanel;
+  /** Simulation speed (1, 2, 4), the zone colours shown with any tool, stops clicked as terminals. */
+  private simSpeed = 1;
+  private zoneLayer = false;
+  private transitTerminal = false;
   private health!: HealthPanel;
   private creator!: Creator;
   private lineSel = 0;
@@ -309,7 +311,7 @@ export class Game {
       testCity: () => void this.testCity(),
       generate: () => void this.generatedCity(),
       options: () => this.optionsPanel?.open(),
-      help: () => this.help.toggle(),
+      help: () => this.hud.toggleHelp(),
       trafficView: () => this.toggleTrafficView(),
       follow: () => this.toggleFollow(),
       grid: () => { gridU.value = gridU.value > 0.5 ? 0 : 1; this.hud.setGrid(gridU.value > 0.5); },
@@ -337,6 +339,21 @@ export class Game {
       roadSnap: (m) => { this.roadTool.snapMode = m; },
       cutWalls: (on) => { this.roadTool.cutWalls = on; },
       blocks: (b) => { this.roadTool.blocks = b; },
+      speed: (n) => this.setSpeed(n),
+      orbit: (dx, dy) => this.rig.rotate(dx, dy),
+      turn: (d) => this.rig.turnTo(this.rig.yaw + d * Math.PI / 4),
+      tilt: (d) => this.rig.rotate(0, d * 60),
+      zoneLayer: (on) => { this.zoneLayer = on; zoneOverlayU.value = on || this.tool === 'zone' ? 1 : 0; },
+      simulation: (sim) => { Object.assign(this.settings, sim); saveSettings(this.settings); this.demandSent = 0; },
+      settings: () => {
+        const st = this.settings;
+        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown' };
+      },
+      paint: (style) => { this.settings.paint = style; saveSettings(this.settings); setPaintStyle(style); },
+      furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
+      ring: (f) => this.roadTool.ringBy(f),
+      terminal: (on) => { this.transitTerminal = on; },
+      health: () => this.health.toggle(),
     });
     this.roadTool = new RoadTool(this.world, this.commands, this.preview, this.hud);
     this.itemTool = new ItemTool(this.world, this.commands, this.preview, this.hud);
@@ -445,10 +462,10 @@ export class Game {
     if (params.has('chuva')) this.settings.weather = 'chuva';
     if (params.has('limpo')) this.settings.weather = 'limpo';
     if (params.has('tempestade')) this.settings.weather = 'tempestade';
-    this.help = new HelpPanel(document.getElementById('hud')!);
     this.health = new HealthPanel(document.getElementById('hud')!);
     this.creator = new Creator({ apply: (d, fl) => this.applyDesign(d, fl) });
-    document.querySelector('#hud .panels')?.append(this.creator.el);
+    this.hud.buildingSlot.append(this.creator.el);
+    followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
     this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
       [['Carregar o pior caso', 'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)', () => void this.testCity()],
@@ -568,7 +585,7 @@ export class Game {
         height: this.rig.eye.y - groundY, day: 1 - nightU.value, green: 0.7,
       });
     }
-    this.hud.setClock(this.hour, this.clockSpeed, this.paused);
+    this.hud.setClock(this.hour, this.simSpeed, this.paused);
     this.hud.setMoney(this.world.money, this.world.unlimited);
     this.hud.setCompass(this.rig.yaw);
 
@@ -659,23 +676,26 @@ export class Game {
   private updateInfo(now: number): void {
     if (now - this.infoTimer < 500) return;
     this.infoTimer = now;
-    const fmt = (n: number) => n >= 10000 ? `${(n / 1000).toFixed(0)} mil` : n.toLocaleString('pt-BR');
     const w = this.world, st = this.simStats?.type === 'stats' ? this.simStats : null;
-    const riders = st ? st.lines.reduce((a, l) => a + l.perHour, 0) : 0;
-    const parts = [
-      `<b>${fmt(w.residents)}</b> moradores · <b>${fmt(w.jobs)}</b> empregos · <b>${fmt(w.buildings.size)}</b> prédios`,
-      st ? `<b>${fmt(st.cars)}</b> veículos · <b>${fmt(st.peds)}</b> pedestres · ${Math.round(st.speed * 3.6)} km/h de média perto daqui` : '',
-      st ? `<b>${fmt(Math.round(this.tripsPerMin))}</b> viagens concluídas/min · <b>${fmt(st.stopped)}</b> parados perto daqui${this.lostPerMin >= 1 ? ` · ${fmt(Math.round(this.lostPerMin))} desistências/min` : ''}` : '',
-      this.transit.lines.length ? `${this.transit.lines.length} linha${this.transit.lines.length > 1 ? 's' : ''} de ônibus · <b>${fmt(riders)}</b> passageiros/h` : '',
-    ].filter(Boolean);
-    this.hud.setInfo(w.roads.segs.size || w.buildings.size ? parts.join('<br>') : '');
+    this.hud.setStatus({
+      cars: st?.cars ?? 0, peds: st?.peds ?? 0, residents: w.residents, jobs: w.jobs, buildings: w.buildings.size,
+      speedKmh: st ? st.speed * 3.6 : 0, tripsPerMin: this.tripsPerMin, lostPerMin: this.lostPerMin, stopped: st?.stopped ?? 0,
+      roads: w.roads.segs.size, nodes: w.roads.nodes.size,
+    });
   }
 
   /** Pausa ou continua: o relógio e a simulação (carros, pedestres, ônibus) param juntos. */
   togglePause(): void {
     this.paused = !this.paused;
-    this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : 1 } satisfies ToSim);
+    this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
     this.hud.toast(this.paused ? 'Pausado. Espaço continua.' : 'Continuando.');
+  }
+
+  /** Simulation speed from the top bar: 0 pauses, 1, 2 or 4 (the clock keeps pace, unless frozen for a photo). */
+  private setSpeed(n: number): void {
+    this.paused = n === 0;
+    if (n > 0) { this.simSpeed = n; if (this.clockSpeed > 0) this.clockSpeed = n; }
+    this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
   }
 
   private cycleClock(): void {
@@ -874,7 +894,7 @@ export class Game {
         else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
         else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey);
         else if (this.tool === 'building') this.clickBuilding(hit);
-        else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey);
+        else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey || this.transitTerminal);
         else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
         else if (this.tool === 'sky') { if (hit) this.clickSky(hit.x, hit.z); }
         else if (this.tool === 'person') { if (hit) this.placePerson(hit.x, hit.z); }
@@ -917,23 +937,24 @@ export class Game {
       if (e.code === 'KeyZ') { this.setTool('zone'); return; }
       if (e.code === 'KeyY') { this.setTool('move'); return; }
       if (e.code === 'KeyX') { this.setTool('split'); return; }
-      if (e.code === 'KeyB') { this.setTool('building'); return; }
+      if (e.code === 'KeyH') { this.setTool('building'); return; }
+      if (e.code === 'KeyB') { this.setTool('bulldoze'); return; }
+      if (e.code === 'KeyO') { this.setTool('transit'); return; }
+      if (e.code === 'KeyT') { this.setTool('raise'); return; }
       if (e.code === 'KeyL') { this.setTool('transit'); return; }
       if (this.tool === 'building' && this.selected >= 0) {
         if (e.code === 'Delete') { this.demolishSelected(); return; }
         if (e.code === 'PageUp') { e.preventDefault(); this.editSelected(1); return; }
         if (e.code === 'PageDown') { e.preventDefault(); this.editSelected(-1); return; }
       }
-      if (e.code === 'F1' || e.code === 'KeyH') { e.preventDefault(); this.help.toggle(); return; }
+      if (e.code === 'F1') { e.preventDefault(); this.hud.toggleHelp(); return; }
       if (e.code === 'F9') { e.preventDefault(); this.health.toggle(); return; }
-      if (e.code === 'Escape' && this.help.open) { this.help.close(); return; }
+      if (e.code === 'Escape' && this.hud.escape()) return;
       if (e.code === 'KeyC') { this.toggleFollow(); return; }
       if (e.code === 'KeyV') { this.setView(this.rig.mode === 'iso' ? 'persp' : 'iso'); return; }
       if (e.code === 'KeyP') { this.cycleClock(); return; }
       if (e.code === 'Space') { e.preventDefault(); this.togglePause(); return; }
       if (e.code === 'KeyK') { this.toggleTrafficView(); return; }
-      if (e.code === 'KeyO') { if (this.optionsPanel.isOpen) this.optionsPanel.close(); else this.optionsPanel.open(); return; }
-      if (e.code === 'KeyT') { this.setView('top'); return; }
       if (e.code === (this.settings.roadUp ?? 'PageUp')) { e.preventDefault(); this.setElevation(this.roadTool.elevation + 4); return; }
       if (e.code === (this.settings.roadDown ?? 'PageDown')) { e.preventDefault(); this.setElevation(this.roadTool.elevation - 4); return; }
       if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
@@ -1033,7 +1054,7 @@ export class Game {
   private setTool(t: Tool): void {
     if (t !== this.tool) this.ambient.sfx('click');
     this.tool = t;
-    zoneOverlayU.value = t === 'zone' ? 1 : 0;
+    zoneOverlayU.value = t === 'zone' || this.zoneLayer ? 1 : 0;
     if (TERRAIN_TOOLS.includes(t)) this.brush.mode = t === 'landform' ? this.landformMode : t as BrushParams['mode'];
     if (ROAD_TOOLS.includes(t)) this.roadTool.setMode(t);
     else { this.roadTool.cancel(); this.hud.setHint(''); }
@@ -1055,7 +1076,7 @@ export class Game {
     if (t !== 'river') this.riverPts.length = 0;
     if (t === 'transit') this.hud.setHint('Clique na calçada para pôr paradas na linha; clique numa parada para tirar; Shift+clique torna a parada terminal.');
     this.transitView.showPaths = t === 'transit';
-    if (t !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; } }
+    if (t !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); } }
     this.hud.setTool(t);
     if (this.health) this.health.context = `ferramenta ${t}`;
     this.canvas.style.cursor = t === 'camera' ? 'grab' : 'crosshair';
@@ -1375,12 +1396,11 @@ export class Game {
   private select(id: number): void {
     this.selected = id;
     const col = this.world.buildings.cols;
-    if (id < 0 || !this.world.buildings.alive[id]) { this.selected = -1; this.hud.setBuilding(''); this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; return; }
+    if (id < 0 || !this.world.buildings.alive[id]) { this.selected = -1; this.hud.setBuilding(null); this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; return; }
     const z = col.zone[id];
-    const fnName = FN_NAMES[col.fn[id]];
     this.creator?.show(hasDesign(col.color[id]) ? decodeDesign(col.color[id], col.h[id]) : null, col.floors[id]);
     if (this.creator) this.creator.el.style.display = this.tool === 'building' && col.floors[id] > 0 ? '' : 'none';
-    this.hud.setBuilding(`${fnName || ZONE_NAMES[z] || 'Prédio'} · ${col.floors[id]} andar${col.floors[id] === 1 ? '' : 'es'}`, col.style[id] >= 128 ? col.style[id] - 128 : -1, col.fn[id]);
+    this.hud.setBuilding({ fn: col.fn[id], zone: z, floors: col.floors[id], arch: col.style[id] >= 128 ? col.style[id] - 128 : -1 });
   }
 
   private showSelection(): void {
@@ -1469,11 +1489,11 @@ export class Game {
     if (this.tool === 'transit') {
       const ids = this.transit.lines.map((l) => l.id);
       if (!this.transit.line(this.lineSel) && ids.length) this.lineSel = ids[0];
-      for (const l of this.transit.lines) this.hud.lineModes.set(l.id, l.mode ?? 0);
-      this.hud.setLines(ids, this.lineSel);
-      const l = this.transit.line(this.lineSel);
-      const st = this.simStats?.type === 'stats' ? this.simStats.lines.find((x) => x.id === this.lineSel) : undefined;
-      this.hud.setLineInfo(l ? `${l.stops.length / 2} ${l.mode ? 'estações' : 'paradas'} · ${l.buses} ${l.mode ? (l.buses === 1 ? 'trem' : 'trens') : 'ônibus'} · ${st ? st.perHour : 0} passageiros/h · ${st ? st.waiting : 0} esperando` : 'Clique na calçada para começar uma linha');
+      const stats = this.simStats?.type === 'stats' ? this.simStats.lines : [];
+      this.hud.setLines(this.transit.lines.map((l) => {
+        const q = stats.find((x) => x.id === l.id);
+        return { id: l.id, mode: l.mode ?? 0, color: l.color, buses: l.buses, stops: l.stops.length / 2, perHour: q ? q.perHour : 0, waiting: q ? q.waiting : 0 };
+      }), this.lineSel);
     }
   }
 
@@ -1685,7 +1705,7 @@ export class Game {
   /** Ver por dentro: o prédio escolhido, ou o do centro da tela; andar acima e abaixo. */
   private insideCmd(c: 'toggle' | 'up' | 'down'): void {
     const w = this.world, col = w.buildings.cols;
-    if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; return; }
+    if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); return; }
     if (c === 'toggle') {
       const id = this.selected >= 0 ? this.selected : lotAt(w, this.rig.target.x, this.rig.target.z);
       if (id < 0 || col.floors[id] === 0) { this.hud.toast('Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.'); return; }
@@ -1698,7 +1718,7 @@ export class Game {
     this.insideFloor = Math.max(0, Math.min(col.floors[id] - 1, this.insideFloor));
     const base = heightAt(w.heights, col.x[id], col.z[id]) + 0.2;
     this.inside.show(col.x[id], col.z[id], col.w[id], col.d[id], col.rot[id], base, this.insideFloor, 3.2);
-    this.hud.toast(this.insideFloor === 0 ? 'Térreo' : `${this.insideFloor}º andar`);
+    this.hud.setInside(this.insideFloor);
   }
 
   /** Criador: põe (ou tira) o projeto no prédio escolhido; andares opcionais (modelo pronto). */
