@@ -28,6 +28,8 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 - Cruzamentos: controle (auto, semáforo, placas, pare em todas, preferência, minirrotatória, sem), regra por
   perna, semáforo adaptativo/fixo com fases, defasagem, onda verde, ônibus; movimentos proibidos; conectores
   manuais; altura do nó; automático pelo fluxo com trava.
+- Economia das vias ✅ (commit "Economia das vias do Roadcraft", foto `economia.png`): preço por m² de pista,
+  canteiro e calçada × modo de construção, devolve 25 % ao demolir, recusa sem saldo, cidade gerada grátis.
 - Pintura regional (Brasil, EUA, Europa, Clássica); mobiliário automático (completo, básico, nenhum).
 - Postes com fios e luz (nenhum, alternados, todos); muros, cercas, sebes, defensas, gradis; paisagismo de calçada
   (árvore, arbusto, banco, lixeira, hidrante, correio, orelhão, boca de lobo, placas com regra).

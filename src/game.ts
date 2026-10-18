@@ -1090,7 +1090,9 @@ export class Game {
       const plan = planRoad(this.world, a, null, b, Math.max(0, id), elevation);
       if (!plan.ok) return plan.reason;
       const j = buildRoad(this.world, plan, a, b, Math.max(0, id), this.roadTool.segFlags());
-      if (j.settle()) this.commands.push(j);
+      const price = j.price;
+      if (!j.settle()) return `dinheiro insuficiente: custa R$ ${price.toLocaleString('pt-BR')}`;
+      this.commands.push(j);
       return 'ok';
     },
     zone: (x: number, z: number, r: number, zone: number) => { this.zoneTool.zone = zone; this.zoneTool.radius = r; this.zoneTool.begin(); this.zoneTool.dab(x, z); this.zoneTool.end(); },
