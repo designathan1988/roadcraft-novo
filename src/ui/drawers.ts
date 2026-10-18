@@ -529,7 +529,6 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
       button('v2-icon danger', t('transit.remove'), () => { pickLine(); a.deleteLine(); }, svg('demolish', 14)));
     items.append(row);
   }
-  if (!rows.length) p.strip.append(el('p', 'v2-note', t('transit.noLines')));
   p.strip.append(el('p', 'v2-note', t(`ui.transit.help.${now}`)));
 }
 

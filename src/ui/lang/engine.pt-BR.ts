@@ -186,4 +186,7 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.toolName.person': 'Pessoas',
   'ui.toolName.pistol': 'Pistola',
   'ui.toolName.bomb': 'Bomba',
+  'ui.health.error': 'erro',
+  'ui.health.slow': 'lento',
+  'ui.health.frame': 'quadro de {ms} ms',
 };
