@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-18, 21h40.
+Atualizado: 2026-10-18, 22h00.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -21,6 +21,11 @@ Atualizado: 2026-10-18, 21h40.
   Roadcraft com rodas, vidro, escapamento; mobiliário automático) (`8a27c71`); budget ok (cidade 479 chamadas,
   antes 548). Devolvido à sessão de vias: ocupantes sob o carro (alturas em `people/occupants.ts`), céu do
   horizonte, grama nos lotes, foto de ponte e túnel, inglês nos arquivos dela.
+- 22h00: interface com o criador de pessoas, "remover postes" e zoom/centro no painel Câmera (`170941a`); prédios
+  com relevos finos só na camada de detalhe (`b1d7fe7`, bairro 2,27 M tri); pesquisa dos prédios commitada
+  (`docs/PESQUISA-PREDIOS.md`, plano em 12 passos, entregue à sessão de prédios junto com o defeito do pool de
+  props: cada peça de fachada processa ~3.624 vértices); `PROMPT-ANALISE.md` (contexto + pedido de análise).
+  98 testes, budget ok.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
