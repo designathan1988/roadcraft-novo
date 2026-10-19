@@ -1595,7 +1595,8 @@ export class Game {
   /** Lines for the simulation and for rendering, when they change (or when the roads change). */
   private syncTransit(): void {
     const v = this.transit.version * 100000 + this.roadsVersion;
-    this.transitView.update(this.transit, this.world.roads, this.world.heights, v);
+    // the stops: rebuilt when the lines change or a road is edited near a stop (not on every road edit)
+    this.transitView.update(this.transit, this.world.roads, this.world.heights, this.transit.version, this.world.dirty);
     if (v !== this.linesSent) {
       this.linesSent = v;
       this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l), loop: !!l.loop })) } satisfies ToSim);

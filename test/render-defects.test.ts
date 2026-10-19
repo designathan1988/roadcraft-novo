@@ -417,3 +417,38 @@ test('E19: with nothing moving the shadow cascades are not redrawn', async () =>
   post.setCamera(camera); prepare(false);
   assert.deepEqual(redrawn(), [true, true, true], 'the city changed: redrawn');
 });
+
+test('E42: a road edit far from every stop does not rebuild the stops; one next to a stop does', async () => {
+  const { TransitRenderer } = await import('../src/render/transit.ts');
+  const { Transit } = await import('../src/world/transit.ts');
+  const { buildRoad, planRoad, snap } = await import('../src/roads/build.ts');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.money = 1e9;
+  const road = (ax: number, az: number, bx: number, bz: number) => {
+    const a = snap(w.roads, ax, az, 8), b = snap(w.roads, bx, bz, 8);
+    const p = planRoad(w, a, null, b, 0, 0);
+    assert.ok(p.ok, p.reason);
+    assert.ok(buildRoad(w, p, a, b, 0).settle());
+  };
+  road(-200, 0, 200, 0);
+  const transit = new Transit();
+  const { id, cmd } = transit.addLine();
+  cmd.apply();
+  transit.addStop(id, -100, 8)!.apply();
+  transit.addStop(id, 100, 8)!.apply();
+  const view = new TransitRenderer();
+  let rebuilds = 0;
+  const shelters = (view as unknown as { shelters: THREE.InstancedMesh }).shelters;
+  const set = shelters.setMatrixAt.bind(shelters);
+  shelters.setMatrixAt = (i: number, m: THREE.Matrix4) => { rebuilds++; return set(i, m); };
+  const sync = () => (view.update as (...a: unknown[]) => void)(transit, w.roads, w.heights, transit.version, w.dirty);
+  sync();
+  const first = rebuilds;
+  assert.ok(first > 0, 'the stops are built');
+  road(3000, 3000, 3300, 3000); // 3 km away
+  sync();
+  assert.equal(rebuilds, first, 'a road built 3 km from every stop rebuilt the stops');
+  road(-100, -60, -100, 60); // through a stop
+  sync();
+  assert.ok(rebuilds > first, 'a road next to a stop rebuilds them');
+});

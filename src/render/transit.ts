@@ -11,6 +11,7 @@ import { PROFILE_INFO } from '../roads/profiles.ts';
 import type { Transit } from '../world/transit.ts';
 import { PAINTS } from './vehicles.ts';
 import { colorOnly } from './post.ts';
+import { Dirty, cellId, cellX, type DirtyCells, type DirtyReader } from '../core/grid.ts';
 
 const CAP = 2048;
 
@@ -36,6 +37,10 @@ export class TransitRenderer {
   private q = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
   private built = -1;
+  /** Road edits since the last build (its own list of dirty road cells). */
+  private roadEdits: DirtyReader | null = null;
+  /** Cells within reach of a stop (a road edit there can turn a shelter or move a platform). */
+  private stopCells = new Set<number>();
 
   constructor() {
     // shelter: roof, dark glass back, bench; facing +z (the road)
@@ -91,10 +96,23 @@ export class TransitRenderer {
 
   set showPaths(v: boolean) { this.paths.visible = v; }
 
-  /** Rebuilds the instances when the lines or the roads change. */
-  update(transit: Transit, net: RoadNetwork, heights: Float32Array, version: number): void {
-    if (version === this.built) return;
+  /**
+   * Rebuilds the stops when the lines change (`version`) or a road is edited within reach of a stop. (A version the
+   * game bumped on every road edit rebuilt every stop of every line on each edit, anywhere in the map.)
+   */
+  update(transit: Transit, net: RoadNetwork, heights: Float32Array, version: number, dirty?: DirtyCells): void {
+    if (dirty && !this.roadEdits) this.roadEdits = dirty.reader(Dirty.Roads);
+    let near = false;
+    if (this.roadEdits) for (const c of this.roadEdits.drain()) if (this.stopCells.has(c)) near = true;
+    if (version === this.built && !near) return;
     this.built = version;
+    this.stopCells.clear();
+    for (const l of transit.lines) {
+      for (let k = 0; k * 2 < l.stops.length; k++) {
+        const x = l.stops[k * 2], z = l.stops[k * 2 + 1], r = 48;
+        for (let cz = cellX(z - r); cz <= cellX(z + r); cz++) for (let cx = cellX(x - r); cx <= cellX(x + r); cx++) this.stopCells.add(cellId(cx, cz));
+      }
+    }
     let n = 0;
     const p2 = new Float64Array(2), d2 = new Float64Array(2);
     const col = new THREE.Color();
