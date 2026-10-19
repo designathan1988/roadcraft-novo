@@ -13,7 +13,7 @@ import * as THREE from 'three/webgpu';
 import { T, withPrevious, type Node } from '../tsl.ts';
 import { rainU } from '../weather.ts';
 import { CLIP, CLIP_PROP, REGION, checkCooked, type CookedPeople } from './format.ts';
-import { hash32, pickLook, type LookChoice } from './looks.ts';
+import { hash32, pickLook, riderHash, type LookChoice } from './looks.ts';
 import { MOTO_PELVIS, aboard, seatsOf } from './occupants.ts';
 import { PeopleCreator, creatorCatalog, type PlacedPerson } from './creator.ts';
 
@@ -262,11 +262,11 @@ export class PeopleRenderer {
    * The people aboard a vehicle of the pose buffer: the motorcycle's rider always, the cabins' driver and
    * passengers (as many as the pose's light bits say) when `seatedInCabins`.
    */
-  occupants(kind: number, style: number, x: number, y: number, z: number, yaw: number, px: number, py: number, pz: number, pyaw: number, info: number, lights: number, dist: number): void {
+  occupants(kind: number, style: number, x: number, y: number, z: number, yaw: number, px: number, py: number, pz: number, pyaw: number, info: number, lights: number, dist: number, id = 0): void {
     const m = this.meta!;
     const c = Math.cos(yaw), s = Math.sin(yaw), pc = Math.cos(pyaw), ps = Math.sin(pyaw);
     const at = (lx: number, ly: number, lz: number, seat: number, clip: number, rate: number, phase: number) => {
-      const h = hash32((Math.floor(info) >>> 0) * 31 + seat * 7919 + 17);
+      const h = riderHash(info, id, seat);
       let v = h % m.variations.length;
       if (m.variations[v].band === 'child' && seat === 0) v = (v + 4) % m.variations.length;
       const l = this.look;

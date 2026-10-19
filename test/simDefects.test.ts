@@ -416,3 +416,10 @@ test('C20: pedestrians look as many ways as their appearance ids, not 16, and ar
   assert.ok(phases.size >= 32, `${phases.size} different walking phases for 400 people`);
 });
 
+test('C27: the motorbike rider keeps the same body when the bike brakes or signals', async () => {
+  const { riderHash } = await import('../src/render/people/looks.ts') as unknown as { riderHash?: (info: number, id: number, seat: number) => number };
+  assert.ok(typeof riderHash === 'function', 'the rider look comes from a function of the vehicle alone');
+  const base = 0 * 256 + 3 + (5 << 4);
+  const plain = riderHash(base, 77, 0);
+  for (const lights of [1, 2, 4, 3, 5]) assert.equal(riderHash(base + lights * 65536, 77, 0), plain, `lights ${lights} changed the rider`);
+});

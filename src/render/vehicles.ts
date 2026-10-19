@@ -652,7 +652,7 @@ export class VehicleRenderer {
         const person = kind === 3, small = person || kind === 5;
         if ((small && dist > PERSON_MID) || (person && this.hidePeople)) continue;
         if (people && small) { people.push(d, o, x, y, z, yaw, px, py, pz, pyaw, dist, r.dt, !person); if (person) continue; }
-        if (people && kind <= 2 && dist < NEAR) people.occupants(kind, style, x, y, z, yaw, px, py, pz, pyaw, info, lights, dist);
+        if (people && kind <= 2 && dist < NEAR) people.occupants(kind, style, x, y, z, yaw, px, py, pz, pyaw, info, lights, dist, d[o + 10]);
         // perto/meio com troca pontilhada numa faixa de 30 m (pessoas: 10 m)
         const fadeNear = small ? Math.min(1, Math.max(0, (PERSON_NEAR + 5 - dist) / 10)) : Math.min(1, Math.max(0, (NEAR + 15 - dist) / 30));
         const alpha = d[o + 9];

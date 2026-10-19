@@ -59,5 +59,13 @@ export function pickLook(info: number, speed: number, bike: boolean, rain: numbe
   return out;
 }
 
+/**
+ * Hash of a seated person (the motorbike's rider, a cabin's occupants): the vehicle's kind and colour without its
+ * light bits (braking or signalling must not change who rides it), its id (pose index 10) and the seat.
+ */
+export function riderHash(info: number, id: number, seat: number): number {
+  return hash32(((Math.floor(info) % 65536) + (id & 0xffff) * 65536) * 31 + seat * 7919 + 17);
+}
+
 /** Rates in steps of 1/16: a rate that wobbles with the measured speed would jump the animation phase. */
 const quantize = (r: number) => Math.round(r * 16) / 16;
