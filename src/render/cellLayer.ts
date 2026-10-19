@@ -382,9 +382,9 @@ export class CellLayer {
     for (const level of this.cells) for (const s of level) { this.setMesh(s, null, 0); s.requested = 0; }
     for (const s of this.tiles) { this.setMesh(s, null, 0); s.requested = 0; }
     for (const s of this.plates) { this.setMesh(s, null, 0); s.requested = 0; }
-    this.cellVer.fill(1);
-    this.tileVer.fill(1);
-    this.plateVer.fill(1);
+    // versions only go forward: a job of the previous city still running answers with its old version and is dropped
+    // (back to 1, the new city's first request had the same version as the old city's and took its mesh)
+    for (const ver of [this.cellVer, this.tileVer, this.plateVer]) for (let i = 0; i < ver.length; i++) ver[i]++;
     this.shown.clear();
     this.fading.length = 0;
     this.group.children.length = 0;

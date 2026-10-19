@@ -45,3 +45,22 @@ test('E10: two layers fed by the same kind of dirty cells both rebuild an edited
   assert.deepEqual(srcA.cells.map((r) => r.c), [c], 'the city layer asked for the edited cell');
   assert.deepEqual(srcB.cells.map((r) => r.c), [c], 'the detail layer asked for the edited cell too');
 });
+
+test('E11: a mesh of the previous city that arrives after reset is thrown away', () => {
+  const w = new World();
+  const src = recordingSource();
+  const layer = new CellLayer(src, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40 });
+  const L = inside(layer);
+  const c = 7;
+  // the old city asks for the cell (its job is still running when the player loads another map)
+  (layer as unknown as { requestCell(c: number, level: number): void }).requestCell(c, 0);
+  const old = src.cells.pop()!;
+  layer.reset();
+  // the new city asks for the same cell
+  (layer as unknown as { requestCell(c: number, level: number): void }).requestCell(c, 0);
+  const fresh = src.cells.pop()!;
+  old.done(triangle());
+  assert.equal(L.cells[0][c].mesh, null, 'the old city\'s mesh was not taken');
+  fresh.done(triangle());
+  assert.notEqual(L.cells[0][c].mesh, null, 'the new city\'s mesh was taken');
+});
