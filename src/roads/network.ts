@@ -14,6 +14,8 @@ export const MAX_SEG_LEN = 112;
 const SEG_MARGIN = MAX_SEG_LEN / 2 + 40;
 
 export { SegFlag } from './flags.ts';
+import { SegFlag } from './flags.ts';
+import { kindOfFlags } from './economy.ts';
 
 export const nodeSchema = { x: Float32Array, z: Float32Array, y: Float32Array, deg: Uint8Array, cell: Int32Array };
 export const segSchema = {
@@ -118,7 +120,8 @@ export class RoadNetwork {
     if (rec.id !== undefined) { t.allocAt(rec.id); id = rec.id; } else id = t.alloc();
     const c = t.cols;
     c.a[id] = rec.a; c.b[id] = rec.b; c.cx[id] = rec.cx; c.cz[id] = rec.cz;
-    c.profile[id] = rec.profile; c.flags[id] = rec.flags;
+    // a road that comes in without a recorded build kind (generated city, test city, old save) was free
+    c.profile[id] = rec.profile; c.flags[id] = kindOfFlags(rec.flags) < 0 ? rec.flags | SegFlag.Free : rec.flags;
     c.zl[id] = rec.zl ?? 0; c.zr[id] = rec.zr ?? 0;
     const q = this.quad(id);
     c.len[id] = bezLength(q);
@@ -130,7 +133,7 @@ export class RoadNetwork {
     this.link(rec.a, id);
     this.link(rec.b, id);
     this.touchSeg(id);
-    this.emit({ t: 'addSeg', rec: { id, a: rec.a, b: rec.b, cx: rec.cx, cz: rec.cz, profile: rec.profile, flags: rec.flags, zl: c.zl[id], zr: c.zr[id] } });
+    this.emit({ t: 'addSeg', rec: { id, a: rec.a, b: rec.b, cx: rec.cx, cz: rec.cz, profile: rec.profile, flags: c.flags[id], zl: c.zl[id], zr: c.zr[id] } });
     return id;
   }
 

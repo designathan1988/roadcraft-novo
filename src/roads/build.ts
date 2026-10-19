@@ -45,10 +45,16 @@ export class RoadJournal implements Command {
 
   get empty(): boolean { return this.ops.length === 0; }
 
-  /** Change in road value (R$) made by this journal. */
+  /** Change in road value (R$) made by this journal, over the roads the player paid for. */
   private value = 0;
+  /** The same over roads that were free (SegFlag.Free): costs when it grows, never gives anything back. */
+  private freeValue = 0;
   /** How much was charged (negative = refunded). */
   charge = 0;
+
+  private addValue(id: number, v: number): void {
+    if (this.net.segs.cols.flags[id] & SegFlag.Free) this.freeValue += v; else this.value += v;
+  }
 
   /** Value of a segment as it stands: length × price of its cross-section × how it is built (`roads/economy.ts`). */
   private segValue(id: number, profile = this.net.segs.cols.profile[id]): number {
@@ -69,15 +75,15 @@ export class RoadJournal implements Command {
   }
 
   /** What the edit would cost (positive) or give back (negative), before settle. */
-  get price(): number { return chargeFor(this.value); }
+  get price(): number { return chargeFor(this.value) + (this.freeValue > 0 ? chargeFor(this.freeValue) : 0); }
 
   /**
-   * Charges what the journal built (demolishing gives back a share, `roads/tuning.ts`). Without enough money it
-   * undoes itself and returns false. Called once, right after the live operations.
+   * Charges what the journal built (demolishing gives back a share, `roads/tuning.ts`; free roads give nothing).
+   * Without enough money it undoes itself and returns false. Called once, right after the live operations.
    */
   settle(): boolean {
-    const charge = this.world.unlimited ? 0 : chargeFor(this.value);
-    if (charge > 0 && charge > this.world.money) { this.invert(); this.ops.length = 0; this.value = 0; return false; }
+    const charge = this.world.unlimited ? 0 : this.price;
+    if (charge > 0 && charge > this.world.money) { this.invert(); this.ops.length = 0; this.value = 0; this.freeValue = 0; return false; }
     this.charge = charge;
     this.world.money -= charge;
     return true;
@@ -121,11 +127,11 @@ export class RoadJournal implements Command {
     }
     const id = this.net.addSeg(rec);
     this.ops.push({ t: 'addSeg', rec: this.net.segRec(id) });
-    this.value += this.segValue(id);
+    this.addValue(id, this.segValue(id));
     return id;
   }
   removeSeg(id: number): SegRec {
-    this.value -= this.segValue(id);
+    this.addValue(id, -this.segValue(id));
     const rec = this.net.removeSeg(id);
     this.ops.push({ t: 'remSeg', rec });
     return rec;
@@ -133,7 +139,7 @@ export class RoadJournal implements Command {
   setProfile(id: number, to: number): void {
     const from = this.net.segs.cols.profile[id];
     if (from === to) return;
-    this.value += this.segValue(id, to) - this.segValue(id, from);
+    this.addValue(id, this.segValue(id, to) - this.segValue(id, from));
     this.net.setProfile(id, to);
     this.ops.push({ t: 'profile', id, from, to });
   }
@@ -197,7 +203,7 @@ export class RoadJournal implements Command {
   }
 
   /** Appends another (not yet charged) journal to this one: it becomes a single undo step. */
-  append(other: RoadJournal): void { this.ops.push(...other.ops); this.value += other.value; }
+  append(other: RoadJournal): void { this.ops.push(...other.ops); this.value += other.value; this.freeValue += other.freeValue; }
 
   apply(): void { for (const op of this.ops) this.exec(op, true); this.world.money -= this.charge; }
   invert(): void { for (let i = this.ops.length - 1; i >= 0; i--) this.exec(this.ops[i], false); this.world.money += this.charge; }
