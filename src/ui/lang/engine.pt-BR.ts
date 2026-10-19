@@ -30,6 +30,7 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.metric.residents': 'Moradores',
   'ui.metric.jobs': 'Empregos',
   'ui.metric.buildings': 'Prédios',
+  'ui.about.steam': 'Jogando pelo Steam como {name}',
   'ui.about.title': 'Sobre o Roadcraft',
   'ui.about.credits': 'Feito com three.js (MIT), Vite (MIT), Electron (MIT) e steamworks.js (MIT). Sons sintetizados no próprio jogo; árvores, prédios e veículos gerados por código.',
   'ui.height.ground': 'no chão',

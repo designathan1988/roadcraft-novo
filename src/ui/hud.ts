@@ -122,8 +122,6 @@ export interface HudActions extends OptionalActions {
   grid(): void;
   /** Compass: north up. */
   north(): void;
-  timeSpeed(): void;
-  pause(): void;
   line(id: number): void;
   newLine(): void;
   lineMode(mode: number): void;
@@ -707,7 +705,6 @@ export class Hud {
 
     for (const b of this.skyButtons) { const on = b.dataset.sky === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
   }
-  setZone(_z: number): void { /* the shell keeps the zone it chose */ }
   setLotMode(m: LotMode): void {
     this.s.lotExtra = null;
     if (this.s.lotMode === m) return;
@@ -828,12 +825,6 @@ export class Hud {
   }
 
   hideLoading(): void { this.loading.classList.add('hidden'); }
-
-  fatal(text: string): void {
-    this.loadingText.textContent = loose(text);
-    this.loading.classList.add('error');
-    this.loading.classList.remove('hidden');
-  }
 
   /** The decimal notation of the interface (for panels of other areas). */
   static dec(n: number, d = 1): string { return fmtDec(n, d); }

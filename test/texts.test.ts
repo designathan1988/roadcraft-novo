@@ -38,3 +38,18 @@ test('B57/B58: the interface and game.ts write no phrase of their own (everythin
   const found = FILES.flatMap(phrases).filter((p) => !/\b(data-|class=|<svg|<path|<i |<b |<img|style=|M\d)/.test(p));
   assert.deepEqual(found, [], `${found.length} phrases outside the dictionaries:\n${found.join('\n')}`);
 });
+
+test('B62: every action the interface declares is used by a button, a key, a panel or a check', () => {
+  const hud = fs.readFileSync(path.join(root, 'src/ui/hud.ts'), 'utf8');
+  const decl = hud.slice(hud.indexOf('export interface OptionalActions'), hud.indexOf('type PopId'));
+  const names = [...decl.matchAll(/^\s+([a-zA-Z]+)\??\(/gm)].map((m) => m[1]);
+  const users = ['src/ui', 'scripts/verificacao', 'tools'].flatMap((d) => fs.readdirSync(path.join(root, d)).filter((f) => /\.(ts|js|mjs)$/.test(f)).map((f) => fs.readFileSync(path.join(root, d, f), 'utf8'))).join('\n')
+    + fs.readFileSync(path.join(root, 'src/game.ts'), 'utf8').replace(/this\.hud = new Hud\([\s\S]*?satisfies HudActions\)\);/, '');
+  const unused = names.filter((n) => !new RegExp(`\\b(a|h\\.a|this\\.a|A|H|hudActions)\\.${n}\\b|\\b${n}\\?\\.\\(`).test(users));
+  assert.deepEqual(unused, [], `actions nobody calls: ${unused.join(', ')}`);
+  const hudClass = hud.slice(hud.indexOf('export class Hud'));
+  const methods = [...hudClass.matchAll(/^ {2}([a-z][a-zA-Z]+)\([^)]*\): void \{/gm)].map((m) => m[1]);
+  const game = fs.readFileSync(path.join(root, 'src/game.ts'), 'utf8') + users;
+  const dead = methods.filter((m) => !new RegExp(`(hud|this)\\.${m}\\(`).test(game));
+  assert.deepEqual(dead, [], `interface methods nobody calls: ${dead.join(', ')}`);
+});

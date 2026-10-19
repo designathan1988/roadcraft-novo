@@ -332,8 +332,6 @@ export class Game {
       follow: () => this.toggleFollow(),
       grid: () => { gridU.value = gridU.value > 0.5 ? 0 : 1; this.hud.setGrid(gridU.value > 0.5); },
       north: () => this.rig.turnTo(0),
-      timeSpeed: () => this.cycleClock(),
-      pause: () => this.togglePause(),
       line: (id) => { this.lineSel = id; },
       newLine: () => this.newLine(),
       // a station tab works on a line of its mode: the last one of that mode, or a new one at the first click
@@ -781,11 +779,6 @@ export class Game {
     this.paused = n === 0;
     if (n > 0) { this.simSpeed = n; if (this.clockSpeed > 0) this.clockSpeed = n; }
     this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
-  }
-
-  private cycleClock(): void {
-    const speeds = [0, 1, 4, 16];
-    this.clockSpeed = speeds[(speeds.indexOf(this.clockSpeed) + 1) % speeds.length];
   }
 
   /** Sends the network changes and the camera position to the simulation. */

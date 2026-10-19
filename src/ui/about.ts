@@ -4,6 +4,7 @@
 
 import { el } from './dom.ts';
 import { fmtInt, t } from './i18n.ts';
+import { steamName } from '../steam.ts';
 
 declare const __BUILD__: string;
 
@@ -42,6 +43,8 @@ export class AboutBox {
   readonly root: HTMLElement;
   private packs: HTMLElement;
   private loaded = false;
+  /** Who plays, when the game runs through Steam (empty otherwise). */
+  private steam = el('p', 'v2-muted');
 
   constructor() {
     this.root = el('div', 'v2-dialog-back');
@@ -56,6 +59,7 @@ export class AboutBox {
     d.append(
       el('h2', '', t('ui.about.title')),
       el('p', 'v2-muted', `${t('about.build')}: ${typeof __BUILD__ === 'string' ? __BUILD__ : ''}`),
+      this.steam,
       el('p', '', t('ui.about.credits')),
       el('h3', '', t('ui.about.assets')),
       this.packs,
@@ -71,7 +75,11 @@ export class AboutBox {
 
   open(): void {
     this.root.hidden = false;
-    if (!this.loaded) { this.loaded = true; void this.fill(); }
+    if (!this.loaded) {
+      this.loaded = true;
+      void this.fill();
+      void steamName().then((name) => { this.steam.textContent = name ? t('ui.about.steam', { name }) : ''; this.steam.hidden = !name; });
+    }
   }
 
   /** Reads each pack's licence files once; packs without any file in this build are left out. */
