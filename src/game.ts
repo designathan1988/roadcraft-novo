@@ -37,7 +37,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { followLanguage, onLanguageReload, plural, setLang, t } from './ui/i18n.ts';
+import { followLanguage, loose, onLanguageReload, plural, setLang, t } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -58,9 +58,11 @@ import { InsideView, insideTarget } from './render/inside.ts';
 import { Blast } from './render/blast.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
-import { curveLotSide, deleteLot, joinLots, lotAt, lotToWorld, moveLotCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotByLine } from './world/lotEdit.ts';
+import { curveLotSide, deleteLot, deleteLotsAlong, joinLots, lotAt, lotFits, lotOutlineWorld, lotToWorld, moveSharedCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotsByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
-import { addressAt } from './roads/streetNames.ts';
+import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
+import { laneCount, roadClasses } from './roads/roadVariant.ts';
+import { CITY_STYLES, type CityStyle } from './jobs/cityField.ts';
 import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
@@ -168,7 +170,9 @@ export class Game {
   private riverWidth = 14;
   private riverPts: Array<[number, number]> = [];
   private pointer = { x: 0, y: 0, inside: false };
-  private drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' = 'none';
+  private drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' | 'lots' = 'none';
+  /** Points of the lot delete stroke being dragged (Roadcraft: every lot under it goes, in one step). */
+  private lotStroke: Array<[number, number]> = [];
   /** Demolish by rectangle: corner where the drag started. */
   private boxStart: THREE.Vector3 | null = null;
   private roadTool: RoadTool;
@@ -343,6 +347,14 @@ export class Game {
       buses: (d) => { const l = this.transit.line(this.lineSel); const c = l && this.transit.setBuses(l.id, l.buses + d); if (c) this.commands.run(c); },
       deleteLine: () => { const c = this.transit.removeLine(this.lineSel); if (c) { this.commands.run(c); this.lineSel = this.transit.lines[0]?.id ?? 0; } },
       profile: (p) => { this.roadTool.setProfile(p); },
+      roadOptions: () => {
+        const rt = this.roadTool, p = PROFILES[rt.base];
+        return { ...rt.options, ownLanes: laneCount(p), ownWidth: Math.round(p.strips.reduce((s, x) => s + x.width, 0)), base: rt.base };
+      },
+      roadLanes: (c) => { if (!this.roadTool.setOptions({ lanes: c })) this.hud.toast(t('ui.catalog.tooMany')); },
+      roadWidth: (m) => { if (!this.roadTool.setOptions({ width: m })) this.hud.toast(t('ui.catalog.tooMany')); },
+      roadParking: (p) => { if (!this.roadTool.setOptions({ parking: p })) this.hud.toast(t('ui.catalog.tooMany')); },
+      roadClasses: () => roadClasses(),
       zone: (z) => { this.zoneTool.zone = z; },
       zoneRadius: (r) => { this.zoneTool.radius = r; },
       floors: (d) => this.editSelected(d),
@@ -392,15 +404,9 @@ export class Game {
         else { this.preview.hide(); this.preview.circle.visible = false; }
       },
       streetName: (x, z) => this.hudActions.streetNameAt?.(x, z) ?? '',
-      nameStreet: (seg, name) => {
-        const w = this.world, chain = streetChain(w, seg);
-        const before = chain.map((x) => w.streetNames.get(x));
-        this.commands.run({
-          label: 'nome da rua',
-          apply: () => { for (const x of chain) w.streetNames.set(x, name); this.textSigns.version++; this.unsaved = true; },
-          invert: () => { chain.forEach((x, i) => { const b = before[i]; if (b === undefined) w.streetNames.delete(x); else w.streetNames.set(x, b); }); this.textSigns.version++; },
-        });
-      },
+      editProfile: (p, apply) => this.hud.catalog.editFor(p, apply),
+      project: (x, z) => { const v = new THREE.Vector3(x, heightAt(this.world.heights, x, z), z).project(this.rig.camera); return { x: v.x * innerWidth / 2, y: -v.y * innerHeight / 2 }; },
+      nameStreet: (seg, name) => this.commands.run(nameStreetCommand(this.world, seg, name, () => { this.textSigns.version++; this.unsaved = true; this.inspector.refresh(); })),
     });
     this.commands.onPush = (c) => {
       const l = c.label;
@@ -409,6 +415,10 @@ export class Game {
     };
     this.commands.onChange = () => {
       this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh(); };
+    this.commands.onError = (err, c, redo) => {
+      console.error(err);
+      this.hud.toast(t(redo ? 'history.redoFailed' : 'history.undoFailed', { label: loose(c.label), message: (err as Error)?.message ?? String(err) }));
+    };
     // changing the language reloads the page: the city is saved first; if that fails, the player decides
     onLanguageReload(async () => {
       if (!this.unsaved && !this.world.saveDirty.includes(1)) return true;
@@ -537,7 +547,7 @@ export class Game {
     this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
-    else if (params.has('cidade')) await this.generatedCity();
+    else if (params.has('cidade')) await this.generatedCity((CITY_STYLES as readonly string[]).includes(params.get('estilo') ?? '') ? params.get('estilo') as CityStyle : 'classic');
     else if (params.has('carregar')) await this.load();
     else if (!params.has('cam') && !params.has('vazio')) {
       // start screen (automated photos skip it with ?cam, ?teste or ?cidade)
@@ -703,7 +713,7 @@ export class Game {
     if (this.arrowNodes.size) this.updateArrows();
     const T1 = pf ? performance.now() : 0;
     if (!this.generating) this.growth.processDirty();
-    this.growth.step(dt);
+    this.growth.tick(dt, this.paused ? 0 : this.simSpeed);
     const T2 = pf ? performance.now() : 0;
     this.terrain.uploadDirtyLayers();
     this.terrain.update(cam, this.rig.eye);
@@ -911,6 +921,10 @@ export class Game {
         this.drag = 'node';
       } else if (e.button === 0 && this.tool === 'building' && this.lotMode === 'corner' && this.grabCorner(this.rig.pick(this.ndcX(), this.ndcY()))) {
         this.drag = 'node';
+      } else if (e.button === 0 && this.tool === 'building' && this.lotMode === 'delete' && !this.lotExtra) {
+        const hit = this.rig.pick(this.ndcX(), this.ndcY());
+        this.drag = 'lots';
+        this.lotStroke = hit ? [[hit.x, hit.z]] : [];
       } else if (e.button === 0 && this.tool === 'zone' && !this.zoneBlock) {
         this.drag = 'zone';
         this.zoneTool.begin();
@@ -923,6 +937,7 @@ export class Game {
       const dx = e.offsetX - this.pointer.x, dy = e.offsetY - this.pointer.y;
       this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
       this.pointer.inside = true;
+      this.roadTool.shiftHeld = e.shiftKey;
       if (this.drag === 'click' && (this.tool === 'bulldoze' || this.tool === 'streetscape') && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
         const px = this.pointer.x, py = this.pointer.y;
         this.pointer.x = down.x; this.pointer.y = down.y;
@@ -938,8 +953,12 @@ export class Game {
       }
       if (this.drag === 'rotate') this.rig.rotate(dx, dy);
       else if (this.drag === 'pan') this.rig.pan(this.ndcX(), this.ndcY());
+      else if (this.drag === 'lots') {
+        const hit = this.rig.pick(this.ndcX(), this.ndcY()), last = this.lotStroke[this.lotStroke.length - 1];
+        if (hit && (!last || Math.hypot(hit.x - last[0], hit.z - last[1]) > 2)) this.lotStroke.push([hit.x, hit.z]);
+      }
     });
-    const end = (e: PointerEvent) => {
+    const finishDrag = (e: PointerEvent) => {
       if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
       const still = Math.hypot(e.offsetX - down.x, e.offsetY - down.y) <= 5;
       if (this.drag === 'brush' && this.elemStroke) {
@@ -958,6 +977,12 @@ export class Game {
         this.stroke = null;
       }
       if (this.drag === 'zone') this.zoneTool.end();
+      if (this.drag === 'lots') {
+        const r = this.lotStroke.length ? deleteLotsAlong(this.world, this.lotStroke) : null;
+        this.lotStroke = [];
+        if (typeof r === 'string') this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.');
+        else if (r) { this.commands.push(r); this.hud.toast('Apagado.'); }
+      }
       if (this.drag === 'free') this.roadTool.freeEnd(this.rig.pick(this.ndcX(), this.ndcY()));
       if (this.drag === 'row' && this.boxStart) {
         const b = this.rig.pick(this.ndcX(), this.ndcY());
@@ -997,6 +1022,13 @@ export class Game {
       if (this.drag === 'rotate' && still && ROAD_TOOLS.includes(this.tool)) this.roadTool.cancel();
       if (this.drag === 'pan') this.rig.endPan();
       this.drag = 'none';
+    };
+    // whatever the tool does on release, the drag always ends (an error must not leave the next move panning the camera)
+    const end = (e: PointerEvent) => {
+      try { finishDrag(e); } catch (err) {
+        console.error(err);
+        this.hud.toast(t('tool.failed', { message: (err as Error)?.message ?? String(err) }));
+      } finally { this.drag = 'none'; if (this.commands.holding) this.zoneTool.end(); }
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('dblclick', () => { if (this.tool === 'river') this.finishRiver(); if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly(); });
@@ -1130,6 +1162,8 @@ export class Game {
 
   /** Undo (false) or redo (true), with sound. */
   private history(redo: boolean): void {
+    // a brush, zoning or free road still being dragged is recorded on release: undo waits for it
+    if (this.drag === 'brush' || this.drag === 'zone' || this.drag === 'free' || this.drag === 'node' || this.drag === 'lots') return;
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
 
@@ -1218,6 +1252,8 @@ export class Game {
       if (c) this.commands.run(c);
     },
     grow: async () => { this.growth.processDirty(); await this.pool.whenIdle(); return this.growth.fillAll(); },
+    /** The style the next generated city lays its local streets in (Roadcraft's grid, organic, radial, mixed, blocks; or classic). */
+    cityStyle: (style: CityStyle) => { if (CITY_STYLES.includes(style)) this.cityStyle = style; return this.cityStyle; },
     /** Road edits at the point (x, z): split, reverse, duplicate, join (node) and move node to (tx, tz). */
     edit: (what: 'split' | 'reverse' | 'duplicate' | 'join' | 'move', x: number, z: number, tx = 0, tz = 0) => {
       const net = this.world.roads;
@@ -1279,7 +1315,7 @@ export class Game {
       this.lotUse = use; this.polyPts = [];
       for (let i = 0; i + 1 < pts.length; i += 2) this.polyPts.push([pts[i], pts[i + 1]]);
       const before = this.world.buildings.end, size = this.world.buildings.size;
-      const r = polygonLot(this.polyPts);
+      const r = polygonLot(this.polyPts, this.world);
       this.finishPoly();
       if (typeof r === 'string') return r;
       if (this.world.buildings.size === size) return 'não criou';
@@ -1662,6 +1698,8 @@ export class Game {
     if (pts.length < 2) { pts.push([hit.x, hit.z]); return; }
     const r = this.lotRect([hit.x, hit.z]);
     if (!r) { this.hud.toast('Lote estreito demais.'); pts.length = 0; return; }
+    const fits = lotFits(this.world, [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => lotToWorld(r, u * r.w / 2, v * r.d / 2)));
+    if (fits) { this.hud.toast(fits[0].toUpperCase() + fits.slice(1) + '.'); pts.length = 0; this.preview.hide(); return; }
     const seed = (Math.random() * 2 ** 31) >>> 0;
     const zone = this.lotUse;
     const rec = {
@@ -1691,7 +1729,7 @@ export class Game {
       poly: 'Clique os cantos do lote; Enter ou duplo clique fecha, Backspace volta um ponto.',
       split: 'Clique num lote para dividi-lo (escolha lado a lado ou frente e fundos e em quantos).',
       join: 'Clique num lote e depois no lote ao lado para juntá-los.',
-      delete: 'Clique num prédio: vira lote vazio. Clique num lote vazio: ele some.',
+      delete: t('lot.hint.delete'),
       front: 'Clique perto de um lado do lote: a construção vira de frente para ele.',
       corner: 'Arraste um canto do lote para mudar o tamanho.',
     };
@@ -1756,7 +1794,7 @@ export class Game {
   }
 
   private finishPoly(): void {
-    const r = polygonLot(this.polyPts);
+    const r = polygonLot(this.polyPts, this.world);
     this.polyPts.length = 0;
     this.preview.hideAll();
     if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
@@ -1782,7 +1820,8 @@ export class Game {
     this.cornerDrag = null;
     this.preview.hideAll();
     if (!c || !hit || !this.world.buildings.alive[c.id]) return;
-    const r = moveLotCorner(this.world, c.id, c.k, hit.x, hit.z);
+    const [cx, cz] = lotOutlineWorld(this.world, c.id)[c.k];
+    const r = moveSharedCorner(this.world, cx, cz, hit.x, hit.z);
     if (typeof r === 'string') { this.hud.toast(`Não mudou: ${r}.`); return; }
     this.commands.push(r);
   }
@@ -1829,8 +1868,7 @@ export class Game {
     let r: RoadJournal | string;
     if (this.lotExtra === 'line') {
       // the lot the line crosses: under its middle, or under either end
-      const id = [lotAt(this.world, (ax + bx) / 2, (az + bz) / 2), lotAt(this.world, ax, az), lotAt(this.world, bx, bz)].find((i) => i >= 0) ?? -1;
-      r = id < 0 ? 'a linha não passa por nenhum lote' : splitLotByLine(this.world, id, ax, az, bx, bz);
+      r = splitLotsByLine(this.world, ax, az, bx, bz);
     } else {
       const id = lotAt(this.world, ax, az);
       r = id < 0 ? 'clique primeiro perto de um lado, dentro do lote' : curveLotSide(this.world, id, ax, az, bx, bz);
@@ -2002,7 +2040,10 @@ export class Game {
   }
 
   /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
-  async generatedCity(): Promise<void> {
+  /** How the generator lays each district's local streets (`jobs/cityField.ts`; ?estilo= in the address, or api). */
+  cityStyle: CityStyle = 'classic';
+
+  async generatedCity(style: CityStyle = this.cityStyle): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     const t0 = performance.now();
@@ -2014,7 +2055,7 @@ export class Game {
       this.generating = true;
       await this.generateTerrain();
       phase('relevo');
-      const city = await this.pool.run('cityGen', { seed: w.seed }, { priority: 0 });
+      const city = await this.pool.run('cityGen', { seed: w.seed, style }, { priority: 0 });
       phase('malha viária');
       this.hud.showLoading('Assentando as vias…');
       const ids: number[] = [];

@@ -12,7 +12,7 @@ import { Fn, archFor, civicFor, eraAt } from './arch.ts';
 import { generatedBuilt } from './decay.ts';
 import { LANDMARKS, encodeDesign } from './design.ts';
 import { hash2 } from '../core/rng.ts';
-import type { BuildingRec, World } from './world.ts';
+import { World, type BuildingRec } from './world.ts';
 
 /** Floors by zone and frontage road (avenues give taller buildings). */
 export function floorsFor(zoneId: number, profile: number, r: Rng): number {
@@ -122,6 +122,12 @@ export class Growth {
     }
   }
 
+  /** One frame of growth at the game's speed (0 = paused: nothing grows; 2× and 4× grow that much faster). */
+  tick(dt: number, speed: number): void {
+    if (!(speed > 0)) return;
+    this.step(dt * speed, 8 * Math.ceil(speed));
+  }
+
   private grow(l: LotColumns, i: number, organic: boolean): void {
     this.world.growBuilding(this.recordFor(l, i, organic));
     this.markTaken(cellId(cellX(l.x[i]), cellX(l.z[i])), i);
@@ -190,22 +196,25 @@ export class Growth {
     const biggest = Growth.biggest(l) === i;
     let fn = biggest && this.squareCell(cell) === cell ? Fn.Square : civicFor(cell, baseZone(l.zone[i]), biggest, l.w[i] * l.d[i]);
     if (fn === Fn.Square && !(biggest && this.squareCell(cell) === cell)) fn = Fn.None;
+    // one square per neighbourhood: the lots may be cut again later and another lot become the biggest
+    if (fn === Fn.Square && this.world.squares[World.neighbourhood(l.x[i], l.z[i])] > 0) fn = Fn.None;
     const zone = baseZone(l.zone[i]);
     let floors = floorsFor(l.zone[i], l.profile[i], r);
+    let most = Infinity;
     if (organic) {
       let tallest = -1;
       const col = this.world.buildings.cols;
       this.world.buildingIndex.query(l.x[i] - 30, l.z[i] - 30, l.x[i] + 30, l.z[i] + 30, (id) => {
         if (Math.hypot(col.x[id] - l.x[i], col.z[id] - l.z[i]) <= 30 + Math.max(col.w[id], col.d[id]) / 2) tallest = Math.max(tallest, col.floors[id]);
       });
-      if (tallest >= 0) floors = Math.min(floors, Math.max(1, tallest) + 3);
+      if (tallest >= 0) { most = Math.max(1, tallest) + 3; floors = Math.min(floors, most); }
     }
     const rec: BuildingRec = {
       fn,
       x: l.x[i], z: l.z[i], w: l.w[i], d: l.d[i], rot: l.rot[i], h: 0, color: 0,
       seed: l.seed[i], zone, floors, style: this.unlikeStyle(l.x[i], l.z[i], zone, floors, l.seed[i]),
     };
-    if (!fn) this.landmark(rec);
+    if (!fn) this.landmark(rec, most);
     return rec;
   }
 
@@ -213,7 +222,7 @@ export class Growth {
    * Landmark (Roadcraft catalog): some commercial towers with a near-square footprint get a ready-made design
    * (round glass, art deco spire, copper octagon...), never the same landmark within 250 m.
    */
-  private landmark(rec: BuildingRec): void {
+  private landmark(rec: BuildingRec, most = Infinity): void {
     if ((rec.zone !== Zone.Commercial && rec.zone !== Zone.Mixed) || rec.floors < 8) return;
     const ratio = rec.w / Math.max(1, rec.d);
     if (rec.w < 16 || rec.d < 16 || rec.w > 46 || rec.d > 46 || ratio < 0.6 || ratio > 1.7) return;
@@ -223,6 +232,8 @@ export class Growth {
     const cols = this.world.buildings.cols;
     for (let t = 0; t < LANDMARKS.length; t++) {
       const [ds, minFloors] = LANDMARKS[(k0 + t) % LANDMARKS.length];
+      // a landmark taller than the growth rule allows here waits for the neighbours to grow
+      if (minFloors > most) continue;
       const enc = encodeDesign(ds);
       let near = false;
       this.world.buildingIndex.query(rec.x - 250, rec.z - 250, rec.x + 250, rec.z + 250, (id) => { if (cols.color[id] === enc.color && cols.h[id] === enc.h) near = true; });

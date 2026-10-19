@@ -60,6 +60,8 @@ export interface Profile {
   category?: Category;
   /** Made by the player (goes into the save). */
   custom?: boolean;
+  /** A variant the road tool made of this profile (lanes, width, parking: roads/roadVariant.ts); not a card of its own. */
+  variantOf?: number;
 }
 
 export interface LaneInfo { u: number; w: number; bus: boolean; turns: number; rail: boolean }
@@ -188,8 +190,17 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
 ];
 
 export const RING_PROFILE = 6;
-/** A segment stores its profile in one byte. */
-export const MAX_PROFILES = 256;
+/** Profiles a map holds (a segment stores its profile in 16 bits; the road mesh's tag has room for 512). */
+export const MAX_PROFILES = 512;
+/** The road mesh's tag (position.w, an int16): profile + TAG_RULE · rule at a + TAG_RULE · 8 · rule at b (rules 0..7). */
+export const TAG_RULE = MAX_PROFILES;
+export function packRoadTag(profile: number, ruleA: number, ruleB: number): number {
+  return profile + TAG_RULE * (ruleA & 7) + TAG_RULE * 8 * (ruleB & 7);
+}
+/** The tag read back as the shader reads it (render/roads.ts): [profile, rule at a, rule at b]. */
+export function unpackRoadTag(tag: number): [number, number, number] {
+  return [tag % TAG_RULE, Math.floor(tag / TAG_RULE) % 8, Math.floor(tag / (TAG_RULE * 8)) % 8];
+}
 /** Painted lines and lanes per profile in the shader table. */
 export const MAX_LINES = 8;
 export const BUILTIN_COUNT = BUILTIN.length;
@@ -277,6 +288,62 @@ export function setCustomProfiles(list: Profile[]): void {
 }
 
 export function profileCount(): number { return PROFILES.length; }
+
+/** What the section editor refuses (Roadcraft 4.0 `world/roads/profile.ts` profileIssues, on this engine's strips). */
+export type ProfileIssue = 'noLanes' | 'maxLanes' | 'busOnly' | 'order' | 'footways' | 'wide' | 'laneBalance' | 'parkingSide' | 'width' | 'median' | 'class';
+
+/** Widths each strip kind can be built at (m): Roadcraft's lane 2–6, footway 1–12, median up to 8; the rest the editor's. */
+export const STRIP_WIDTH: Record<StripKind, [number, number]> = {
+  sidewalk: [1, 12], curb: [0.1, 0.4], parking: [2, 3], bike: [1.2, 2.5], lane: [2, 6], median: [0.3, 8], shoulder: [0.5, 4], barrier: [0.3, 1.2],
+};
+
+/**
+ * The problems of a cross-section (empty = it can be built): lanes in each direction kept together with the
+ * right-hand rule, the same number of lanes both ways on a two-way road, parking and cycle lanes only at the kerb
+ * (never between lanes or by the median), a median only between the two directions, every strip within its widths,
+ * no parking or cycle lane on highways and ramps (priority 4 and up), footways only at the edges.
+ */
+export function profileIssues(d: Omit<Profile, 'id'>): ProfileIssue[] {
+  return profileIssueSpots(d).map((x) => x.problem);
+}
+
+/** Each problem of a cross-section with the strips it is about (their indices; empty when it is about the whole
+ *  road), so the editor can point at them (Roadcraft 4.0 ui/roads/profileEditor.ts:451-462, "see"). */
+export function profileIssueSpots(d: Omit<Profile, 'id'>): Array<{ problem: ProfileIssue; strips: number[] }> {
+  const out: Array<{ problem: ProfileIssue; strips: number[] }> = [];
+  const st = d.strips;
+  const where = (test: (s: Strip, i: number) => boolean): number[] => st.flatMap((s, i) => (test(s, i) ? [i] : []));
+  const push = (problem: ProfileIssue, strips: number[] = []): void => { out.push({ problem, strips }); };
+  const lanes = st.filter((s) => s.kind === 'lane');
+  if (lanes.length === 0) push('noLanes');
+  if (lanes.length > MAX_LINES) push('maxLanes', where((s) => s.kind === 'lane'));
+  const fwd = lanes.filter((s) => (s.dir ?? 1) === 1), back = lanes.filter((s) => s.dir === -1);
+  if ((fwd.length > 0 && fwd.every((s) => s.bus)) || (back.length > 0 && back.every((s) => s.bus))) push('busOnly', where((s) => s.kind === 'lane' && !!s.bus));
+  const firstBack = st.findIndex((s) => s.kind === 'lane' && s.dir === -1);
+  const lastFwd = st.map((s) => s.kind === 'lane' && (s.dir ?? 1) === 1).lastIndexOf(true);
+  if (firstBack >= 0 && lastFwd > firstBack) push('order', where((s, i) => s.kind === 'lane' && (((s.dir ?? 1) === 1 && i > firstBack) || (s.dir === -1 && i < lastFwd))));
+  if (st.slice(1, -1).some((s) => s.kind === 'sidewalk')) push('footways', where((s, i) => s.kind === 'sidewalk' && i > 0 && i < st.length - 1));
+  if (st.reduce((s, x) => s + x.width, 0) > 70) push('wide');
+  if (fwd.length > 0 && back.length > 0 && fwd.length !== back.length) push('laneBalance', where((s) => s.kind === 'lane'));
+  // parking and cycle lanes: walking outwards through other parking/cycle strips reaches the kerb side, not a lane
+  const edge = (k: StripKind) => k === 'sidewalk' || k === 'curb' || k === 'shoulder' || k === 'barrier';
+  const atKerb = (i: number) => {
+    for (const step of [-1, 1]) {
+      let k = i + step;
+      while (k >= 0 && k < st.length && (st[k].kind === 'parking' || st[k].kind === 'bike')) k += step;
+      if (k < 0 || k >= st.length || edge(st[k].kind)) return true;
+    }
+    return false;
+  };
+  const astray = where((s, i) => (s.kind === 'parking' || s.kind === 'bike') && !atKerb(i));
+  if (astray.length) push('parkingSide', astray);
+  const medians = d.ring ? [] : where((s, i) => s.kind === 'median' && (s.flush ? false : !(fwd.length > 0 && back.length > 0 && i > lastFwd && i < firstBack)));
+  if (medians.length) push('median', medians);
+  const sized = where((s) => s.width < STRIP_WIDTH[s.kind][0] - 1e-6 || s.width > STRIP_WIDTH[s.kind][1] + 1e-6);
+  if (sized.length) push('width', sized);
+  if ((d.priority ?? 0) >= 4 && st.some((s) => s.kind === 'parking' || s.kind === 'bike')) push('class', where((s) => s.kind === 'parking' || s.kind === 'bike'));
+  return out;
+}
 
 function derive(p: Profile): ProfileInfo {
   const total = p.strips.reduce((s, x) => s + x.width, 0);

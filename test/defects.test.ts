@@ -85,7 +85,7 @@ test('A20: undoing a demolition works after growth took the lot (and its freed i
   commands.push(demolish);
   // the lot is free again: growth grows a building on it, outside the history
   const lot: LotColumns = { count: 1, x: new Float32Array([100]), z: new Float32Array([100]), w: new Float32Array([20]), d: new Float32Array([30]),
-    rot: new Float32Array([0]), zone: new Uint8Array([Zone.Residential]), seed: new Uint32Array([991]), profile: new Uint8Array([0]) };
+    rot: new Float32Array([0]), zone: new Uint8Array([Zone.Residential]), seed: new Uint32Array([991]), profile: new Uint16Array([0]) };
   new Growth(w, null as unknown as JobPool).place(lot, 0);
   // a neighbour on the next lot, sharing the lot edge at x = 110: it must stay
   const neighbour = w.growBuilding({ ...rec, x: 120, seed: 555 });

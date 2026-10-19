@@ -4,18 +4,23 @@
 // buildings in the way. Everything becomes a journal of operations that undoes and
 // redoes exactly, with the same ids.
 
-import { HEIGHT_MAP_RES, HEIGHT_TILE_RES, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
+import { HEIGHT_MAP_RES, HEIGHT_TILE_RES, MAP_HALF, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { Dirty } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
-import { heightAt, heightIndex, sampleCoord, worldOfSample } from '../world/heights.ts';
+import { cellsOfSamples, heightAt, heightIndex, sampleCoord, worldOfSample } from '../world/heights.ts';
 import type { BuildingRec, World } from '../world/world.ts';
-import { arcTable, bez, bezD, closestT, intersectQuads, splitQuad, subQuad, tAtLength, type Quad } from './geometry.ts';
-import { MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './network.ts';
+import { arcTable, bez, bezD, bezLength, closestT, intersectQuads, splitQuad, subQuad, tAtLength, type Quad } from './geometry.ts';
+import { MAX_DEG, MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './network.ts';
+import { t as text } from '../ui/i18n.ts';
 import { SegFlag } from './flags.ts';
 import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
 import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPrice, withKind } from './economy.ts';
-import type { JunctionSpec } from './control.ts';
+import { dirOut, remapSpec, type JunctionSpec } from './control.ts';
+import { MIN_LEG_ANGLE } from './impossible.ts';
+import { ROAD_TUNING } from './tuning.ts';
+import { ARCHES, archFor, eraAt } from '../world/arch.ts';
+import { NO_WATER, waterAt } from '../world/ground.ts';
 
 // --------------------------------------------------------------- journal
 
@@ -27,9 +32,10 @@ type Op =
   | { t: 'profile'; id: number; from: number; to: number }
   | { t: 'zone'; id: number; side: number; from: number; to: number }
   | { t: 'junction'; id: number; from: JunctionSpec | null; to: JunctionSpec | null }
+  | { t: 'name'; id: number; from: string | undefined; to: string | undefined }
   | { t: 'addBld'; rec: number[] }
   | { t: 'remBld'; rec: number[] }
-  | { t: 'terrain'; idx: Int32Array; before: Float32Array; after: Float32Array; x0: number; z0: number; x1: number; z1: number };
+  | { t: 'terrain'; idx: Int32Array; before: Float32Array; after: Float32Array; x0: number; z0: number; x1: number; z1: number; cells?: number[]; near?: number[] };
 
 export class RoadJournal implements Command {
   readonly label: string;
@@ -45,10 +51,23 @@ export class RoadJournal implements Command {
 
   get empty(): boolean { return this.ops.length === 0; }
 
-  /** Change in road value (R$) made by this journal. */
+  /** Memory kept for undo: the terrain samples (the rest is small records). */
+  get bytes(): number {
+    let n = this.ops.length * 64;
+    for (const op of this.ops) if (op.t === 'terrain') n += op.idx.byteLength + op.before.byteLength + op.after.byteLength;
+    return n;
+  }
+
+  /** Change in road value (R$) made by this journal, over the roads the player paid for. */
   private value = 0;
+  /** The same over roads that were free (SegFlag.Free): costs when it grows, never gives anything back. */
+  private freeValue = 0;
   /** How much was charged (negative = refunded). */
   charge = 0;
+
+  private addValue(id: number, v: number): void {
+    if (this.net.segs.cols.flags[id] & SegFlag.Free) this.freeValue += v; else this.value += v;
+  }
 
   /** Value of a segment as it stands: length × price of its cross-section × how it is built (`roads/economy.ts`). */
   private segValue(id: number, profile = this.net.segs.cols.profile[id]): number {
@@ -63,21 +82,22 @@ export class RoadJournal implements Command {
     const nc = this.net.nodes.cols, p = new Float64Array(2), kinds: number[] = [];
     for (const t of [0.1, 0.3, 0.5, 0.7, 0.9]) {
       bez(q, t, p);
-      kinds.push(buildKindAt(nc.y[a] + (nc.y[b] - nc.y[a]) * t, heightAt(this.world.heights, p[0], p[1])));
+      kinds.push(buildKindAt(nc.y[a] + (nc.y[b] - nc.y[a]) * t, heightAt(this.world.heights, p[0], p[1]), waterAt(this.world.water, p[0], p[1])));
     }
     return dominantKind(kinds);
   }
 
   /** What the edit would cost (positive) or give back (negative), before settle. */
-  get price(): number { return chargeFor(this.value); }
+  get price(): number { return chargeFor(this.value) + (this.freeValue > 0 ? chargeFor(this.freeValue) : 0); }
 
   /**
-   * Charges what the journal built (demolishing gives back a share, `roads/tuning.ts`). Without enough money it
-   * undoes itself and returns false. Called once, right after the live operations.
+   * Charges what the journal built (demolishing gives back a share, `roads/tuning.ts`; free roads give nothing).
+   * Without enough money it undoes itself and returns false. Called once, right after the live operations.
    */
   settle(): boolean {
-    const charge = this.world.unlimited ? 0 : chargeFor(this.value);
-    if (charge > 0 && charge > this.world.money) { this.invert(); this.ops.length = 0; this.value = 0; return false; }
+    this.tidy();
+    const charge = this.world.unlimited ? 0 : this.price;
+    if (charge > 0 && charge > this.world.money) { this.invert(); this.ops.length = 0; this.value = 0; this.freeValue = 0; return false; }
     this.charge = charge;
     this.world.money -= charge;
     return true;
@@ -121,19 +141,83 @@ export class RoadJournal implements Command {
     }
     const id = this.net.addSeg(rec);
     this.ops.push({ t: 'addSeg', rec: this.net.segRec(id) });
-    this.value += this.segValue(id);
+    this.addValue(id, this.segValue(id));
     return id;
   }
   removeSeg(id: number): SegRec {
-    this.value -= this.segValue(id);
+    this.addValue(id, -this.segValue(id));
     const rec = this.net.removeSeg(id);
     this.ops.push({ t: 'remSeg', rec });
+    this.gone.push(rec);
     return rec;
+  }
+
+  /** Segments this journal removed, and the pieces that took over from a removed one (split, join, roundabout cut). */
+  private gone: SegRec[] = [];
+  private heirs = new Map<number, number[]>();
+  /** `pieces` took over from the removed segment `from` (its name and its place in the junctions' settings). */
+  inherit(from: number, pieces: number[]): void { this.heirs.set(from, [...(this.heirs.get(from) ?? []), ...pieces]); }
+
+  /**
+   * Junction settings and street names are kept by segment id, and ids are reused. After the live operations, every
+   * removed segment hands them to its heirs (the pieces it was split into, or a segment between the same two nodes:
+   * raised, moved, reversed) and they are taken off the ones that are gone, so nothing names a removed segment or
+   * passes to a road that reuses the id. Recorded like any change: undo puts them back.
+   */
+  private tidy(): void {
+    const net = this.net, sc = net.segs.cols, names = this.world.streetNames;
+    const gone = this.gone;
+    this.gone = [];
+    const name = new Map<number, string>();
+    // the names as they were before this journal, by the first removal of each id
+    for (const op of this.ops) if (op.t === 'remSeg' && !name.has(op.rec.id)) { const v = this.nameBefore(op.rec.id); if (v !== undefined) name.set(op.rec.id, v); }
+    const done = new Set<number>();
+    for (const rec of gone) {
+      if (done.has(rec.id)) continue;
+      done.add(rec.id);
+      const heirs = (this.heirs.get(rec.id) ?? []).filter((h) => net.segs.alive[h]);
+      for (const n of [rec.a, rec.b]) {
+        if (!net.nodes.alive[n]) continue;
+        const between = net.segsOf(n, []).filter((s) => (sc.a[s] === rec.a && sc.b[s] === rec.b) || (sc.a[s] === rec.b && sc.b[s] === rec.a));
+        for (const s of between) if (!heirs.includes(s)) heirs.push(s);
+      }
+      // street name: on every heir that has none, and off the id if it is no longer one of them
+      const nm = name.get(rec.id);
+      if (nm !== undefined) {
+        for (const h of heirs) if (names.get(h) === undefined) this.setName(h, nm);
+        if (!heirs.includes(rec.id) && names.get(rec.id) === nm) this.setName(rec.id, undefined);
+      }
+      // junction settings at both ends: the heir at that node, or nothing
+      for (const n of [rec.a, rec.b]) {
+        if (!net.nodes.alive[n]) continue;
+        const spec = net.junctions.get(n);
+        if (!spec) continue;
+        const at = net.segsOf(n, []);
+        if (at.includes(rec.id)) continue; // the id is at this node again (re-added, or the heir took it)
+        const heir = heirs.find((h) => at.includes(h)) ?? -1;
+        const next = remapSpec(spec, rec.id, heir, at);
+        if (next !== spec) this.setJunction(n, next);
+      }
+    }
+  }
+
+  /** The street name of segment `id` before this journal's own name changes. */
+  private nameBefore(id: number): string | undefined {
+    let v = this.world.streetNames.get(id);
+    for (let i = this.ops.length - 1; i >= 0; i--) { const op = this.ops[i]; if (op.t === 'name' && op.id === id) v = op.from; }
+    return v;
+  }
+
+  private setName(id: number, to: string | undefined): void {
+    const names = this.world.streetNames, from = names.get(id);
+    if (from === to) return;
+    if (to === undefined) names.delete(id); else names.set(id, to);
+    this.ops.push({ t: 'name', id, from, to });
   }
   setProfile(id: number, to: number): void {
     const from = this.net.segs.cols.profile[id];
     if (from === to) return;
-    this.value += this.segValue(id, to) - this.segValue(id, from);
+    this.addValue(id, this.segValue(id, to) - this.segValue(id, from));
     this.net.setProfile(id, to);
     this.ops.push({ t: 'profile', id, from, to });
   }
@@ -176,7 +260,11 @@ export class RoadJournal implements Command {
       if (values[k] > w.tileMax[tile]) w.tileMax[tile] = values[k];
       w.layerDirty.add(tile);
     }
-    w.touchRect(op.x0, op.z0, op.x1, op.z1, Dirty.Terrain | Dirty.Buildings | Dirty.Roads);
+    // the cells the samples are in, not the whole box (a long diagonal road would mark every cell of its square)
+    op.cells ??= cellsOfSamples(op.idx);
+    op.near ??= cellsOfSamples(op.idx, BUILDING_REACH);
+    for (const c of op.cells) w.touchCell(c, Dirty.Terrain | Dirty.Roads);
+    for (const c of op.near) w.touchCell(c, Dirty.Buildings);
   }
 
   private exec(op: Op, forward: boolean): void {
@@ -190,17 +278,48 @@ export class RoadJournal implements Command {
       case 'profile': net.setProfile(op.id, doAdd ? op.to : op.from); break;
       case 'zone': net.setZone(op.id, op.side, doAdd ? op.to : op.from); break;
       case 'junction': net.setJunction(op.id, doAdd ? op.to : op.from); break;
+      case 'name': { const v = doAdd ? op.to : op.from; if (v === undefined) this.world.streetNames.delete(op.id); else this.world.streetNames.set(op.id, v); break; }
       case 'addBld': if (doAdd) this.world.restoreBuilding(op.rec); else this.world.removeBuilding(op.rec[0]); break;
       case 'remBld': if (doAdd) this.world.removeBuilding(op.rec[0]); else this.world.restoreBuilding(op.rec); break;
       case 'terrain': this.writeTerrain(op, doAdd ? op.after : op.before); break;
     }
   }
 
-  /** Appends another (not yet charged) journal to this one: it becomes a single undo step. */
-  append(other: RoadJournal): void { this.ops.push(...other.ops); this.value += other.value; }
+  /**
+   * Runs live operations. If they throw half way, everything this journal did goes back (it is left empty, nothing
+   * half built and nothing charged) and the error goes on.
+   */
+  guard<T>(fn: () => T): T {
+    try { return fn(); } catch (err) {
+      for (let i = this.ops.length - 1; i >= 0; i--) this.exec(this.ops[i], false);
+      this.ops.length = 0; this.value = 0; this.freeValue = 0;
+      throw err;
+    }
+  }
 
-  apply(): void { for (const op of this.ops) this.exec(op, true); this.world.money -= this.charge; }
-  invert(): void { for (let i = this.ops.length - 1; i >= 0; i--) this.exec(this.ops[i], false); this.world.money += this.charge; }
+  /** Appends another (not yet charged) journal to this one: it becomes a single undo step. */
+  append(other: RoadJournal): void { this.ops.push(...other.ops); this.value += other.value; this.freeValue += other.freeValue; }
+
+  /** Redo: runs the ops in order. If one throws, those already run go back and the error goes on: nothing changed. */
+  apply(): void {
+    const ops = this.ops;
+    let k = 0;
+    try { for (; k < ops.length; k++) this.exec(ops[k], true); } catch (err) {
+      for (let i = k - 1; i >= 0; i--) this.exec(ops[i], false);
+      throw err;
+    }
+    this.world.money -= this.charge;
+  }
+  /** Undo: runs the ops backwards. If one throws, those already undone are done again and the error goes on. */
+  invert(): void {
+    const ops = this.ops;
+    let k = ops.length - 1;
+    try { for (; k >= 0; k--) this.exec(ops[k], false); } catch (err) {
+      for (let i = k + 1; i < ops.length; i++) this.exec(ops[i], true);
+      throw err;
+    }
+    this.world.money += this.charge;
+  }
 }
 
 // --------------------------------------------------------------- snapping
@@ -251,17 +370,22 @@ function smoothGround(h: Float32Array, x: number, z: number): number {
  * Heights along the path, every `step` meters: follows the terrain + the requested
  * offset, passes over water, respects the fixed points and the maximum grade.
  */
-export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, offset: number, maxGrade: number, fixed: Fixed[], step = 6): { at: Float64Array; y: Float64Array } {
+export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, offset: number, maxGrade: number, fixed: Fixed[], step = 6, water?: Float32Array): { at: Float64Array; y: Float64Array } {
   const len = table[table.length - 1];
   const n = Math.max(2, Math.ceil(len / step) + 1);
   const at = new Float64Array(n), y = new Float64Array(n);
   const isFixed = new Uint8Array(n);
+  // over water a road on or above the ground never dips below the bridge clearance (narrow rivers are not smoothed away)
+  const floor = new Float64Array(n).fill(-Infinity);
   const p = new Float64Array(2);
   for (let i = 0; i < n; i++) {
     at[i] = len * i / (n - 1);
     bez(q, tAtLength(table, at[i]), p);
     const g = smoothGround(h, p[0], p[1]);
-    y[i] = g < SEA_LEVEL + 0.5 ? SEA_LEVEL + 7 + offset : g + offset;
+    // over the sea or a river or lake of the player's: a bridge 7 m over the water
+    const wl = water ? waterAt(water, p[0], p[1]) : NO_WATER;
+    y[i] = g < SEA_LEVEL + 0.5 ? SEA_LEVEL + 7 + offset : wl > g ? wl + 7 + offset : g + offset;
+    if (offset >= 0 && (g < SEA_LEVEL + 0.5 || wl > g)) floor[i] = Math.max(SEA_LEVEL, wl) + ROAD_TUNING.economy.bridgeFrom + 0.5;
   }
   for (const f of fixed) {
     const i = Math.round(f.at / len * (n - 1));
@@ -272,15 +396,15 @@ export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, off
     let prev = y[0];
     for (let i = 1; i < n - 1; i++) {
       const cur = y[i];
-      if (!isFixed[i]) y[i] = (prev + 2 * cur + y[i + 1]) / 4;
+      if (!isFixed[i]) y[i] = Math.max(floor[i], (prev + 2 * cur + y[i + 1]) / 4);
       prev = cur;
     }
   }
   const d = len / (n - 1);
   const g = maxGrade * d;
   for (let pass = 0; pass < 3; pass++) {
-    for (let i = 1; i < n; i++) if (!isFixed[i]) y[i] = Math.min(y[i - 1] + g, Math.max(y[i - 1] - g, y[i]));
-    for (let i = n - 2; i >= 0; i--) if (!isFixed[i]) y[i] = Math.min(y[i + 1] + g, Math.max(y[i + 1] - g, y[i]));
+    for (let i = 1; i < n; i++) if (!isFixed[i]) y[i] = Math.max(floor[i], Math.min(y[i - 1] + g, Math.max(y[i - 1] - g, y[i])));
+    for (let i = n - 2; i >= 0; i--) if (!isFixed[i]) y[i] = Math.max(floor[i], Math.min(y[i + 1] + g, Math.max(y[i + 1] - g, y[i])));
   }
   return { at, y };
 }
@@ -325,7 +449,7 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
   else if (start.seg >= 0) fixed.push({ at: 0, y: segHeightAt(net, start.seg, start.t) });
   if (end.node >= 0) fixed.push({ at: len, y: nc.y[end.node] });
   else if (end.seg >= 0) fixed.push({ at: len, y: segHeightAt(net, end.seg, end.t) });
-  let pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed);
+  let pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed, 6, world.water);
 
   const fail = (reason: string): RoadPlan => ({ ok: false, reason, quad: q, profile: pr, len, junctions: [] });
   if (len < MIN_LEN) return fail('curta demais');
@@ -370,8 +494,19 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
   // junctions pin the height and go into the profile
   if (junctions.length) {
     for (const [tn, s, to] of junctions) fixed.push({ at: arcAtT(table, tn), y: segHeightAt(net, s, to) });
-    pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed);
+    pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed, 6, world.water);
   }
+  if (overlapsRoad(net, q, table, profile, pr)) return { ...fail(text('road.reason.overlap')), junctions };
+  // no node may end up with more roads than it holds: an end on a node takes one more, a junction on a node two more
+  const extra = new Map<number, number>();
+  const more = (n: number, k: number) => extra.set(n, (extra.get(n) ?? 0) + k);
+  if (start.node >= 0) more(start.node, 1);
+  if (end.node >= 0) more(end.node, 1);
+  for (const [, s, to] of junctions) {
+    const sl = net.segs.cols.len[s];
+    if (to * sl < 6) more(net.segs.cols.a[s], 2); else if ((1 - to) * sl < 6) more(net.segs.cols.b[s], 2);
+  }
+  for (const [n, k] of extra) if (nc.deg[n] + k > MAX_DEG) return { ...fail(text('road.reason.fullNode', { max: MAX_DEG })), junctions };
   // fixed points too close together
   const ats = [0, ...junctions.map((j) => arcAtT(table, j[0])), len];
   for (let i = 1; i < ats.length; i++) if (ats[i] - ats[i - 1] < 6) return { ...fail('cruzamentos muito próximos'), junctions };
@@ -380,6 +515,66 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
     if (Math.abs(pr.y[i] - pr.y[i - 1]) / (pr.at[i] - pr.at[i - 1]) > maxGrade * 1.9) return { ...fail('rampa íngreme demais'), junctions };
   }
   return { ok: true, reason: '', quad: q, profile: pr, len, junctions };
+}
+
+/**
+ * The new road would run over another one: along it (nearly parallel, at the same level) closer than three quarters
+ * of their half widths added, for 8 m or more away from its ends. A second road between the same two nodes is one.
+ */
+function overlapsRoad(net: RoadNetwork, q: Quad, table: Float64Array, profile: number, pr: { at: Float64Array; y: Float64Array }): boolean {
+  const len = table[table.length - 1], half = PROFILE_INFO[profile].right;
+  const cands: number[] = [];
+  net.forSegsNear(Math.min(q.x0, q.cx, q.x1) - half - 30, Math.min(q.z0, q.cz, q.z1) - half - 30, Math.max(q.x0, q.cx, q.x1) + half + 30, Math.max(q.z0, q.cz, q.z1) + half + 30, (s) => cands.push(s));
+  if (!cands.length) return false;
+  const p = new Float64Array(2), d = new Float64Array(2), e = new Float64Array(2), oq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
+  const gap = half + 10;
+  let run = 0;
+  for (let s = gap; s <= len - gap; s += 4) {
+    const t = tAtLength(table, s);
+    bez(q, t, p); bezD(q, t, d);
+    const dl = Math.hypot(d[0], d[1]) || 1;
+    let over = false;
+    for (const o of cands) {
+      net.quad(o, oq);
+      const [to, dist] = closestT(oq, p[0], p[1]);
+      if (dist >= (half + PROFILE_INFO[net.segs.cols.profile[o]].right) * 0.75) continue;
+      bezD(oq, to, e);
+      if (Math.abs(d[0] * e[0] + d[1] * e[1]) / (dl * (Math.hypot(e[0], e[1]) || 1)) < 0.9) continue;
+      if (Math.abs(profileY(pr, s) - segHeightAt(net, o, to)) >= 4.5) continue;
+      over = true; break;
+    }
+    run = over ? run + 4 : 0;
+    if (run >= 8) return true;
+  }
+  return false;
+}
+
+/**
+ * What building the plan will cost, for the preview: the road cut where buildRoad cuts it (at the junctions, then in
+ * halves while longer than MAX_SEG_LEN or bending away from the straight line between its ends), each piece priced by how it is built over the ground and water (five samples, as the
+ * journal does). The roads it splits keep their value.
+ */
+export function planPrice(world: World, plan: RoadPlan, profile: number): number {
+  if (!plan.ok) return 0;
+  const q = plan.quad, table = arcTable(q, 64), len = table[table.length - 1];
+  const stops = [0, ...plan.junctions.map((j) => arcAtT(table, j[0])), len];
+  const p = new Float64Array(2);
+  let total = 0;
+  const piece = (s0: number, s1: number, depth: number) => {
+    const y0 = profileY(plan.profile, s0), y1 = profileY(plan.profile, s1), L = s1 - s0;
+    let worst = 0;
+    for (let f = 0.125; f < 1; f += 0.125) worst = Math.max(worst, Math.abs(profileY(plan.profile, s0 + L * f) - (y0 + (y1 - y0) * f)));
+    if ((L > MAX_SEG_LEN || (worst > 0.4 && L > 30)) && depth < 8) { const m = (s0 + s1) / 2; piece(s0, m, depth + 1); piece(m, s1, depth + 1); return; }
+    const kinds: number[] = [];
+    for (const f of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      const s = s0 + (s1 - s0) * f;
+      bez(q, tAtLength(table, s), p);
+      kinds.push(buildKindAt(y0 + (y1 - y0) * f, heightAt(world.heights, p[0], p[1]), waterAt(world.water, p[0], p[1])));
+    }
+    total += segmentPrice(profile, s1 - s0, dominantKind(kinds));
+  };
+  for (let i = 1; i < stops.length; i++) piece(stops[i - 1], stops[i], 0);
+  return chargeFor(total);
 }
 
 function arcAtT(table: Float64Array, t: number): number {
@@ -398,25 +593,43 @@ function splitSeg(j: RoadJournal, net: RoadNetwork, s: number, t: number, y: num
   const yy = y ?? segHeightAt(net, s, t);
   j.removeSeg(s);
   const n = j.addNode(a.x1, a.z1, yy);
-  j.addSeg({ a: rec.a, b: n, cx: a.cx, cz: a.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
-  j.addSeg({ a: n, b: rec.b, cx: b.cx, cz: b.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
+  const pa = j.addSeg({ a: rec.a, b: n, cx: a.cx, cz: a.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
+  const pb = j.addSeg({ a: n, b: rec.b, cx: b.cx, cz: b.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
+  j.inherit(s, [pa, pb]);
   return n;
+}
+
+/**
+ * Segment s still runs through (x, z) as it did when the point was taken: a split frees its id and one of the pieces
+ * may take it, and the old `t` would cut the piece in the wrong place.
+ */
+function stillThere(net: RoadNetwork, s: number, x: number, z: number): boolean {
+  if (!net.segs.alive[s]) return false;
+  const sc = net.segs.cols, nc = net.nodes.cols;
+  const [, d] = closestT(net.quad(s), x, z);
+  return d < 0.5 && Math.hypot(nc.x[sc.a[s]] - x, nc.z[sc.a[s]] - z) > 0.5 && Math.hypot(nc.x[sc.b[s]] - x, nc.z[sc.b[s]] - z) > 0.5;
 }
 
 /** Resolves an anchor to a node (splitting the segment if needed). */
 function anchorNode(j: RoadJournal, net: RoadNetwork, a: Anchor, y: number): number {
   if (a.node >= 0 && net.nodes.alive[a.node]) return a.node;
-  if (a.seg >= 0 && net.segs.alive[a.seg]) return splitSeg(j, net, a.seg, a.t, null);
-  // the segment may have been split by the other end: search again
+  if (a.seg >= 0 && stillThere(net, a.seg, a.x, a.z)) return splitSeg(j, net, a.seg, closestT(net.quad(a.seg), a.x, a.z)[0], null);
+  // the segment may have been split by the other end (and its id taken by a piece): search again
   const again = snap(net, a.x, a.z, 3);
   if (again.node >= 0) return again.node;
   if (again.seg >= 0) return splitSeg(j, net, again.seg, again.t, null);
   return j.addNode(a.x, a.z, y);
 }
 
+/** Builds a planned road. If anything throws half way, the whole build goes back before the error goes on. */
 export function buildRoad(world: World, plan: RoadPlan, start: Anchor, end: Anchor, profile: number, flags = 0, label = 'construir via'): RoadJournal {
-  const net = world.roads;
   const j = new RoadJournal(world, label);
+  j.guard(() => buildLive(j, world, plan, start, end, profile, flags));
+  return j;
+}
+
+function buildLive(j: RoadJournal, world: World, plan: RoadPlan, start: Anchor, end: Anchor, profile: number, flags: number): void {
+  const net = world.roads;
   const q = plan.quad;
   const table = arcTable(q, 64);
   const pr = plan.profile;
@@ -428,7 +641,8 @@ export function buildRoad(world: World, plan: RoadPlan, start: Anchor, end: Anch
     // the crossed segment may already have been split by another junction: find the right piece
     const p = new Float64Array(2); bez(q, tn, p);
     let seg = s, tt = to;
-    if (!net.segs.alive[seg]) {
+    if (stillThere(net, seg, p[0], p[1])) tt = closestT(net.quad(seg), p[0], p[1])[0];
+    else {
       const near = net.nearestSeg(p[0], p[1], 3);
       if (!near) continue;
       seg = near[0]; tt = near[1];
@@ -499,7 +713,6 @@ export function buildRoad(world: World, plan: RoadPlan, start: Anchor, end: Anch
   clearAndConform(j, world, q, profile, yLinear, table, (flags & SegFlag.Wall) !== 0);
   // dead ends with a turning bulb: the terrain settles under the circle
   for (const n of [stops[0].node, stops[stops.length - 1].node]) if (bulbAt(net, n)) conformDisc(j, world, nc.x[n], nc.z[n], BULB_R + BULB_WALK + 6, nc.y[n]);
-  return j;
 }
 
 export { bulbAt };
@@ -536,7 +749,20 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
   world.buildingIndex.query(minX - reach - 40, minZ - reach - 40, maxX + reach + 40, maxZ + reach + 40, (id) => {
     const r = Math.hypot(col.w[id], col.d[id]) / 2;
     const [d] = nearest(col.x[id], col.z[id]);
-    if (d < half + r * 0.8) doomed.push(id);
+    if (d >= half + r) return;
+    // the road's footprint (centreline points widened by its half width) over any part of the lot's rectangle
+    const c = Math.cos(col.rot[id]), s = Math.sin(col.rot[id]), hw = col.w[id] / 2 + half - 0.3, hd = col.d[id] / 2 + half - 0.3;
+    let i = -1;
+    for (let k = 0; k < n && i < 0; k++) {
+      const dx = px[k] - col.x[id], dz = pz[k] - col.z[id];
+      if (Math.abs(dx * c - dz * s) < hw && Math.abs(dx * s + dz * c) < hd) i = k;
+    }
+    if (i < 0) return;
+    // a deck that passes over the roof, or a tunnel deep under the lot, leaves the building standing
+    const g = heightAt(world.heights, col.x[id], col.z[id]);
+    if (py[i] - DECK_DEPTH > g + buildingTop(col, id)) return;
+    if (py[i] < g - ROAD_TUNING.economy.tunnelFrom) return;
+    doomed.push(id);
   });
   for (const id of doomed) j.removeBuilding(id);
 
@@ -559,7 +785,7 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
       const target = py[i] - 0.06;
       const gap = target - old; // + fill, - cut
       if (gap > 4.5 || gap < -7) continue; // bridge or tunnel: the terrain stays
-      if (old < SEA_LEVEL + 0.3) continue; // never fills water: it becomes a bridge
+      if (old < SEA_LEVEL + 0.3 || waterAt(world.water, x, z) > old) continue; // never fills water: it becomes a bridge
       // cut with a retaining wall: the ground rises right at the edge (the wall covers it); embankment: 7 m slope
       const bl = wallCut && gap < 0 ? 1.2 : blend;
       if (d >= half + bl) continue;
@@ -570,6 +796,17 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
     }
   }
   if (idx.length) j.terrain(new Int32Array(idx), new Float32Array(before), new Float32Array(after), [minX - reach, minZ - reach, maxX + reach, maxZ + reach]);
+}
+
+/** How far into the next cell a building's base may reach from its centre's cell (m): heights there move it too. */
+const BUILDING_REACH = 40;
+
+/** Deck and girders under a road surface on a bridge (m): a roof must stay below this much under the road. */
+const DECK_DEPTH = 2;
+/** Highest a building may reach over its ground (m): its storeys at the height of its architecture, plus roof and crown. */
+function buildingTop(col: World['buildings']['cols'], id: number): number {
+  const arch = ARCHES[archFor(col.zone[id], col.floors[id], eraAt(col.x[id], col.z[id]), col.style[id])];
+  return col.floors[id] * (arch?.floorH ?? 5.6) + 4;
 }
 
 function smooth(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }
@@ -588,15 +825,24 @@ export function demolishSeg(world: World, s: number): RoadJournal {
 export function changeProfile(world: World, s: number, profile: number): RoadJournal {
   const j = new RoadJournal(world, 'trocar perfil');
   if (world.roads.segs.cols.flags[s] & SegFlag.Ring) return j;
-  j.setProfile(s, profile);
+  j.guard(() => { j.setProfile(s, profile); settleUnder(j, world, s); });
   return j;
+}
+
+/** After a profile change: like a new road, what the (wider) road now covers goes and the terrain settles under it. */
+function settleUnder(j: RoadJournal, world: World, s: number): void {
+  const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
+  const sq = net.quad(s), t = arcTable(sq, 32), L = t[t.length - 1];
+  const ya = nc.y[sc.a[s]], yb = nc.y[sc.b[s]];
+  clearAndConform(j, world, sq, sc.profile[s], (d) => ya + (yb - ya) * d / L, t, (sc.flags[s] & SegFlag.Wall) !== 0);
 }
 
 /**
  * The whole street of a segment: walks through the nodes picking, at each one, the segment
- * that continues straightest (up to 35°) with the same profile. One-way roads only follow the same direction.
+ * that continues straightest (up to 35°) with the same profile (`anyProfile`: whatever its profile, never from a
+ * road onto rails or back). One-way roads only follow the same direction.
  */
-export function streetChain(world: World, s0: number): number[] {
+export function streetChain(world: World, s0: number, anyProfile = false): number[] {
   const net = world.roads, sc = net.segs.cols;
   const prof = sc.profile[s0];
   const oneWay = PROFILE_INFO[prof].oneWay;
@@ -613,9 +859,10 @@ export function streetChain(world: World, s0: number): number[] {
       const hx = -here.dx, hz = -here.dz;
       let best = -1, bestDot = Math.cos(35 * Math.PI / 180), bestEnd: 0 | 1 = 0;
       for (const t of net.segsOf(n, list)) {
-        if (seen.has(t) || sc.profile[t] !== prof || (sc.flags[t] & SegFlag.Ring)) continue;
+        if (seen.has(t) || (sc.flags[t] & SegFlag.Ring)) continue;
+        if (anyProfile ? PROFILE_INFO[sc.profile[t]].rail !== PROFILE_INFO[prof].rail : sc.profile[t] !== prof) continue;
         const tEnd: 0 | 1 = sc.a[t] === n ? 0 : 1;
-        if (oneWay && tEnd !== (end === 1 ? 0 : 1)) continue;
+        if (oneWay && PROFILE_INFO[sc.profile[t]].oneWay && tEnd !== (end === 1 ? 0 : 1)) continue;
         const arm = armOf(net.quad(t, q), prof, tEnd);
         const d = arm.dx * hx + arm.dz * hz;
         if (d > bestDot) { bestDot = d; best = t; bestEnd = tEnd; }
@@ -629,34 +876,106 @@ export function streetChain(world: World, s0: number): number[] {
 }
 
 /** Changes the profile of several segments in a single command. */
-export function changeProfiles(world: World, segs: number[], profile: number): RoadJournal {
+export function changeProfiles(world: World, segs: number[], profile: number, ref = segs[0]): RoadJournal {
   const j = new RoadJournal(world, 'trocar perfil da rua');
-  for (const s of segs) if (!(world.roads.segs.cols.flags[s] & SegFlag.Ring)) j.setProfile(s, profile);
+  const net = world.roads;
+  // a profile that is not the same seen from both ends (parking on one side, a bus lane…) is laid the way `ref` runs:
+  // segments of the street drawn the other way are turned round first, so it lands on the same side of every block
+  const along = mirrorSymmetric(profile) ? null : alongStreet(world, segs, ref);
+  j.guard(() => {
+    for (let s of segs) {
+      if (!net.segs.alive[s] || (net.segs.cols.flags[s] & SegFlag.Ring)) continue;
+      if (along && along.get(s) === false) {
+        const r = j.removeSeg(s);
+        s = j.addSeg({ a: r.b, b: r.a, cx: r.cx, cz: r.cz, profile: r.profile, flags: r.flags, zl: r.zr, zr: r.zl });
+      }
+      j.setProfile(s, profile);
+      settleUnder(j, world, s);
+    }
+  });
   return j;
+}
+
+/** The profile reads the same from both ends (its strips mirrored, with each lane's direction turned, are itself). */
+export function mirrorSymmetric(profile: number): boolean {
+  const st = PROFILE_INFO[profile].strips, n = st.length;
+  for (let i = 0; i < n; i++) {
+    const a = st[i], b = st[n - 1 - i];
+    if (a.kind !== b.kind || Math.abs(a.width - b.width) > 0.01 || !!a.bus !== !!b.bus || !!a.rail !== !!b.rail || (a.pave ?? 0) !== (b.pave ?? 0)) return false;
+    if (a.kind === 'lane' && (a.dir ?? 1) !== -(b.dir ?? 1)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether each segment of a connected street runs the way `ref` does (true) or against it, walking from `ref` through
+ * the nodes the segments share.
+ */
+export function alongStreet(world: World, segs: number[], ref: number): Map<number, boolean> {
+  const sc = world.roads.segs.cols, set = new Set(segs);
+  const out = new Map<number, boolean>([[ref, true]]);
+  const queue = [ref];
+  while (queue.length) {
+    const s = queue.pop()!, fwd = out.get(s)!;
+    // the node where the street leaves s going forward, and where it comes in
+    const ahead = fwd ? sc.b[s] : sc.a[s], behind = fwd ? sc.a[s] : sc.b[s];
+    for (const t of world.roads.segsOf(ahead, [])) if (set.has(t) && !out.has(t)) { out.set(t, sc.a[t] === ahead); queue.push(t); }
+    for (const t of world.roads.segsOf(behind, [])) if (set.has(t) && !out.has(t)) { out.set(t, sc.b[t] === behind); queue.push(t); }
+  }
+  return out;
 }
 
 /**
  * Roundabout: cuts the roads inside the circle, connects the ends to the ring and closes the
  * ring in arcs (counter-clockwise traffic seen from above).
  */
-export function buildRoundabout(world: World, cx: number, cz: number, radius: number): RoadJournal | null {
+/**
+ * Why a roundabout cannot go at (cx, cz), or '' when it can (the tool shows it and the preview turns red): another
+ * roundabout in the circle, water under the ring (a roundabout never fills the sea or a river), or, unless `cut`, a
+ * road the ring would cut (Roadcraft puts roundabouts on vacant ground; cutting roads in is asked for).
+ */
+export function roundaboutRefusal(world: World, cx: number, cz: number, radius: number, cut = true): string {
+  const net = world.roads, p = new Float64Array(2);
+  let ring = false, road = false;
+  const reach = radius + PROFILE_INFO[RING_PROFILE].right;
+  net.forSegsNear(cx - reach, cz - reach, cx + reach, cz + reach, (s) => {
+    if (ring) return;
+    const q = net.quad(s), isRing = (net.segs.cols.flags[s] & SegFlag.Ring) !== 0;
+    for (let k = 0; k <= 16; k++) {
+      bez(q, k / 16, p);
+      const d = Math.hypot(p[0] - cx, p[1] - cz);
+      if (isRing && d < radius) { ring = true; return; }
+      if (!isRing && d < reach) road = true;
+    }
+  });
+  if (ring) return text('road.ring.exists');
+  if (road && !cut) return text('road.ring.cuts');
+  const half = PROFILE_INFO[RING_PROFILE].right;
+  for (const r of [radius - half, radius, radius + half]) for (let k = 0; k < 48; k++) {
+    const a = (k / 48) * Math.PI * 2;
+    if (heightAt(world.heights, cx + Math.cos(a) * r, cz + Math.sin(a) * r) < SEA_LEVEL + 0.3) return text('road.ring.water');
+  }
+  return '';
+}
+
+/**
+ * Roundabout at (cx, cz). On vacant ground: the ring and four approaches of APPROACH m (Roadcraft). Over roads, when
+ * `cutRoads`: the roads inside are cut and their ends joined to the ring.
+ */
+export function buildRoundabout(world: World, cx: number, cz: number, radius: number, cutRoads = true): RoadJournal | null {
   const net = world.roads;
+  if (roundaboutRefusal(world, cx, cz, radius, cutRoads)) return null;
   const j = new RoadJournal(world, 'rotatória');
   const y = smoothGround(world.heights, cx, cz);
   const cut = radius;
-  const entries: Array<{ angle: number; node: number }> = [];
-  const approaches: number[] = [];
-  const victims: number[] = [];
-  net.forSegsNear(cx - cut, cz - cut, cx + cut, cz + cut, (s) => victims.push(s));
-  const q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
   const p = new Float64Array(2);
-  const created = new Set<number>(); // new ids may reuse victims' ids
-  for (const s of victims) {
-    if (!net.segs.alive[s] || created.has(s)) continue;
-    net.quad(s, q);
+  // every road the circle touches, before anything changes: an existing roundabout there refuses it untouched
+  const hits: Array<{ s: number; q: Quad; crossings: number[] }> = [];
+  let ringThere = false;
+  net.forSegsNear(cx - cut, cz - cut, cx + cut, cz + cut, (s) => {
+    const q = net.quad(s);
     const inside = (t: number) => { bez(q, t, p); return Math.hypot(p[0] - cx, p[1] - cz) < cut; };
-    const ia = inside(0), ib = inside(1);
-    // find crossings with the circle by sampling + bisection
+    // crossings with the circle by sampling + bisection
     const crossings: number[] = [];
     const N = 32;
     for (let k = 0; k < N; k++) {
@@ -667,9 +986,48 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
         crossings.push((lo + hi) / 2);
       }
     }
-    if (!ia && !ib && crossings.length === 0) continue;
+    if (!inside(0) && !inside(1) && crossings.length === 0) return;
+    if (net.segs.cols.flags[s] & SegFlag.Ring) ringThere = true;
+    hits.push({ s, q, crossings });
+  });
+  if (ringThere) return null;
+  j.guard(() => roundaboutLive(j, world, cx, cz, radius, y, hits));
+  return j;
+}
+
+/** Length of each approach a roundabout on vacant ground gets (m, Roadcraft). */
+const APPROACH = 40;
+
+/** Roads that meet a roundabout's circle closer than this (m) enter the ring at the same node. */
+const ENTRY_MERGE = 6;
+
+function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, radius: number, y: number,
+  hits: Array<{ s: number; q: Quad; crossings: number[] }>): void {
+  const net = world.roads;
+  const cut = radius;
+  const entries: Array<{ angle: number; node: number }> = [];
+  const approaches: number[] = [];
+  /**
+   * The ring node where a road meets the circle: roads that meet it within ENTRY_MERGE metres share one node, so
+   * the ring never gets a piece of almost no length nor goes round twice.
+   */
+  const entryNode = (x: number, z: number): number => {
+    const angle = Math.atan2(-(z - cz), x - cx);
+    for (const e of entries) {
+      let d = Math.abs(e.angle - angle);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      if (d * radius < ENTRY_MERGE) return e.node;
+    }
+    const node = j.addNode(x, z, y);
+    entries.push({ angle, node });
+    return node;
+  };
+  const p = new Float64Array(2);
+  const created = new Set<number>(); // new ids may reuse victims' ids
+  for (const { s, q, crossings } of hits) {
+    if (!net.segs.alive[s] || created.has(s)) continue;
+    const inside = (t: number) => { bez(q, t, p); return Math.hypot(p[0] - cx, p[1] - cz) < cut; };
     const rec = net.segRec(s);
-    if (rec.flags & SegFlag.Ring) return null; // there is already a roundabout here
     j.removeSeg(s);
     // keep the outside parts
     const pts = [0, ...crossings, 1];
@@ -678,10 +1036,8 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
       if (inside((t0 + t1) / 2)) continue;
       let sub = subQuad(q, t0, t1);
       // the ring is flat at the center's height; the entry ramps to the rest of the road
-      let na = t0 === 0 ? rec.a : j.addNode(sub.x0, sub.z0, y);
-      let nb = t1 === 1 ? rec.b : j.addNode(sub.x1, sub.z1, y);
-      if (t0 !== 0) entries.push({ angle: Math.atan2(-(sub.z0 - cz), sub.x0 - cx), node: na });
-      if (t1 !== 1) entries.push({ angle: Math.atan2(-(sub.z1 - cz), sub.x1 - cx), node: nb });
+      let na = t0 === 0 ? rec.a : entryNode(sub.x0, sub.z0);
+      let nb = t1 === 1 ? rec.b : entryNode(sub.x1, sub.z1);
       // short piece up to a plain joint of the same road: swallow the joint
       const outer = t0 === 0 ? rec.a : t1 === 1 ? rec.b : -1;
       const pieceLen = Math.hypot(sub.x1 - sub.x0, sub.z1 - sub.z0);
@@ -697,6 +1053,7 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
       }
       const ns = j.addSeg({ a: na, b: nb, cx: sub.cx, cz: sub.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
       created.add(ns);
+      j.inherit(s, [ns]);
       approaches.push(ns);
     }
   }
@@ -705,6 +1062,18 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
   net.nodeIndex.query(cx - cut, cz - cut, cx + cut, cz + cut, (n) => { if (net.nodes.cols.deg[n] === 0) loose.push(n); });
   for (const n of loose) j.removeNode(n);
 
+  // vacant ground: four approaches, two-way local streets out from the ring (Roadcraft editor/roundabout.ts)
+  if (entries.length === 0) {
+    for (let k = 0; k < 4; k++) {
+      const ang = k * Math.PI / 2, ux = Math.cos(ang), uz = -Math.sin(ang);
+      const e = j.addNode(cx + ux * radius, cz + uz * radius, y);
+      entries.push({ angle: ang, node: e });
+      const fx = cx + ux * (radius + APPROACH), fz = cz + uz * (radius + APPROACH);
+      const far = j.addNode(fx, fz, smoothGround(world.heights, fx, fz));
+      j.setJunction(far, { ctl: 0, end: 'plain' }); // an approach waits to be extended: no turning bulb
+      approaches.push(j.addSeg({ a: far, b: e, cx: cx + ux * (radius + APPROACH / 2), cz: cz + uz * (radius + APPROACH / 2), profile: 0, flags: 0 }));
+    }
+  }
   // ring: entry nodes (already on the circle) + extra nodes for arcs of at most 50°
   const ring = entries.map((e) => ({ angle: e.angle, node: e.node }));
   const maxArc = Math.PI * 50 / 180;
@@ -730,16 +1099,18 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
       }
     }
   }
+  const ringSegs: number[] = [];
   for (let i = 0; i < filled.length; i++) {
     const a = filled[i], b = filled[(i + 1) % filled.length];
     let span = b.angle - a.angle;
     if (span <= 0) span += Math.PI * 2;
     const mid = a.angle + span / 2;
     const r = radius / Math.cos(span / 2);
-    j.addSeg({ a: a.node, b: b.node, cx: cx + Math.cos(mid) * r, cz: cz - Math.sin(mid) * r, profile: RING_PROFILE, flags: SegFlag.Ring });
+    ringSegs.push(j.addSeg({ a: a.node, b: b.node, cx: cx + Math.cos(mid) * r, cz: cz - Math.sin(mid) * r, profile: RING_PROFILE, flags: SegFlag.Ring }));
   }
-  // terrain under the ring
+  // terrain under the ring, then the ring clears what stands in its way like any road
   conformDisc(j, world, cx, cz, radius + PROFILE_INFO[RING_PROFILE].right + 6, y);
+  for (const s of ringSegs) { const sq = net.quad(s); clearAndConform(j, world, sq, RING_PROFILE, () => y, arcTable(sq, 32)); }
   // the entries settle on top of the disc
   for (const s of approaches) {
     if (!net.segs.alive[s]) continue;
@@ -749,7 +1120,6 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
     const L = t[t.length - 1];
     clearAndConform(j, world, sq, net.segs.cols.profile[s], (d) => ya + (yb - ya) * d / L, t);
   }
-  return j;
 }
 
 function conformDisc(j: RoadJournal, world: World, cx: number, cz: number, r: number, y: number): void {
@@ -761,8 +1131,11 @@ function conformDisc(j: RoadJournal, world: World, cx: number, cz: number, r: nu
     const d = Math.hypot(worldOfSample(gx) - cx, worldOfSample(gz) - cz);
     if (d > r) continue;
     const k = heightIndex(gx, gz);
+    // as under a road: water is never filled, and a disc high above or deep below the ground leaves it alone
+    const gap = y - 0.06 - h[k];
+    if (h[k] < SEA_LEVEL + 0.3 || gap > ROAD_TUNING.economy.bridgeFrom || gap < -ROAD_TUNING.economy.tunnelFrom) continue;
     const w = d < r - 6 ? 1 : 1 - smooth((d - (r - 6)) / 6);
-    const v = h[k] + (y - 0.06 - h[k]) * w;
+    const v = h[k] + gap * w;
     idx.push(k); before.push(h[k]); after.push(v);
   }
   if (idx.length) j.terrain(new Int32Array(idx), new Float32Array(before), new Float32Array(after), [cx - r, cz - r, cx + r, cz + r]);
@@ -852,18 +1225,26 @@ export function joinAt(world: World, n: number): RoadJournal {
   if (segs.length !== 2) return j;
   const [s1, s2] = segs;
   if (sc.profile[s1] !== sc.profile[s2] || (sc.flags[s1] & ~KIND_MASK) !== (sc.flags[s2] & ~KIND_MASK) || (sc.flags[s1] & SegFlag.Ring)) return j;
-  if (sc.len[s1] + sc.len[s2] > MAX_SEG_LEN * 2) return j;
+  // the spatial index finds a segment by its midpoint: none may be longer than MAX_SEG_LEN
+  if (sc.len[s1] + sc.len[s2] > MAX_SEG_LEN) return j;
   // ends in order (s1 arrives at the node, s2 leaves it), respecting the one-way direction
   const p = sc.a[s1] === n ? sc.b[s1] : sc.a[s1], q = sc.a[s2] === n ? sc.b[s2] : sc.a[s2];
   if (p === q) return j;
   const forward = sc.b[s1] === n;
   if (PROFILE_INFO[sc.profile[s1]].oneWay && forward !== (sc.a[s2] === n)) return j;
+  // the joined segment runs the way s1 does; s2's sides seen that way must hold the same zones
+  const s2Along = forward ? sc.a[s2] === n : sc.b[s2] === n;
+  const zl2 = s2Along ? sc.zl[s2] : sc.zr[s2], zr2 = s2Along ? sc.zr[s2] : sc.zl[s2];
+  if (zl2 !== sc.zl[s1] || zr2 !== sc.zr[s1]) return j;
+  // one segment is straight in height between its nodes: a node off that line would be lost
+  if (Math.abs(nc.y[n] - (nc.y[p] + nc.y[q]) / 2) > 0.3) return j;
   // control point that makes the curve pass through the node at t = 0.5
   const cx = 2 * nc.x[n] - (nc.x[p] + nc.x[q]) / 2, cz = 2 * nc.z[n] - (nc.z[p] + nc.z[q]) / 2;
   const r1 = j.removeSeg(s1); j.removeSeg(s2);
   j.removeNode(n);
   const [a, b] = forward ? [p, q] : [q, p];
-  j.addSeg({ a, b, cx, cz, profile: r1.profile, flags: r1.flags, zl: forward ? r1.zl : r1.zr, zr: forward ? r1.zr : r1.zl });
+  const joined = j.addSeg({ a, b, cx, cz, profile: r1.profile, flags: r1.flags, zl: r1.zl, zr: r1.zr });
+  j.inherit(s1, [joined]); j.inherit(s2, [joined]);
   return j;
 }
 
@@ -872,19 +1253,118 @@ export function moveNode(world: World, n: number, x: number, z: number): RoadJou
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const j = new RoadJournal(world, 'mover nó');
   const dx = x - nc.x[n], dz = z - nc.z[n];
+  if (Math.abs(x) > MAP_HALF - 20 || Math.abs(z) > MAP_HALF - 20) return text('road.move.outside');
+  const ground = heightAt(world.heights, x, z);
+  const y = ground > nc.y[n] + 4 || ground < nc.y[n] - 4 ? nc.y[n] : Math.max(nc.y[n], ground);
   const segs = net.segsOf(n, []);
+  const eq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
   for (const s of segs) {
     const o = sc.a[s] === n ? sc.b[s] : sc.a[s];
     if (Math.hypot(nc.x[o] - x, nc.z[o] - z) < 8) return 'uma via ali ficaria curta demais';
+    // the curve's length after the move (control point translated by half), within the spatial index's limit
+    const q = net.quad(s);
+    if (sc.a[s] === n) { q.x0 = x; q.z0 = z; } else { q.x1 = x; q.z1 = z; }
+    q.cx += dx / 2; q.cz += dz / 2;
+    if (bezLength(q) > MAX_SEG_LEN) return text('road.move.tooLong', { max: MAX_SEG_LEN });
     if (sc.flags[s] & SegFlag.Ring) return 'nó de rotatória não se move';
+    // the moved road may not run into another one at its level (that would need a junction)
+    let crosses = false;
+    const yo = nc.y[o];
+    net.forSegsNear(Math.min(q.x0, q.cx, q.x1), Math.min(q.z0, q.cz, q.z1), Math.max(q.x0, q.cx, q.x1), Math.max(q.z0, q.cz, q.z1), (t) => {
+      if (crosses || t === s || sc.a[t] === n || sc.b[t] === n || sc.a[t] === o || sc.b[t] === o) return;
+      net.quad(t, eq);
+      for (const [tn, to] of intersectQuads(q, eq)) {
+        const yNew = sc.a[s] === n ? y + (yo - y) * tn : yo + (y - yo) * tn;
+        if (Math.abs(yNew - segHeightAt(net, t, to)) < 4.5) crosses = true;
+      }
+    });
+    if (crosses) return text('road.move.crosses');
   }
   const recs = segs.map((s) => j.removeSeg(s));
   const rec = net.nodeRec(n);
   j.removeNode(n);
-  net.addNode({ ...rec, x, z, y: heightAt(world.heights, x, z) > rec.y + 4 || heightAt(world.heights, x, z) < rec.y - 4 ? rec.y : Math.max(rec.y, heightAt(world.heights, x, z)) });
+  net.addNode({ ...rec, x, z, y });
   j.recordAddNode(n);
-  for (const r of recs) j.addSeg({ ...r, cx: r.cx + dx / 2, cz: r.cz + dz / 2 });
+  j.guard(() => {
+    for (const r of recs) {
+      const s = j.addSeg({ ...r, cx: r.cx + dx / 2, cz: r.cz + dz / 2 });
+      // like a new road: what stands in the way goes, the terrain settles under it
+      const sq = net.quad(s), t = arcTable(sq, 32), L = t[t.length - 1];
+      const ya = nc.y[sc.a[s]], yb = nc.y[sc.b[s]];
+      clearAndConform(j, world, sq, sc.profile[s], (d) => ya + (yb - ya) * d / L, t, (sc.flags[s] & SegFlag.Wall) !== 0);
+    }
+  });
   return j;
+}
+
+/**
+ * Bends a road (Roadcraft 4.0 core/bezier.ts controlPoint, ui/inspector.ts:325-341): its control point `h` metres off
+ * the chord (signed, left of a → b positive) at `t` (0.15..0.85) along it. Refused like a moved node: longer than the
+ * spatial index holds, running into another road at its level, or leaving a leg sharper than MIN_LEG_ANGLE to its
+ * neighbour at either end. What stands in the way goes and the terrain settles under it, like a new road.
+ */
+export function bendRoad(world: World, s: number, t: number, h: number): RoadJournal | string {
+  const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
+  if (sc.flags[s] & SegFlag.Ring) return text('road.bend.ring');
+  const a = sc.a[s], b = sc.b[s];
+  const dx = nc.x[b] - nc.x[a], dz = nc.z[b] - nc.z[a], L = Math.hypot(dx, dz) || 1;
+  const tt = Math.max(0.15, Math.min(0.85, t));
+  // left of a → b: (dz, −dx) in this engine's frame (as the profiles' u)
+  const cx = nc.x[a] + dx * tt + (dz / L) * h, cz = nc.z[a] + dz * tt - (dx / L) * h;
+  const q: Quad = { x0: nc.x[a], z0: nc.z[a], cx, cz, x1: nc.x[b], z1: nc.z[b] };
+  if (bezLength(q) > MAX_SEG_LEN) return text('road.move.tooLong', { max: MAX_SEG_LEN });
+  const eq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
+  let crosses = false;
+  net.forSegsNear(Math.min(q.x0, q.cx, q.x1), Math.min(q.z0, q.cz, q.z1), Math.max(q.x0, q.cx, q.x1), Math.max(q.z0, q.cz, q.z1), (o) => {
+    if (crosses || o === s || sc.a[o] === a || sc.b[o] === a || sc.a[o] === b || sc.b[o] === b) return;
+    net.quad(o, eq);
+    for (const [ts, to] of intersectQuads(q, eq)) if (Math.abs(nc.y[a] + (nc.y[b] - nc.y[a]) * ts - segHeightAt(net, o, to)) < 4.5) crosses = true;
+  });
+  if (crosses) return text('road.move.crosses');
+  // the leg's new direction at each end against the other roads there
+  for (const [n, tx, tz] of [[a, cx - nc.x[a], cz - nc.z[a]], [b, cx - nc.x[b], cz - nc.z[b]]] as Array<[number, number, number]>) {
+    const ang = Math.atan2(tz, tx);
+    for (const o of net.segsOf(n, [])) {
+      if (o === s) continue;
+      const d = dirOut(net, n, o);
+      let gap = Math.abs(Math.atan2(d[1], d[0]) - ang) % (2 * Math.PI);
+      gap = Math.min(gap, 2 * Math.PI - gap) * 180 / Math.PI;
+      if (gap < MIN_LEG_ANGLE) return text('road.bend.sharp', { angle: Math.round(gap) });
+    }
+  }
+  const j = new RoadJournal(world, 'curvar via');
+  const r = j.removeSeg(s);
+  j.guard(() => {
+    const id = j.addSeg({ ...r, cx, cz });
+    const sq = net.quad(id), tab = arcTable(sq, 32), len = tab[tab.length - 1];
+    const ya = nc.y[a], yb = nc.y[b];
+    clearAndConform(j, world, sq, sc.profile[id], (d) => ya + (yb - ya) * d / len, tab, (sc.flags[id] & SegFlag.Wall) !== 0);
+  });
+  return j;
+}
+
+/** Roadcraft 4.0's upgrade ladder (world/roadTypes.ts:232-233: local, urban, avenue, boulevard), by our profiles' names. */
+const UPGRADE_LADDER = ['Rua local', 'Rua urbana', 'Avenida', 'Bulevar'];
+
+/**
+ * The class one step up the ladder from `profile` (by its priority: a street with parking is on the urban rung),
+ * or −1 at the top, and for highways, rails and rings, which are not on the ladder.
+ */
+export function upgradeStep(profile: number): number {
+  const info = PROFILE_INFO[profile];
+  if (!info || info.ring || info.rail || (info.priority ?? 0) >= 4) return -1;
+  const rungs = UPGRADE_LADDER.map((name) => PROFILE_INFO.findIndex((p) => p?.name === name)).filter((i) => i >= 0);
+  const next = rungs.find((i) => (PROFILE_INFO[i].priority ?? 0) > (info.priority ?? 0) && i !== profile);
+  return next ?? -1;
+}
+
+/** A height point on the road (Roadcraft 4.0 ui/inspector.ts:264): the road split in the middle; its new node. */
+export function addHeightPoint(world: World, s: number): { journal: RoadJournal; node: number } | string {
+  const L = world.roads.segs.cols.len[s];
+  if (L < 16) return text('road.heightPoint.short');
+  const j = new RoadJournal(world, 'ponto de altura');
+  const node = splitSeg(j, world.roads, s, 0.5, null);
+  return { journal: j, node };
 }
 
 /** An identical road parallel to the road between junctions, alongside (to the right of the drawing direction). */

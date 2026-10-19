@@ -33,8 +33,8 @@ test('o relógio da cidade envelhece só quem passou de um décimo, e a reforma 
   const c = w.buildings.cols;
   assert.equal(c.decay[a], decayTenths(0, 15 * DAY));
   assert.equal(c.decay[b], 0);
-  const dirty = w.dirty.drain(Dirty.Buildings);
-  assert.ok(dirty.includes(c.cell[a]) && !dirty.includes(c.cell[b]), 'só a célula do prédio que mudou');
+  // nada desenhado lê o desgaste (defeito D9): nenhuma malha é refeita por ele
+  assert.equal(w.dirty.drain(Dirty.Buildings).length, 0, 'o desgaste não suja a malha dos prédios');
   // passar o tempo de novo sem chegar ao próximo décimo não suja nada
   w.advanceClock(1);
   assert.equal(w.dirty.drain(Dirty.Buildings).length, 0);

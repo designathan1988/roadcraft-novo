@@ -7,6 +7,7 @@
 import './shell.css';
 import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
+import type { LaneChoice, ParkingPreset } from '../roads/roadVariant.ts';
 import { button, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
@@ -45,6 +46,14 @@ export interface CityStatus {
  * optional here: a panel turns its button on when the action exists, and leaves it "being built" otherwise.
  */
 export interface OptionalActions {
+  /** The road tool's options (Roadcraft 4.0 ui/v2/shell.ts:1244-1299): lanes, total width and parking of the next road,
+   *  null for the road's own; the road's own lane count and width; the road picked. */
+  roadOptions?(): { lanes: LaneChoice | null; width: number | null; parking: ParkingPreset | null; ownLanes: number; ownWidth: number; base: number };
+  roadLanes?(c: LaneChoice | null): void;
+  roadWidth?(m: number | null): void;
+  roadParking?(p: ParkingPreset | null): void;
+  /** Upgrade: the class cards [profile, name key] (4.0 ui/v2/shell.ts:1308-1314). */
+  roadClasses?(): Array<[number, string]>;
   /** Lot: split by a line drawn across it (two clicks). */
   lotLine?(): void;
   /** Lot: curve a side (click near it, then where it should pass). */

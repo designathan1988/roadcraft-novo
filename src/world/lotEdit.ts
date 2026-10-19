@@ -9,6 +9,8 @@
 import { Rng } from '../core/rng.ts';
 import { SHAPE_MAX } from '../jobs/protocol.ts';
 import { RoadJournal } from '../roads/build.ts';
+import { bez, closestT } from '../roads/geometry.ts';
+import { PROFILE_INFO } from '../roads/profiles.ts';
 import { floorsFor } from './growth.ts';
 import { World, polygonArea, type BuildingRec } from './world.ts';
 
@@ -158,6 +160,48 @@ function replaceBy(world: World, id: number, pieces: Pt[][], label: string): Roa
   return j;
 }
 
+/**
+ * Whether a lot outline (world points) may stand there: a simple polygon, clear of every road's footprint and not
+ * overlapping another lot (`ignore`: the lots it replaces). '' when it fits, otherwise the reason for the player.
+ * Queries only the spatial indexes around the outline.
+ */
+export function lotFits(world: World, outline: Pt[], ignore: readonly number[] = []): string {
+  if (outline.length < 3 || !isSimple(outline)) return 'os lados do lote se cruzam';
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const [x, z] of outline) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  // roads: no point of the outline's edges (every metre) on a carriageway or sidewalk, no centreline inside
+  const net = world.roads, sc = net.segs.cols, q = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 }, p = new Float64Array(2);
+  let onRoad = false;
+  net.forSegsNear(x0 - 30, z0 - 30, x1 + 30, z1 + 30, (s) => {
+    if (onRoad) return;
+    net.quad(s, q);
+    const half = PROFILE_INFO[sc.profile[s]].right - 0.3;
+    for (let i = 0; i < outline.length && !onRoad; i++) {
+      const [ax, az] = outline[i], [bx, bz] = outline[(i + 1) % outline.length];
+      const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az)));
+      for (let k = 0; k <= n; k++) if (closestT(q, ax + (bx - ax) * k / n, az + (bz - az) * k / n)[1] < half) { onRoad = true; break; }
+    }
+    for (let k = 0; k <= 16 && !onRoad; k++) { bez(q, k / 16, p); if (pointInPolygon(outline, p[0], p[1])) onRoad = true; }
+  });
+  if (onRoad) return 'o lote ficaria sobre uma via';
+  // other lots: edges crossing, or a corner (pulled 0.3 m inwards) inside the other one; touching is fine
+  const shrink = (o: Pt[]): Pt[] => {
+    const cx = o.reduce((s, v) => s + v[0], 0) / o.length, cz = o.reduce((s, v) => s + v[1], 0) / o.length;
+    return o.map(([x, z]) => { const l = Math.hypot(x - cx, z - cz) || 1; return [x + (cx - x) / l * 0.3, z + (cz - z) / l * 0.3] as Pt; });
+  };
+  const mine = shrink(outline);
+  let hit = false;
+  world.buildingIndex.query(x0 - 120, z0 - 120, x1 + 120, z1 + 120, (id) => {
+    if (hit || ignore.includes(id)) return;
+    const other = shrink(lotOutlineWorld(world, id));
+    if (mine.some(([x, z]) => pointInPolygon(other, x, z)) || other.some(([x, z]) => pointInPolygon(mine, x, z))) { hit = true; return; }
+    for (let i = 0; i < mine.length && !hit; i++) for (let k = 0; k < other.length; k++) {
+      if (segsCross(mine[i], mine[(i + 1) % mine.length], other[k], other[(k + 1) % other.length])) { hit = true; break; }
+    }
+  });
+  return hit ? 'o lote ficaria sobre outro lote' : '';
+}
+
 // ------------------------------------------------------------------ edits
 
 /** Splits the lot into `n` equal strips: side by side (along the front) or front and back. */
@@ -193,13 +237,18 @@ export function splitLotByLine(world: World, id: number, ax: number, az: number,
   return replaceBy(world, id, [one, two], 'dividir lote por linha');
 }
 
-/** Lot made from a drawn polygon (world points): frame of the smallest rectangle, front on the first side clicked. */
-export function polygonLot(pts: Pt[]): { x: number; z: number; w: number; d: number; rot: number; shape?: number[] } | string {
+/**
+ * Lot made from a drawn polygon (world points): frame of the smallest rectangle, front on the first side clicked.
+ * With the world, it must also fit there (`lotFits`).
+ */
+export function polygonLot(pts: Pt[], world?: World): { x: number; z: number; w: number; d: number; rot: number; shape?: number[] } | string {
   if (pts.length < 3) return 'clique pelo menos três cantos';
   const p = tidy(pts);
   if (p.length < 3) return 'clique pelo menos três cantos';
   if (p.length > SHAPE_MAX) return `no máximo ${SHAPE_MAX} cantos`;
   if (!isSimple(p)) return 'os lados do lote se cruzam';
+  const fits = world ? lotFits(world, p) : '';
+  if (fits) return fits;
   const frame = polygonRect(p);
   if (!frame) return 'não cabe um lote aí';
   return frameLot(p, frame.rot) ?? 'não cabe um lote aí';
@@ -239,6 +288,8 @@ export function joinLots(world: World, a: number, b: number): RoadJournal | stri
   if (!merged) return 'esses lotes não têm um lado em comum';
   const f = frameLot(merged, ra.rot);
   if (!f) return 'esses lotes não têm um lado em comum';
+  const fits = lotFits(world, merged, [a, b]);
+  if (fits) return fits;
   const j = new RoadJournal(world, 'juntar lotes');
   j.removeBuilding(a); j.removeBuilding(b);
   j.addBuilding({ ...ra, ...f, shape: f.shape, built: undefined, floors: ra.floors === 0 && rb.floors === 0 ? 0 : Math.max(ra.floors, rb.floors, 1), fn: 0 });
@@ -296,6 +347,8 @@ export function moveLotCorner(world: World, id: number, k: number, x: number, z:
     if (w > 200 || d > 200) return 'lote grande demais';
     const [cx, cz] = lotToWorld(r, ox + sx * w / 2, oz + sz * d / 2);
     f = { x: cx, z: cz, w, d, rot: r.rot };
+    const fits = lotFits(world, [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]].map(([u, v]) => lotToWorld(f!, u, v)), [id]);
+    if (fits) return fits;
   } else {
     const o = lotOutlineWorld(world, id);
     o[k] = [x, z];
@@ -303,6 +356,8 @@ export function moveLotCorner(world: World, id: number, k: number, x: number, z:
     f = frameLot(o, r.rot);
     if (!f) return 'lote pequeno demais';
     if (f.w > 200 || f.d > 200) return 'lote grande demais';
+    const fits = lotFits(world, o, [id]);
+    if (fits) return fits;
   }
   const j = new RoadJournal(world, 'cantos do lote');
   j.removeBuilding(id);
@@ -339,6 +394,8 @@ export function curveLotSide(world: World, id: number, x: number, z: number, px:
   if (!isSimple(out)) return 'a curva cruzaria outro lado do lote';
   const f = frameLot(out, r.rot);
   if (!f) return 'lote pequeno demais';
+  const fits = lotFits(world, out, [id]);
+  if (fits) return fits;
   const j = new RoadJournal(world, 'curvar lado do lote');
   j.removeBuilding(id);
   j.addBuilding({ ...r, ...f, shape: f.shape });
@@ -390,4 +447,84 @@ function convexHull(pts: Array<[number, number]>): Array<[number, number]> {
   for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
   for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
+// ------------------------------------------------------------------ edits on every lot touched (Roadcraft 4.0 lots.ts)
+
+/** Lots whose outline has a corner within `r` m of (x, z), with the indices of those corners. */
+function lotsWithCorner(world: World, x: number, z: number, r: number): Array<[number, number[]]> {
+  const out: Array<[number, number[]]> = [];
+  world.buildingIndex.query(x - 120, z - 120, x + 120, z + 120, (id) => {
+    const ks: number[] = [];
+    lotOutlineWorld(world, id).forEach(([cx, cz], k) => { if (Math.hypot(cx - x, cz - z) < r) ks.push(k); });
+    if (ks.length) out.push([id, ks]);
+  });
+  return out;
+}
+
+/**
+ * Drags the lot corner at (fromX, fromZ) to (x, z) on every lot that has it (neighbours share their corners), as
+ * one step. A rectangle whose corner leaves its rectangle becomes a polygon lot in the same rotation.
+ */
+export function moveSharedCorner(world: World, fromX: number, fromZ: number, x: number, z: number): RoadJournal | string {
+  const lots = lotsWithCorner(world, fromX, fromZ, 0.8);
+  if (!lots.length) return 'nenhum canto de lote aqui';
+  const ids = lots.map(([id]) => id);
+  const next: Array<[number, BuildingRec]> = [];
+  for (const [id, ks] of lots) {
+    const r = rec(world, id), o = lotOutlineWorld(world, id);
+    for (const k of ks) o[k] = [x, z];
+    if (!isSimple(o)) return 'os lados do lote se cruzariam';
+    const f = frameLot(o, r.rot);
+    if (!f) return 'lote pequeno demais';
+    if (f.w > 200 || f.d > 200) return 'lote grande demais';
+    const fits = lotFits(world, o, ids);
+    if (fits) return fits;
+    next.push([id, { ...r, ...f, shape: f.shape }]);
+  }
+  const j = new RoadJournal(world, 'cantos do lote');
+  for (const [id] of next) j.removeBuilding(id);
+  for (const [, r] of next) j.addBuilding(r);
+  return j;
+}
+
+/** Splits every lot the segment (ax, az)–(bx, bz) runs across in two along it, as one step (Roadcraft split by line). */
+export function splitLotsByLine(world: World, ax: number, az: number, bx: number, bz: number): RoadJournal | string {
+  const L = Math.hypot(bx - ax, bz - az);
+  if (L < 2) return 'trace uma linha que atravesse os lotes';
+  const nx = -(bz - az) / L, nz = (bx - ax) / L, c = ax * nx + az * nz;
+  const hit: number[] = [];
+  world.buildingIndex.query(Math.min(ax, bx) - 120, Math.min(az, bz) - 120, Math.max(ax, bx) + 120, Math.max(az, bz) + 120, (id) => {
+    const o = lotOutlineWorld(world, id);
+    // corners on both sides of the line, and the segment itself passing through the lot
+    const side = o.map(([x, z]) => x * nx + z * nz - c);
+    if (!(side.some((v) => v < -0.05) && side.some((v) => v > 0.05))) return;
+    for (let k = 0; k <= 20; k++) if (pointInPolygon(o, ax + (bx - ax) * k / 20, az + (bz - az) * k / 20)) { hit.push(id); return; }
+  });
+  if (!hit.length) return 'a linha não atravessa nenhum lote';
+  const all = new RoadJournal(world, 'dividir lotes por linha');
+  let why = '';
+  for (const id of hit) {
+    const r = splitLotByLine(world, id, ax, az, bx, bz);
+    if (typeof r === 'string') why = r; else all.append(r);
+  }
+  return all.empty ? why || 'a linha não atravessa nenhum lote' : all;
+}
+
+/**
+ * Delete stroke (Roadcraft): every lot under the line through `pts` (sampled every 2 m) is deleted, as one step: a
+ * building becomes an empty lot, an empty lot goes away.
+ */
+export function deleteLotsAlong(world: World, pts: Pt[]): RoadJournal | string {
+  const hit = new Set<number>();
+  const visit = (x: number, z: number) => { const id = lotAt(world, x, z); if (id >= 0) hit.add(id); };
+  if (pts.length === 1) visit(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1], [bx, bz] = pts[i], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2));
+    for (let k = 0; k <= n && hit.size < 400; k++) visit(ax + (bx - ax) * k / n, az + (bz - az) * k / n);
+  }
+  if (!hit.size) return 'nenhum lote no traço';
+  const all = new RoadJournal(world, 'apagar lotes');
+  for (const id of hit) all.append(deleteLot(world, id));
+  return all;
 }

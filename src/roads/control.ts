@@ -1,53 +1,55 @@
-// Controle de cruzamento: o que o jogador escolheu (ou o automático pela
-// importância das vias e, depois de medir, pelo fluxo) e a regra de cada braço. A mesma conta roda na
-// página (pintura, placas, painel) e no worker de simulação (quem passa primeiro).
+// Junction control: what the player chose (or the automatic one, by the
+// importance of the roads and, once measured, by the flow) and the rule of each arm. The same rule runs on the
+// page (paint, signs, panel) and in the simulation worker (who goes first).
 
 import { PROFILE_INFO } from './profiles.ts';
 import { SegFlag } from './flags.ts';
 import type { RoadNetwork } from './network.ts';
 
-/** Tipo de controle. Auto escolhe pela importância das vias. */
+/** Control kind. Auto chooses by the importance of the roads. */
 export const Ctl = { Auto: 0, Signal: 1, Priority: 2, AllStop: 3, YieldAll: 4, Mini: 5, None: 6, Ring: 7, Crossing: 8, Zebra: 9, PedSignal: 10, UTurn: 11 } as const;
-/** Faixa de pedestres no meio da quadra (nó de duas vias). */
+/** Mid-block pedestrian crossing (a two-road node). */
 export const isMidCrossing = (ctl: number) => ctl === Ctl.Zebra || ctl === Ctl.PedSignal;
-/** Controle especial de um nó de duas vias (faixa de pedestres ou retorno no canteiro). */
+/** Special control of a two-road node (pedestrian crossing or U-turn through the median). */
 export const isMidNode = (ctl: number) => isMidCrossing(ctl) || ctl === Ctl.UTurn;
 export const CTL_NAMES = ['Automático', 'Semáforo', 'Placas (via principal)', 'Pare em todas', 'Preferência em todas', 'Minirrotatória', 'Sem sinalização', 'Rotatória', 'Passagem de nível', 'Faixa zebra', 'Faixa com semáforo', 'Retorno'];
-/** Regra de um braço: Free = sem placa (preferência de quem vem pela direita). */
+/** Rule of an arm: Free = no sign (priority to the right). */
 export const Rule = { Free: 0, Main: 1, Yield: 2, Stop: 3, Signal: 4 } as const;
 export const RULE_NAMES = ['Sem placa', 'Preferencial', 'Dê a preferência', 'Pare', 'Semáforo'];
 
 export interface JunctionSpec {
   ctl: number;
-  /** Semáforo de tempo fixo (senão adaptativo pela fila). */
+  /** Fixed-time signal (otherwise adaptive to the queue). */
   fixed?: boolean;
-  /** Verde de cada fase (s), no modo fixo. */
+  /** Green of each stage (s), in fixed mode. */
   greens?: number[];
-  /** Defasagem do ciclo (s), para a onda verde. */
+  /** Cycle offset (s), for the green wave. */
   offset?: number;
-  /** Prioridade ao ônibus (adaptativo encurta o verde dos outros). */
+  /** Bus priority (adaptive mode shortens the others' green). */
   bus?: boolean;
-  /** Regra escolhida à mão por braço: [trecho, regra]. */
+  /** Rule picked by hand per arm: [segment, rule]. */
   legs?: Array<[number, number]>;
-  /** Movimentos proibidos: pares [trecho de chegada, trecho de saída]. */
+  /** Banned movements: pairs [arriving segment, leaving segment]. */
   bans?: number[];
-  /** Conexões de faixa à mão: [trecho de chegada, faixa (0 = a da direita), trechos de saída]. */
+  /** Lane connections by hand: [arriving segment, lane (0 = the rightmost), leaving segments]. */
   lanes?: Array<[number, number, number[]]>;
+  /** A dead end's shape chosen by the player (Roadcraft node end): a turning bulb, or a plain end; absent = automatic. */
+  end?: 'bulb' | 'plain';
 }
 
-export interface Control { ctl: number; /** regra por trecho ligado ao nó */ legs: Map<number, number>; auto: boolean }
+export interface Control { ctl: number; /** rule per segment at the node */ legs: Map<number, number>; auto: boolean }
 
 const tmpSegs: number[] = [];
 
-/** O que o fluxo medido pede num cruzamento no automático (roadcraft controlAdvisor). */
+/** What the measured flow asks for at an automatic junction (roadcraft controlAdvisor). */
 export const Flow = { None: 0, Signal: 1, Signs: 2 } as const;
 
-/** Limiares do fluxo (veíc./h por braço que chega): via principal (soma dos dois braços dela) e secundárias. */
+/** Flow thresholds (veh/h per arriving arm): main road (sum of its two arms) and side roads. */
 export const FLOW = { stopMajor: 300, stopMinor: 200, signalMajor: 500, signalMinor: 150, signalMajorB: 750, signalMinorB: 75, stepDown: 0.8 } as const;
 
 /**
- * Controle que o fluxo pede, com histerese: para manter o que já tem basta 80% do limiar
- * ('stop' = placas com pare; quem decide as placas aqui é a importância das vias, então só o semáforo troca).
+ * Control the flow asks for, with hysteresis: keeping what is there needs only 80% of the threshold
+ * ('stop' = signs with stop; the importance of the roads decides the signs here, so only the signal changes).
  */
 export function warrantedControl(major: number, minorMax: number, minorTotal: number, current: 'signal' | 'stop' | 'priority'): 'signal' | 'stop' | 'priority' {
   const rank = (c: string) => (c === 'signal' ? 2 : c === 'stop' ? 1 : 0);
@@ -58,7 +60,7 @@ export function warrantedControl(major: number, minorMax: number, minorTotal: nu
   return major >= FLOW.stopMajor * k('stop') && minorTotal >= FLOW.stopMinor * k('stop') ? 'stop' : 'priority';
 }
 
-/** Os dois braços da via principal do nó (os mais importantes; empate: os mais opostos). */
+/** The two arms of the node's main road (the most important; on a tie, the most opposite). */
 export function mainLegs(net: RoadNetwork, n: number): number[] {
   const sc = net.segs.cols;
   const segs = net.segsOf(n, tmpSegs).slice();
@@ -70,8 +72,8 @@ export function mainLegs(net: RoadNetwork, n: number): number[] {
 }
 
 /**
- * Controle efetivo do nó `n` (com o automático resolvido). `flow`: o que o fluxo medido pede (Flow), só no
- * automático: Signal põe semáforo; Signs tira o semáforo que a importância das vias poria (fica com placas).
+ * Effective control of node `n` (automatic resolved). `flow`: what the measured flow asks for (Flow), automatic
+ * only: Signal puts a traffic light; Signs removes the light the importance of the roads would put (signs stay).
  */
 export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctions.get(n), flow: number = Flow.None): Control {
   const sc = net.segs.cols;
@@ -82,7 +84,7 @@ export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctio
     return { ctl: Ctl.UTurn, legs, auto: false };
   }
   if (segs.length === 2 && spec && isMidCrossing(spec.ctl)) {
-    // faixa no meio da quadra: zebra (carro dá a vez a quem atravessa) ou com semáforo
+    // mid-block crossing: zebra (cars give way to walkers) or with a signal
     for (const s of segs) legs.set(s, spec.ctl === Ctl.PedSignal ? Rule.Signal : Rule.Free);
     return { ctl: spec.ctl, legs, auto: false };
   }
@@ -91,7 +93,7 @@ export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctio
     for (const s of segs) legs.set(s, (sc.flags[s] & SegFlag.Ring) ? Rule.Main : Rule.Yield);
     return { ctl: Ctl.Ring, legs, auto: true };
   }
-  // trilhos: passagem de nível (o trem sempre passa; quem vem pela rua para) ou só trilhos (agulhas)
+  // rails: level crossing (the train always goes; the street stops) or rails only (switches)
   const rails = segs.filter((s) => PROFILE_INFO[sc.profile[s]].rail).length;
   if (rails > 0) {
     for (const s of segs) legs.set(s, rails === segs.length ? Rule.Free : PROFILE_INFO[sc.profile[s]].rail ? Rule.Main : Rule.Stop);
@@ -99,17 +101,19 @@ export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctio
   }
   const pr = (s: number) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
   let ctl = spec?.ctl ?? Ctl.Auto;
+  // a mid-block crossing or U-turn that got a third road is an ordinary junction now: automatic
+  if (isMidNode(ctl)) ctl = Ctl.Auto;
   const auto = ctl === Ctl.Auto;
   const sorted = segs.slice().sort((a, b) => pr(b) - pr(a));
   const p1 = pr(sorted[0]);
   if (auto) {
-    // arteriais (preferência 2+) que se cruzam: semáforo; uma via mais importante: placas; todas iguais: sem placa
+    // arterials (priority 2+) crossing: signal; one road more important: signs; all equal: no sign
     const majors = segs.filter((s) => pr(s) >= 2);
-    // 5 braços ou mais: semáforo (com placas o cruzamento grande escoa pouco e trava no pico)
+    // 5 arms or more: signal (with signs a big junction drains little and jams at the peak)
     if (segs.length >= 5 || majors.length >= 3 || (majors.length === 2 && !throughPair(net, n, majors[0], majors[1]))) ctl = Ctl.Signal;
     else if (p1 > pr(sorted[sorted.length - 1])) ctl = Ctl.Priority;
     else ctl = Ctl.None;
-    // o fluxo medido manda: semáforo onde passa muita gente; sem ele onde quase ninguém passa
+    // the measured flow rules: a signal where many pass; none where almost nobody does
     if (flow === Flow.Signal) ctl = Ctl.Signal;
     else if (flow === Flow.Signs && ctl === Ctl.Signal && segs.length < 5) ctl = Ctl.Priority;
   }
@@ -118,7 +122,7 @@ export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctio
     case Ctl.AllStop: for (const s of segs) legs.set(s, Rule.Stop); break;
     case Ctl.YieldAll: case Ctl.Mini: case Ctl.None: for (const s of segs) legs.set(s, Rule.Free); break;
     case Ctl.Priority: {
-      // principal: as duas mais importantes (as mais opostas, se empatar mais de duas)
+      // main: the two most important (the most opposite, if more than two tie)
       const top = segs.filter((s) => pr(s) === p1);
       let main = top.length >= 2 ? top.slice(0, 2) : [sorted[0], sorted[1]];
       if (top.length > 2) main = mostOpposite(net, n, top);
@@ -130,14 +134,14 @@ export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctio
       break;
     }
   }
-  // regras escolhidas à mão (só com placas)
+  // rules picked by hand (signs only)
   if (spec?.legs && (ctl === Ctl.Priority || ctl === Ctl.AllStop)) {
     for (const [s, r] of spec.legs) if (legs.has(s) && r >= Rule.Main && r <= Rule.Stop) legs.set(s, r);
   }
   return { ctl, legs, auto };
 }
 
-/** Os dois trechos são a mesma via passando reto pelo nó. */
+/** The two segments are the same road going straight through the node. */
 function throughPair(net: RoadNetwork, n: number, a: number, b: number): boolean {
   const da = dirOut(net, n, a), db = dirOut(net, n, b);
   return da[0] * db[0] + da[1] * db[1] < -0.8;
@@ -153,7 +157,7 @@ function mostOpposite(net: RoadNetwork, n: number, segs: number[]): number[] {
   return best;
 }
 
-/** Direção de saída do trecho a partir do nó (pelo ponto de controle). */
+/** Direction out of the node along the segment (by its control point). */
 export function dirOut(net: RoadNetwork, n: number, s: number): [number, number] {
   const sc = net.segs.cols, nc = net.nodes.cols;
   let dx = sc.cx[s] - nc.x[n], dz = sc.cz[s] - nc.z[n];
@@ -162,7 +166,7 @@ export function dirOut(net: RoadNetwork, n: number, s: number): [number, number]
   return [dx / l, dz / l];
 }
 
-/** Movimento proibido? */
+/** Is the movement banned? */
 export function banned(spec: JunctionSpec | undefined, fromSeg: number, toSeg: number): boolean {
   const b = spec?.bans;
   if (!b) return false;
@@ -171,8 +175,8 @@ export function banned(spec: JunctionSpec | undefined, fromSeg: number, toSeg: n
 }
 
 /**
- * Fases do semáforo: braços quase opostos andam juntos (a mesma via nos dois
- * sentidos); os outros têm fase própria. Devolve a fase de cada braço (na ordem dada) e o total.
+ * Signal stages: nearly opposite arms go together (the same road both
+ * ways); the others get their own stage. Returns each arm's stage (in the given order) and the count.
  */
 export function signalStages(dirs: Array<[number, number]>, out: number[]): number {
   const n = dirs.length;
@@ -192,4 +196,32 @@ export function signalStages(dirs: Array<[number, number]>, out: number[]): numb
     stages++;
   }
   return stages;
+}
+
+/**
+ * The settings with segment `from` replaced by `to` (−1: taken out), keeping only segments still in `at` (the
+ * node's segments now). Returns the same object when nothing names `from`.
+ */
+export function remapSpec(spec: JunctionSpec, from: number, to: number, at: readonly number[]): JunctionSpec {
+  const names = (s: number) => s === from;
+  const hit = spec.legs?.some(([s]) => names(s)) || spec.bans?.some(names) || spec.lanes?.some(([s, , exits]) => names(s) || exits.some(names));
+  if (!hit) return spec;
+  const map = (s: number) => (s === from ? to : s);
+  const keep = (s: number) => s >= 0 && at.includes(s);
+  const next: JunctionSpec = { ...spec };
+  if (spec.legs) next.legs = spec.legs.map(([s, r]) => [map(s), r] as [number, number]).filter(([s]) => keep(s));
+  if (spec.bans) {
+    const bans: number[] = [];
+    for (let i = 0; i + 1 < spec.bans.length; i += 2) {
+      const a = map(spec.bans[i]), b = map(spec.bans[i + 1]);
+      if (keep(a) && keep(b)) bans.push(a, b);
+    }
+    next.bans = bans;
+  }
+  if (spec.lanes) {
+    // a lane whose chosen exits are all gone goes back to automatic (never a lane with no exit)
+    next.lanes = spec.lanes.map(([s, i, exits]) => [map(s), i, exits.map(map).filter(keep)] as [number, number, number[]])
+      .filter(([s, , exits]) => keep(s) && exits.length > 0);
+  }
+  return next;
 }

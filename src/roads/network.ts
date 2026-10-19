@@ -12,13 +12,17 @@ export const MAX_DEG = 8;
 /** Segments are split while drawing so they never exceed this (the index uses the midpoint). */
 export const MAX_SEG_LEN = 112;
 const SEG_MARGIN = MAX_SEG_LEN / 2 + 40;
+/** How far from a road its lots reach: half the widest road (≈ 25 m), the deepest lot (72 m) and a margin. */
+const LOT_REACH = 100;
 
 export { SegFlag } from './flags.ts';
+import { SegFlag } from './flags.ts';
+import { kindOfFlags } from './economy.ts';
 
 export const nodeSchema = { x: Float32Array, z: Float32Array, y: Float32Array, deg: Uint8Array, cell: Int32Array };
 export const segSchema = {
   a: Int32Array, b: Int32Array, cx: Float32Array, cz: Float32Array,
-  profile: Uint8Array, flags: Uint8Array, len: Float32Array, cell: Int32Array,
+  profile: Uint16Array, flags: Uint8Array, len: Float32Array, cell: Int32Array,
   mx: Float32Array, mz: Float32Array,
   /** Zone on each side (left/right in the a → b direction). */
   zl: Uint8Array, zr: Uint8Array,
@@ -118,7 +122,8 @@ export class RoadNetwork {
     if (rec.id !== undefined) { t.allocAt(rec.id); id = rec.id; } else id = t.alloc();
     const c = t.cols;
     c.a[id] = rec.a; c.b[id] = rec.b; c.cx[id] = rec.cx; c.cz[id] = rec.cz;
-    c.profile[id] = rec.profile; c.flags[id] = rec.flags;
+    // a road that comes in without a recorded build kind (generated city, test city, old save) was free
+    c.profile[id] = rec.profile; c.flags[id] = kindOfFlags(rec.flags) < 0 ? rec.flags | SegFlag.Free : rec.flags;
     c.zl[id] = rec.zl ?? 0; c.zr[id] = rec.zr ?? 0;
     const q = this.quad(id);
     c.len[id] = bezLength(q);
@@ -130,7 +135,7 @@ export class RoadNetwork {
     this.link(rec.a, id);
     this.link(rec.b, id);
     this.touchSeg(id);
-    this.emit({ t: 'addSeg', rec: { id, a: rec.a, b: rec.b, cx: rec.cx, cz: rec.cz, profile: rec.profile, flags: rec.flags, zl: c.zl[id], zr: c.zr[id] } });
+    this.emit({ t: 'addSeg', rec: { id, a: rec.a, b: rec.b, cx: rec.cx, cz: rec.cz, profile: rec.profile, flags: c.flags[id], zl: c.zl[id], zr: c.zr[id] } });
     return id;
   }
 
@@ -160,7 +165,7 @@ export class RoadNetwork {
   setFlow(id: number, flow: number): void {
     if (!this.nodes.alive[id] || (this.flow.get(id) ?? 0) === flow) return;
     if (flow) this.flow.set(id, flow); else this.flow.delete(id);
-    this.touchNode(id);
+    this.touchRules(id);
   }
 
   /** Junction control chosen by the player (null = automatic). */
@@ -170,7 +175,7 @@ export class RoadNetwork {
     if (spec) this.junctions.set(id, spec); else this.junctions.delete(id);
     // new choice: the simulation measures again
     this.flow.delete(id);
-    this.touchNode(id);
+    this.touchRules(id);
     this.emit({ t: 'junction', id, spec });
   }
 
@@ -188,10 +193,7 @@ export class RoadNetwork {
   /** Zone of one side of the segment (0 = left, 1 = right). */
   setZone(id: number, side: number, zone: number): void {
     (side === 0 ? this.segs.cols.zl : this.segs.cols.zr)[id] = zone;
-    const sc = this.segs.cols;
-    this.world.touchCell(sc.cell[id], Dirty.Lots);
-    this.world.touchCell(this.nodes.cols.cell[sc.a[id]], Dirty.Lots);
-    this.world.touchCell(this.nodes.cols.cell[sc.b[id]], Dirty.Lots);
+    this.markLots(id);
     this.emit({ t: 'zone', id, side, zone });
   }
 
@@ -230,6 +232,28 @@ export class RoadNetwork {
     this.world.touchCell(cellId(cellX(x), cellX(z)), Dirty.Roads | Dirty.RoadPaint | Dirty.Lots);
   }
 
+  /**
+   * The lots of every cell the segment's lots, or the lots it blocks, can stand in: its curve's box widened by
+   * LOT_REACH (at most 3 × 3 cells). A cell's lots are cut from every road near it, not only the ones inside it.
+   */
+  private markLots(s: number): void {
+    const sc = this.segs.cols, nc = this.nodes.cols, a = sc.a[s], b = sc.b[s];
+    const x0 = cellX(Math.min(nc.x[a], nc.x[b], sc.cx[s]) - LOT_REACH), x1 = cellX(Math.max(nc.x[a], nc.x[b], sc.cx[s]) + LOT_REACH);
+    const z0 = cellX(Math.min(nc.z[a], nc.z[b], sc.cz[s]) - LOT_REACH), z1 = cellX(Math.max(nc.z[a], nc.z[b], sc.cz[s]) + LOT_REACH);
+    for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) this.world.touchCell(cellId(cx, cz), Dirty.Lots);
+  }
+
+  /**
+   * A junction's control changed: the road meshes there (paint, signs, signals) are redrawn; its shape is the same,
+   * so no lot is redone.
+   */
+  private touchRules(n: number): void {
+    const nc = this.nodes.cols, sc = this.segs.cols, k = Dirty.Roads | Dirty.RoadPaint;
+    this.world.touchCell(cellId(cellX(nc.x[n]), cellX(nc.z[n])), k);
+    const o = n * MAX_DEG;
+    for (let i = 0; i < nc.deg[n]; i++) { const s = this.adj[o + i]; this.world.touchCell(cellId(cellX(sc.mx[s]), cellX(sc.mz[s])), k); }
+  }
+
   /** A node changed: its cell and the cell of each connected segment (their setback changes). */
   private touchNode(n: number): void {
     const nc = this.nodes.cols;
@@ -239,6 +263,7 @@ export class RoadNetwork {
     for (let k = 0; k < d; k++) {
       const s = this.adj[o + k];
       this.mark(sc.mx[s], sc.mz[s]);
+      this.markLots(s);
       // the other node also uses this segment's shape
       const other = sc.a[s] === n ? sc.b[s] : sc.a[s];
       this.mark(nc.x[other], nc.z[other]);
@@ -325,7 +350,7 @@ export class RoadNetwork {
     const g: RoadGraph = {
       nodeCount: nn, nx: new Float32Array(nn), nz: new Float32Array(nn), ny: new Float32Array(nn), nodeOwn: new Uint8Array(nn),
       segCount: ns, sa: new Int32Array(ns), sb: new Int32Array(ns), scx: new Float32Array(ns), scz: new Float32Array(ns),
-      sprofile: new Uint8Array(ns), sflags: new Uint8Array(ns), segOwn: new Uint8Array(ns), sid: new Int32Array(ns),
+      sprofile: new Uint16Array(ns), sflags: new Uint8Array(ns), segOwn: new Uint8Array(ns), sid: new Int32Array(ns),
       szl: new Uint8Array(ns), szr: new Uint8Array(ns), nid: new Int32Array(nn),
       nctl: new Uint8Array(nn), srule: new Uint8Array(ns),
     };

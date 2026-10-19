@@ -1,11 +1,12 @@
-// Ferramentas de via: desenhar reta ou curva em sequência, rotatória, trocar
-// perfil e demolir. Cada clique válido vira um comando no histórico.
+// Road tools: draw straight or curved roads one after another, roundabout, change
+// profile and demolish. Every valid click becomes a command in the history.
 
 import type * as THREE from 'three/webgpu';
 import type { CommandStack } from '../core/commands.ts';
-import { RoadJournal, buildRoad, buildRoundabout, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
+import { RoadJournal, buildRoad, buildRoundabout, planPrice, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
 import { bez, type Quad } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
+import { registerVariant, type RoadOptions } from '../roads/roadVariant.ts';
 import { SegFlag } from '../roads/flags.ts';
 import type { RoadPreview } from '../render/preview.ts';
 import type { Hud, Tool } from '../ui/hud.ts';
@@ -13,12 +14,18 @@ import { heightAt } from '../world/heights.ts';
 import { demolishTarget, targetAt, type Target } from './demolish.ts';
 import { lotToWorld } from '../world/lotEdit.ts';
 import type { World } from '../world/world.ts';
+import { money, t } from '../ui/i18n.ts';
 
 const p2 = new Float64Array(2);
 
 export class RoadTool {
   mode: Tool = 'road';
+  /** The profile roads are drawn with: the road picked, or its variant by the options below. */
   profile = 0;
+  /** The road picked (catalogue, eyedropper, class card). */
+  base = 0;
+  /** Lanes, total width and parking the next road is drawn with (Roadcraft 4.0's road tool options); null: the road's own. */
+  readonly options: RoadOptions = { lanes: null, width: null, parking: null };
   elevation = 0;
   ringRadius = 22;
   private start: Anchor | null = null;
@@ -27,15 +34,17 @@ export class RoadTool {
   private hoverSeg = -1;
   private hoverT = 0.5;
   private target: Target = null;
-  /** Encaixe: 0 desligado, 1 ângulos de 15°, 2 ângulos e grade de 1 m. */
+  /** Snapping: 0 off, 1 angles of 15°, 2 angles and a 1 m grid. */
   snapMode = 0;
-  /** Mobiliário das vias novas: 0 completo, 1 básico, 2 nenhum. */
+  /** Street furniture of new roads: 0 full, 1 basic, 2 none. */
   furniture = 0;
-  /** Corte com muro de arrimo (senão talude). */
+  /** Cut with a retaining wall (otherwise a slope). */
   cutWalls = false;
-  /** Quarteirões de uma vez: colunas, linhas, lado da quadra (m) e giro (graus). */
+  /** Blocks at once: columns, rows, block side (m) and turn (degrees). */
   blocks = { cols: 3, rows: 3, size: 100, angle: 0 };
-  /** Mover nó: o nó arrastado (−1 = nenhum). */
+  /** Shift is held (the roundabout preview shows whether it may cut roads in). */
+  shiftHeld = false;
+  /** Move node: the node being dragged (−1 = none). */
   moving = -1;
   private world: World;
   private commands: CommandStack;
@@ -89,7 +98,7 @@ export class RoadTool {
     return heightAt(this.world.heights, a.x, a.z);
   }
 
-  /** Atualiza a pré-visualização com o cursor em hit (ou nada). */
+  /** Updates the preview with the cursor at hit (or nothing). */
   hover(hit: THREE.Vector3 | null): void {
     const pv = this.preview;
     if (!hit) { pv.hideAll(); return; }
@@ -122,7 +131,7 @@ export class RoadTool {
       return;
     }
     if (this.mode === 'bulldoze') {
-      // item ou muro perto, prédio, ou via: o que o clique tira
+      // an item or wall nearby, a building, or a road: what the click takes away
       const t = this.target = targetAt(this.world, hit.x, hit.z);
       pv.marker.visible = false; pv.circle.visible = false;
       if (!t) { pv.hide(); return; }
@@ -148,26 +157,28 @@ export class RoadTool {
     if (this.mode === 'roundabout') {
       const a = snap(net, hit.x, hit.z, 14);
       pv.hide();
-      pv.showCircle(a.x, this.anchorY(a), a.z, this.ringRadius, true);
+      pv.showCircle(a.x, this.anchorY(a), a.z, this.ringRadius, !roundaboutRefusal(this.world, a.x, a.z, this.ringRadius, a.node >= 0 || this.shiftHeld));
       pv.showMarker(a.x, this.anchorY(a), a.z, 1.2, a.node >= 0 ? 'node' : a.seg >= 0 ? 'seg' : 'free');
       return;
     }
-    // via: reta ou curva
+    // road: straight or curved
     const a = this.guide(snap(net, hit.x, hit.z, this.snapRadius()));
     const ay = this.anchorY(a);
     pv.showMarker(a.x, ay, a.z, PROFILE_INFO[this.profile].right * 0.6, a.node >= 0 ? 'node' : a.seg >= 0 ? 'seg' : 'free');
     if (!this.start) { pv.hide(); this.plan = null; return; }
     if (this.mode === 'curve' && !this.control) {
-      // ainda escolhendo o controle: mostra a reta até o cursor
+      // still choosing the control point: shows the straight line to the cursor
       this.plan = planRoad(this.world, this.start, null, { ...a, node: -1, seg: -1 }, this.profile, this.elevation);
     } else {
       this.plan = planRoad(this.world, this.start, this.control, a, this.profile, this.elevation);
     }
     const p = this.plan;
     pv.show(p.quad, PROFILE_INFO[this.profile].right, p.profile.at, p.profile.y, p.ok);
+    // what it will cost, while the player aims (the same pieces and build kinds as the journal will charge)
+    if (p.ok && (this.mode !== 'curve' || this.control)) this.hud.setHint(t('road.preview.cost', { price: money(this.world.unlimited ? 0 : planPrice(this.world, p, this.profile)) }));
   }
 
-  /** Conta-gotas: pega o perfil da via sob o cursor. Devolve o id, ou -1. */
+  /** Eyedropper: takes the profile of the road under the cursor. Returns the id, or -1. */
   pick(hit: THREE.Vector3 | null): number {
     if (!hit) return -1;
     const s = this.world.roads.nearestSeg(hit.x, hit.z, 14);
@@ -202,7 +213,7 @@ export class RoadTool {
     }
     if (this.mode === 'upgrade') {
       if (this.hoverSeg >= 0 && net.segs.alive[this.hoverSeg]) {
-        // Shift: a rua inteira (segue pelos cruzamentos)
+        // Shift: the whole street (follows it through the junctions)
         const j = shift ? changeProfiles(this.world, streetChain(this.world, this.hoverSeg), this.profile) : changeProfile(this.world, this.hoverSeg, this.profile);
         this.commit(j);
       }
@@ -210,8 +221,12 @@ export class RoadTool {
     }
     if (this.mode === 'roundabout') {
       const a = snap(net, hit.x, hit.z, 14);
-      const j = buildRoundabout(this.world, a.x, a.z, this.ringRadius);
-      if (!j) this.hud.toast('Já existe uma rotatória aqui.');
+      // on vacant ground it brings its own approaches; roads in the circle are cut in only when asked: Shift, or a
+      // click on a junction (turning it into a roundabout)
+      const cut = shift || a.node >= 0;
+      const why = roundaboutRefusal(this.world, a.x, a.z, this.ringRadius, cut);
+      const j = why ? null : buildRoundabout(this.world, a.x, a.z, this.ringRadius, cut);
+      if (!j) this.hud.toast(why || 'Já existe uma rotatória aqui.');
       else this.commit(j);
       return;
     }
@@ -222,7 +237,7 @@ export class RoadTool {
     if (!plan.ok) { this.hud.toast(`Não dá para construir aqui: ${plan.reason}.`); return; }
     const j = buildRoad(this.world, plan, this.start, a, this.profile, this.segFlags());
     if (!this.commit(j)) return;
-    // continua do fim do trecho
+    // goes on from the end of the segment
     const q: Quad = plan.quad;
     bez(q, 1, p2);
     this.start = snap(net, p2[0], p2[1], 1.5);
@@ -230,7 +245,7 @@ export class RoadTool {
     this.updateHint();
   }
 
-  /** Cobra e registra; sem dinheiro desfaz e avisa. */
+  /** Charges and records; without the money it undoes itself and says so. */
   private commit(j: RoadJournal): boolean {
     if (j.empty) return true;
     const price = j.price;
@@ -240,10 +255,10 @@ export class RoadTool {
     return true;
   }
 
-  /** Bits das vias novas: mobiliário e corte. */
+  /** Bits of new roads: furniture and cut. */
   segFlags(): number { return (this.furniture << SegFlag.FurnShift) | (this.cutWalls ? SegFlag.Wall : 0); }
 
-  /** Encaixe de ponto livre: comprimento em metro inteiro e rumo em múltiplos de 15° a partir do começo; sem começo, na grade. */
+  /** Snapping of a free point: whole-metre length and a heading in steps of 15° from the start; with no start, to the grid. */
   private guide(a: Anchor): Anchor {
     if (this.snapMode === 0 || a.node >= 0 || a.seg >= 0) return a;
     if (!this.start) return this.snapMode === 2 ? { ...a, x: Math.round(a.x), z: Math.round(a.z) } : a;
@@ -255,7 +270,7 @@ export class RoadTool {
     return { ...a, x: sx + Math.cos(ang) * L, z: sz + Math.sin(ang) * L };
   }
 
-  /** Traçado livre: pontos do arrasto (a cada ~24 m). */
+  /** Free drawing: the points of the drag (every ~24 m). */
   private freePts: Array<[number, number]> = [];
 
   freeBegin(hit: THREE.Vector3 | null): boolean {
@@ -269,7 +284,7 @@ export class RoadTool {
     if (!hit || !this.freePts.length) return;
     const [lx, lz] = this.freePts[this.freePts.length - 1];
     if (Math.hypot(hit.x - lx, hit.z - lz) >= 24) this.freePts.push([hit.x, hit.z]);
-    // pré-visualização: o último pedaço até o cursor
+    // preview: the last piece up to the cursor
     const net = this.world.roads;
     const a = { x: lx, z: lz, node: -1, seg: -1, t: 0 };
     const b = snap(net, hit.x, hit.z, this.snapRadius());
@@ -277,7 +292,7 @@ export class RoadTool {
     this.preview.show(plan.quad, PROFILE_INFO[this.profile].right, plan.profile.at, plan.profile.y, plan.ok);
   }
 
-  /** Solta: a via pelos pontos, em curvas pelos meios (cada pedaço vai de meio a meio, controle no ponto). */
+  /** Release: the road through the points, curving through the midpoints (each piece runs midpoint to midpoint, control at the point). */
   freeEnd(hit: THREE.Vector3 | null): void {
     const pts = this.freePts;
     this.freePts = [];
@@ -287,7 +302,7 @@ export class RoadTool {
     const net = this.world.roads;
     const total = new RoadJournal(this.world, 'construir via');
     const mid = (i: number): [number, number] => [(pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2];
-    // pedaços: p0 → m0 (reto), m(i-1) → m(i) com controle p(i), m(n-2) → p(n-1) (reto)
+    // pieces: p0 → m0 (straight), m(i-1) → m(i) with control p(i), m(n-2) → p(n-1) (straight)
     const pieces: Array<[[number, number], [number, number] | null, [number, number]]> = [];
     if (pts.length === 2) pieces.push([pts[0], null, pts[1]]);
     else {
@@ -304,7 +319,7 @@ export class RoadTool {
     this.commit(total);
   }
 
-  /** Grade de quarteirões centrada em (x, z): todas as ruas num comando só. */
+  /** Grid of blocks centred on (x, z): all the streets in a single command. */
   private buildBlocks(x: number, z: number): void {
     const { cols, rows, size, angle } = this.blocks;
     const c = Math.cos(angle * Math.PI / 180), s = Math.sin(angle * Math.PI / 180);
@@ -324,7 +339,7 @@ export class RoadTool {
     if (this.commit(total)) this.hud.toast(`Quarteirões construídos: ${cols} × ${rows}.`);
   }
 
-  /** Mover nó: pega o nó perto do ponto (true se pegou). */
+  /** Move node: grabs the node near the point (true if it did). */
   grab(hit: THREE.Vector3 | null): boolean {
     if (!hit) return false;
     this.moving = this.world.roads.nearestNode(hit.x, hit.z, 14);
@@ -332,7 +347,7 @@ export class RoadTool {
     return this.moving >= 0;
   }
 
-  /** Mover nó: solta em `hit`. */
+  /** Move node: drops it at `hit`. */
   drop(hit: THREE.Vector3 | null): void {
     const n = this.moving;
     this.moving = -1;
@@ -346,7 +361,23 @@ export class RoadTool {
     this.commit(r);
   }
 
-  setProfile(p: number): void { this.profile = p; this.updateHint(); }
+  /** A road picked: drawn as it is (the options go back to the road's own). */
+  setProfile(p: number): void {
+    this.base = p; this.profile = p;
+    this.options.lanes = null; this.options.width = null; this.options.parking = null;
+    this.updateHint();
+  }
+
+  /** Lanes, width or parking chosen: the road picked, varied (roads/roadVariant.ts). False when the map has no room for one more profile. */
+  setOptions(o: Partial<RoadOptions>): boolean {
+    const next = { ...this.options, ...o };
+    const id = registerVariant(this.base, next);
+    if (id < 0) return false;
+    Object.assign(this.options, next);
+    this.profile = id;
+    this.updateHint();
+    return true;
+  }
 
   setElevation(e: number): void { this.elevation = Math.max(-12, Math.min(16, e)); }
 

@@ -5,7 +5,9 @@
 // is the same in every session and after loading; only names the player typed are kept (World.streetNames).
 // Every query walks one street, never the map.
 
+import type { Command } from '../core/commands.ts';
 import type { World } from '../world/world.ts';
+import { streetChain } from './build.ts';
 import { armOf } from './junction.ts';
 import { PROFILE_INFO } from './profiles.ts';
 import { SegFlag } from './flags.ts';
@@ -99,6 +101,22 @@ export function streetName(world: World, s: number, street?: Street): string {
   const st = street ?? streetOf(world, s);
   for (const t of st.segs) { const n = world.streetNames.get(t); if (n) return n; }
   return hashName(st.key, st.profile);
+}
+
+/**
+ * Names the whole street of segment `seg` as one undo step. An empty name takes the typed names away, so the
+ * generated name shows again (Roadcraft 4.0 world/roads/streetNames.ts:61: a plate without text names nothing).
+ * The street is the chain the tools follow and the one streetName reads; `changed` runs after each change.
+ */
+export function nameStreetCommand(world: World, seg: number, name: string, changed: () => void): Command {
+  const segs = [...new Set([...streetChain(world, seg), ...streetOf(world, seg).segs])];
+  const before = segs.map((x) => world.streetNames.get(x));
+  const text = name.trim();
+  return {
+    label: 'nome da rua',
+    apply: () => { for (const x of segs) { if (text) world.streetNames.set(x, text); else world.streetNames.delete(x); } changed(); },
+    invert: () => { segs.forEach((x, i) => { const b = before[i]; if (b === undefined) world.streetNames.delete(x); else world.streetNames.set(x, b); }); changed(); },
+  };
 }
 
 export interface Address { seg: number; name: string; number: number; side: 'left' | 'right'; along: number }

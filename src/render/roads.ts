@@ -11,7 +11,7 @@ import { roadGraphTransfer } from '../jobs/protocol.ts';
 import { RMAT, RoadCode } from '../jobs/roadMesh.ts';
 import type { RoadNetwork } from '../roads/network.ts';
 import { heightAt } from '../world/heights.ts';
-import { MAX_LINES, MAX_PROFILES, TABLE_W, onProfileAdded, profileCount, writeProfileRow } from '../roads/profiles.ts';
+import { MAX_LINES, MAX_PROFILES, TABLE_W, TAG_RULE, onProfileAdded, profileCount, writeProfileRow } from '../roads/profiles.ts';
 import { LAMP_FIRST, LAMP_STEP } from '../jobs/props.ts';
 import { nightU } from './scene.ts';
 import { wetLook } from './weather.ts';
@@ -165,9 +165,9 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   const code = floor(road.w.add(0.5));
   const segId = int(floor(code.div(16)));
   const tag = floor(attribute('position', 'vec4').w.mul(32767).add(0.5));
-  const profile = mod(tag, 256);
-  // rule of each end (Rule): 2 yield, 3 stop, 4 signal
-  const ruleA = mod(floor(tag.div(256)), 8), ruleB = mod(floor(tag.div(2048)), 8);
+  const profile = mod(tag, TAG_RULE);
+  // rule of each end (Rule): 2 yield, 3 stop, 4 signal (the tag as roads/profiles.ts packRoadTag packs it)
+  const ruleA = mod(floor(tag.div(TAG_RULE)), 8), ruleB = mod(floor(tag.div(TAG_RULE * 8)), 8);
   const flags = mod(code, 16);
   const bit = (b: number) => step(float(0.5), mod(floor(flags.div(b)), 2));
   const crossA = bit(RoadCode.CrossA), crossB = bit(RoadCode.CrossB), oneWay = bit(RoadCode.OneWay);

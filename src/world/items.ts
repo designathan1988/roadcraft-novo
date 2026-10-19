@@ -1,6 +1,6 @@
-// Itens de rua postos pelo jogador: objetos (árvore, banco, hidrante, placa…)
-// e trechos de muro/cerca/sebe/defensa/gradil. Tabela SoA com índice espacial;
-// as peças saem no mesmo trabalho de peças da célula. Edição = comando.
+// Street items placed by the player: objects (tree, bench, hydrant, sign…)
+// and runs of wall/fence/hedge/guardrail/railing. SoA table with a spatial index;
+// their pieces come out of the cell's props job. Editing = a command.
 
 import { Table } from '../core/table.ts';
 import { MAP_CELLS } from '../config.ts';
@@ -8,32 +8,32 @@ import { Dirty, SpatialIndex, cellId, cellX } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
 import type { World } from './world.ts';
 
-/** O que o item é. Objetos usam (x0, z0) e o rumo em x1; trechos vão de (x0, z0) a (x1, z1). */
+/** What the item is. Objects use (x0, z0) and the heading in x1; runs go from (x0, z0) to (x1, z1). */
 export const Item = {
   Tree: 0, Bush: 1, Bench: 2, Bin: 3, Lamp: 4, Hydrant: 5, Postbox: 6, Phone: 7, Drain: 8, Bollard: 9, Planter: 10,
   Sign: 11, Conifer: 12, Smoke: 13, Steam: 14, Fire: 15, Fountain: 16,
   Fence: 20, Wall: 21, Hedge: 22, Guardrail: 23, Railing: 24, PoleLine: 25,
-  // efeitos (partículas) que vieram depois
+  // effects (particles) that came later
   Dust: 26, Soot: 27, Sparks: 28, Spray: 29,
-  // elementos do chão (pincel): 30 + variante da peça Ground
+  // ground elements (brush): 30 + variant of the Ground piece
   Stones: 30, Pebbles: 31, Gravel: 32, Leaves: 33, Grass: 34, TallGrass: 35, Scrub: 36, Fern: 37, Clover: 38, Flowers: 39, Mushrooms: 40,
   Palm: 41,
-  // neblina (pincel do clima): emissor de lençol baixo
+  // mist (weather brush): a low sheet emitter
   Mist: 42,
-  // pessoa feita no criador (parada): variante = cor da roupa + altura × 16
+  // person made in the creator (standing): variant = clothes colour + height × 16
   Person: 43,
 } as const;
 export const isBarrier = (t: number) => t >= 20 && t <= 25;
-/** Fumaça, vapor, fogo, chafariz, poeira, fuligem, faíscas e borrifo: emissores de partículas. */
+/** Smoke, steam, fire, fountain, dust, soot, sparks and spray: particle emitters. */
 export const isEffect = (t: number) => (t >= 13 && t <= 16) || (t >= 26 && t <= 29) || t === 42;
 export const isGroundElement = (t: number) => t >= 30 && t <= 40;
 
 const schema = { x0: Float32Array, z0: Float32Array, x1: Float32Array, z1: Float32Array, type: Uint8Array, variant: Uint8Array };
-/** Registro plano: [id, x0, z0, x1, z1, tipo, variante]. */
+/** Flat record: [id, x0, z0, x1, z1, type, variant]. */
 export type ItemRec = [number, number, number, number, number, number, number];
-/** Sem o id: [x0, z0, x1, z1, tipo, variante]. */
+/** Without the id: [x0, z0, x1, z1, type, variant]. */
 export type ItemBody = [number, number, number, number, number, number];
-/** Comprimento máximo de um trecho (o traço é quebrado nisso). */
+/** Longest run (a stroke is broken into these). */
 export const MAX_RUN = 48;
 
 export class StreetItems {
@@ -50,7 +50,7 @@ export class StreetItems {
 
   private touch(id: number): void {
     const c = this.t.cols;
-    // a peça pode sair numa célula vizinha (trecho que cruza a borda): marca as das pontas e as vizinhas
+    // the piece may fall in a neighbouring cell (a run crossing the edge): marks the ends' cells and their neighbours
     const cx0 = cellX(Math.min(c.x0[id], isBarrier(c.type[id]) ? c.x1[id] : c.x0[id])) - 1;
     const cz0 = cellX(Math.min(c.z0[id], isBarrier(c.type[id]) ? c.z1[id] : c.z0[id])) - 1;
     const cx1 = cellX(Math.max(c.x0[id], isBarrier(c.type[id]) ? c.x1[id] : c.x0[id])) + 1;
@@ -86,7 +86,7 @@ export class StreetItems {
 
   clear(): void { this.t.clear(); this.index.clear(); }
 
-  /** Item mais perto do ponto (objeto pela posição, trecho pela distância à linha). */
+  /** Item nearest the point (an object by its position, a run by the distance to its line). */
   nearest(x: number, z: number, radius: number): number {
     let best = -1, bd = radius;
     const c = this.t.cols;
@@ -102,7 +102,7 @@ export class StreetItems {
     return best;
   }
 
-  /** Itens que podem ter peças na célula (os dela e os das vizinhas), em registros planos. */
+  /** Items that may have pieces in the cell (its own and its neighbours'), as flat records. */
   gather(cell: number, mapCells: number): Float32Array {
     const out: number[] = [];
     const cx = cell % mapCells, cz = (cell / mapCells) | 0;
@@ -114,7 +114,7 @@ export class StreetItems {
     return new Float32Array(out);
   }
 
-  /** Itens de um ladrilho para salvar (pela ponta inicial). */
+  /** Items of a tile to save (by their start point). */
   saveTile(tileOf: (x: number, z: number) => number, tile: number, cells: number[]): Float32Array {
     const out: number[] = [];
     const c = this.t.cols;
@@ -130,8 +130,8 @@ export class StreetItems {
   }
 }
 
-/** Pôr e tirar itens, com desfazer. */
-/** Pincel de elementos do chão: espalha tufos pela densidade, ou apaga (um tipo ou todos). Um traço = um comando. */
+/** Putting and taking items, with undo. */
+/** Ground elements brush: scatters tufts by density, or erases (one type or all). One stroke = one command. */
 export class ElementStroke {
   readonly cmd: ItemsCommand;
   private items: StreetItems;
@@ -140,7 +140,7 @@ export class ElementStroke {
   constructor(items: StreetItems) { this.items = items; this.cmd = new ItemsCommand(items, 'elementos'); }
   private rnd(): number { this.seed = (this.seed * 1103515245 + 12345) >>> 0; return this.seed / 4294967296; }
 
-  /** density: tufos por 100 m²; size 0..15; mode lay | eraseKind | eraseAll. */
+  /** density: tufts per 100 m²; size 0..15; mode lay | eraseKind | eraseAll. */
   dab(x: number, z: number, r: number, kind: number, density: number, size: number, mode: 'lay' | 'eraseKind' | 'eraseAll', dt: number, spacing = 1.6): void {
     const it = this.items, c = it.t.cols;
     if (mode !== 'lay') {
@@ -152,7 +152,7 @@ export class ElementStroke {
       for (const i of doomed) this.cmd.remove(i);
       return;
     }
-    // quantos tufos neste passo: a densidade enche o círculo em ~2 s de pincel
+    // how many tufts this step: the density fills the circle in ~2 s of brushing
     this.acc += density / 100 * Math.PI * r * r * Math.min(1, dt) * 0.5;
     let tries = 0;
     while (this.acc >= 1 && tries++ < 64) {
@@ -187,13 +187,17 @@ export class ItemsCommand implements Command {
     this.items.remove(id);
   }
 
-  apply(): void {
-    for (const r of this.removed) this.items.remove(r[0]);
-    for (const r of this.added) this.items.add(r, r[0]);
-  }
+  apply(): void { this.swap(this.removed, this.added); }
+  invert(): void { this.swap(this.added, this.removed); }
 
-  invert(): void {
-    for (const r of this.added) this.items.remove(r[0]);
-    for (const r of this.removed) this.items.add(r, r[0]);
+  /** Takes `out` away and puts `in` back with their ids; if an id is taken, everything goes back as it was and the error goes on. */
+  private swap(out: ItemRec[], back: ItemRec[]): void {
+    for (const r of out) this.items.remove(r[0]);
+    let k = 0;
+    try { for (; k < back.length; k++) this.items.add(back[k], back[k][0]); } catch (err) {
+      for (let i = 0; i < k; i++) this.items.remove(back[i][0]);
+      for (const r of out) this.items.add(r, r[0]);
+      throw err;
+    }
   }
 }

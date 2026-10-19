@@ -1,24 +1,26 @@
-// Gerador da cidade inteira pela semente (worker). Centros em terreno plano
-// perto do rio; avenidas radiais e um anel em volta do centro principal; via
-// expressa atravessando o mapa; ruas locais em grade por bairro (orientação de
-// cada centro), cortadas por água e encosta forte. Tudo vira um grafo planar:
-// cruzamentos achados por grade de baldes, nós próximos fundidos. Zonas pela
-// distância aos centros e às avenidas. A página só insere o resultado.
+// Generator of the whole city from the seed (worker). Centres on flat ground
+// near the river; radial avenues and a ring round the main centre; an
+// expressway across the map; local streets in a grid per district (each centre's
+// orientation), cut by water and steep slopes. Everything becomes a planar graph:
+// crossings found through a grid of buckets, nearby nodes merged. Zones by the
+// distance to the centres and avenues. The page only inserts the result.
 
 import { MAP_HALF, SEA_LEVEL } from '../config.ts';
 import { Rng, fbm } from '../core/rng.ts';
 import { baseHeight, waterLevelAt } from './terrainGen.ts';
 import { Zone } from '../roads/zones.ts';
-import { PROFILES } from '../roads/profiles.ts';
+import { PROFILES, PROFILE_INFO } from '../roads/profiles.ts';
+import { MIN_LEG_ANGLE } from '../roads/impossible.ts';
+import { blockLines, districtField, districtLevels, simplifyLine, traceStreets, type CityStyle, type P2 } from './cityField.ts';
 
 export const GEN = { Local: 1, Avenue: 3, AvenueBike: 4, Expressway: 5 } as const;
 
 export interface CityRoads {
-  /** x, z, y por nó. */
+  /** x, z, y per node. */
   nodes: Float32Array;
-  /** a, b, perfil, zona esquerda, zona direita por trecho. */
+  /** a, b, profile, left zone, right zone per segment. */
   segs: Int32Array;
-  /** Centros (x, z, raio). */
+  /** Centres (x, z, radius). */
   centers: Float32Array;
 }
 
@@ -26,10 +28,17 @@ interface Poly { pts: number[]; profile: number; bridge: boolean }
 interface Center { x: number; z: number; r: number; angle: number; bx: number; bz: number }
 
 const MERGE = 7;
+/** Longest generated segment (m): under MAX_SEG_LEN (roads/network.ts), the spatial index's limit. */
+const GEN_SEG_LEN = 100;
 const MAX_LOCAL_GRADE = 0.11;
 const MAX_ART_GRADE = 0.08;
 
-export function generateCity(seed: number): CityRoads {
+/**
+ * The city from the seed. `style` lays the local streets of each district: 'classic' a rotated grid (this engine's
+ * first generator), or one of Roadcraft 4.0's (grid, organic, radial, mixed: streets along a tensor field; blocks:
+ * a straight grid of 120 × 72 m blocks). The arterials, the water and slope rules and the zones are the same for all.
+ */
+export function generateCity(seed: number, style: CityStyle = 'classic'): CityRoads {
   const rng = new Rng(seed * 7919 + 13);
   const H = (x: number, z: number) => baseHeight(x, z, seed);
   const land = (x: number, z: number) => { const h = H(x, z); return h > SEA_LEVEL + 1.2 && waterLevelAt(x, z, seed) < h - 1.2; };
@@ -39,14 +48,14 @@ export function generateCity(seed: number): CityRoads {
   };
   const inside = (x: number, z: number, m = 380) => Math.max(Math.abs(x), Math.abs(z)) < MAP_HALF - m;
 
-  // ---------------------------------------------------------------- centros
+  // ---------------------------------------------------------------- centres
   const pick = (cx: number, cz: number, rad: number, avoid: Center[], minD: number): [number, number] | null => {
     let best: [number, number] | null = null, bs = Infinity;
     for (let k = 0; k < 400; k++) {
       const x = cx + rng.range(-rad, rad), z = cz + rng.range(-rad, rad);
       if (!inside(x, z, 1500) || !land(x, z)) continue;
       if (avoid.some((c) => Math.hypot(c.x - x, c.z - z) < minD)) continue;
-      // plano e perto (mas não dentro) do rio
+      // flat and near (but not in) the river
       let s = 0;
       for (const [dx, dz] of [[0, 0], [200, 0], [-200, 0], [0, 200], [0, -200]]) s += slope(x + dx, z + dz);
       let water = 1e9;
@@ -66,7 +75,7 @@ export function generateCity(seed: number): CityRoads {
     const p = pick(c0[0] + Math.cos(a) * 3800, c0[1] + Math.sin(a) * 3800, 1600, centers, 3000);
     if (p) centers.push({ x: p[0], z: p[1], r: 2200, angle: rng.range(-0.8, 0.8), bx: 118, bz: 100 });
   }
-  // mapas maiores: mais bairros-satélite em volta, na proporção da área a mais
+  // bigger maps: more satellite districts around, in proportion to the extra area
   const extra = Math.round(2 * ((MAP_HALF * MAP_HALF) / (5120 * 5120) - 1));
   for (let i = 0, tries = 0; i < extra && tries < extra * 4; tries++) {
     const a = rng.range(0, Math.PI * 2), d = rng.range(5500, MAP_HALF - 1800);
@@ -76,9 +85,9 @@ export function generateCity(seed: number): CityRoads {
     i++;
   }
 
-  // ---------------------------------------------------------------- linhas
+  // ---------------------------------------------------------------- lines
   const polys: Poly[] = [];
-  /** Marcha uma linha por pontos; água vira ponte (curta) ou corta; encosta forte corta. */
+  /** Marches a line through points; water becomes a (short) bridge or a cut; a steep slope cuts. */
   const march = (pts: Array<[number, number]>, profile: number, allowBridge: boolean, maxGrade: number) => {
     let cur: number[] = [];
     let lastLand: [number, number] | null = null;
@@ -91,7 +100,7 @@ export function generateCity(seed: number): CityRoads {
         if (!allowBridge || !lastLand) { flush(); lastLand = null; continue; }
         wet += Math.hypot(x - (pts[i - 1]?.[0] ?? x), z - (pts[i - 1]?.[1] ?? z));
         if (wet > 320) { flush(); lastLand = null; wet = 0; }
-        continue; // ponte: o próximo ponto em terra liga direto
+        continue; // bridge: the next point on land links straight to it
       }
       if (lastLand && wet === 0) {
         const g = Math.abs(H(x, z) - H(lastLand[0], lastLand[1])) / Math.max(1, Math.hypot(x - lastLand[0], z - lastLand[1]));
@@ -104,10 +113,10 @@ export function generateCity(seed: number): CityRoads {
     flush();
   };
 
-  // via expressa: ao longo do rio, deslocada para um lado, de borda a borda
+  // expressway: along the river, moved to one side, from edge to edge
   const side = rng.next() < 0.5 ? 1 : -1;
   const riverZ = (x: number) => {
-    // procura a água mais perto da linha z = c0.z
+    // looks for the water nearest the line z = c0.z
     let best = c0[1], bd = Infinity;
     for (let z = -MAP_HALF; z < MAP_HALF; z += 40) if (!land(x, z)) { const d = Math.abs(z - c0[1]); if (d < bd) { bd = d; best = z; } }
     return bd < Infinity ? best : NaN;
@@ -118,18 +127,18 @@ export function generateCity(seed: number): CityRoads {
     for (let x = -MAP_HALF + 400; x <= MAP_HALF - 400; x += 160) {
       const rz = riverZ(x);
       const target = Number.isFinite(rz) ? rz + side * 1700 : lastZ;
-      lastZ += Math.max(-60, Math.min(60, target - lastZ)); // curva suave
+      lastZ += Math.max(-60, Math.min(60, target - lastZ)); // soft curve
       pts.push([x, lastZ]);
     }
     march(pts, GEN.Expressway, true, MAX_ART_GRADE);
-    // e uma norte-sul cruzando o rio, ao lado do centro
+    // and a north-south one across the river, beside the centre
     const pts2: Array<[number, number]> = [];
     const x0 = c0[0] + rng.range(1100, 1500) * (rng.next() < 0.5 ? 1 : -1);
     for (let z = -MAP_HALF + 400; z <= MAP_HALF - 400; z += 160) pts2.push([x0 + 200 * Math.sin(z / 1700), z]);
     march(pts2, GEN.Expressway, true, MAX_ART_GRADE);
   }
 
-  // avenidas radiais e anel do centro principal
+  // radial avenues and the main centre's ring
   centers.forEach((c, ci) => {
     const rays = ci === 0 ? 8 : 5;
     for (let k = 0; k < rays; k++) {
@@ -143,7 +152,7 @@ export function generateCity(seed: number): CityRoads {
       }
       march(pts, ci === 0 && k % 2 === 0 ? GEN.AvenueBike : GEN.Avenue, ci === 0, MAX_ART_GRADE);
     }
-    // anel pequeno em volta da praça central: as radiais nascem nele (sem nó com braços demais)
+    // a small ring round the central square: the radials start on it (no node with too many arms)
     for (const rr of ci === 0 ? [150, 850, 2100] : [150, 700]) {
       const pts: Array<[number, number]> = [];
       const n = Math.max(12, Math.ceil((Math.PI * 2 * rr) / 110));
@@ -156,14 +165,14 @@ export function generateCity(seed: number): CityRoads {
     }
   });
 
-  // estradas entre bairros: cada satélite liga ao centro mais perto já posto
+  // roads between districts: each satellite links to the nearest centre already placed
   for (let i = 1; i < centers.length; i++) {
     const c = centers[i];
     let j = 0, bd = Infinity;
     for (let k = 0; k < i; k++) { const d = Math.hypot(centers[k].x - c.x, centers[k].z - c.z); if (d < bd) { bd = d; j = k; } }
     const o = centers[j];
     const L = Math.hypot(o.x - c.x, o.z - c.z);
-    if (L < c.r + o.r * 0.9) continue; // as radiais já se cruzam
+    if (L < c.r + o.r * 0.9) continue; // the radials already cross
     const pts: Array<[number, number]> = [];
     const nx = -(o.z - c.z) / L, nz = (o.x - c.x) / L, bow = rng.range(-0.08, 0.08) * L;
     for (let d = 150; d <= L - 150; d += 120) {
@@ -173,12 +182,16 @@ export function generateCity(seed: number): CityRoads {
     march(pts, GEN.Avenue, true, MAX_ART_GRADE);
   }
 
-  // ruas locais: grade de cada centro, só na área dele (o centro "mais forte" ganha)
+  // local streets: each centre's grid, only in its own area (the "strongest" centre wins)
   const owner = (x: number, z: number): number => {
     let best = -1, bs = Infinity;
     centers.forEach((c, i) => { const s = Math.hypot(x - c.x, z - c.z) / c.r; if (s < bs) { bs = s; best = i; } });
     return bs < 1.12 ? best : -1;
   };
+  if (style !== 'classic') {
+    centers.forEach((c, ci) => fieldStreets(c, ci));
+    return buildGraph(polys, centers, H, seed);
+  }
   centers.forEach((c, ci) => {
     const ca = Math.cos(c.angle), sa = Math.sin(c.angle);
     const R = c.r * 1.12;
@@ -187,7 +200,7 @@ export function generateCity(seed: number): CityRoads {
       const step = dirU ? c.bz : c.bx;
       const along = dirU ? c.bx : c.bz;
       for (let off = -R; off <= R; off += step) {
-        // ruas mais ralas longe do centro
+        // sparser streets far from the centre
         const keepP = 1 - Math.max(0, Math.abs(off) / R - 0.55) * 1.6;
         if (rng.next() > keepP) continue;
         const pts: Array<[number, number]> = [];
@@ -204,12 +217,41 @@ export function generateCity(seed: number): CityRoads {
   });
 
   return buildGraph(polys, centers, H, seed);
+
+  /**
+   * Local streets of district `ci` in one of Roadcraft's styles: traced over its own ground (its share of the map,
+   * on land, not too steep, with the same countryside gaps as the classic grid), cut by water and slope by `march`.
+   */
+  function fieldStreets(c: Center, ci: number): void {
+    const R = c.r * 1.12;
+    const insideP = (p: P2): boolean => {
+      const d = Math.hypot(p.x - c.x, p.z - c.z);
+      if (d > R || !inside(p.x, p.z) || !land(p.x, p.z) || owner(p.x, p.z) !== ci) return false;
+      if (d > c.r * 0.7 && fbm(p.x / 900, p.z / 900, seed + 51, 2) < -0.25) return false;
+      return slope(p.x, p.z) < MAX_LOCAL_GRADE * 1.6;
+    };
+    const lay = (level: number, points: P2[]) => {
+      // split where the line leaves the district's ground; each piece is marched (bridges are not built here)
+      // each piece with one point every 20 m or so where it bends (the graph merges anything under 16 m into a node)
+      let run: P2[] = [];
+      const flushRun = () => {
+        if (run.length >= 2) march(simplifyLine(run, 1.2, 20).map((p) => [p.x, p.z] as [number, number]), level === 0 && style === 'blocks' ? GEN.Avenue : GEN.Local, false, MAX_LOCAL_GRADE);
+        run = [];
+      };
+      for (const p of points) { if (insideP(p)) run.push(p); else flushRun(); }
+      flushRun();
+    };
+    if (style === 'blocks') { for (const l of blockLines(c.x, c.z, R)) lay(l.level, l.points); return; }
+    const field = districtField(style, c.x, c.z, c.r, rng, seed + ci * 101)!;
+    const lines = traceStreets(field, insideP, { x0: c.x - R, z0: c.z - R, x1: c.x + R, z1: c.z + R }, districtLevels(c.r), rng);
+    for (const l of lines) lay(l.level, l.points);
+  }
 }
 
-// ---------------------------------------------------------------- grafo planar
+// ---------------------------------------------------------------- planar graph
 
 function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) => number, seed: number): CityRoads {
-  // pedaços retos
+  // straight pieces
   const sx0: number[] = [], sz0: number[] = [], sx1: number[] = [], sz1: number[] = [], sp: number[] = [];
   for (const p of polys) {
     for (let i = 0; i + 3 < p.pts.length; i += 2) {
@@ -217,7 +259,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     }
   }
   const n = sp.length;
-  // cruzamentos por baldes de 96 m
+  // crossings by 96 m buckets
   const B = 96;
   const buckets = new Map<number, number[]>();
   const key = (i: number, j: number) => (i + 2000) * 4096 + (j + 2000);
@@ -231,7 +273,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       l.push(s);
     }
   }
-  // rua local colada e quase paralela a uma avenida/expressa: sai (evita vias sobrepostas)
+  // a local street hugging and nearly parallel to an avenue/expressway goes (no overlapping roads)
   const dead = new Uint8Array(n);
   for (const list of buckets.values()) {
     for (const s of list) {
@@ -266,7 +308,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       if (u > 1e-6 && u < 1 - 1e-6 && v > 1e-6 && v < 1 - 1e-6) { cuts[s].push(u); cuts[t].push(v); }
     }
   }
-  // nós com fusão por grade de hash
+  // nodes merged through a hash grid
   const nx: number[] = [], nz: number[] = [];
   const grid = new Map<number, number[]>();
   const nodeAt = (x: number, z: number): number => {
@@ -283,7 +325,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     l.push(id);
     return id;
   };
-  const edges = new Map<number, number>(); // par de nós → perfil (o mais forte)
+  const edges = new Map<number, number>(); // node pair → profile (the strongest)
   const rank = (p: number) => (p === GEN.Expressway ? 3 : p === GEN.AvenueBike ? 2 : p === GEN.Avenue ? 1 : 0);
   for (let s = 0; s < n; s++) {
     const c = cuts[s].sort((a, b) => a - b);
@@ -298,7 +340,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       prev = id;
     }
   }
-  // trechos curtos demais viram um nó só (união por raiz)
+  // segments too short become a single node (union by root)
   const root = nx.map((_, i) => i);
   const find = (i: number): number => { while (root[i] !== i) { root[i] = root[root[i]]; i = root[i]; } return i; };
   for (const k of edges.keys()) {
@@ -313,7 +355,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     const old = merged.get(kk);
     if (old === undefined || rank(p) > rank(old)) merged.set(kk, p);
   }
-  // no máximo 8 ligações por nó (fica com as mais fortes)
+  // at most 8 links per node (the strongest stay)
   const deg = new Int32Array(nx.length);
   const sorted = [...merged.entries()].sort((x, y) => rank(y[1]) - rank(x[1]));
   edges.clear();
@@ -323,7 +365,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     deg[a]++; deg[b]++;
     edges.set(k, p);
   }
-  // pedaços soltos (componentes pequenos) saem
+  // loose pieces (small components) go
   {
     const adj = new Map<number, number[]>();
     for (const k of edges.keys()) {
@@ -348,7 +390,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     }
     for (const k of [...edges.keys()]) if (size[comp.get(Math.floor(k / 1e6))!] < 30) edges.delete(k);
   }
-  // distância à expressa (para a indústria)
+  // distance to the expressway (for industry)
   const expNodes: number[] = [];
   for (const [k, p] of edges) if (p === GEN.Expressway) expNodes.push(Math.floor(k / 1e6));
   const nearExp = (x: number, z: number) => {
@@ -356,21 +398,21 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     for (const id of expNodes) { const d = Math.abs(nx[id] - x) + Math.abs(nz[id] - z); if (d < best) best = d; }
     return best;
   };
-  // alturas dos nós: relevo suavizado; nó na água (ponte) fica na média dos vizinhos
+  // node heights: smoothed terrain; a node in the water (bridge) at the average of its neighbours
   const ny = nx.map((x, i) => {
     let h = 0;
     for (const [dx, dz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]]) h += H(x + dx, nz[i] + dz);
     return Math.max(SEA_LEVEL + 1.5, h / 5);
   });
-  // zonas pela distância aos centros, às avenidas e à expressa
+  // zones by the distance to the centres, the avenues and the expressway
   const nearCenter = (x: number, z: number) => {
     let best = Infinity;
     for (const c of centers) best = Math.min(best, Math.hypot(x - c.x, z - c.z) / c.r);
     return best;
   };
   const zr = new Rng(seed * 31 + 7);
-  const segs: number[] = [];
-  // variedade do catálogo por bairro (ruído largo: a rua inteira fica igual)
+  const segs: number[] = [], strength: number[] = [];
+  // catalogue variety by district (broad noise: a whole street stays the same)
   const P = (name: string) => { const i = PROFILES.findIndex((p) => p.name === name); return i < 0 ? 0 : i; };
   const V = {
     wide: P('Calçadas largas'), park: 1, urban: P('Rua urbana'), cobble: P('Rua de paralelepípedo'), green: P('Rua com canteiro central'),
@@ -380,8 +422,8 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
   const variant = (profile: number, zone: number, d: number, x: number, z: number): number => {
     const n = fbm(x / 650, z / 650, seed + 313, 2), m = fbm(x / 1400, z / 1400, seed + 919, 2);
     if (profile === GEN.Local) {
-      // centro comercial: calçadão de 30 km/h só em parte das ruas (com ele em toda rua o centro não passava de
-      // 13 km/h no pico); o resto, rua urbana de 50 km/h ou com estacionamento
+      // commercial centre: 30 km/h wide-pavement streets in part of the streets only (with it on every street the
+      // centre did not pass 13 km/h at the peak); the rest, 50 km/h urban streets or with parking
       if (zone === Zone.Commercial) return n > 0.45 ? V.wide : n > 0.1 ? V.urban : V.park;
       if (zone === Zone.Industrial) return V.concrete;
       if (zone === Zone.Mixed) return n > 0.25 ? V.bike : n < -0.25 ? V.green : V.park;
@@ -408,9 +450,22 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       else if (d < 1.05) zone = nearExp(mx, mz) < 800 && fbm(mx / 900, mz / 900, seed + 77, 2) > 0.05 ? Zone.Industrial : d > 0.75 ? Zone.ResLow : Zone.Residential;
       else zone = zr.next() < 0.5 ? Zone.Residential : Zone.None;
     }
-    segs.push(a, b, variant(profile, zone, d, mx, mz), zone, zone);
+    // no segment longer than the spatial index holds (MAX_SEG_LEN): long straight edges get nodes along them
+    const L = Math.hypot(nx[b] - nx[a], nz[b] - nz[a]), pieces = Math.ceil(L / GEN_SEG_LEN), prof = variant(profile, zone, d, mx, mz);
+    let from = a;
+    for (let k = 1; k <= pieces; k++) {
+      let to = b;
+      if (k < pieces) {
+        const t = k / pieces, x = nx[a] + (nx[b] - nx[a]) * t, z = nz[a] + (nz[b] - nz[a]) * t;
+        to = nx.length;
+        nx.push(x); nz.push(z); ny.push(ny[a] + (ny[b] - ny[a]) * t);
+      }
+      segs.push(from, to, prof, zone, zone); strength.push(rank(profile));
+      from = to;
+    }
   }
-  // só os nós usados, com índices novos
+  tidyGraph(nx, nz, ny, segs, strength, (x, z) => H(x, z) > SEA_LEVEL + 1.2);
+  // only the nodes in use, with new indices
   const remap = new Int32Array(nx.length).fill(-1);
   const out: number[] = [];
   for (let i = 0; i < segs.length; i += 5) {
@@ -422,4 +477,119 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
   }
   const nodes = new Float32Array(out);
   return { nodes, segs: new Int32Array(segs), centers: new Float32Array(centers.flatMap((c) => [c.x, c.z, c.r])) };
+}
+
+/** A dead end closer than this to another road's ends is a near miss, not inside it (roads/repair.ts END_GAP). */
+const END_GAP = 4;
+/** Shortest piece a split or a moved end may leave (the generator's own floor, test/citygen.test.ts). */
+const MIN_PIECE = 9;
+
+/**
+ * The graph the city is born with must open clean: no node where two roads leave at less than MIN_LEG_ANGLE (an
+ * impossible junction) and no dead end lying inside another road (what repairDanglingEnds would join on reopening).
+ * At a too sharp pair the weaker leg goes (on a tie, the one whose far end keeps another road, then the shorter).
+ * A dead end inside a road becomes a junction with it (the road split at the closest point) when its street meets
+ * the road at MIN_LEG_ANGLE or more; within MIN_PIECE of the road's end it ends on that end's node; else (or over water, on a bridge)
+ * its last piece goes. Repeated until nothing changes. `segs` is rewritten
+ * in place (a, b, profile, zl, zr); `nx`, `nz`, `ny` grow by the split nodes.
+ */
+function tidyGraph(nx: number[], nz: number[], ny: number[], segs: number[], strength: number[], land: (x: number, z: number) => boolean): void {
+  const a: number[] = [], b: number[] = [], prof: number[] = [], zl: number[] = [], zr: number[] = [], rk: number[] = [], alive: boolean[] = [];
+  const legs = new Map<number, number[]>();
+  const legsOf = (n: number): number[] => legs.get(n) ?? legs.set(n, []).get(n)!;
+  // a segment is filed in every cell its box, widened by the widest road, touches
+  const C = 64, PAD = 12, cells = new Map<number, number[]>();
+  const ck = (i: number, j: number) => (i + 4000) * 8192 + (j + 4000);
+  const add = (sa: number, sb: number, p: number, l: number, r: number, k: number): number => {
+    const s = a.length;
+    a.push(sa); b.push(sb); prof.push(p); zl.push(l); zr.push(r); rk.push(k); alive.push(true);
+    legsOf(sa).push(s); legsOf(sb).push(s);
+    const i0 = Math.floor((Math.min(nx[sa], nx[sb]) - PAD) / C), i1 = Math.floor((Math.max(nx[sa], nx[sb]) + PAD) / C);
+    const j0 = Math.floor((Math.min(nz[sa], nz[sb]) - PAD) / C), j1 = Math.floor((Math.max(nz[sa], nz[sb]) + PAD) / C);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) (cells.get(ck(i, j)) ?? cells.set(ck(i, j), []).get(ck(i, j))!).push(s);
+    return s;
+  };
+  const remove = (s: number): void => {
+    alive[s] = false;
+    for (const n of [a[s], b[s]]) { const l = legs.get(n)!; l.splice(l.indexOf(s), 1); }
+  };
+  const other = (s: number, n: number) => (a[s] === n ? b[s] : a[s]);
+  const heading = (n: number, m: number) => Math.atan2(nz[m] - nz[n], nx[m] - nx[n]) * 180 / Math.PI;
+  const gapBetween = (h1: number, h2: number) => { const d = Math.abs(h1 - h2) % 360; return Math.min(d, 360 - d); };
+  for (let i = 0; i < segs.length; i += 5) add(segs[i], segs[i + 1], segs[i + 2], segs[i + 3], segs[i + 4], strength[i / 5]);
+
+  /** The two neighbouring legs at `n` closest in angle, if closer than MIN_LEG_ANGLE. */
+  const sharpPair = (n: number): [number, number] | null => {
+    const l = legs.get(n);
+    if (!l || l.length < 2) return null;
+    const hs = l.map((s) => ({ s, h: heading(n, other(s, n)) })).sort((x, y) => x.h - y.h);
+    let best: [number, number] | null = null, gap = MIN_LEG_ANGLE;
+    for (let i = 0; i < hs.length; i++) {
+      const j = (i + 1) % hs.length, g = j === 0 ? hs[0].h + 360 - hs[i].h : hs[j].h - hs[i].h;
+      if (g < gap) { gap = g; best = [hs[i].s, hs[j].s]; }
+    }
+    return best;
+  };
+  const weaker = (n: number, s: number, t: number): number => {
+    if (rk[s] !== rk[t]) return rk[s] < rk[t] ? s : t;
+    const keeps = (x: number) => legsOf(other(x, n)).length >= 3;
+    if (keeps(s) !== keeps(t)) return keeps(s) ? s : t;
+    const len = (x: number) => Math.hypot(nx[a[x]] - nx[b[x]], nz[a[x]] - nz[b[x]]);
+    return len(s) <= len(t) ? s : t;
+  };
+  /** The road a dead end lies inside (repairDanglingEnds' test): segment, position along it, or −1. */
+  const inside = (n: number, own: number): [number, number] => {
+    const x = nx[n], z = nz[n];
+    let best = -1, bt = 0, bd = Infinity;
+    const l = cells.get(ck(Math.floor(x / C), Math.floor(z / C)));
+    if (l) for (const s of l) {
+      if (!alive[s] || s === own || a[s] === n || b[s] === n) continue;
+      const dx = nx[b[s]] - nx[a[s]], dz = nz[b[s]] - nz[a[s]], L = Math.hypot(dx, dz);
+      if (L < 1e-6) continue;
+      const t = Math.max(0, Math.min(1, ((x - nx[a[s]]) * dx + (z - nz[a[s]]) * dz) / (L * L)));
+      const d = Math.hypot(x - nx[a[s]] - dx * t, z - nz[a[s]] - dz * t);
+      if (d > Math.max(1.5, PROFILE_INFO[prof[s]]?.asphaltRight ?? 3) || d >= bd) continue;
+      if (t * L < END_GAP || (1 - t) * L < END_GAP) continue;
+      if (Math.abs(ny[a[s]] + (ny[b[s]] - ny[a[s]]) * t - ny[n]) > 2) continue;
+      best = s; bt = t; bd = d;
+    }
+    return [best, bt];
+  };
+  for (let changed = true, pass = 0; changed && pass < 20; pass++) {
+    changed = false;
+    for (const n of [...legs.keys()]) {
+      for (let p = sharpPair(n); p; p = sharpPair(n)) { remove(weaker(n, p[0], p[1])); changed = true; }
+    }
+    for (const n of [...legs.keys()]) {
+      const l = legs.get(n)!;
+      if (l.length !== 1) continue;
+      const own = l[0], [s, t] = inside(n, own);
+      if (s < 0) continue;
+      changed = true;
+      const far = other(own, n);
+      const x = nx[a[s]] + (nx[b[s]] - nx[a[s]]) * t, z = nz[a[s]] + (nz[b[s]] - nz[a[s]]) * t;
+      const h = Math.atan2(nz[far] - z, nx[far] - x) * 180 / Math.PI, hr = heading(a[s], b[s]);
+      const L = Math.hypot(nx[b[s]] - nx[a[s]], nz[b[s]] - nz[a[s]]);
+      if (t * L < MIN_PIECE || (1 - t) * L < MIN_PIECE) {
+        // too near the road's end for a piece of its own: the street ends on that node instead
+        const e = t * L < MIN_PIECE ? a[s] : b[s];
+        const free = legsOf(e).length < 6 && land(nx[e], nz[e]) && !legsOf(e).some((x) => other(x, e) === far);
+        remove(own);
+        if (free && Math.hypot(nx[far] - nx[e], nz[far] - nz[e]) >= MIN_PIECE) add(a[own] === n ? e : a[own], a[own] === n ? b[own] : e, prof[own], zl[own], zr[own], rk[own]);
+        continue;
+      }
+      if (gapBetween(h, hr) < MIN_LEG_ANGLE || gapBetween(h, hr + 180) < MIN_LEG_ANGLE || Math.hypot(nx[far] - x, nz[far] - z) < MIN_PIECE || !land(x, z)) { remove(own); continue; }
+      // split the road there and bring the street's end onto the new node
+      const m = nx.length;
+      nx.push(x); nz.push(z); ny.push(ny[a[s]] + (ny[b[s]] - ny[a[s]]) * t);
+      remove(s);
+      add(a[s], m, prof[s], zl[s], zr[s], rk[s]);
+      add(m, b[s], prof[s], zl[s], zr[s], rk[s]);
+      remove(own);
+      if (a[own] === n) add(m, b[own], prof[own], zl[own], zr[own], rk[own]);
+      else add(a[own], m, prof[own], zl[own], zr[own], rk[own]);
+    }
+  }
+  segs.length = 0;
+  for (let s = 0; s < a.length; s++) if (alive[s]) segs.push(a[s], b[s], prof[s], zl[s], zr[s]);
 }

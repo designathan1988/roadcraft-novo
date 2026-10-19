@@ -1,0 +1,1001 @@
+/// <reference types="node" />
+// Regression tests for the road, editing, zone, lot, growth, terrain and history defects of DEFEITOS-roadcraft-novo.md
+// (section D and A19-A44). Each one failed on the code before its fix; the commit that fixed it quotes both results.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { World } from '../src/world/world.ts';
+import { RoadJournal, buildRoad, buildRoundabout, bulbAt, demolishSeg, planRoad, roundaboutRefusal, snap } from '../src/roads/build.ts';
+import { heightIndex, sampleCoord } from '../src/world/heights.ts';
+import { HEIGHT_MAP_RES } from '../src/config.ts';
+import { CommandStack, type Command } from '../src/core/commands.ts';
+import { demolishBox } from '../src/tools/demolish.ts';
+import { PROFILE_INFO } from '../src/roads/profiles.ts';
+import { MAX_DEG } from '../src/roads/network.ts';
+import { Zone } from '../src/roads/zones.ts';
+import { Dirty, cellId, cellX } from '../src/core/grid.ts';
+import type { JobPool } from '../src/jobs/pool.ts';
+import type { LotColumns } from '../src/jobs/protocol.ts';
+import { decayTenths } from '../src/world/decay.ts';
+import { Ctl, Rule, type JunctionSpec } from '../src/roads/control.ts';
+import { laneExits } from '../src/roads/laneLinks.ts';
+
+function flatWorld(money: number, y = 10): World {
+  const w = new World();
+  w.heights.fill(y); w.tileMin.fill(y); w.tileMax.fill(y);
+  w.money = money;
+  return w;
+}
+
+function road(w: World, ax: number, az: number, bx: number, bz: number, profile = 0, elevation = 0): RoadJournal {
+  const a = snap(w.roads, ax, az, 8), b = snap(w.roads, bx, bz, 8);
+  const p = planRoad(w, a, null, b, profile, elevation);
+  assert.ok(p.ok, p.reason);
+  const j = buildRoad(w, p, a, b, profile);
+  assert.ok(j.settle());
+  return j;
+}
+
+/** Network as sorted text (ends, heights and profiles), to compare before and after. */
+function shape(w: World): string {
+  const net = w.roads, sc = net.segs.cols, nc = net.nodes.cols, out: string[] = [];
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) {
+    const a = sc.a[s], b = sc.b[s];
+    out.push(`${nc.x[a].toFixed(1)},${nc.z[a].toFixed(1)},${nc.y[a].toFixed(2)}>${nc.x[b].toFixed(1)},${nc.z[b].toFixed(1)},${nc.y[b].toFixed(2)}:${sc.profile[s]}`);
+  }
+  return out.sort().join(" ");
+}
+
+/** The generated city puts its roads straight into the network, with no build kind (game.ts generatedCity). */
+function generatedRoad(w: World, ax: number, az: number, bx: number, bz: number, profile = 3): number {
+  const net = w.roads;
+  const find = (x: number, z: number) => { const n = net.nearestNode(x, z, 0.5); return n >= 0 ? n : net.addNode({ x, z, y: 10 }); };
+  const a = find(ax, az), b = find(bx, bz);
+  return net.addSeg({ a, b, cx: (ax + bx) / 2, cz: (az + bz) / 2, profile, flags: 0, zl: Zone.Residential, zr: Zone.Residential });
+}
+
+test('D2: demolishing the generated city, which was free, gives no money back', () => {
+  const w = flatWorld(1000);
+  const s1 = generatedRoad(w, -200, 0, -100, 0);
+  generatedRoad(w, -100, 0, 0, 0);
+  generatedRoad(w, 0, 0, 100, 0);
+  generatedRoad(w, 0, -100, 0, 0);
+  const start = w.money;
+  const d = demolishSeg(w, s1);
+  assert.ok(d.settle());
+  assert.equal(w.money, start, `demolishing one generated segment changed the money from ${start} to ${w.money}`);
+  const box = demolishBox(w, -150, -150, 150, 150)!;
+  assert.ok(box);
+  assert.equal(box.charge, 0, `demolishing the area gave back R$ ${-box.charge}`);
+  assert.equal(w.money, start);
+  // undo and redo of the demolition keep the money as it is
+  box.cmd.invert(); assert.equal(w.money, start);
+  box.cmd.apply(); assert.equal(w.money, start);
+});
+
+test('D2: a road built across a generated road costs only itself; the generated pieces stay free', () => {
+  const w = flatWorld(1e9);
+  generatedRoad(w, -100, 0, 100, 0);
+  const a = snap(w.roads, 0, -80, 8), b = snap(w.roads, 0, 80, 8);
+  const p = planRoad(w, a, null, b, 0, 0);
+  assert.ok(p.ok, p.reason);
+  const j = buildRoad(w, p, a, b, 0);
+  const own = 160 * PROFILE_INFO[0].cost;
+  assert.ok(Math.abs(j.price - own) < own * 0.02, `the crossing road costs ${j.price}, its own price is ${own}`);
+  assert.ok(j.settle());
+  // the generated road was split in two at the crossing: demolishing its pieces still gives nothing
+  const before = w.money;
+  const west = w.roads.nearestSeg(-60, 0, 3)![0];
+  const d = demolishSeg(w, west);
+  assert.ok(d.settle());
+  assert.equal(w.money, before, 'a piece of the split generated road gave money back');
+  // the player's own road still gives back its share
+  const north = w.roads.nearestSeg(0, -50, 3)![0];
+  const e = demolishSeg(w, north);
+  assert.ok(e.settle());
+  assert.ok(w.money > before, 'the player\'s own road gives back a share when demolished');
+});
+
+test('D2: making a free road dearer costs the difference; making it cheaper gives nothing back', async () => {
+  const { changeProfile } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  const s = generatedRoad(w, -50, 0, 50, 0, 0);
+  const wide = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+  const up = changeProfile(w, s, wide);
+  const diff = 100 * (PROFILE_INFO[wide].cost - PROFILE_INFO[0].cost);
+  assert.ok(Math.abs(up.price - diff) < diff * 0.02, `upgrading costs ${up.price}, the difference is ${diff}`);
+  assert.ok(up.settle());
+  const down = changeProfile(w, s, 0);
+  assert.equal(down.price, 0, 'downgrading a free road gave money back');
+});
+
+test('A21: an undo that fails half way leaves the world and the history as they were', () => {
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  commands.push(road(w, -100, 0, 100, 0));
+  const net = w.roads;
+  const n0 = net.nearestNode(-100, 0, 1), n1 = net.nearestNode(0, 0, 1), n2 = net.nearestNode(100, 0, 1);
+  const s0 = net.segsOf(n0)[0], s1 = net.segsOf(n2)[0];
+  // demolish the whole road west to east: the undo puts the east end back first and the west node last
+  const d = new RoadJournal(w, 'demolish');
+  d.removeSeg(s0); d.removeNode(n0); d.removeSeg(s1); d.removeNode(n1); d.removeNode(n2);
+  assert.ok(d.settle());
+  commands.push(d);
+  const before = shape(w);
+  // something outside the history took the id of the west node: the undo fails after restoring half the road
+  const taken = n0;
+  w.roads.nodes.allocAt(taken);
+  const nodesAlive = Array.from(w.roads.nodes.alive.subarray(0, w.roads.nodes.end));
+  let error: unknown = null;
+  commands.onError = (e) => { error = e; };
+  assert.doesNotThrow(() => commands.undo(), 'undo threw out of the stack');
+  assert.ok(error, 'the failure was reported');
+  assert.equal(shape(w), before, 'the failed undo left the network half restored');
+  assert.deepEqual(Array.from(w.roads.nodes.alive.subarray(0, w.roads.nodes.end)), nodesAlive);
+  assert.equal(commands.canUndo, true, 'the step is still in the history');
+  // once the id is free again the same undo works
+  w.roads.nodes.release(taken);
+  assert.equal(commands.undo(), true);
+  assert.notEqual(shape(w), before);
+});
+
+test('A21: a redo that throws keeps the step to redo', () => {
+  const commands = new CommandStack();
+  let fail = true, state = 0;
+  const c: Command = { label: 'x', apply: () => { if (fail) throw new Error('no'); state = 1; }, invert: () => { state = 0; } };
+  commands.push(c);
+  assert.equal(commands.undo(), true);
+  let error: unknown = null;
+  commands.onError = (e) => { error = e; };
+  assert.doesNotThrow(() => commands.redo());
+  assert.ok(error);
+  assert.equal(commands.canRedo, true);
+  fail = false;
+  assert.equal(commands.redo(), true);
+  assert.equal(state, 1);
+});
+
+test('D4: a 9th road at a node is refused before building, never half built', () => {
+  const w = flatWorld(1e9);
+  for (let k = 0; k < MAX_DEG; k++) {
+    const a = (k / MAX_DEG) * Math.PI * 2;
+    road(w, 0, 0, Math.cos(a) * 100, Math.sin(a) * 100);
+  }
+  const centre = w.roads.nearestNode(0, 0, 1);
+  assert.equal(w.roads.nodes.cols.deg[centre], MAX_DEG);
+  const before = shape(w);
+  const money = w.money;
+  const ang = Math.PI / MAX_DEG; // half way between two roads
+  const a = snap(w.roads, 0, 0, 8);
+  const b = snap(w.roads, Math.cos(ang) * 100, Math.sin(ang) * 100, 8);
+  let plan: ReturnType<typeof planRoad> | null = null;
+  assert.doesNotThrow(() => { plan = planRoad(w, a, null, b, 0, 0); if (plan.ok) buildRoad(w, plan, a, b, 0); }, 'planning or building the 9th road threw');
+  assert.equal(plan!.ok, false, 'the plan refuses the 9th road');
+  assert.equal(shape(w), before, 'nothing was built');
+  // a straight road crossing the full node is refused too (it would take two more)
+  const c = snap(w.roads, -Math.cos(ang) * 30, -Math.sin(ang) * 30, 8), d = snap(w.roads, Math.cos(ang) * 30, Math.sin(ang) * 30, 8);
+  let cross: ReturnType<typeof planRoad> | null = null;
+  assert.doesNotThrow(() => { cross = planRoad(w, c, null, d, 0, 0); if (cross.ok) buildRoad(w, cross, c, d, 0); });
+  assert.equal(cross!.ok, false, 'the road through the full node is refused');
+  assert.equal(shape(w), before, 'nothing was built through the full node');
+  assert.equal(w.money, money);
+});
+
+test('D4: a build that fails half way puts back everything it did', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  const before = shape(w);
+  const j = new RoadJournal(w, 'test');
+  const s = w.roads.nearestSeg(0, 0, 3)![0];
+  assert.throws(() => j.guard(() => { j.removeSeg(s); j.addNode(0, 50, 10); throw new Error('broken'); }), /broken/);
+  assert.equal(shape(w), before, 'the half-built edit stayed');
+  assert.equal(j.empty, true);
+  assert.equal(j.price, 0);
+});
+
+test('D3: a refused roundabout leaves every road as it was', () => {
+  const w = flatWorld(1e9);
+  // an existing roundabout, and roads all around it that a second circle would cut
+  road(w, -120, 0, 120, 0);
+  road(w, 0, -120, 0, 120);
+  const first = buildRoundabout(w, 0, 0, 22);
+  assert.ok(first);
+  assert.ok(first.settle());
+  road(w, 60, -120, 60, 120);
+  road(w, -120, 50, 120, 50);
+  const before = shape(w);
+  const money = w.money;
+  for (const [x, z] of [[40, 20], [30, 30], [45, 10], [25, 35], [35, 25]]) {
+    const j = buildRoundabout(w, x, z, 30);
+    assert.ok(j === null, `a roundabout at ${x}, ${z} over the first one is refused`);
+    assert.equal(shape(w), before, `after refusing the roundabout at ${x}, ${z} the roads are cut`);
+    assert.equal(w.money, money);
+  }
+});
+
+test('D5: a bridge or a tunnel leaves the buildings below or above it standing; a road at grade clears them', () => {
+  const w = flatWorld(1e9);
+  const rec = (x: number, floors: number) => ({ x, z: 0, w: 16, d: 16, h: 0, rot: 0, color: 0, seed: x, zone: Zone.Residential, floors, style: 1 });
+  // a low house under a viaduct 16 m up, a row of houses over a metro 12 m down, and a house in the way at grade
+  const house = w.addBuilding(rec(0, 2));
+  const row = [w.addBuilding(rec(400, 3)), w.addBuilding(rec(430, 3)), w.addBuilding(rec(460, 3))];
+  const inWay = w.addBuilding(rec(900, 2));
+  // the viaduct's ends stand on piers 16 m up, so the whole span stays up
+  w.roads.addNode({ x: -120, z: 0, y: 26 }); w.roads.addNode({ x: 120, z: 0, y: 26 });
+  road(w, -120, 0, 120, 0, 0, 16);
+  assert.equal(w.buildings.alive[house], 1, 'the house under the viaduct was demolished');
+  const metro = PROFILE_INFO.findIndex((p) => p.name.startsWith('Metrô'));
+  w.roads.addNode({ x: 300, z: 0, y: -2 }); w.roads.addNode({ x: 560, z: 0, y: -2 });
+  road(w, 300, 0, 560, 0, metro, -12);
+  for (const id of row) assert.equal(w.buildings.alive[id], 1, `the house ${id} over the metro was demolished`);
+  road(w, 860, 0, 940, 0, 0, 0);
+  assert.equal(w.buildings.alive[inWay], 0, 'a road at grade still clears the house in its way');
+});
+
+test('D5: a tall tower under a low bridge is still in the way', () => {
+  const w = flatWorld(1e9);
+  const tower = w.addBuilding({ x: 0, z: 0, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 3, zone: Zone.Commercial, floors: 20, style: 1 });
+  w.roads.addNode({ x: -120, z: 0, y: 26 }); w.roads.addNode({ x: 120, z: 0, y: 26 });
+  road(w, -120, 0, 120, 0, 0, 16);
+  assert.equal(w.buildings.alive[tower], 0, 'a 20-floor tower cannot stand under a deck 16 m up');
+});
+
+/** Terrain height at the nearest sample. */
+function ground(w: World, x: number, z: number): number { return w.heights[heightIndex(Math.round(sampleCoord(x)), Math.round(sampleCoord(z)))]; }
+
+test('D6: the turning bulb of a dead end never pulls the terrain up to a bridge or down to a tunnel', () => {
+  const w = flatWorld(1e9);
+  // a dead end that ends 14 m above the ground: the end of a viaduct
+  w.roads.addNode({ x: 100, z: 0, y: 24 });
+  road(w, -100, 0, 100, 0);
+  for (const [dx, dz] of [[0, 0], [6, 0], [0, 8], [-8, 4]]) {
+    const g = ground(w, 100 + dx, dz);
+    assert.ok(g < 11, `the ground at the viaduct end (${100 + dx}, ${dz}) rose to ${g.toFixed(2)} m`);
+  }
+  // a dead end 12 m down: the end of a tunnel
+  w.roads.addNode({ x: 500, z: 300, y: -2 });
+  road(w, 300, 300, 500, 300);
+  for (const [dx, dz] of [[0, 0], [6, 0], [0, 8]]) {
+    const g = ground(w, 500 + dx, 300 + dz);
+    assert.ok(g > 9, `the ground over the tunnel end (${500 + dx}, ${300 + dz}) sank to ${g.toFixed(2)} m`);
+  }
+});
+
+test('D6: rail lines have no turning bulb; streets keep theirs', () => {
+  const w = flatWorld(1e9);
+  const rail = PROFILE_INFO.findIndex((p) => p.rail && p.oneWay);
+  road(w, -100, 0, 100, 0, rail);
+  assert.equal(bulbAt(w.roads, w.roads.nearestNode(100, 0, 1)), false, 'a rail dead end got a turning bulb');
+  const street = flatWorld(1e9);
+  road(street, -100, 0, 100, 0, 0);
+  assert.equal(bulbAt(street.roads, street.roads.nearestNode(100, 0, 1)), true, 'a local street dead end keeps its bulb');
+});
+
+test('D6: a roundabout never fills the sea', () => {
+  const w = flatWorld(1e9);
+  // sea west of x = 0
+  for (let gz = 0; gz < HEIGHT_MAP_RES; gz++) for (let gx = 0; gx < Math.round(sampleCoord(0)); gx++) w.heights[heightIndex(gx, gz)] = -4;
+  road(w, 0, 0, 200, 0);
+  const at = [[-10, 0], [-20, 6], [-6, -12]];
+  const j = buildRoundabout(w, 10, 0, 22);
+  if (j) assert.ok(j.settle());
+  for (const [x, z] of at) assert.ok(ground(w, x, z) < 0, `the sea bed at ${x}, ${z} rose to ${ground(w, x, z).toFixed(2)}`);
+  assert.notEqual(roundaboutRefusal(w, 10, 0, 22), '', 'the tool says why it cannot go there');
+  assert.equal(roundaboutRefusal(w, 120, 0, 22), '', 'on dry land it can');
+});
+
+test('D9 and A41: decay tenths rebuild no mesh and mark no tile for saving', () => {
+  const w = flatWorld(0);
+  for (let i = 0; i < 400; i++) w.addBuilding({ x: (i % 20) * 30 - 300, z: Math.floor(i / 20) * 30 - 300, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: i, zone: Zone.Residential, floors: 3, style: 1, built: i * 37 });
+  for (const k of [Dirty.Buildings, Dirty.Props, Dirty.Save, Dirty.Lots]) w.dirty.drain(k);
+  w.saveDirty.fill(0);
+  const versions = w.cellVersion.slice();
+  const before = w.decayChanges;
+  for (let day = 0; day < 40; day++) w.advanceClock(1440);
+  assert.ok(w.decayChanges - before > 400 * 9, `the buildings aged (${w.decayChanges - before} tenths passed)`);
+  for (const [name, k] of [['buildings', Dirty.Buildings], ['props', Dirty.Props], ['save', Dirty.Save]] as const) {
+    assert.equal(w.dirty.pending(k), 0, `decay marked ${w.dirty.pending(k)} cells dirty for ${name}`);
+  }
+  assert.equal(w.saveDirty.reduce((a, b) => a + b, 0), 0, 'decay marked tiles for saving');
+  assert.deepEqual(w.cellVersion, versions, 'decay bumped cell versions');
+});
+
+test('A40: setting the clock keeps the minute set and files every building again from it', () => {
+  const w = flatWorld(0);
+  const id = w.addBuilding({ x: 0, z: 0, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 3, style: 1, built: 0 });
+  w.setClock(20 * 1440);
+  assert.equal(w.clock, 20 * 1440, 'the clock went back to 0');
+  assert.equal(w.buildings.cols.decay[id], decayTenths(0, 20 * 1440));
+});
+
+/** The segment at node n heading (dx, dz) out of it. */
+function legToward(w: World, n: number, dx: number, dz: number): number {
+  const net = w.roads, nc = net.nodes.cols;
+  let best = -1, bd = -2;
+  for (const s of net.segsOf(n, [])) {
+    const o = net.segs.cols.a[s] === n ? net.segs.cols.b[s] : net.segs.cols.a[s];
+    const ex = nc.x[o] - nc.x[n], ez = nc.z[o] - nc.z[n], l = Math.hypot(ex, ez) || 1;
+    const d = (ex * dx + ez * dz) / l;
+    if (d > bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
+/** Every segment id a junction's hand-made settings name. */
+function specSegs(spec: JunctionSpec | undefined): number[] {
+  if (!spec) return [];
+  return [...(spec.legs ?? []).map(([s]) => s), ...(spec.bans ?? []), ...(spec.lanes ?? []).flatMap(([s, , to]) => [s, ...to])];
+}
+
+test('D8: junction rules and lane links follow a split leg and forget a removed one; undo brings them back', () => {
+  const w = flatWorld(1e9);
+  road(w, -200, 0, 200, 0);
+  road(w, 0, -200, 0, 200);
+  const c = w.roads.nearestNode(0, 0, 1);
+  const east = legToward(w, c, 1, 0), west = legToward(w, c, -1, 0), north = legToward(w, c, 0, -1);
+  const set = new RoadJournal(w, 'junction');
+  set.setJunction(c, { ctl: Ctl.Priority, legs: [[east, Rule.Stop]], bans: [north, east], lanes: [[west, 0, [east]]] });
+  assert.ok(set.settle());
+  // a new road crosses the east leg 40 m out: the leg at the node is a new piece
+  road(w, 40, -60, 40, 60);
+  const east2 = legToward(w, c, 1, 0);
+  let spec = w.roads.junctions.get(c);
+  for (const s of specSegs(spec)) {
+    assert.ok(w.roads.segs.alive[s], `the junction names segment ${s}, which is gone`);
+    assert.ok(w.roads.segsOf(c, []).includes(s), `the junction names segment ${s}, which is not at the node`);
+  }
+  assert.deepEqual(spec?.legs, [[east2, Rule.Stop]], 'the stop sign stayed with the east leg');
+  assert.equal(laneExits(w.roads, c, west)[0].exits.length, 1, 'the west lane still has its one exit');
+  assert.equal(laneExits(w.roads, c, west)[0].exits[0][0], east2);
+  // the east leg is demolished: nothing names it any more, and the west lane has exits again (automatic)
+  const commands = new CommandStack();
+  const d = demolishSeg(w, east2);
+  assert.ok(d.settle());
+  commands.push(d);
+  spec = w.roads.junctions.get(c);
+  for (const s of specSegs(spec)) assert.ok(w.roads.segsOf(c, []).includes(s), `after the demolition the junction still names segment ${s}`);
+  assert.ok(laneExits(w.roads, c, west)[0].exits.length > 0, 'the west lane was left with no exit: cars stuck');
+  // a new road elsewhere takes the freed id: it must not inherit anything
+  road(w, 500, 500, 600, 500);
+  for (const s of specSegs(w.roads.junctions.get(c))) assert.ok(w.roads.segsOf(c, []).includes(s));
+  commands.push(road(w, 700, 500, 800, 500));
+  commands.undo(); commands.undo();
+});
+
+test('A23: a street name stays with its street and never passes to a road that reuses the id', () => {
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  commands.push(road(w, -100, 0, 0, 0));
+  const s = w.roads.nearestSeg(-50, 0, 3)![0];
+  w.streetNames.set(s, 'Rua Teste');
+  // splitting the street keeps the name on both pieces
+  commands.push(road(w, -50, -60, -50, 60));
+  const west = w.roads.nearestSeg(-80, 0, 3)![0], east = w.roads.nearestSeg(-20, 0, 3)![0];
+  assert.equal(w.streetNames.get(west), 'Rua Teste', 'the west piece lost the name');
+  assert.equal(w.streetNames.get(east), 'Rua Teste', 'the east piece lost the name');
+  // demolished: the ids are free and the name goes with the road
+  const d = new RoadJournal(w, 'demolish');
+  for (const x of [west, east]) d.removeSeg(x);
+  assert.ok(d.settle());
+  commands.push(d);
+  for (const x of [west, east]) assert.equal(w.streetNames.has(x), false, `the name of the demolished segment ${x} stayed`);
+  commands.push(road(w, 300, 300, 400, 300));
+  const fresh = w.roads.nearestSeg(350, 300, 3)![0];
+  assert.equal(w.streetNames.get(fresh), undefined, 'the new road got the demolished street\'s name');
+  // undo the new road and the demolition: the name is back on the pieces
+  commands.undo(); commands.undo();
+  assert.equal(w.streetNames.get(w.roads.nearestSeg(-80, 0, 3)![0]), 'Rua Teste');
+});
+
+test('D7: zoning or building a road near a cell edge refreshes the lots of the cell across the edge', () => {
+  const w = flatWorld(1e9);
+  // a street 14 m south of the edge between two cell rows (z = 256): its north lots stand in the next row
+  road(w, 20, 242, 120, 242);
+  w.dirty.drain(Dirty.Lots);
+  const s = w.roads.nearestSeg(70, 242, 3)![0];
+  const z = new RoadJournal(w, 'zone');
+  z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential);
+  const north = cellId(cellX(70), cellX(270)), south = cellId(cellX(70), cellX(242));
+  assert.notEqual(north, south);
+  const dirty = w.dirty.drain(Dirty.Lots);
+  assert.ok(dirty.includes(south), 'the street\'s own cell');
+  assert.ok(dirty.includes(north), 'zoning did not refresh the lots of the cell across the edge');
+  // a new road in the south cell whose side lots overlap the north cell's lots
+  road(w, 200, 230, 200, 250);
+  assert.ok(w.dirty.drain(Dirty.Lots).includes(cellId(cellX(200), cellX(270))), 'a new road did not refresh the lots across the edge');
+});
+
+test('A19: restoring ids one by one (load, undo) takes time in proportion to the count, not its square', async () => {
+  const { Table } = await import('../src/core/table.ts');
+  const n = 100_000;
+  const t = new Table({ v: Float32Array }, 1024);
+  for (let i = 0; i < n; i++) t.alloc();
+  for (let i = 0; i < n; i++) t.release(i);
+  // an undo restores the ids it removed, oldest first: each one sits at the far end of the free list
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) t.allocAt(i);
+  const ms = performance.now() - t0;
+  assert.equal(t.size, n);
+  assert.ok(ms < 1000, `restoring ${n} ids took ${ms.toFixed(0)} ms`);
+  // the free list stays right: releasing and allocating again hands the ids back without repeats
+  for (let i = 0; i < 10; i++) t.release(i * 7);
+  const got = new Set<number>();
+  for (let i = 0; i < 10; i++) got.add(t.alloc());
+  assert.equal(got.size, 10);
+  for (const id of got) assert.equal(id % 7, 0);
+});
+
+test('A44: the undo history drops its oldest steps past a byte budget; flattening the map says what it holds', async () => {
+  const { FlattenMap } = await import('../src/world/brush.ts');
+  const w = flatWorld(0);
+  const flat = new FlattenMap(w, 20);
+  assert.ok((flat.bytes ?? 0) >= w.heights.length * 2, 'the flatten command reports the heights it keeps');
+  const commands = new CommandStack();
+  const big = (): Command => ({ label: 'big', bytes: 100 * 2 ** 20, apply() {}, invert() {} });
+  for (let i = 0; i < 10; i++) commands.push(big());
+  let steps = 0;
+  while (commands.undo()) steps++;
+  assert.ok(steps * 100 <= 512 && steps >= 1, `${steps} steps of 100 MB kept in the history`);
+});
+
+test('D10: the terrain brush and the river redraw the roads and redo the lots they reshape', async () => {
+  const { BrushStroke } = await import('../src/world/brush.ts');
+  const { RiverCommand } = await import('../src/world/ground.ts');
+  const w = flatWorld(0);
+  const cell = cellId(cellX(0), cellX(0));
+  for (const k of [Dirty.Roads, Dirty.RoadPaint, Dirty.Lots]) w.dirty.drain(k);
+  const b = new BrushStroke(w);
+  b.dab(0, 0, { mode: 'raise', radius: 20, strength: 2 }, 0.5);
+  for (const [name, k] of [['roads', Dirty.Roads], ['road paint', Dirty.RoadPaint], ['lots', Dirty.Lots]] as const) {
+    assert.ok(w.dirty.drain(k).includes(cell), `the brush did not mark the ${name}`);
+  }
+  b.finish();
+  const r = new RiverCommand(w, [[-100, 300], [100, 300]], 12, 2);
+  r.apply();
+  const rc = cellId(cellX(0), cellX(300));
+  for (const [name, k] of [['roads', Dirty.Roads], ['road paint', Dirty.RoadPaint], ['lots', Dirty.Lots]] as const) {
+    assert.ok(w.dirty.drain(k).includes(rc), `the river did not mark the ${name}`);
+  }
+});
+
+test('D11: a road across a river the player dug crosses it on a bridge and leaves the riverbed alone', async () => {
+  const { RiverCommand, waterAt } = await import('../src/world/ground.ts');
+  const { BuildKind, buildKindAt } = await import('../src/roads/economy.ts');
+  const w = flatWorld(1e9, 20);
+  const river = new RiverCommand(w, [[0, -300], [0, 300]], 24, 3);
+  river.apply();
+  const level = waterAt(w.water, 0, 0);
+  assert.ok(level > 10 && level < 20, `the river runs at ${level}`);
+  const bed = ground(w, 0, 0);
+  const a = snap(w.roads, -150, 0, 8), b = snap(w.roads, 150, 0, 8);
+  const p = planRoad(w, a, null, b, 0, 0);
+  assert.ok(p.ok, p.reason);
+  const mid = p.profile.y[Math.floor(p.profile.y.length / 2)];
+  assert.ok(mid > level + 4, `the road crosses the river at ${mid.toFixed(2)}, the water is at ${level.toFixed(2)}`);
+  assert.ok(buildRoad(w, p, a, b, 0).settle());
+  assert.ok(Math.abs(ground(w, 0, 0) - bed) < 0.01, `the riverbed was filled from ${bed.toFixed(2)} to ${ground(w, 0, 0).toFixed(2)}`);
+  // a road 2 m over a riverbed that is under water is a bridge, never an embankment
+  assert.equal(buildKindAt(bed + 2, bed, level), BuildKind.Bridge, 'over the river the road is priced as an embankment');
+});
+
+test('D12: the roundabout ring clears the buildings under it', () => {
+  const w = flatWorld(1e9);
+  road(w, -120, 0, 120, 0);
+  // a house where the ring will pass (radius 30, north side), and one well outside
+  const under = w.addBuilding({ x: 0, z: -30, w: 12, d: 12, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  const away = w.addBuilding({ x: 0, z: -80, w: 12, d: 12, h: 0, rot: 0, color: 0, seed: 2, zone: Zone.Residential, floors: 2, style: 1 });
+  const j = buildRoundabout(w, 0, 0, 30);
+  assert.ok(j && j.settle());
+  assert.equal(w.buildings.alive[under], 0, 'the house under the ring is still standing in the roundabout');
+  assert.equal(w.buildings.alive[away], 1, 'the house away from the ring was demolished');
+  j.invert();
+  assert.equal(w.buildings.alive[under], 1, 'undo brings the house back');
+});
+
+/** Ring segments: each ring node in exactly two, none shorter than `min` m, and the arcs going round once. */
+function checkRing(w: World, cx: number, cz: number, min: number): void {
+  const net = w.roads, sc = net.segs.cols, nc = net.nodes.cols;
+  const uses = new Map<number, number>();
+  let turn = 0;
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s] && sc.flags[s] & 1) {
+    assert.ok(sc.len[s] >= min, `ring segment ${s} is ${sc.len[s].toFixed(2)} m long`);
+    for (const n of [sc.a[s], sc.b[s]]) uses.set(n, (uses.get(n) ?? 0) + 1);
+    let d = Math.atan2(nc.z[sc.b[s]] - cz, nc.x[sc.b[s]] - cx) - Math.atan2(nc.z[sc.a[s]] - cz, nc.x[sc.a[s]] - cx);
+    while (d <= -Math.PI) d += 2 * Math.PI;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    turn += d;
+  }
+  for (const [n, k] of uses) assert.equal(k, 2, `ring node ${n} is in ${k} ring segments`);
+  assert.ok(Math.abs(Math.abs(turn) - 2 * Math.PI) < 0.01, `the ring turns ${(turn / Math.PI).toFixed(2)}π`);
+}
+
+test('D13: a roundabout over roads that meet the circle close together makes one clean ring', () => {
+  for (const gap of [-1, 1, 3, 6]) {
+    const w = flatWorld(1e9);
+    // two roads that cross the circle (radius 25) a few metres apart on its east side (−1: the same road twice), put
+    // straight into the network as the generated city or an old save can have them (planning refuses overlaps, D21)
+    generatedRoad(w, 0, 0, 60, gap, 0); generatedRoad(w, 60, gap, 110, gap, 0);
+    if (gap < 0) generatedRoad(w, 0, 0, 60, gap, 0);
+    else { generatedRoad(w, 0, 0, 60, -gap - 2, 0); generatedRoad(w, 60, -gap - 2, 110, -gap - 2, 0); }
+    generatedRoad(w, -100, 0, 0, 0, 0);
+    const j = buildRoundabout(w, 0, 0, 25);
+    if (!j) continue; // refusing is fine; a broken ring is not
+    assert.ok(j.settle());
+    checkRing(w, 0, 0, 4);
+  }
+});
+
+test('D14: a road from one point of a segment to another point of the same segment splits it at both points', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 0, 0);
+  const a = snap(w.roads, -80, 0, 8), b = snap(w.roads, -20, 0, 8);
+  assert.ok(a.seg >= 0 && a.seg === b.seg, 'both ends are on the same segment');
+  const p = planRoad(w, a, { x: -50, z: 50 }, b, 0, 0);
+  assert.ok(p.ok, p.reason);
+  assert.ok(buildRoad(w, p, a, b, 0).settle());
+  for (const x of [-80, -20]) {
+    const n = w.roads.nearestNode(x, 0, 1);
+    assert.ok(n >= 0, `no node where the new road meets the old one at x = ${x}`);
+    assert.equal(w.roads.nodes.cols.deg[n], 3, `the node at x = ${x} has ${w.roads.nodes.cols.deg[n]} roads`);
+  }
+});
+
+test('D15: joining two segments keeps each side\'s zone and refuses what one segment cannot hold', async () => {
+  const { joinAt } = await import('../src/roads/build.ts');
+  const make = (y: number, z2l: number = Zone.Commercial) => {
+    const w = flatWorld(1e9);
+    const net = w.roads;
+    const p = net.addNode({ x: -50, z: 0, y: 10 }), n = net.addNode({ x: 0, z: 0, y }), q = net.addNode({ x: 50, z: 0, y: 10 });
+    // both drawn east to west (q → n → p): residential on the left, commercial on the right
+    net.addSeg({ a: n, b: p, cx: -25, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: Zone.Commercial });
+    net.addSeg({ a: q, b: n, cx: 25, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: z2l });
+    return { w, n };
+  };
+  const { w, n } = make(10);
+  const j = joinAt(w, n);
+  assert.ok(!j.empty, 'the two segments join');
+  const s = w.roads.nearestSeg(0, 0, 2)![0], sc = w.roads.segs.cols, nc = w.roads.nodes.cols;
+  const westward = nc.x[sc.a[s]] > nc.x[sc.b[s]];
+  const left = westward ? sc.zl[s] : sc.zr[s], right = westward ? sc.zr[s] : sc.zl[s];
+  assert.equal(left, Zone.Residential, 'the residential side (left going west) changed');
+  assert.equal(right, Zone.Commercial, 'the commercial side (right going west) changed');
+  // a raised middle node or different zones on the two halves cannot become one straight segment
+  const hump = make(14);
+  assert.ok(joinAt(hump.w, hump.n).empty, 'joining lost the 4 m hump of the middle node');
+  const mixed = make(10, Zone.Industrial);
+  assert.ok(joinAt(mixed.w, mixed.n).empty, 'joining lost the zone of one half');
+});
+
+test('D16: no edit makes a segment longer than the spatial index holds; clicks near the end still find it', async () => {
+  const { joinAt, moveNode } = await import('../src/roads/build.ts');
+  const { MAX_SEG_LEN } = await import('../src/roads/network.ts');
+  const w = flatWorld(1e9);
+  const net = w.roads;
+  const p = net.addNode({ x: -110, z: 0, y: 10 }), n = net.addNode({ x: 0, z: 0, y: 10 }), q = net.addNode({ x: 110, z: 0, y: 10 });
+  net.addSeg({ a: p, b: n, cx: -55, cz: 0, profile: 0, flags: 16 });
+  net.addSeg({ a: n, b: q, cx: 55, cz: 0, profile: 0, flags: 16 });
+  const j = joinAt(w, n);
+  if (!j.empty) assert.ok(j.settle());
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) assert.ok(net.segs.cols.len[s] <= MAX_SEG_LEN + 0.01, `a join made a ${net.segs.cols.len[s].toFixed(0)} m segment`);
+  assert.ok(net.nearestSeg(108, 0, 4), 'a click 2 m from the end of the road finds nothing');
+  // moving a node far away
+  const w2 = flatWorld(1e9);
+  road(w2, 0, 0, 100, 0);
+  const end = w2.roads.nearestNode(100, 0, 1);
+  const m = moveNode(w2, end, 400, 0);
+  if (typeof m !== 'string') assert.ok(m.settle());
+  for (let s = 0; s < w2.roads.segs.end; s++) if (w2.roads.segs.alive[s]) assert.ok(w2.roads.segs.cols.len[s] <= MAX_SEG_LEN + 0.01, `moving a node made a ${w2.roads.segs.cols.len[s].toFixed(0)} m segment`);
+});
+
+test('D17: moving a node clears and settles under the roads that move, and refuses crossings and the map edge', async () => {
+  const { moveNode } = await import('../src/roads/build.ts');
+  const { MAP_HALF } = await import('../src/config.ts');
+  const w = flatWorld(1e9);
+  road(w, 0, 0, 80, 0);
+  const end = w.roads.nearestNode(80, 0, 1);
+  // a house and a hill where the road will swing to
+  const house = w.addBuilding({ x: 40, z: 30, w: 12, d: 12, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  for (let gz = Math.round(sampleCoord(20)); gz <= Math.round(sampleCoord(40)); gz++) for (let gx = Math.round(sampleCoord(20)); gx <= Math.round(sampleCoord(60)); gx++) w.heights[heightIndex(gx, gz)] = 12.5;
+  const m = moveNode(w, end, 80, 60);
+  assert.ok(typeof m !== 'string', `the move was refused: ${m}`);
+  assert.ok(m.settle());
+  assert.equal(w.buildings.alive[house], 0, 'the house the moved road now runs through still stands');
+  assert.ok(ground(w, 40, 30) < 11, `the ground under the moved road stayed at ${ground(w, 40, 30).toFixed(2)}`);
+  // across another road at grade: refused (it would cross without a junction)
+  road(w, 150, -60, 150, 60);
+  const r2 = moveNode(w, w.roads.nearestNode(80, 60, 1), 200, 0);
+  assert.equal(typeof r2, 'string', 'moving the node made the road cross another one without a junction');
+  // off the map: refused
+  const r3 = moveNode(w, w.roads.nearestNode(0, 0, 1), -MAP_HALF - 50, 0);
+  assert.equal(typeof r3, 'string', 'the node was moved off the map');
+});
+
+test('D18: widening a road clears the buildings the wider road covers and settles the terrain under it', async () => {
+  const { changeProfile, changeProfiles } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  const wide = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+  const half = PROFILE_INFO[wide].right;
+  // a house just off the local street, inside the avenue's width, and a bump in the ground there
+  const house = w.addBuilding({ x: 30, z: half - 4, w: 8, d: 8, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  w.heights[heightIndex(Math.round(sampleCoord(-30)), Math.round(sampleCoord(half - 3)))] = 13;
+  const s = w.roads.nearestSeg(30, 0, 3)![0];
+  const j = changeProfile(w, s, wide);
+  assert.ok(j.settle());
+  assert.equal(w.buildings.alive[house], 0, 'the house now under the avenue still stands');
+  j.invert();
+  assert.equal(w.buildings.alive[house], 1, 'undo brings the house back');
+  const k = changeProfiles(w, [w.roads.nearestSeg(-30, 0, 3)![0]], wide);
+  assert.ok(k.settle());
+  assert.ok(ground(w, -30, half - 3) < 11, `the bump under the widened road is still ${ground(w, -30, half - 3).toFixed(2)} m`);
+});
+
+/** World side (sign of z off the centreline) of the first parking strip of segment s on an east-west street. */
+function parkingSide(w: World, s: number): number {
+  const net = w.roads, sc = net.segs.cols, nc = net.nodes.cols, info = PROFILE_INFO[sc.profile[s]];
+  const e = info.edges.find((x) => x.strip.kind === 'parking');
+  assert.ok(e, `segment ${s} has no parking`);
+  const dx = nc.x[sc.b[s]] - nc.x[sc.a[s]], dz = nc.z[sc.b[s]] - nc.z[sc.a[s]], l = Math.hypot(dx, dz);
+  const u = (e.u0 + e.u1) / 2;
+  return Math.sign((-dx / l) * u); // left normal (dz, −dx): its z part is −dx
+}
+
+test('D19: a street-wide profile and parking on one side land on the same side of every block, whichever way each was drawn', async () => {
+  const { changeProfiles, streetChain, roadBetweenJunctions } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  const net = w.roads;
+  const n = [-150, -50, 50, 150].map((x) => net.addNode({ x, z: 0, y: 10 }));
+  net.addSeg({ a: n[0], b: n[1], cx: -100, cz: 0, profile: 0, flags: 16 });
+  net.addSeg({ a: n[2], b: n[1], cx: 0, cz: 0, profile: 0, flags: 16 }); // drawn the other way
+  net.addSeg({ a: n[2], b: n[3], cx: 100, cz: 0, profile: 0, flags: 16 });
+  const one = PROFILE_INFO.findIndex((p) => p.name === 'Estacionamento de um lado');
+  const first = net.nearestSeg(-100, 0, 2)![0];
+  const j = changeProfiles(w, streetChain(w, first), one);
+  assert.ok(j.settle());
+  const sides = [-100, 0, 100].map((x) => parkingSide(w, net.nearestSeg(x, 0, 2)![0]));
+  assert.ok(sides.every((v) => v === sides[0]), `the parking is on sides ${sides.join(', ')} along the street`);
+  // the inspector's parking chip on a reversed block: the whole road between junctions gets it on the same side
+  const w2 = flatWorld(1e9), m = [-150, -50, 50].map((x) => w2.roads.addNode({ x, z: 0, y: 10 }));
+  w2.roads.addSeg({ a: m[0], b: m[1], cx: -100, cz: 0, profile: 0, flags: 16 });
+  w2.roads.addSeg({ a: m[2], b: m[1], cx: 0, cz: 0, profile: 0, flags: 16 });
+  const s2 = w2.roads.nearestSeg(0, 0, 2)![0];
+  const k = changeProfiles(w2, roadBetweenJunctions(w2, s2), one, s2);
+  assert.ok(k.settle());
+  const s2b = [-100, 0].map((x) => parkingSide(w2, w2.roads.nearestSeg(x, 0, 2)![0]));
+  assert.equal(s2b[0], s2b[1], `parking on sides ${s2b.join(', ')}`);
+});
+
+test('D20: a mid-block crossing or U-turn node that gets a third road becomes an ordinary automatic junction', async () => {
+  const { addCrossing, addUTurn } = await import('../src/roads/build.ts');
+  const { effectiveControl } = await import('../src/roads/control.ts');
+  for (const kind of ['zebra', 'uturn'] as const) {
+    const w = flatWorld(1e9);
+    const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+    road(w, -100, 0, 100, 0, kind === 'uturn' ? avenue : 0);
+    const s = w.roads.nearestSeg(0, 0, 2)![0];
+    const r = kind === 'zebra' ? addCrossing(w, s, 0.5, Ctl.Zebra) : addUTurn(w, s, 0.5);
+    assert.ok(typeof r !== 'string', String(r));
+    assert.ok(r.settle());
+    let mid = -1;
+    for (let n = 0; n < w.roads.nodes.end; n++) if (w.roads.nodes.alive[n] && w.roads.junctions.has(n)) mid = n;
+    assert.ok(mid >= 0);
+    const nc = w.roads.nodes.cols;
+    road(w, nc.x[mid], nc.z[mid], nc.x[mid], nc.z[mid] - 80);
+    assert.equal(nc.deg[mid], 3);
+    const c = effectiveControl(w.roads, mid);
+    assert.equal(c.legs.size, 3, `the ${kind} node with a third road has rules for ${c.legs.size} legs`);
+    assert.ok(c.ctl !== Ctl.Zebra && c.ctl !== Ctl.UTurn, `the ${kind} node kept its two-road control (${c.ctl})`);
+  }
+});
+
+test('D21: a road over another one, or a second road between the same two nodes, is refused', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  const before = shape(w);
+  const tryRoad = (ax: number, az: number, bx: number, bz: number, r: number) => {
+    const a = snap(w.roads, ax, az, r), b = snap(w.roads, bx, bz, r);
+    const p = planRoad(w, a, null, b, 0, 0);
+    if (p.ok) assert.ok(buildRoad(w, p, a, b, 0).settle());
+    return p;
+  };
+  assert.equal(tryRoad(-100, 0, 100, 0, 8).ok, false, 'a second road between the same two ends was allowed');
+  assert.equal(tryRoad(-60, 0, 60, 0, 8).ok, false, 'a road along the same road was allowed');
+  assert.equal(tryRoad(-60, 6, 60, 6, 1).ok, false, 'a road 6 m alongside, over half of the other, was allowed');
+  assert.equal(shape(w), before);
+  // a road that crosses it, or one alongside with room between, is fine
+  assert.ok(tryRoad(0, -60, 0, 60, 1).ok, 'a crossing road was refused');
+  assert.ok(tryRoad(-60, 40, 60, 40, 1).ok, 'a road 40 m alongside was refused');
+});
+
+test('D22: repainting a street\'s zone leaves the corner buildings that front the cross street', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const w = flatWorld(1e9);
+  road(w, -150, 0, 150, 0);
+  road(w, 0, -150, 0, 150);
+  const z = new RoadJournal(w, 'zone');
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && Math.abs(w.roads.segs.cols.mz[s]) < 1) { z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential); }
+  // facing the main street (front towards −z), and on the corner facing the cross street (front towards −x)
+  const onMain = w.addBuilding({ x: 60, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  const onCross = w.addBuilding({ x: 20, z: 30, w: 14, d: 26, h: 0, rot: -Math.PI / 2, color: 0, seed: 2, zone: Zone.Residential, floors: 2, style: 1 });
+  const tool = new ZoneTool(w, new CommandStack());
+  tool.zone = Zone.Commercial; tool.radius = 30;
+  tool.begin(); tool.dab(50, 16); tool.end();
+  assert.equal(w.buildings.alive[onMain], 0, 'the house facing the rezoned street stays (it should give way)');
+  assert.equal(w.buildings.alive[onCross], 1, 'the corner house facing the cross street was demolished');
+});
+
+test('D23: the zone brush never zones rails, highways or ramps', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const names = ['Ferrovia dupla', 'Metrô (duplo)', 'Rodovia 6 faixas', 'Alça de acesso', 'Pista dupla, 2 faixas'];
+  for (const name of names) {
+    const w = flatWorld(1e9);
+    road(w, -100, 0, 100, 0, PROFILE_INFO.findIndex((p) => p.name === name));
+    const tool = new ZoneTool(w, new CommandStack());
+    tool.begin(); tool.dab(0, 20); tool.dab(0, -20); tool.end();
+    const sc = w.roads.segs.cols;
+    for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) assert.ok(sc.zl[s] === 0 && sc.zr[s] === 0, `the brush zoned a ${name}`);
+  }
+  const street = flatWorld(1e9);
+  road(street, -100, 0, 100, 0, 0);
+  const tool = new ZoneTool(street, new CommandStack());
+  tool.begin(); tool.dab(0, 20); tool.end();
+  const sc = street.roads.segs.cols;
+  let zoned = 0;
+  for (let s = 0; s < street.roads.segs.end; s++) if (street.roads.segs.alive[s] && (sc.zl[s] || sc.zr[s])) zoned++;
+  assert.ok(zoned > 0, 'a street is still zoned');
+});
+
+test('D24: demolishing a Stop sign takes its rule away; undo puts both back', async () => {
+  const { signRuleCommand, SIGN_STOP } = await import('../src/roads/signRule.ts');
+  const { ItemsCommand, Item } = await import('../src/world/items.ts');
+  const { demolishTarget, demolishBox } = await import('../src/tools/demolish.ts');
+  for (const how of ['click', 'box'] as const) {
+    const w = flatWorld(1e9);
+    road(w, -150, 0, 150, 0);
+    road(w, 0, -150, 0, 150);
+    const c = w.roads.nearestNode(0, 0, 1);
+    // a Stop sign on the east arm's sidewalk, 12 m out, put the way the streetscape tool does
+    const put = new ItemsCommand(w.items, 'sign');
+    const id = put.add([12, 6, 0, 0, Item.Sign, SIGN_STOP]);
+    const rule = signRuleCommand(w, 12, 6, SIGN_STOP, true);
+    assert.ok(typeof rule !== 'string');
+    rule.apply();
+    assert.ok(w.roads.junctions.get(c)?.legs?.some(([, r]) => r === Rule.Stop), 'the sign made a stop rule');
+    const cmd = how === 'click' ? demolishTarget(w, { kind: 'item', id }).cmd : demolishBox(w, 8, 2, 16, 10)!.cmd;
+    assert.equal(w.items.t.alive[id], 0);
+    assert.ok(!w.roads.junctions.get(c)?.legs?.some(([, r]) => r === Rule.Stop), `demolishing the sign (${how}) left its stop rule`);
+    cmd.invert();
+    assert.equal(w.items.t.alive[id], 1);
+    assert.ok(w.roads.junctions.get(c)?.legs?.some(([, r]) => r === Rule.Stop), 'undo brought the sign back without its rule');
+  }
+});
+
+test('D25: Backspace in the wall tool takes back its own last run, never another command', async () => {
+  const { ItemTool } = await import('../src/tools/itemTool.ts');
+  const { Item } = await import('../src/world/items.ts');
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  const stub = new Proxy({}, { get: () => () => {} });
+  const tool = new ItemTool(w, commands, stub as never, stub as never);
+  tool.setMode('barrier');
+  tool.barrier = Item.Wall;
+  const at = (x: number, z: number) => ({ x, y: 10, z }) as never;
+  tool.click(at(300, 300), false);
+  tool.click(at(320, 300), false);
+  tool.click(at(340, 300), false);
+  assert.equal(w.items.size, 2, 'two runs of wall');
+  // Backspace twice: each takes back the last run, and the trace goes on from where that run began
+  tool.back();
+  assert.equal(w.items.size, 1, 'Backspace did not take back the last run');
+  tool.back();
+  assert.equal(w.items.size, 0, 'a second Backspace did not take back the run before');
+  tool.click(at(320, 320), false);
+  assert.equal(w.items.size, 1, 'after Backspace the trace did not go on from its start');
+  // the player builds a road while the trace is still open, then presses Backspace
+  commands.push(road(w, -100, 0, 100, 0));
+  const roads = w.roads.segs.size;
+  tool.back();
+  assert.equal(w.roads.segs.size, roads, 'Backspace in the wall tool undid the road');
+});
+
+test('D26: lot edits never put a lot over a road or over another lot', async () => {
+  const { polygonLot, moveLotCorner, curveLotSide, nearestCorner } = await import('../src/world/lotEdit.ts');
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0); // half width 5.9: the road covers −5.9 < z < 5.9
+  const lot = (x: number, z: number) => w.addBuilding({ x, z, w: 16, d: 24, h: 0, rot: Math.PI, color: 0, seed: x, zone: Zone.Residential, floors: 0, style: 1 });
+  const a = lot(0, 20), b = lot(30, 20);
+  // a drawn polygon over the road, and one over lot b
+  assert.equal(typeof polygonLot([[-50, -3], [-30, -3], [-30, 20], [-50, 20]], w), 'string', 'a drawn lot over the road was accepted');
+  assert.equal(typeof polygonLot([[25, 15], [45, 15], [45, 40], [25, 40]], w), 'string', 'a drawn lot over another lot was accepted');
+  assert.equal(typeof polygonLot([[-50, 10], [-30, 10], [-30, 30], [-50, 30]], w), 'object', 'a drawn lot on free ground was refused');
+  // dragging a corner of lot a onto the road, or into lot b
+  const [k] = nearestCorner(w, a, 8, 8);
+  assert.equal(typeof moveLotCorner(w, a, k, 8, 2), 'string', 'a corner was dragged onto the road');
+  assert.equal(typeof moveLotCorner(w, a, k, 26, 8), 'string', 'a corner was dragged into the next lot');
+  // curving the front side out over the road
+  assert.equal(typeof curveLotSide(w, a, 0, 8, 0, 0), 'string', 'a side was curved over the road');
+  assert.equal(w.buildings.alive[b], 1);
+});
+
+test('D27: growth follows the game speed: nothing while paused, twice as fast at 2×', async () => {
+  const { Growth } = await import('../src/world/growth.ts');
+  const lots = (n: number): LotColumns => ({ count: n, x: Float32Array.from({ length: n }, (_, i) => (i % 40) * 30 - 600), z: Float32Array.from({ length: n }, (_, i) => Math.floor(i / 40) * 40 + 40),
+    w: new Float32Array(n).fill(14), d: new Float32Array(n).fill(26), rot: new Float32Array(n), zone: new Uint8Array(n).fill(Zone.Residential),
+    seed: Uint32Array.from({ length: n }, (_, i) => i * 31 + 7), profile: new Uint16Array(n) });
+  const grown = (speed: number): number => {
+    const w = flatWorld(0);
+    const g = new Growth(w, null as unknown as JobPool);
+    const cells = new Map<number, LotColumns>();
+    const l = lots(200);
+    for (let i = 0; i < l.count; i++) {
+      const c = cellId(cellX(l.x[i]), cellX(l.z[i]));
+      if (!cells.has(c)) cells.set(c, l);
+    }
+    (g as unknown as { setLots(c: number, l: LotColumns): void }).setLots(cellId(cellX(0), cellX(100)), l);
+    g.rate = 5;
+    for (let f = 0; f < 60; f++) g.tick(1 / 60 * 10, speed);
+    return w.buildings.size;
+  };
+  assert.equal(grown(0), 0, 'buildings grew with the game paused');
+  const one = grown(1), two = grown(2);
+  assert.ok(one > 0);
+  assert.ok(two >= one * 1.8, `at 2× ${two} buildings grew, at 1× ${one}`);
+});
+
+test('D28: changing a junction\'s control redraws the roads there but does not redo any lots', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  road(w, 0, -100, 0, 100);
+  const c = w.roads.nearestNode(0, 0, 1);
+  for (const k of [Dirty.Roads, Dirty.RoadPaint, Dirty.Lots]) w.dirty.drain(k);
+  const j = new RoadJournal(w, 'control');
+  j.setJunction(c, { ctl: Ctl.Signal });
+  assert.ok(w.dirty.drain(Dirty.RoadPaint).length > 0, 'the paint was not redrawn');
+  assert.equal(w.dirty.drain(Dirty.Lots).length, 0, 'changing the control redid lots');
+});
+
+test('D30: painting the ground does not rebuild the props; planting a forest does', async () => {
+  const { GroundStroke, Ground } = await import('../src/world/ground.ts');
+  const w = flatWorld(0);
+  w.dirty.drain(Dirty.Props);
+  const paint = new GroundStroke(w);
+  paint.dab(0, 0, 20, 'paint', Ground.Sand, 1, 0.1);
+  assert.equal(w.dirty.drain(Dirty.Props).length, 0, 'a dab of ground paint marked the props');
+  const forest = new GroundStroke(w);
+  forest.dab(0, 0, 20, 'forest', 0, 1, 0.1);
+  assert.ok(w.dirty.drain(Dirty.Props).length > 0, 'planting trees must rebuild the props');
+});
+
+test('D38: applying a segment\'s profile to the whole street reaches the blocks that have another profile', async () => {
+  const { changeProfiles, streetChain } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  const net = w.roads;
+  const n = [-150, -50, 50, 150].map((x) => net.addNode({ x, z: 0, y: 10 }));
+  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas');
+  net.addSeg({ a: n[0], b: n[1], cx: -100, cz: 0, profile: 0, flags: 16 });
+  net.addSeg({ a: n[1], b: n[2], cx: 0, cz: 0, profile: avenue, flags: 16 });
+  net.addSeg({ a: n[2], b: n[3], cx: 100, cz: 0, profile: 0, flags: 16 });
+  const first = net.nearestSeg(-100, 0, 2)![0];
+  const chain = streetChain(w, first, true);
+  assert.equal(chain.length, 3, `the street has ${chain.length} segments`);
+  assert.ok(changeProfiles(w, chain, 0).settle());
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) assert.equal(net.segs.cols.profile[s], 0, 'a block kept its old profile');
+});
+
+test('D39: the preview\'s price of a planned road matches what building it costs', async () => {
+  const { planPrice } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  // sea in the middle: part of the road is a bridge
+  for (let gz = 0; gz < HEIGHT_MAP_RES; gz++) for (let gx = Math.round(sampleCoord(-30)); gx < Math.round(sampleCoord(30)); gx++) w.heights[heightIndex(gx, gz)] = -4;
+  for (const [ax, bx, prof] of [[-300, -100, 0], [-150, 150, 0], [-200, 200, PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]]) {
+    const a = snap(w.roads, ax, 0, 1), b = snap(w.roads, bx, 0, 1);
+    const p = planRoad(w, a, null, b, prof, 0);
+    assert.ok(p.ok, p.reason);
+    const shown = planPrice(w, p, prof);
+    const j = buildRoad(w, p, a, b, prof);
+    const real = j.price;
+    j.invert();
+    assert.ok(Math.abs(shown - real) <= real * 0.08, `the preview shows R$ ${shown}, building costs R$ ${real}`);
+  }
+});
+
+test('D33: a landmark that grows over time keeps to 3 floors above its tallest neighbour', async () => {
+  const { Growth } = await import('../src/world/growth.ts');
+  const w = flatWorld(0);
+  const g = new Growth(w, null as unknown as JobPool);
+  let worst = 0, landmarks = 0;
+  for (let i = 0; i < 400; i++) {
+    const x = (i % 20) * 120 - 1200, z = Math.floor(i / 20) * 120 - 1200;
+    w.addBuilding({ x: x + 30, z, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Commercial, floors: 6, style: 1 });
+    const l: LotColumns = { count: 1, x: new Float32Array([x]), z: new Float32Array([z]), w: new Float32Array([30]), d: new Float32Array([30]), rot: new Float32Array([0]),
+      zone: new Uint8Array([Zone.ComHigh]), seed: new Uint32Array([i * 7919 + 3]), profile: new Uint16Array([PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]) };
+    const rec = g.recordFor(l, 0, true);
+    if (rec.color) landmarks++;
+    worst = Math.max(worst, rec.floors);
+  }
+  assert.ok(worst <= 9, `a building grew to ${worst} floors next to a 6-floor one (${landmarks} landmarks)`);
+});
+
+test('D32: one square per neighbourhood, even after the lots are cut again', async () => {
+  const { Growth } = await import('../src/world/growth.ts');
+  const { Fn } = await import('../src/world/arch.ts');
+  const w = flatWorld(0);
+  const g = new Growth(w, null as unknown as JobPool);
+  const set = g as unknown as { setLots(c: number, l: LotColumns): void };
+  const lotsAt = (xs: number[], big: number): LotColumns => ({ count: xs.length, x: Float32Array.from(xs), z: new Float32Array(xs.length).fill(100),
+    w: Float32Array.from(xs.map((_, i) => (i === big ? 40 : 14))), d: Float32Array.from(xs.map((_, i) => (i === big ? 40 : 26))), rot: new Float32Array(xs.length),
+    zone: new Uint8Array(xs.length).fill(Zone.Residential), seed: Uint32Array.from(xs.map((_, i) => i + 11)), profile: new Uint16Array(xs.length) });
+  // every cell of one neighbourhood (2 × 2 cells) gets lots with a big one; grow the big lot of each, twice over
+  // (the second time the lots were cut again and another lot is the biggest)
+  let squares = 0;
+  for (const round of [0, 1]) for (const [cx, cz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const x0 = cx * 256 - 5120 + 5120 % 512, z0 = cz * 256 - 5120 + 5120 % 512;
+    const l = lotsAt([x0 + 30, x0 + 90, x0 + 150, x0 + 210], round === 0 ? 1 : 2);
+    for (let i = 0; i < l.count; i++) l.z[i] = z0 + 100;
+    set.setLots(cellId(cellX(x0 + 1), cellX(z0 + 1)), l);
+    const big = round === 0 ? 1 : 2;
+    const rec = g.recordFor(l, big);
+    if (rec.fn === Fn.Square) { squares++; w.growBuilding(rec); }
+  }
+  assert.equal(squares, 1, `${squares} squares in one neighbourhood`);
+});
+
+test('D35: a new road through any part of a lot clears it; a lot beside the road stays', () => {
+  const w = flatWorld(1e9);
+  // a deep lot (20 m front, 100 m deep) whose back end the new road crosses, 45 m from its centre
+  const deep = w.addBuilding({ x: 0, z: 0, w: 20, d: 100, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Industrial, floors: 2, style: 1 });
+  // a lot whose side runs 1 m clear of the road's sidewalk
+  const beside = w.addBuilding({ x: 60, z: 45 - 5.9 - 1 - 10, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 2, zone: Zone.Residential, floors: 2, style: 1 });
+  road(w, -100, 45, 100, 45);
+  assert.equal(w.buildings.alive[deep], 0, 'the deep lot the road runs across still stands');
+  assert.equal(w.buildings.alive[beside], 1, 'the lot beside the road was demolished');
+});
+
+test('D36: changing only the density keeps the buildings that fit it; towers go when the zone turns low', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const w = flatWorld(1e9);
+  road(w, -150, 0, 150, 0);
+  const z = new RoadJournal(w, 'zone');
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential); }
+  const house = w.addBuilding({ x: 30, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  const tower = w.addBuilding({ x: 60, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 2, zone: Zone.Residential, floors: 12, style: 1 });
+  const paint = (zone: number) => { const t = new ZoneTool(w, new CommandStack()); t.zone = zone; t.radius = 60; t.begin(); t.dab(45, 16); t.end(); };
+  paint(Zone.ResHigh);
+  assert.equal(w.buildings.alive[house], 1, 'turning residential to high density demolished the house');
+  assert.equal(w.buildings.alive[tower], 1, 'turning residential to high density demolished the tower');
+  paint(Zone.ResLow);
+  assert.equal(w.buildings.alive[house], 1, 'turning it low demolished the house too');
+  assert.equal(w.buildings.alive[tower], 0, 'a 12-floor tower stays in a low-density zone');
+});
+
+test('D43: undo while a stroke is still open does nothing; after it closes it undoes the stroke', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  commands.push(road(w, -150, 0, 150, 0));
+  const roads = w.roads.segs.size;
+  const tool = new ZoneTool(w, commands);
+  tool.begin();
+  tool.dab(0, 20);
+  assert.equal(commands.undo(), false, 'undo ran in the middle of the zoning stroke');
+  assert.equal(w.roads.segs.size, roads, 'undo in the middle of the stroke took the road away');
+  tool.end();
+  assert.equal(commands.undo(), true);
+  const sc = w.roads.segs.cols;
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) assert.ok(!sc.zl[s] && !sc.zr[s], 'the undo after the stroke did not take the zoning back');
+  assert.equal(w.roads.segs.size, roads);
+});
+
+test('D29: a long diagonal road marks the cells it touches, not its whole bounding box', () => {
+  const w = flatWorld(1e9);
+  // bumpy ground so the road has terrain to settle along all its length
+  for (let i = 0; i < w.heights.length; i++) w.heights[i] = 10 + ((i * 2654435761) % 7) * 0.1;
+  for (const k of [Dirty.Terrain, Dirty.Buildings, Dirty.Roads]) w.dirty.drain(k);
+  road(w, -500, -500, 500, 500);
+  const marked = new Set(w.dirty.drain(Dirty.Terrain));
+  // the cells within 30 m of the line (half width, the 7 m blend and a sample of margin)
+  const near = new Set<number>();
+  for (let s = -520; s <= 520; s += 2) for (const [dx, dz] of [[-30, 30], [30, -30], [0, 0], [-21, -21], [21, 21]]) near.add(cellId(cellX(s + dx), cellX(s + dz)));
+  const extra = [...marked].filter((c) => !near.has(c));
+  assert.ok(marked.size > 0);
+  assert.equal(extra.length, 0, `${extra.length} of ${marked.size} cells marked for terrain lie away from the road`);
+});

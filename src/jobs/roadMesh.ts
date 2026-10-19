@@ -1,14 +1,15 @@
-// Monta a malha das vias de um pedaço da rede (worker). Trechos viram faixas
-// pela seção do perfil (asfalto, meio-fio, calçada, canteiro, mureta); nós com
-// 3+ braços viram cruzamentos com esquinas arredondadas; pontas soltas ganham
-// arremate. Faixa de pedestre, linha de retenção e faixas pintadas ficam no
-// shader (atributo extra: u, v, até o fim, código). Rebaixo de calçada junto à
-// faixa de pedestre. Trechos altos viram pontes (laje, mureta, pilares) e
-// trechos enterrados viram túneis com portal.
+// Builds the road mesh of a piece of the network (worker). Segments become strips
+// by the profile's cross-section (asphalt, kerb, sidewalk, median, barrier); nodes with
+// 3+ arms become junctions with rounded corners; loose ends get
+// a finish. Zebra crossings, stop lines and painted lines are in the
+// shader (extra attribute: u, v, to the end, code). Dropped kerbs at the
+// zebra crossings. High segments become bridges (deck, parapet, piers) and
+// buried segments become tunnels with a portal.
 
+import { SEA_LEVEL } from '../config.ts';
 import { arcTable, bez, bezD, tAtLength, type Arm, type Quad } from '../roads/geometry.ts';
-import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, junctionRetreats } from '../roads/junction.ts';
-import { PROFILE_INFO, Paving, Surface, type ProfileInfo, type Strip } from '../roads/profiles.ts';
+import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, cornerFillet, junctionRetreats } from '../roads/junction.ts';
+import { PROFILE_INFO, Paving, Surface, packRoadTag, type ProfileInfo, type Strip } from '../roads/profiles.ts';
 import { SegFlag } from '../roads/flags.ts';
 import { heightAt } from '../world/heights.ts';
 import { ZONE_COLORS } from '../roads/zones.ts';
@@ -17,24 +18,58 @@ import type { PackedMesh, RoadGraph } from './protocol.ts';
 
 export const RMAT = { Asphalt: 2, Plain: 3, Sidewalk: 4, Grass: 5, Concrete: 6, Curb: 7, Zone: 8, Pavers: 9, Stone: 10 } as const;
 export const CURB_H = 0.15;
+/** Roadcraft 4.0 (render/roadSurfaceReads.ts KERB_RISE, MEDIAN_KERB, MEDIAN_PLANTING): the kerb stone stands 1 cm proud of
+ *  the footway; a median's kerb is at the footway's height and its planting 2 cm over it, so they are never one plane. */
+export const KERB_TOP = CURB_H + 0.01, MEDIAN_TOP = CURB_H + 0.02;
 const DECK = 1.3;
 const SKIRT = 0.7;
-const CROSSWALK = 4.2; // comprimento da faixa de pedestre + retenção
-const PILLAR_EVERY = 26;
+/** Dropped kerb (Roadcraft curbRamps.ts): the zebra runs 0.7–3.6 m from the mouth; the kerb is down across it, at
+ *  RAMP_LOW, rising back to full height towards the mouth and over a 1.5 m flare (1:10) past it; the walk ramps up
+ *  over RAMP_RUN (1:12) away from the kerb. */
+const RAMP_LOW = 0.02, RAMP_RUN = 1.8, RAMP_FROM = 0.65, RAMP_TO = 3.65, RAMP_FLARE = 1.5;
+const RAMP_MARKS = [RAMP_FROM, RAMP_TO, RAMP_TO + RAMP_FLARE];
+/** Height share (0 down, 1 full) of the kerb at `d` metres from the mouth. */
+function rampShare(d: number): number {
+  if (d < RAMP_FROM) return Math.max(0, (RAMP_FROM - d) / RAMP_FROM);
+  if (d <= RAMP_TO) return 0;
+  return Math.min(1, (d - RAMP_TO) / RAMP_FLARE);
+}
+/** Bridges (Roadcraft render/structures.ts): pier spacing on land (viaduct) and over water, the crossbeam's height and
+ *  overhang, an abutment's length, and how near an abutment a pier may stand. */
+export const PIER_SPACING_ELEVATED = 29.6, PIER_SPACING_BRIDGE = 38.4;
+const CAP_H = 0.72, CAP_OVERHANG = 0.64, ABUTMENT_LEN = 1.6, ABUTMENT_CLEAR = 10.4, PARAPET_FROM = 0.64, PARAPET_FULL = 1.28;
+const smooth01 = (t: number) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
+
+/** Where the piers of a span from s0 to s1 go: every `spacing` from half a spacing in, never within ABUTMENT_CLEAR of an
+ *  abutment; one at mid-span when none fits. */
+export function pierStations(s0: number, s1: number, spacing: number, abutments: readonly number[]): number[] {
+  const out: number[] = [];
+  for (let d = s0 + spacing * 0.5; d < s1 - spacing * 0.35; d += spacing) if (!abutments.some((a) => Math.abs(a - d) < ABUTMENT_CLEAR)) out.push(d);
+  if (!out.length) { const mid = (s0 + s1) / 2; if (!abutments.some((a) => Math.abs(a - mid) < ABUTMENT_CLEAR)) out.push(mid); }
+  return out;
+}
+
+/** A bent under a deck of half width `halfDeck`: column offsets across the road, the column's width (thicker when
+ *  taller: an eighth of its height, between r and 1.8 r) and r (wider over water). */
+export function bentColumns(halfDeck: number, height: number, overWater: boolean): { offsets: number[]; width: number; radius: number } {
+  const radius = overWater ? 1.28 : 1.04;
+  const spread = Math.max(0, Math.min(0.55 * halfDeck, halfDeck - radius - 1));
+  return { offsets: spread > 0 ? [-spread, spread] : [0], width: Math.min(radius * 1.8, Math.max(radius, height / 8)), radius };
+}
 
 const COLOR = {
   asphalt: 0x3a3c40, parking: 0x404246, bike: 0x9a4a3e, shoulder: 0x4a4c4f,
   sidewalk: 0xb3b0aa, curb: 0xd3cec4, grass: 0x5a7a3e, concrete: 0xa9a59d,
 };
 
-/** Flags no código do vértice (código = trecho * 16 + flags). */
+/** Flags in the vertex code (code = segment * 16 + flags). */
 export const RoadCode = { CrossA: 1, CrossB: 2, OneWay: 4, Ring: 8 } as const;
 
 interface ArmRef { seg: number; end: 0 | 1; arm: Arm }
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 
-/** Cor da pista pelo piso. */
+/** Carriageway colour by its surface. */
 function surfaceColor(surface: number | undefined): number {
   return surface === Surface.Concrete ? 0x8e8b85 : surface === Surface.Cobble ? 0x6e675f : surface === Surface.Ballast ? 0x7a746b : COLOR.asphalt;
 }
@@ -65,10 +100,18 @@ function stripMat(st: Strip): number {
 function stripHeight(st: Strip): number {
   if (st.flush) return st.kind === 'barrier' ? 0.9 : 0;
   switch (st.kind) {
-    case 'sidewalk': case 'curb': case 'median': return CURB_H;
+    case 'sidewalk': return CURB_H;
+    case 'curb': return KERB_TOP;
+    case 'median': return MEDIAN_TOP;
     case 'barrier': return 0.9;
     default: return 0;
   }
+}
+
+/** Width of the kerb strip at the carriageway's left (or right) edge; 0 when the profile has none there. */
+function kerbWidth(info: ProfileInfo, left: boolean): number {
+  const e = info.edges.find((x) => x.strip.kind === 'curb' && (left ? Math.abs(x.u0 - info.asphaltLeft) : Math.abs(x.u1 + info.asphaltRight)) < 0.01);
+  return e && !e.strip.flush ? e.u1 - e.u0 : 0;
 }
 
 export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: number, originZ: number, extent: number, lod: number): PackedMesh | null {
@@ -80,7 +123,7 @@ export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: numb
   const tables = quads.map((q) => arcTable(q, 48));
   const lens = tables.map((t) => t[t.length - 1]);
 
-  // braços de cada nó, ordenados, e o recuo de cada ponta de trecho
+  // arms of each node, sorted, and the setback of each segment end
   const armsOf: ArmRef[][] = Array.from({ length: g.nodeCount }, () => []);
   for (let s = 0; s < g.segCount; s++) {
     for (const end of [0, 1] as const) armsOf[end === 0 ? g.sa[s] : g.sb[s]].push({ seg: s, end, arm: armOf(quads[s], g.sprofile[s], end) });
@@ -94,11 +137,11 @@ export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: numb
     if (list.length < 2) continue;
     junctionRetreats(list.map((r) => r.arm), list.map((r) => lens[r.seg]), r16, order);
     list.forEach((r, i) => { retreat[r.seg * 2 + r.end] = r16[i]; });
-    // o cruzamento é montado na ordem anti-horária
+    // the junction is built in counter-clockwise order
     const sorted = order.map((i) => list[i]);
     list.length = 0; list.push(...sorted);
   }
-  // faixa no meio da quadra: o nó de duas vias pinta a zebra como um cruzamento
+  // mid-block crossing: the two-road node paints the zebra like a junction
   const deg = (n: number) => armsOf[n].length === 2 && (g.nctl[n] === 9 || g.nctl[n] === 10) ? 3 : armsOf[n].length;
 
   for (let s = 0; s < g.segCount; s++) {
@@ -108,7 +151,7 @@ export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: numb
   for (let n = 0; n < g.nodeCount; n++) {
     if (!g.nodeOwn[n]) continue;
     const list = armsOf[n];
-    // piso do cruzamento: o da via de maior preferência
+    // junction surface: that of the road with the most priority
     let best = list[0] ? g.sprofile[list[0].seg] : 0;
     for (const r of list) if ((PROFILE_INFO[g.sprofile[r.seg]].priority ?? 0) > (PROFILE_INFO[best].priority ?? 0)) best = g.sprofile[r.seg];
     mb.curTag = best;
@@ -122,7 +165,7 @@ export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: numb
   return mb.pack(originX, originZ, extent);
 }
 
-/** Frame no ponto s (comprimento) do trecho: posição, direção, altura. */
+/** Frame at point s (length) of the segment: position, direction, height. */
 function frameAt(g: RoadGraph, s: number, q: Quad, table: Float64Array, len: number, at: number, out: Float64Array): void {
   const t = tAtLength(table, at);
   bez(q, t, p2); bezD(q, t, d2);
@@ -139,18 +182,18 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
   if (s1 - s0 < 0.2) return;
   const ring = (g.sflags[s] & SegFlag.Ring) !== 0;
   const crossA = degA >= 3 && !ring, crossB = degB >= 3 && !ring;
-  // código: id do trecho * 16 + bits (exato em float32 até 1 milhão de trechos); o perfil vai em position.w
-  mb.curTag = info.id | (g.srule[s] & 7) << 8 | ((g.srule[s] >> 3) & 7) << 11;
+  // code: segment id * 16 + bits (exact in float32 up to 1 million segments); the profile goes in position.w
+  mb.curTag = packRoadTag(info.id, g.srule[s] & 7, (g.srule[s] >> 3) & 7);
   const code = g.sid[s] * 16 + (crossA ? RoadCode.CrossA : 0) + (crossB ? RoadCode.CrossB : 0) + (info.oneWay ? RoadCode.OneWay : 0) + (ring ? RoadCode.Ring : 0);
 
-  // posições das amostras: passo regular + pontos do rebaixo
+  // sample positions: a regular step + the dropped kerb's points
   const step = lod === 0 ? 3 : 10;
   const marks = new Set<number>();
   const n0 = Math.max(1, Math.ceil((s1 - s0) / step));
   for (let k = 0; k <= n0; k++) marks.add(s0 + (s1 - s0) * k / n0);
   if (lod === 0) {
-    if (crossA) for (const d of [CROSSWALK - 1.2, CROSSWALK + 0.4]) if (s0 + d < s1) marks.add(s0 + d);
-    if (crossB) for (const d of [CROSSWALK - 1.2, CROSSWALK + 0.4]) if (s1 - d > s0) marks.add(s1 - d);
+    if (crossA) for (const d of RAMP_MARKS) if (s0 + d < s1) marks.add(s0 + d);
+    if (crossB) for (const d of RAMP_MARKS) if (s1 - d > s0) marks.add(s1 - d);
   }
   const at = [...marks].sort((a, b) => a - b);
   const n = at.length;
@@ -166,39 +209,57 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
   const elevated = (k: number) => F[k * 5 + 4] - ground[k] > 1.2;
   const buried = (k: number) => ground[k] - F[k * 5 + 4] > 4;
 
-  /** Altura da calçada, rebaixada junto às faixas de pedestre. */
-  const sidewalkH = (k: number): number => {
-    if (lod !== 0) return CURB_H;
-    const da = at[k] - s0, db = s1 - at[k];
-    let h = CURB_H;
-    const ramp = (d: number) => 0.02 + (CURB_H - 0.02) * Math.min(1, Math.max(0, (d - (CROSSWALK - 1.2)) / 1.6));
-    if (crossA) h = Math.min(h, ramp(da));
-    if (crossB) h = Math.min(h, ramp(db));
-    return h;
+  /**
+   * Dropped kerb at the crossings (Roadcraft curbRamps.ts): across the zebra's width the kerb comes down to 2 cm and
+   * the sidewalk rises back over RAMP_RUN (1:12) into the walk; past the zebra it flares back up. At the junction's
+   * mouth the kerb is full height again, so it meets the corner without a step. Height of the kerb's top at sample k.
+   */
+  const kerbH = (k: number, full: number): number => {
+    if (lod !== 0 || full <= RAMP_LOW) return full;
+    let f = 1;
+    if (crossA) f = Math.min(f, rampShare(at[k] - s0));
+    if (crossB) f = Math.min(f, rampShare(s1 - at[k]));
+    return RAMP_LOW + (full - RAMP_LOW) * f;
   };
+  const ramps = lod === 0 && (crossA || crossB);
 
   const edges = info.edges;
-  // retorno no canteiro: o canteiro se abre (vira pista) nos 9 m junto ao nó do retorno
+  // each strip's height: a kerb by a median is the median's kerb (at the footway's height); the others stand proud
+  const fullH = edges.map((e, i) => e.strip.kind === 'curb' && !e.strip.flush && (edges[i - 1]?.strip.kind === 'median' || edges[i + 1]?.strip.kind === 'median') ? CURB_H : stripHeight(e.strip));
+  // U-turn through the median: the median opens (becomes carriageway) in the 9 m by the U-turn's node
   const uA = g.nctl[g.sa[s]] === 11, uB = g.nctl[g.sb[s]] === 11;
   const laneEdge = edges.find((e) => e.strip.kind === 'lane');
-  // vértices de topo: por amostra, por borda de faixa (u0 e u1 de cada faixa)
+  // top vertices: per sample, per strip edge (u0 and u1 of each strip)
   const tops: number[][] = edges.map(() => []);
+  /** The second band of a sidewalk split for its dropped kerb (empty otherwise). */
+  const split: number[][] = edges.map(() => []);
   for (let k = 0; k < n; k++) {
     const o = k * 5;
     const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
     const lx = dz, lz = -dx;
-    // normal do topo: cross(tangente 3D, esquerda)
+    // top normal: cross(3D tangent, left)
     const tx = dx, ty = slope, tz = dz;
     const nx = ty * lz - 0, ny = tz * lx - tx * lz, nz = 0 - ty * lx;
     const v = at[k] - s0, toEnd = s1 - at[k];
     edges.forEach((e, i) => {
       const kind = e.strip.kind;
-      let h = stripHeight(e.strip);
-      if (kind === 'sidewalk' && !e.strip.flush) h = sidewalkH(k);
-      if (lod !== 0 && kind === 'curb') h = CURB_H;
+      let h = fullH[i];
+      if (kind === 'curb') h = kerbH(k, h);
       let col = stripColor(e.strip, info.surface), mat = stripMat(e.strip);
       if ((kind === 'median' || kind === 'barrier') && laneEdge && ((uA && v < 9) || (uB && toEnd < 9))) {
         h = stripHeight(laneEdge.strip); col = stripColor(laneEdge.strip, info.surface); mat = stripMat(laneEdge.strip);
+      }
+      // a sidewalk by a kerb with a dropped kerb: the ramp band next to the kerb, then the rest of the walk
+      const kerbSide = ramps && kind === 'sidewalk' && !e.strip.flush ? (edges[i + 1]?.strip.kind === 'curb' ? 1 : edges[i - 1]?.strip.kind === 'curb' ? 0 : -1) : -1;
+      if (kerbSide >= 0) {
+        const run = Math.min(RAMP_RUN, e.u1 - e.u0 - 0.2), um = kerbSide === 1 ? e.u1 - run : e.u0 + run, hk = Math.min(h, kerbH(k, fullH[kerbSide === 1 ? i + 1 : i - 1]));
+        const h0 = kerbSide === 0 ? hk : h, h1 = kerbSide === 1 ? hk : h;
+        const a = mb.vert(px + lx * e.u0, y + h0, pz + lz * e.u0, nx, ny, nz, col, mat, e.u0, v, toEnd, code);
+        const m = mb.vert(px + lx * um, y + h, pz + lz * um, nx, ny, nz, col, mat, um, v, toEnd, code);
+        const b = mb.vert(px + lx * e.u1, y + h1, pz + lz * e.u1, nx, ny, nz, col, mat, e.u1, v, toEnd, code);
+        tops[i].push(a, m);
+        split[i].push(m, b);
+        return;
       }
       const a = mb.vert(px + lx * e.u0, y + h, pz + lz * e.u0, nx, ny, nz, col, mat, e.u0, v, toEnd, code);
       const b = mb.vert(px + lx * e.u1, y + h, pz + lz * e.u1, nx, ny, nz, col, mat, e.u1, v, toEnd, code);
@@ -206,15 +267,16 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
     });
   }
   const hidden = (k: number) => buried(k) && buried(k + 1);
-  for (let i = 0; i < edges.length; i++) {
-    const T = tops[i];
+  for (const bands of [tops, split]) for (let i = 0; i < edges.length; i++) {
+    const T = bands[i];
+    if (!T.length) continue;
     for (let k = 0; k + 1 < n; k++) {
       if (hidden(k)) continue;
       mb.quad(T[k * 2], T[k * 2 + 1], T[k * 2 + 3], T[k * 2 + 2], 0, 1, 0);
     }
   }
 
-  // faixa de zona fora da calçada (só aparece com a ferramenta de zona)
+  // zone band outside the sidewalk (shown with the zone tool only)
   for (const [zone, uEdge, dir] of [[g.szl[s], edges[edges.length - 1].u1, 1], [g.szr[s], edges[0].u0, -1]] as Array<[number, number, number]>) {
     if (!zone) continue;
     const zc = ZONE_COLORS[zone];
@@ -235,7 +297,7 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
     }
   }
 
-  // muro de arrimo: nas bordas, onde o chão fica acima da calçada (via em trincheira)
+  // retaining wall: at the edges, where the ground is above the sidewalk (road in a cutting)
   if ((g.sflags[s] & 8) !== 0 && lod < 2) {
     for (const [uEdge, outSign] of [[edges[edges.length - 1].u1, 1], [edges[0].u0, -1]] as Array<[number, number]>) {
       for (let k = 0; k + 1 < n; k++) {
@@ -255,7 +317,7 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
         const b1 = mb.vert(B.x, Math.max(B.y, topB), B.z, B.nx, 0, B.nz, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
         const a1 = mb.vert(A.x, Math.max(A.y, topA), A.z, A.nx, 0, A.nz, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
         mb.quad(a0, b0, b1, a1, A.nx, 0, A.nz);
-        // topo do muro (coroa de 30 cm), virado para cima
+        // top of the wall (30 cm coping), facing up
         const ox = -A.nx * 0.3, oz = -A.nz * 0.3;
         const t0 = mb.vert(A.x, Math.max(A.y, topA), A.z, 0, 1, 0, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
         const t1 = mb.vert(B.x, Math.max(B.y, topB), B.z, 0, 1, 0, COLOR.concrete, RMAT.Concrete, uEdge, v, toEnd, code);
@@ -266,7 +328,7 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
     }
   }
 
-  // faces verticais entre faixas de alturas diferentes (meio-fio, mureta)
+  // vertical faces between strips of different heights (kerb, barrier)
   const side = (k: number, u: number, y0: number, y1: number, toLeft: boolean, col: number, mat: number): [number, number] => {
     const o = k * 5;
     const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
@@ -290,25 +352,28 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
       prev = cur;
     }
   };
-  const hOf = (i: number) => (k: number) => edges[i].strip.kind === 'sidewalk' && !edges[i].strip.flush ? sidewalkH(k) : (lod !== 0 && edges[i].strip.kind === 'curb' ? CURB_H : stripHeight(edges[i].strip));
+  const hOf = (i: number) => (k: number) => edges[i].strip.kind === 'curb' ? kerbH(k, fullH[i]) : fullH[i];
+  /** Height of strip i at its side by strip nb: a footway by a dropped kerb comes down with it. */
+  const sideH = (i: number, nb: number) => ramps && edges[i].strip.kind === 'sidewalk' && !edges[i].strip.flush && edges[nb].strip.kind === 'curb'
+    ? (k: number) => Math.min(fullH[i], hOf(nb)(k)) : hOf(i);
   if (lod === 0) {
     for (let i = 0; i + 1 < edges.length; i++) {
-      const ha = hOf(i), hb = hOf(i + 1);
+      const ha = sideH(i, i + 1), hb = sideH(i + 1, i);
       const u = edges[i].u1;
-      // face voltada para o lado mais baixo
-      const leftLower = stripHeight(edges[i + 1].strip) < stripHeight(edges[i].strip);
-      const rightLower = stripHeight(edges[i].strip) < stripHeight(edges[i + 1].strip);
+      // the face looks towards the lower side
+      const leftLower = fullH[i + 1] < fullH[i];
+      const rightLower = fullH[i] < fullH[i + 1];
       if (leftLower) wall(u, hb, ha, true, stripColor(edges[i].strip, info.surface), stripMat(edges[i].strip));
       else if (rightLower) wall(u, ha, hb, false, stripColor(edges[i + 1].strip, info.surface), stripMat(edges[i + 1].strip));
     }
   }
-  // bordas externas: saia até o chão (ou laje, na ponte)
+  // outer edges: a skirt down to the ground (or the deck, on a bridge)
   const first = edges[0], last = edges[edges.length - 1];
   const below = (k: number) => elevated(k) ? -DECK : -SKIRT;
   wall(first.u0, below, hOf(0), false, elevatedAny(n, elevated) ? COLOR.concrete : stripColor(first.strip, info.surface), RMAT.Concrete);
   wall(last.u1, below, hOf(edges.length - 1), true, elevatedAny(n, elevated) ? COLOR.concrete : stripColor(last.strip, info.surface), RMAT.Concrete);
 
-  // ponte: laje por baixo, mureta e pilares
+  // bridge: deck underneath, parapets and piers
   const bridge = (k: number) => elevated(k);
   if (elevatedAny(n, elevated)) {
     let prev: [number, number] | null = null;
@@ -321,23 +386,26 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
       if (prev && (bridge(k) || bridge(k - 1))) mb.quad(prev[0], a, b, prev[1], 0, -1, 0);
       prev = [a, b];
     }
-    // mureta nas duas bordas onde está alto
+    // parapets on both edges, growing in with the deck's height over the ground (Roadcraft: smoothstep 0.64–1.28 m)
+    const lift = (k: number) => F[k * 5 + 4] - ground[k];
+    const railed = (k: number) => lift(k) > PARAPET_FROM;
+    const parapet = (k: number) => CURB_H + (1.0 - CURB_H) * smooth01((lift(k) - PARAPET_FROM) / (PARAPET_FULL - PARAPET_FROM));
     const top = (h: number) => () => h;
     for (const [u, inward] of [[first.u0, true], [last.u1, false]] as Array<[number, boolean]>) {
       const w = inward ? 0.25 : -0.25;
-      wall(u, top(CURB_H), top(1.0), !inward, COLOR.concrete, RMAT.Concrete, bridge);
-      wall(u + w, top(CURB_H), top(1.0), inward, COLOR.concrete, RMAT.Concrete, bridge);
+      wall(u, top(CURB_H), parapet, !inward, COLOR.concrete, RMAT.Concrete, railed);
+      wall(u + w, top(CURB_H), parapet, inward, COLOR.concrete, RMAT.Concrete, railed);
       // parapet coping: the top of the wall, a little wider than it
       let pc: [number, number] | null = null;
       for (let k = 0; k < n; k++) {
         const o = k * 5;
-        const lx = F[o + 3], lz = -F[o + 2], y = F[o + 4] + 1.0;
+        const lx = F[o + 3], lz = -F[o + 2], y = F[o + 4] + parapet(k);
         const ua = u - (inward ? 0.03 : -0.03), ub = u + w + (inward ? 0.03 : -0.03);
         const cur: [number, number] = [
           mb.vert(F[o] + lx * ua, y, F[o + 1] + lz * ua, 0, 1, 0, COLOR.curb, RMAT.Concrete),
           mb.vert(F[o] + lx * ub, y, F[o + 1] + lz * ub, 0, 1, 0, COLOR.curb, RMAT.Concrete),
         ];
-        if (pc && bridge(k) && bridge(k - 1)) mb.quad(pc[0], cur[0], cur[1], pc[1], 0, 1, 0);
+        if (pc && railed(k) && railed(k - 1)) mb.quad(pc[0], cur[0], cur[1], pc[1], 0, 1, 0);
         pc = cur;
       }
     }
@@ -359,28 +427,42 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
         }
       }
     }
-    // pilares
-    const width = last.u1 - first.u0;
-    for (let d = s0 + PILLAR_EVERY / 2; d < s1; d += PILLAR_EVERY) {
+    // Roadcraft structures.ts: an abutment where the deck leaves the ground, piers spaced by kind (over water wider)
+    // clear of the abutments, each a two-column bent under a crossbeam, the columns thicker the taller they are
+    const width = last.u1 - first.u0, halfDeck = width / 2;
+    const abutments: number[] = [];
+    let wet = false;
+    for (let k = 0; k < n; k++) {
+      if (ground[k] < SEA_LEVEL + 0.3) wet = true;
+      if (k + 1 < n && elevated(k) !== elevated(k + 1)) abutments.push(at[elevated(k) ? k + 1 : k]);
+    }
+    for (const d of abutments) {
+      frameAt(g, s, q, table, len, d, f);
+      const gy = heightAt(heights, f[0], f[1]), soffit = f[4] - DECK;
+      mb.box(f[0], f[1], Math.min(gy, soffit) - 1, soffit, f[2], f[3], ABUTMENT_LEN / 2, halfDeck + 0.3, COLOR.concrete, RMAT.Concrete, true);
+    }
+    for (const d of pierStations(s0, s1, wet ? PIER_SPACING_BRIDGE : PIER_SPACING_ELEVATED, abutments)) {
       frameAt(g, s, q, table, len, d, f);
       const gy = heightAt(heights, f[0], f[1]);
-      if (f[4] - gy < 3) continue;
+      const soffit = f[4] - DECK - 1.1, beam = soffit - CAP_H;
+      if (f[4] - gy <= 1.2 || beam - gy < 0.36) continue;
+      const bent = bentColumns(halfDeck, beam - gy, gy < SEA_LEVEL + 0.3);
       const lx = f[3], lz = -f[2];
-      const offs = width > 16 ? [-width / 4, width / 4] : [0];
-      for (const off of offs) {
+      for (const off of bent.offsets) {
         // round pier near (octagonal prism), square farther
-        if (lod === 0) prism(mb, f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK - 1.1, 0.62, 8, COLOR.concrete, RMAT.Concrete);
-        else mb.box(f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK - 1.1, f[2], f[3], 0.6, 0.6, COLOR.concrete, RMAT.Concrete);
+        if (lod === 0) prism(mb, f[0] + lx * off, f[1] + lz * off, gy - 1, beam, bent.width / 2, 8, COLOR.concrete, RMAT.Concrete);
+        else mb.box(f[0] + lx * off, f[1] + lz * off, gy - 1, beam, f[2], f[3], bent.width / 2, bent.width / 2, COLOR.concrete, RMAT.Concrete);
       }
-      // pier cap (crossbeam) under the girders
-      mb.box(f[0], f[1], f[4] - DECK - 2.1, f[4] - DECK - 1.1, f[2], f[3], 0.8, width / 2 - 0.3, COLOR.concrete, RMAT.Concrete, true);
+      // crossbeam under the girders, past the columns by its overhang
+      const reach = bent.offsets.length > 1 ? Math.abs(bent.offsets[0]) + bent.width / 2 + CAP_OVERHANG : halfDeck - 0.3;
+      mb.box(f[0], f[1], beam, soffit, f[2], f[3], bent.width * 1.1, Math.min(halfDeck - 0.1, reach), COLOR.concrete, RMAT.Concrete, true);
     }
   }
 
-  // túnel: portal na passagem do aberto para o enterrado
+  // tunnel: a portal where the open road goes under
   for (let k = 0; k + 1 < n; k++) {
     if (buried(k) === buried(k + 1)) continue;
-    const kk = buried(k) ? k + 1 : k; // lado aberto
+    const kk = buried(k) ? k + 1 : k; // open side
     const o = kk * 5;
     const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
     const half = (last.u1 - first.u0) / 2 + 0.6;
@@ -414,11 +496,11 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
     }
   }
 
-  // arremate das faixas altas nas pontas do trecho (frente da calçada, nariz do canteiro)
+  // finish of the raised strips at the segment's ends (sidewalk front, median nose)
   for (const kEnd of [0, n - 1]) {
     const o = kEnd * 5;
     const px = F[o], pz = F[o + 1], dx = F[o + 2], dz = F[o + 3], y = F[o + 4];
-    const out = kEnd === 0 ? -1 : 1; // normal para fora do trecho
+    const out = kEnd === 0 ? -1 : 1; // normal out of the segment
     const lx = dz, lz = -dx;
     edges.forEach((e, i) => {
       const h = hOf(i)(kEnd);
@@ -451,8 +533,8 @@ function elevatedAny(n: number, fn: (k: number) => boolean): boolean {
 }
 
 /**
- * Balão de retorno (roadcraft `junction/bulb.ts`): asfalto em círculo de raio BULB_R em volta do nó e calçada com
- * meio-fio por fora, abertos para o trecho, que termina no recuo `d` (onde o círculo encontra a borda da pista).
+ * Turning bulb (roadcraft `junction/bulb.ts`): asphalt in a circle of radius BULB_R round the node and a sidewalk with
+ * a kerb outside, open towards the segment, which ends at the setback `d` (where the circle meets the carriageway edge).
  */
 function buildBulb(mb: MeshBuilder, g: RoadGraph, node: number, ref: ArmRef, q: Quad, table: Float64Array, len: number, d: number, lod: number): void {
   const { arm, seg, end } = ref;
@@ -470,7 +552,7 @@ function buildBulb(mb: MeshBuilder, g: RoadGraph, node: number, ref: ArmRef, q: 
     return [x + dx * along + lx * u, yAt(along), z + dz * along + lz * u];
   };
   const paved = surfaceColor(PROFILE_INFO[mb.curTag]?.surface);
-  // asfalto: leque do nó, do lado esquerdo da boca, por trás, até o lado direito
+  // asphalt: a fan from the node, from the mouth's left side, round the back, to the right side
   const center = mb.vert(x, y0, z, 0, 1, 0, paved, RMAT.Plain);
   const rim: number[] = [];
   for (let i = 0; i <= N; i++) {
@@ -479,28 +561,52 @@ function buildBulb(mb: MeshBuilder, g: RoadGraph, node: number, ref: ArmRef, q: 
   }
   for (let i = 0; i < N; i++) mb.tri(center, rim[i], rim[i + 1], 0, 1, 0);
   mb.tri(center, rim[N], rim[0], 0, 1, 0);
-  // calçada em anel, meio-fio virado para dentro e saia por fora
+  // kerb facing in, the kerb stone's top, the sidewalk ring and a skirt outside
+  const kw = kerbWidth(PROFILE_INFO[g.sprofile[seg]], true), Rk = R + kw, aKerb = Math.acos(Math.min(1, d / Rk));
   let prev: number[] | null = null;
   for (let i = 0; i <= N; i++) {
     const t = i / N;
     const [ix, iy, iz] = at(R, aIn + t * (Math.PI * 2 - 2 * aIn));
+    const [kx, ky, kz] = at(Rk, aKerb + t * (Math.PI * 2 - 2 * aKerb));
     const [ox, oy, oz] = at(Ro, aOut + t * (Math.PI * 2 - 2 * aOut));
     const nx = x - ix, nz = z - iz;
-    const cur = [
-      mb.vert(ix, iy + CURB_H, iz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), mb.vert(ox, oy + CURB_H, oz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk),
-      mb.vert(ix, iy, iz, nx, 0, nz, COLOR.curb, RMAT.Curb), mb.vert(ix, iy + CURB_H, iz, nx, 0, nz, COLOR.curb, RMAT.Curb),
-      mb.vert(ox, oy - SKIRT, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk), mb.vert(ox, oy + CURB_H, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk),
-    ];
-    if (prev) {
-      mb.quad(prev[0], cur[0], cur[1], prev[1], 0, 1, 0);
-      mb.quad(prev[2], cur[2], cur[3], prev[3], nx, 0, nz);
-      mb.quad(prev[4], cur[4], cur[5], prev[5], -nx, 0, -nz);
-    }
+    const cur = cornerSection(mb, ix, iy, iz, kx, ky, kz, ox, oy, oz, nx, nz, kw > 0 && lod === 0);
+    if (prev) cornerQuads(mb, prev, cur, nx, nz);
     prev = cur;
   }
 }
 
-/** Arremate de rua sem saída: faixa de calçada atravessando a ponta. */
+/** One section across a kerbed edge (junction corner, bulb): the kerb's face at the carriageway's edge (i), the kerb
+ *  stone's top to its back (k), a 1 cm step down to the footway, the footway to its outer edge (o) and a skirt there. */
+function cornerSection(mb: MeshBuilder, ix: number, iy: number, iz: number, kx: number, ky: number, kz: number, ox: number, oy: number, oz: number,
+  nx: number, nz: number, kerbed: boolean): number[] {
+  const top = kerbed ? KERB_TOP : CURB_H;
+  // without a stone (a road without kerbs, or far away where 1 cm does not show) the footway starts at the face
+  if (!kerbed) { kx = ix; ky = iy; kz = iz; }
+  return [
+    mb.vert(ix, iy, iz, nx, 0, nz, COLOR.curb, RMAT.Curb), mb.vert(ix, iy + top, iz, nx, 0, nz, COLOR.curb, RMAT.Curb),
+    ...(kerbed ? [
+      mb.vert(ix, iy + top, iz, 0, 1, 0, COLOR.curb, RMAT.Curb), mb.vert(kx, ky + top, kz, 0, 1, 0, COLOR.curb, RMAT.Curb),
+      mb.vert(kx, ky + CURB_H, kz, -nx, 0, -nz, COLOR.curb, RMAT.Curb), mb.vert(kx, ky + top, kz, -nx, 0, -nz, COLOR.curb, RMAT.Curb),
+    ] : [-1, -1, -1, -1]),
+    mb.vert(kx, ky + CURB_H, kz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), mb.vert(ox, oy + CURB_H, oz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk),
+    mb.vert(ox, oy - SKIRT, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk), mb.vert(ox, oy + CURB_H, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk),
+    kerbed ? 1 : 0,
+  ];
+}
+
+/** The quads between two sections of `cornerSection` (the stone's top and step only where there is a kerb stone). */
+function cornerQuads(mb: MeshBuilder, p: number[], c: number[], nx: number, nz: number): void {
+  mb.quad(p[0], c[0], c[1], p[1], nx, 0, nz);
+  if (c[10]) {
+    mb.quad(p[2], c[2], c[3], p[3], 0, 1, 0);
+    mb.quad(p[4], c[4], c[5], p[5], -nx, 0, -nz);
+  }
+  mb.quad(p[6], c[6], c[7], p[7], 0, 1, 0);
+  mb.quad(p[8], c[8], c[9], p[9], -nx, 0, -nz);
+}
+
+/** Finish of a dead end: a sidewalk strip across the end. */
 function buildDeadEnd(mb: MeshBuilder, g: RoadGraph, node: number, ref: ArmRef, q: Quad): void {
   void q;
   const { arm } = ref;
@@ -510,22 +616,33 @@ function buildDeadEnd(mb: MeshBuilder, g: RoadGraph, node: number, ref: ArmRef, 
   const P = (u: number, back: number, h: number, nx: number, ny: number, nz: number, col: number, mat: number) =>
     mb.vert(x + lx * u - dx * back, y + h, z + lz * u - dz * back, nx, ny, nz, col, mat);
   const L = arm.left, R = -arm.right;
-  const t = [P(R, 0, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), P(L, 0, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk),
+  // the kerb stone across the end, as wide as the road's own (none on a road without kerbs)
+  const info = PROFILE_INFO[g.sprofile[ref.seg]], kw = Math.max(kerbWidth(info, true), kerbWidth(info, false)), top = kw > 0 ? KERB_TOP : CURB_H;
+  const t = [P(R, kw, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), P(L, kw, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk),
     P(L, depth, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk), P(R, depth, CURB_H, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk)];
   mb.quad(t[0], t[1], t[2], t[3], 0, 1, 0);
-  // meio-fio de frente para a rua
+  if (kw > 0) {
+    const k = [P(R, 0, top, 0, 1, 0, COLOR.curb, RMAT.Curb), P(L, 0, top, 0, 1, 0, COLOR.curb, RMAT.Curb),
+      P(L, kw, top, 0, 1, 0, COLOR.curb, RMAT.Curb), P(R, kw, top, 0, 1, 0, COLOR.curb, RMAT.Curb)];
+    mb.quad(k[0], k[1], k[2], k[3], 0, 1, 0);
+    // the 1 cm step down to the footway behind the stone
+    const st = [P(L, kw, CURB_H, -dx, 0, -dz, COLOR.curb, RMAT.Curb), P(R, kw, CURB_H, -dx, 0, -dz, COLOR.curb, RMAT.Curb),
+      P(R, kw, top, -dx, 0, -dz, COLOR.curb, RMAT.Curb), P(L, kw, top, -dx, 0, -dz, COLOR.curb, RMAT.Curb)];
+    mb.quad(st[0], st[1], st[2], st[3], -dx, 0, -dz);
+  }
+  // kerb facing the street
   const c = [P(-arm.asphRight, 0, 0, dx, 0, dz, COLOR.curb, RMAT.Curb), P(arm.asphLeft, 0, 0, dx, 0, dz, COLOR.curb, RMAT.Curb),
-    P(arm.asphLeft, 0, CURB_H, dx, 0, dz, COLOR.curb, RMAT.Curb), P(-arm.asphRight, 0, CURB_H, dx, 0, dz, COLOR.curb, RMAT.Curb)];
+    P(arm.asphLeft, 0, top, dx, 0, dz, COLOR.curb, RMAT.Curb), P(-arm.asphRight, 0, top, dx, 0, dz, COLOR.curb, RMAT.Curb)];
   mb.quad(c[0], c[1], c[2], c[3], dx, 0, dz);
-  // saia atrás
+  // skirt behind
   const s = [P(R, depth, -SKIRT, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk), P(L, depth, -SKIRT, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk),
     P(L, depth, CURB_H, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk), P(R, depth, CURB_H, -dx, 0, -dz, COLOR.sidewalk, RMAT.Sidewalk)];
   mb.quad(s[0], s[1], s[2], s[3], -dx, 0, -dz);
 }
 
-interface ArmEnd { px: number; pz: number; y: number; dx: number; dz: number; info: ProfileInfo; arm: Arm }
+interface ArmEnd { px: number; pz: number; y: number; dx: number; dz: number; info: ProfileInfo; arm: Arm; /** setback of the mouth */ at: number }
 
-/** Cruzamento: asfalto em leque a partir do nó, esquinas com calçada e meio-fio arredondados. */
+/** Junction: an asphalt fan from the node, corners with rounded sidewalk and kerb. */
 function buildJunction(mb: MeshBuilder, g: RoadGraph, node: number, list: ArmRef[], quads: Quad[], tables: Float64Array[], lens: number[],
   retreat: Float64Array, lod: number): void {
   const cx = g.nx[node], cz = g.nz[node], cy = g.ny[node];
@@ -535,14 +652,40 @@ function buildJunction(mb: MeshBuilder, g: RoadGraph, node: number, list: ArmRef
     const at = r.end === 0 ? retreat[s * 2] : len - retreat[s * 2 + 1];
     frameAt(g, s, quads[s], tables[s], len, at, f);
     const sgn = r.end === 0 ? 1 : -1;
-    return { px: f[0], pz: f[1], y: f[4], dx: f[2] * sgn, dz: f[3] * sgn, info: PROFILE_INFO[g.sprofile[s]], arm: r.arm };
+    return { px: f[0], pz: f[1], y: f[4], dx: f[2] * sgn, dz: f[3] * sgn, info: PROFILE_INFO[g.sprofile[s]], arm: r.arm, at: r.end === 0 ? at : len - at };
   });
   const m = lod === 0 ? 7 : 3;
   const point = (e: ArmEnd, u: number): [number, number, number] => [e.px + e.dz * u, e.pz - e.dx * u, e.y];
-  /** Curva de canto entre o lado esquerdo de a (u = ua) e o direito de b (u = -ub). */
+  /**
+   * Corner between a's left side (u = ua) and b's right side (u = −ub). Where the two kerbs get a kerb return
+   * (`roads/junction.ts` cornerFillet, Roadcraft corners.ts) the line runs from a's mouth to the tangent point, round the
+   * circle and on to b's mouth; the sidewalk's outer line is the same circle less the sidewalk width. Otherwise (bevel,
+   * taper, a setback capped on a short segment) a smooth curve between the mouths.
+   */
   const corner = (a: ArmEnd, ua: number, b: ArmEnd, ub: number): Array<[number, number, number]> => {
+    const fc = cornerFillet(a.arm, b.arm);
+    if (fc.mode === 'fillet' && a.at >= fc.trimA - 0.05 && b.at >= fc.trimB - 0.05) {
+      const ccx = cx + fc.cx, ccz = cz + fc.cz;
+      const ta: [number, number] = [cx + a.arm.dx * fc.trimA + a.arm.dz * ua, cz + a.arm.dz * fc.trimA - a.arm.dx * ua];
+      const tb: [number, number] = [cx + b.arm.dx * fc.trimB - b.arm.dz * ub, cz + b.arm.dz * fc.trimB + b.arm.dx * ub];
+      const a0 = Math.atan2(ta[1] - ccz, ta[0] - ccx);
+      let sweep = Math.atan2(tb[1] - ccz, tb[0] - ccx) - a0;
+      while (sweep > Math.PI) sweep -= 2 * Math.PI;
+      while (sweep < -Math.PI) sweep += 2 * Math.PI;
+      const rho = Math.max(0.05, Math.hypot(ta[0] - ccx, ta[1] - ccz));
+      const steps = Math.max(2, Math.ceil(Math.abs(sweep) / (Math.PI / (lod === 0 ? 16 : 6))));
+      const out: Array<[number, number, number]> = [];
+      const [mx, mz] = point(a, ua), [nx2, nz2] = point(b, -ub);
+      out.push([mx, mz, a.y]);
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps, ang = a0 + sweep * t;
+        out.push([ccx + Math.cos(ang) * rho, ccz + Math.sin(ang) * rho, a.y + (b.y - a.y) * t]);
+      }
+      out.push([nx2, nz2, b.y]);
+      return out;
+    }
     const [ax, az] = point(a, ua), [bx, bz] = point(b, -ub);
-    // controle: cruzamento das bordas prolongadas para dentro
+    // control: where the edges, carried inwards, cross
     const den = a.dx * b.dz - a.dz * b.dx;
     let kx = (ax + bx) / 2, kz = (az + bz) / 2;
     if (Math.abs(den) > 1e-3) {
@@ -558,7 +701,7 @@ function buildJunction(mb: MeshBuilder, g: RoadGraph, node: number, list: ArmRef
     return out;
   };
 
-  // asfalto: leque do centro
+  // asphalt: a fan from the centre
   const ring: Array<[number, number, number]> = [];
   const nArms = ends.length;
   for (let i = 0; i < nArms; i++) {
@@ -571,27 +714,46 @@ function buildJunction(mb: MeshBuilder, g: RoadGraph, node: number, list: ArmRef
   const rv = ring.map(([x, z, y]) => mb.vert(x, y, z, 0, 1, 0, paved, RMAT.Plain));
   for (let i = 0; i < rv.length; i++) mb.tri(center, rv[i], rv[(i + 1) % rv.length], 0, 1, 0);
 
-  // esquinas: calçada entre a curva do asfalto e a curva externa
+  /**
+   * The line `wa`…`wb` metres outside a corner's kerb line (away from the carriageway): at the mouths across the leg
+   * (where it meets the segment's own strips), between them square to the line. The kerb stone's back and the
+   * footway's outer edge follow the kerb line this way whatever its shape (kerb return, bevel), so the footway keeps
+   * its width round the corner.
+   */
+  const outside = (line: Array<[number, number, number]>, a: ArmEnd, b: ArmEnd, wa: number, wb: number): Array<[number, number, number]> => {
+    const n = line.length;
+    // the outside is on the same hand of the line all along: the hand a's own outside (its left) is on at the start
+    let hand = 1;
+    for (let k = 1; k < n; k++) {
+      const tx = line[k][0] - line[0][0], tz = line[k][1] - line[0][1];
+      if (Math.hypot(tx, tz) > 1e-3) { hand = tx * -a.dx - tz * a.dz >= 0 ? 1 : -1; break; }
+    }
+    return line.map(([x, z, y], k) => {
+      let nx: number, nz: number;
+      if (k === 0) { nx = a.dz; nz = -a.dx; }
+      else if (k === n - 1) { nx = -b.dz; nz = b.dx; }
+      else {
+        const tx = line[k + 1][0] - line[k - 1][0], tz = line[k + 1][1] - line[k - 1][1], l = Math.hypot(tx, tz) || 1;
+        nx = (-tz / l) * hand; nz = (tx / l) * hand;
+      }
+      const w = wa + (wb - wa) * (k / Math.max(1, n - 1));
+      return [x + nx * w, z + nz * w, y];
+    });
+  };
+
+  // corners: the kerb, its stone and the sidewalk between the asphalt curve and the outer curve
   for (let i = 0; i < nArms; i++) {
     const a = ends[i], b = ends[(i + 1) % nArms];
     const inner = corner(a, a.arm.asphLeft, b, b.arm.asphRight);
-    const outer = corner(a, a.arm.left, b, b.arm.right);
+    const ka = kerbWidth(a.info, true), kb = kerbWidth(b.info, false);
+    const back = outside(inner, a, b, ka, kb);
+    const outer = outside(inner, a, b, a.arm.left - a.arm.asphLeft, b.arm.right - b.arm.asphRight);
     let pi: number[] | null = null;
-    for (let k = 0; k <= m; k++) {
-      const [ix, iz, iy] = inner[k], [ox, oz, oy] = outer[k];
-      const nx = cx - ix, nz = cz - iz; // meio-fio olha para o centro
-      const top0 = mb.vert(ix, iy + CURB_H, iz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk);
-      const top1 = mb.vert(ox, oy + CURB_H, oz, 0, 1, 0, COLOR.sidewalk, RMAT.Sidewalk);
-      const c0 = mb.vert(ix, iy, iz, nx, 0, nz, COLOR.curb, RMAT.Curb);
-      const c1 = mb.vert(ix, iy + CURB_H, iz, nx, 0, nz, COLOR.curb, RMAT.Curb);
-      const s0 = mb.vert(ox, oy - SKIRT, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk);
-      const s1 = mb.vert(ox, oy + CURB_H, oz, -nx, 0, -nz, COLOR.sidewalk, RMAT.Sidewalk);
-      const cur = [top0, top1, c0, c1, s0, s1];
-      if (pi) {
-        mb.quad(pi[0], top0, top1, pi[1], 0, 1, 0);
-        mb.quad(pi[2], c0, c1, pi[3], nx, 0, nz);
-        mb.quad(pi[4], s0, s1, pi[5], -nx, 0, -nz);
-      }
+    for (let k = 0; k < inner.length; k++) {
+      const [ix, iz, iy] = inner[k], [kx, kz, ky] = back[k], [ox, oz, oy] = outer[k];
+      const nx = ix - ox, nz = iz - oz; // the kerb faces the carriageway
+      const cur = cornerSection(mb, ix, iy, iz, kx, ky, kz, ox, oy, oz, nx, nz, (ka > 0 || kb > 0) && lod === 0);
+      if (pi) cornerQuads(mb, pi, cur, nx, nz);
       pi = cur;
     }
   }

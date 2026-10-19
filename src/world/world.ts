@@ -11,6 +11,8 @@ import { MinuteHeap, decayTenths, nextTenthAt } from './decay.ts';
 import { RoadNetwork } from '../roads/network.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
 import { ImpossibleNodes } from '../roads/impossible.ts';
+import { MAP_CELLS } from '../config.ts';
+import { Fn } from './arch.ts';
 
 /** Buildings. Milestone 1 has only generic boxes; the procedural generator arrives in milestone 4. */
 export const buildingSchema = {
@@ -90,6 +92,11 @@ export class World {
   readonly cellVersion = new Uint32Array(CELL_COUNT);
   /** Buildings per cell. */
   readonly cellBuildings = new Uint32Array(CELL_COUNT);
+  /** Squares per neighbourhood (2 × 2 cells): growth puts one at most in each (Roadcraft). */
+  readonly squares = new Uint16Array(Math.ceil(MAP_CELLS / 2) ** 2);
+
+  /** The neighbourhood (2 × 2 cells, 512 m) of a point. */
+  static neighbourhood(x: number, z: number): number { return (cellX(z) >> 1) * Math.ceil(MAP_CELLS / 2) + (cellX(x) >> 1); }
 
   readonly roads: RoadNetwork;
   /** Nodes where two neighbouring roads meet under 25° (the top bar's warning), kept from the network's changes. */
@@ -136,7 +143,10 @@ export class World {
     return [-w, -d, w, -d, w, d, -w, d];
   }
 
-  /** Advances the city clock; buildings that reach a new decay tenth get their cell redrawn (only those). */
+  /**
+   * Advances the city clock; buildings that reach a new decay tenth get it in `decay` (only those). Nothing drawn reads
+   * decay yet, so no mesh is marked for it; the saved decay is derived again from `built` on load.
+   */
   advanceClock(minutes: number): void {
     if (!(minutes > 0)) return;
     this.clock += minutes;
@@ -152,7 +162,6 @@ export class World {
   setClock(minute: number): void {
     this.clock = minute;
     this.decayHeap.clear();
-    this.clock = 0;
     const t = this.buildings;
     for (let id = 0; id < t.end; id++) if (t.alive[id]) this.refreshDecay(id);
   }
@@ -160,7 +169,7 @@ export class World {
   private refreshDecay(id: number): void {
     const c = this.buildings.cols;
     const d = decayTenths(c.built[id], this.clock);
-    if (d !== c.decay[id]) { c.decay[id] = d; this.decayChanges++; this.touchCell(c.cell[id], Dirty.Buildings); }
+    if (d !== c.decay[id]) { c.decay[id] = d; this.decayChanges++; }
     const next = nextTenthAt(c.built[id], d);
     c.due[id] = next;
     if (next !== Infinity) this.decayHeap.push(next, id);
@@ -252,6 +261,7 @@ export class World {
     c.cell[id] = cid;
     this.buildingIndex.insert(id, x, z);
     this.cellBuildings[cid]++;
+    if (c.fn[id] === Fn.Square) this.squares[World.neighbourhood(x, z)]++;
     this.count(id, 1);
     this.refreshDecay(id);
     this.touchCell(cid, Dirty.Buildings);
@@ -300,7 +310,10 @@ export class World {
   editBuilding(id: number, floors: number, style: number, fn = this.buildings.cols.fn[id]): void {
     const c = this.buildings.cols;
     this.count(id, -1);
+    const nb = World.neighbourhood(c.x[id], c.z[id]);
+    if (c.fn[id] === Fn.Square) this.squares[nb]--;
     c.floors[id] = floors; c.style[id] = style; c.fn[id] = fn;
+    if (fn === Fn.Square) this.squares[nb]++;
     this.count(id, 1);
     this.touchCell(c.cell[id], Dirty.Buildings);
   }
@@ -320,6 +333,7 @@ export class World {
     this.count(id, -1);
     const cid = this.buildings.cols.cell[id];
     this.cellBuildings[cid]--;
+    if (this.buildings.cols.fn[id] === Fn.Square) this.squares[World.neighbourhood(this.buildings.cols.x[id], this.buildings.cols.z[id])]--;
     this.touchCell(cid, Dirty.Buildings);
     this.buildings.release(id);
   }
@@ -358,6 +372,7 @@ export class World {
     this.buildingIndex.clear();
     this.buildings.clear();
     this.cellBuildings.fill(0);
+    this.squares.fill(0);
     this.residents = 0; this.jobs = 0;
     this.decayHeap.clear();
     this.clock = 0;

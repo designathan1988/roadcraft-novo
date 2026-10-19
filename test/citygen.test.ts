@@ -23,6 +23,27 @@ test('cidade gerada: determinística, grafo limpo, nós em terra', () => {
   }
   for (let i = 0; i < n; i++) {
     assert.ok(deg[i] >= 1 && deg[i] <= 6, `grau ${deg[i]}`);
-    assert.ok(baseHeight(a.nodes[i * 3], a.nodes[i * 3 + 1], 3) > 0, 'nó na água');
+    // over water only a pier in the middle of a bridge span (two roads, deck above the water): long spans are split
+    // so no segment is longer than the spatial index holds
+    if (baseHeight(a.nodes[i * 3], a.nodes[i * 3 + 1], 3) <= 0) assert.ok(deg[i] === 2 && a.nodes[i * 3 + 2] > 1, `nó na água com grau ${deg[i]}, altura ${a.nodes[i * 3 + 2]}`);
+  }
+});
+
+test('the generated city is born clean: no impossible node, no dead end lying inside another road', async () => {
+  const { World } = await import('../src/world/world.ts');
+  const { repairDanglingEnds } = await import('../src/roads/repair.ts');
+  for (const [seed, style] of [[1, 'classic'], [7, 'classic'], [42, 'classic'], [1, 'organic'], [1, 'blocks']] as const) {
+    // inserted the way game.ts generatedCity does
+    const w = new World(); w.seed = seed; w.unlimited = true;
+    const city = generateCity(seed, style);
+    const ids: number[] = [];
+    for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
+    const nc = w.roads.nodes.cols;
+    for (let k = 0; k < city.segs.length; k += 5) {
+      const a = ids[city.segs[k]], b = ids[city.segs[k + 1]];
+      w.roads.addSeg({ a, b, cx: (nc.x[a] + nc.x[b]) / 2, cz: (nc.z[a] + nc.z[b]) / 2, profile: city.segs[k + 2], flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
+    }
+    assert.equal(w.impossible.count, 0, `seed ${seed} ${style}: ${w.impossible.count} impossible nodes`);
+    assert.equal(repairDanglingEnds(w), 0, `seed ${seed} ${style}: dead ends inside other roads`);
   }
 });

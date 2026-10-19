@@ -134,7 +134,7 @@ export const LEGACY_EN: Record<string, string> = {
   'Larga demais (máximo 70 m).': 'Too wide (70 m at most).', 'Calçada só nas bordas.': 'Sidewalks only at the edges.',
   'Cada sentido precisa de uma faixa para todos os veículos, além das de ônibus.': 'Each direction needs a lane for all vehicles besides bus lanes.',
   'As faixas de cada sentido ficam juntas, com a mão à direita.': 'Lanes of each direction stay together, driving on the right.',
-  'Perfis demais neste mapa (máximo 256).': 'Too many profiles on this map (256 at most).', 'Não salvo: dê um nome.': 'Not saved: give it a name.',
+  'Perfis demais neste mapa (máximo 512).': 'Too many profiles on this map (512 at most).', 'Não salvo: dê um nome.': 'Not saved: give it a name.',
   'Não salvo: o armazenamento do navegador está cheio ou bloqueado.': 'Not saved: browser storage is full or blocked.',
   'Calçada': 'Sidewalk', 'Meio-fio': 'Curb', 'Estacionamento': 'Parking', 'Ciclofaixa': 'Bike lane', 'Faixa': 'Lane', 'Canteiro': 'Median',
   'Acostamento': 'Shoulder', 'Mureta': 'Barrier', 'Faixas': 'Lanes', 'Largura': 'Width', 'Largura total': 'Total width', 'Comprimento': 'Length',
