@@ -696,3 +696,21 @@ test('C37: two trucks never back into the same dock, two cars never take the sam
   assert.equal(T.tryDock(a, lane), true, 'the first truck docks');
   assert.equal(T.tryDock(b, lane), false, 'a second truck backed into the same dock');
 });
+
+test('C38: clearing the simulation (new map, load) leaves nothing of the old city behind', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 1 / 20;
+  tr.setLines([{ id: 1, color: 3, buses: 2, stops: [-120, -189, 189, 0, 0, 189] }]);
+  tr.occupancy = new Uint8Array(1 << 16);
+  for (let i = 0; i < 20 * 60; i++) tr.step(0.05);
+  tr.gov = 0.8; tr.jamShare = 0.4;
+  inner(tr).crossingClosed.set(3, tr.time + 100);
+  tr.clearAll();
+  assert.equal(tr.gov, 1, 'fleet share');
+  assert.equal(tr.jamShare, 0, 'jam share');
+  assert.equal(inner(tr).crossingClosed.size, 0, 'level crossings still closed');
+  assert.equal(tr.lines.length, 0, 'bus lines of the old city');
+  assert.ok(tr.occupancy.every((x) => x === 0), 'road occupancy');
+  assert.equal(tr.docks.length, 0, 'docks of the old city');
+});

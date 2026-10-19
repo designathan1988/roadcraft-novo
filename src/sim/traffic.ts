@@ -316,6 +316,13 @@ export class Traffic {
     this.parkers.clear();
     this.mvs.clear();
     this.spots.clear();
+    // nothing of the old city: its jams, crossings, docks and bus lines (the page sends the new map's lines and docks)
+    this.gov = 1; this.jamShare = 0; this.jammedNow = 0; this.regionOcc.fill(0); this.regionT = -Infinity;
+    this.cityV = 0; this.distSum = 0; this.timeSum = 0; this.laneVel.fill(0);
+    this.crossingClosed.clear();
+    this.docks = new Float32Array(0);
+    this.lines = []; this.busSets = []; this.indexStops();
+    this.spawnCredit = 0; this.fleetFloor = 0;
   }
 
   /** New segment (the id may belong to a demolished one): fresh asphalt. */
