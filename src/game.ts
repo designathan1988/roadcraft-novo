@@ -1872,7 +1872,11 @@ export class Game {
     const lot = this.growth.lotAt(hit.x, hit.z);
     if (!lot) { this.hud.toast(t('game.toast.buildWhere')); return; }
     const j = new RoadJournal(this.world, 'construir prédio');
-    const id = j.addBuilding(this.growth.recordFor(lot.lots, lot.i));
+    // the style and function chosen for the next building (the Build panel) win over the neighbourhood's
+    const rec = this.growth.recordFor(lot.lots, lot.i);
+    if (this.newArch >= 0) rec.style = 128 + this.newArch;
+    if (this.newFn > 0) rec.fn = this.newFn;
+    const id = j.addBuilding(rec);
     this.commands.push(j);
     this.select(id);
   }
