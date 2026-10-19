@@ -72,10 +72,11 @@ export class JobPool {
   /** Same message to all workers (arrives before jobs sent later). */
   broadcast(msg: ToWorker): void { for (const w of this.workers) w.postMessage(msg); }
 
-  constructor(shared: SharedWorld, count = workerCount()) {
+  /** `make`: how a worker is created (tests pass a stand-in; the game uses the module worker). */
+  constructor(shared: SharedWorld, count = workerCount(), make: (i: number) => Worker = moduleWorker) {
     this.size = count;
     for (let i = 0; i < count; i++) {
-      const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: `jobs-${i} ${MAP_TAG}` });
+      const w = make(i);
       w.onmessage = (e: MessageEvent<FromWorker>) => this.onMessage(i, e.data);
       w.onerror = (e) => console.error('worker', i, e.message);
       w.postMessage({ type: 'init', shared } satisfies ToWorker);
@@ -136,6 +137,10 @@ export class JobPool {
     }
     this.pump();
   }
+}
+
+function moduleWorker(i: number): Worker {
+  return new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: `jobs-${i} ${MAP_TAG}` });
 }
 
 /** Pool workers: cores − 2, or ?workers=N (photos and tests that must not hog the machine). */
