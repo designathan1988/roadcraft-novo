@@ -121,6 +121,8 @@ interface SimLine {
   stopLane: number[]; stopV: number[]; waiting: number[]; lastT: number[];
   /** Who is waiting at each stop, by destination stop (real people and background demand). */
   waitTo: Float64Array[];
+  /** Of those, the people who walked to the stop (pedestrians: they step off as pedestrians again). */
+  realTo: Float64Array[];
   /** Stop position on the sidewalk (to draw those waiting). */
   stopX: number[]; stopZ: number[]; stopY: number[]; stopYaw: number[];
   /** Boardings since the last report, and the hourly average. */
@@ -309,7 +311,7 @@ export class Traffic {
     for (const n of this.windowSignals) this.sig.setActive(n, false);
     this.windowSignals.clear();
     for (const set of this.busSets) set.clear();
-    this.riders.clear();
+    this.riders.clear(); this.realRiders.clear();
     this.wagonPrev.clear();
     if (this.occupancy) this.occupancy.fill(0);
     this.segWear.fill(0);
@@ -335,8 +337,9 @@ export class Traffic {
   lines: SimLine[] = [];
   /** Buses of each line (so the fleet is not scanned). */
   private busSets: Array<Set<number>> = [];
-  /** Passengers of each bus by destination stop. */
+  /** Passengers of each bus by destination stop, and of them those who came on foot. */
   private riders = new Map<number, Float64Array>();
+  private realRiders = new Map<number, Float64Array>();
   /** People get off the bus at node `node` (the pedestrians carry on on foot). */
   onAlight: (node: number, count: number, x: number, z: number) => void = () => {};
   private lineCheck = 0;
@@ -1124,7 +1127,7 @@ export class Traffic {
     const c = this.veh.cols;
     this.mesoUnlink(v);
     if (c.spot[v] !== 0) this.releaseSpot(v);
-    if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); }
+    if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); this.realRiders.delete(v); }
     this.wagonPrev.delete(v);
     if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
     const parked = c.dying[v] === 2;
@@ -2170,7 +2173,7 @@ export class Traffic {
   private retireBus(v: number): void {
     const c = this.veh.cols;
     if (!this.veh.alive[v] || c.line[v] < 0) return;
-    this.riders.delete(v);
+    this.riders.delete(v); this.realRiders.delete(v);
     c.why[v] = End.NoTrip;
     if (c.micro[v]) { c.dying[v] = 1; c.line[v] = -1; } else { c.line[v] = -1; this.despawn(v); }
   }
@@ -2188,7 +2191,7 @@ export class Traffic {
       if (i < 0) continue;
       ln.lastT[i] = prev.lastT[j];
       let w = 0;
-      for (let k = 0; k < m; k++) if (toNew[k] >= 0) { ln.waitTo[i][toNew[k]] += prev.waitTo[j][k]; w += prev.waitTo[j][k]; }
+      for (let k = 0; k < m; k++) if (toNew[k] >= 0) { ln.waitTo[i][toNew[k]] += prev.waitTo[j][k]; ln.realTo[i][toNew[k]] += prev.realTo[j][k]; w += prev.waitTo[j][k]; }
       ln.waiting[i] = w;
     }
     ln.boardings = prev.boardings; ln.perHour = prev.perHour;
@@ -2199,11 +2202,12 @@ export class Traffic {
       set.add(v);
       c.line[v] = li;
       const next = nextKept(c.stopI[v]);
-      const r = this.riders.get(v);
-      if (r) {
+      for (const map of [this.riders, this.realRiders]) {
+        const r = map.get(v);
+        if (!r) continue;
         const nr = new Float64Array(n);
         for (let k = 0; k < r.length && k < m; k++) nr[toNew[k] >= 0 ? toNew[k] : next] += r[k];
-        this.riders.set(v, nr);
+        map.set(v, nr);
       }
       c.stopI[v] = next;
     }
@@ -2214,7 +2218,7 @@ export class Traffic {
     const net = this.sim.net, sc = net.segs.cols;
     const rail = (sp.mode ?? 0) > 0;
     const ln: SimLine = { id: sp.id, color: sp.color, buses: sp.buses, mode: sp.mode ?? 0, stopLane: [], stopV: [], waiting: [], lastT: [],
-      stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
+      stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], realTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
     /** One stop at (x, z); `flip`: the stop of the return trip, across the street. False if no road there. */
     const addStop = (x: number, z: number, i: number, flip: boolean): boolean => {
       // bus: nearest ordinary road; train and metro: nearest rail
@@ -2258,6 +2262,7 @@ export class Traffic {
       for (let k = kept.length - 2; k >= 1; k--) addStop(sp.stops[kept[k]], sp.stops[kept[k] + 1], kept[k], true);
     }
     ln.waitTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
+    ln.realTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
     return ln;
   }
 
@@ -2314,6 +2319,7 @@ export class Traffic {
     if (!ln || from >= ln.waitTo.length || to >= ln.waitTo.length) return;
     this.accrue(ln, from);
     ln.waitTo[from][to] += 1;
+    ln.realTo[from][to] += 1;
     ln.waiting[from] += 1;
   }
 
@@ -2335,21 +2341,26 @@ export class Traffic {
     const i = c.stopI[v];
     const n = ln.stopLane.length;
     this.accrue(ln, i);
-    let r = this.riders.get(v);
+    let r = this.riders.get(v), rr = this.realRiders.get(v);
     if (!r || r.length !== n) { r = new Float64Array(n); this.riders.set(v, r); }
-    // those bound for this stop get off (and carry on on foot)
-    const off = r[i];
-    r[i] = 0;
-    // they step off at the stop and walk on (from a train people leave through the station: no sidewalk on the rails)
-    if (off >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(off), ln.stopX[i], ln.stopZ[i]);
+    if (!rr || rr.length !== n) { rr = new Float64Array(n); this.realRiders.set(v, rr); }
+    // those bound for this stop get off; the people who came on foot step off at the stop and walk on (the background
+    // demand only rides: it never becomes extra pedestrians). From a train people leave through the station.
+    const realOff = rr[i];
+    r[i] = 0; rr[i] = 0;
+    if (realOff >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(realOff), ln.stopX[i], ln.stopZ[i]);
     let load = 0;
     for (let j = 0; j < n; j++) load += r[j];
-    // those waiting get on, until full
+    // those waiting get on, until full: the people who walked there first (whole persons), then the background
     const room = Math.max(0, (ln.mode ? 600 : BUS_CAP) - load);
     const take = Math.min(Math.floor(ln.waiting[i]), room);
     if (take > 0 && ln.waiting[i] > 0) {
-      const f = take / ln.waiting[i];
-      for (let j = 0; j < n; j++) { const m = ln.waitTo[i][j] * f; r[j] += m; ln.waitTo[i][j] -= m; }
+      let real = 0, total = 0;
+      for (let j = 0; j < n; j++) { real += ln.realTo[i][j]; total += ln.waitTo[i][j]; }
+      const realTake = Math.min(real, take), fr = real > 0 ? realTake / real : 0;
+      for (let j = 0; j < n; j++) { const m = ln.realTo[i][j] * fr; rr[j] += m; r[j] += m; ln.realTo[i][j] -= m; ln.waitTo[i][j] -= m; }
+      const bg = total - real, fb = bg > 0 ? Math.min(1, (take - realTake) / bg) : 0;
+      for (let j = 0; j < n; j++) { const m = (ln.waitTo[i][j] - ln.realTo[i][j]) * fb; r[j] += m; ln.waitTo[i][j] -= m; }
       ln.waiting[i] -= take;
     }
     c.load[v] = Math.min(255, Math.round(load + take));

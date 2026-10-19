@@ -970,3 +970,19 @@ test('buses reach every stop of their line (the last turn into a stop\'s lane is
   const n = tr.lines[0].stopLane.length;
   for (let s = 0; s < n; s++) assert.ok((served.get(s) ?? 0) >= 2, `stop ${s} served ${served.get(s) ?? 0} times in 15 min (served: ${JSON.stringify([...served])})`);
 });
+
+test('C39: bus riders of the background demand do not step off as extra pedestrians; only people who boarded on foot do', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  let off = 0;
+  tr.onAlight = (_n, count) => { off += count; };
+  tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
+  for (let i = 0; i < 20 * 600; i++) { tr.step(0.05); if (i % 20 === 0) tr.checkWindow(); }
+  assert.ok(tr.lineStats(1)[0].perHour > 0, 'people rode the buses');
+  assert.equal(off, 0, `${off} pedestrians stepped off with nobody having boarded on foot`);
+  // one person on foot boards at stop 0 for stop 1: exactly one steps off
+  tr.pedAtStop(0, 0, 1);
+  for (let i = 0; i < 20 * 900 && off === 0; i++) { tr.step(0.05); if (i % 20 === 0) tr.checkWindow(); }
+  assert.equal(off, 1, `${off} stepped off for one person who boarded on foot`);
+});
