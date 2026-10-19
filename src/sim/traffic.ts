@@ -1548,29 +1548,49 @@ export class Traffic {
   /** A connection is about to disappear (node rebuilt): those on it jump to the destination lane. */
   evacuateConn(conn: number): void {
     const c = this.veh.cols, sim = this.sim;
+    // those on it wait out the rebuild where they are (their exit lane kept in exitC); `nodesRebuilt` puts them on
+    // the new connection with the same lanes, at the same place
     for (let v = this.connHead[conn]; v >= 0;) {
       const next = c.next[v];
-      const to = sim.conns.cols.to[conn];
       this.unlink(v);
       c.conn[v] = -1;
-      if (!sim.net.segs.alive[laneSeg(to)]) { c.why[v] = End.Lost; this.finish(v); v = next; continue; }
-      // the destination lane may be gone with a new profile: the outermost one left, or the trip is lost
-      const kept = this.keptLane(to);
-      if (kept < 0) { c.why[v] = End.Lost; this.finish(v); v = next; continue; }
-      this.setLaneCount(c.lane[v], -1);
-      this.setLaneCount(kept, 1);
-      c.lane[v] = kept; c.s[v] = 0; c.rIdx[v]++;
-      this.enterLane(v, 0);
-      if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== sim.laneTo(kept)) this.replanFrom(v, sim.laneTo(kept));
-      this.insert(v, false, kept);
+      c.exitC[v] = sim.conns.cols.to[conn];
+      this.inBox.push(v);
       v = next;
     }
     this.connHead[conn] = -1; this.connTail[conn] = -1;
     this.activeConns.delete(conn);
   }
 
+  /** Vehicles that were inside a junction being rebuilt (`evacuateConn`). */
+  private inBox: number[] = [];
+
+  /** After a rebuild: each vehicle that was inside a junction goes back onto the connection with the same lanes. */
+  private resettleBox(): void {
+    const c = this.veh.cols, sim = this.sim, k = sim.conns.cols;
+    for (const v of this.inBox.splice(0)) {
+      if (!this.veh.alive[v] || c.conn[v] >= 0 || !c.micro[v]) continue;
+      const from = c.lane[v], to = c.exitC[v];
+      let conn = -1;
+      if (from >= 0 && sim.net.segs.alive[laneSeg(from)]) for (let x = sim.laneConn[from]; x >= 0; x = k.nextFromLane[x]) if (k.to[x] === to) { conn = x; break; }
+      if (conn >= 0) { c.conn[v] = conn; c.s[v] = Math.min(c.s[v], k.len[conn] - 0.1); this.insert(v, true, conn); continue; }
+      // that movement is gone: onto the exit lane (the outermost one left, after a new profile), behind whoever is there
+      if (!sim.net.segs.alive[laneSeg(to)]) { c.why[v] = End.Lost; this.finish(v); continue; }
+      const kept = this.keptLane(to);
+      if (kept < 0) { c.why[v] = End.Lost; this.finish(v); continue; }
+      this.setLaneCount(c.lane[v], -1);
+      this.setLaneCount(kept, 1);
+      const tail = this.laneTail[kept];
+      c.lane[v] = kept; c.s[v] = tail >= 0 ? Math.max(0, c.s[tail] - c.len[tail] - 1) : 0; c.rIdx[v]++;
+      this.enterLane(v, c.s[v]);
+      if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== sim.laneTo(kept)) this.replanFrom(v, sim.laneTo(kept));
+      this.insert(v, false, kept);
+    }
+  }
+
   /** Rebuilt nodes: a new plan for their lights, which start their cycle again. */
   nodesRebuilt(nodes: number[]): void {
+    this.resettleBox();
     for (const n of nodes) {
       this.sig.rebuild(n);
       if (!this.sim.net.nodes.alive[n] || this.sim.nodePhases[n] === 0) {

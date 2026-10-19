@@ -904,3 +904,28 @@ test('C43: when the crowd fills the people batches, the groups the player placed
   for (let i = 0; i < pr.drawn[0]; i++) if ((info[i * 4] & 0xfff000) === 0xabc000) placed++;
   assert.equal(placed, 5, `${placed} of the 5 placed people drawn with a full crowd`);
 });
+
+test('C23: changing a junction\'s control keeps the cars inside it where they are', async () => {
+  const { recordOps, mirror, syncNet } = await import('./simCity.ts');
+  const { w, sim } = gridCity(4, 120);
+  const ops = recordOps(w);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const k = sim.conns.cols, conn = someConn(sim), node = k.node[conn];
+  // two cars inside the junction, one behind the other
+  const T = inner(tr), c = tr.veh.cols, cars: number[] = [];
+  for (const s of [k.len[conn] * 0.7, k.len[conn] * 0.7 - 6]) {
+    if (s < 0) continue;
+    const v = place(tr, k.from[conn], 0, k.to[conn], true);
+    T.unlink(v); c.conn[v] = conn; c.s[v] = s; c.v[v] = 0; T.insert(v, true, conn);
+    cars.push(v);
+  }
+  const where = (v: number) => { const p = new Float64Array(4); if (c.conn[v] >= 0) sim.connPoint(c.conn[v], c.s[v], p); else sim.lanePoint(c.lane[v], c.s[v], p); return p; };
+  const before = cars.map(where);
+  w.roads.setJunction(node, { ctl: 3 }); // stop signs on every arm
+  mirror(sim, ops.splice(0)); syncNet(sim, tr);
+  cars.forEach((v, i) => {
+    const p = where(v);
+    assert.ok(Math.hypot(p[0] - before[i][0], p[2] - before[i][2]) < 1, `car ${i} moved ${Math.hypot(p[0] - before[i][0], p[2] - before[i][2]).toFixed(1)} m when the control changed`);
+  });
+});
