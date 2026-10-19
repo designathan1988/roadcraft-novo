@@ -4,7 +4,7 @@
 
 export const SHAPES = ['Retângulo', 'Em L', 'Em U', 'Círculo', 'Hexágono', 'Octógono', 'Chanfrado'] as const;
 export const ROOFS = ['Plana', 'Terraço', '2 águas', '4 águas', '1 água', 'Dente de serra'] as const;
-export const FINISHES = ['Reboco', 'Tijolo', 'Vidro', 'Concreto', 'Metal', 'Madeira', 'Pedra'] as const;
+export const FINISHES = ['Reboco', 'Tijolo', 'Vidro', 'Concreto', 'Metal', 'Madeira', 'Pedra', 'Cerâmica', 'Massa raspada', 'Painel'] as const;
 /** Peças no telhado (bits). */
 /** Janelas da fachada (por cima do que o acabamento daria). */
 export const WINDOWS = ['Do acabamento', 'Faixa de vidro', 'Janelas largas', 'Janelas estreitas', 'Parede cega'] as const;
@@ -70,12 +70,12 @@ const FLAG = 0x80000000;
 export function hasDesign(color: number): boolean { return (color & FLAG) !== 0; }
 
 export function encodeDesign(d: Design): { color: number; h: number } {
-  const c = FLAG | (d.shape & 7) | ((d.roof & 7) << 3) | ((d.finish & 7) << 6) | ((d.gear & 63) << 9) | ((d.setback & 15) << 15) | (((d.windows ?? 0) & 7) << 19) | (((d.wing ?? 0) & 3) << 22) | (((d.catalog ?? 0) & 63) << 24);
+  const c = FLAG | (d.shape & 7) | ((d.roof & 7) << 3) | ((d.finish & 7) << 6) | (((d.finish >> 3) & 1) << 30) | ((d.gear & 63) << 9) | ((d.setback & 15) << 15) | (((d.windows ?? 0) & 7) << 19) | (((d.wing ?? 0) & 3) << 22) | (((d.catalog ?? 0) & 63) << 24);
   return { color: c >>> 0, h: d.wall & 0xffffff };
 }
 
 export function decodeDesign(color: number, h: number): Design {
-  return { shape: color & 7, roof: (color >> 3) & 7, finish: (color >> 6) & 7, gear: (color >> 9) & 63, setback: (color >> 15) & 15, windows: (color >> 19) & 7, wing: (color >> 22) & 3, catalog: (color >>> 24) & 63, wall: Math.round(h) & 0xffffff };
+  return { shape: color & 7, roof: (color >> 3) & 7, finish: ((color >> 6) & 7) | (((color >>> 30) & 1) << 3), gear: (color >> 9) & 63, setback: (color >> 15) & 15, windows: (color >> 19) & 7, wing: (color >> 22) & 3, catalog: (color >>> 24) & 63, wall: Math.round(h) & 0xffffff };
 }
 
 /** Planta em partes no espaço local do lote (x ao longo da frente, z para a frente), dentro de w × d. */

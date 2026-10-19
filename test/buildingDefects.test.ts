@@ -352,3 +352,27 @@ test('B15: the camera and the collapse use the height the generator builds', asy
   }
   assert.deepEqual(failures, []);
 });
+
+test('F5: the creator reaches all 13 finishes by its choices, and "Vidro" is glass', async () => {
+  const { FIN, FINISH_COUNT } = await import('../src/jobs/buildingFinishes.ts');
+  const { FINISHES, ROOFS } = await import('../src/world/design.ts');
+  const heights = flatHeights(10);
+  /** The finish ids a design puts on the mesh, for every one of 5 seeds (by choice, not by luck). */
+  const finishesOf = (finish: number, roof: number): Set<number> => {
+    let common = null as Set<number> | null;
+    for (const seed of [1, 22, 333, 4444, 55555]) {
+      const b = oneBuilding(Zone.Commercial, 4, 24, 30, seed, 0);
+      const e = encodeDesign({ shape: 0, roof, finish, gear: 0, setback: 0, wall: 0xd9c7a6 });
+      b.color[0] = e.color; b.h[0] = e.h;
+      const m = buildBuildings(heights, b, 0, 0, 256, 0)!, here = new Set<number>();
+      for (let i = 0; i < m.vertexCount; i++) here.add(m.color[i * 4 + 3] >> 4);
+      common = common ? new Set([...common].filter((f) => here.has(f))) : here;
+    }
+    return common!;
+  };
+  const reached = new Set<number>();
+  for (let f = 0; f < FINISHES.length; f++) for (let r = 0; r < ROOFS.length; r++) for (const id of finishesOf(f, r)) reached.add(id);
+  const missing = Object.entries(FIN).filter(([, id]) => id > 0 && !reached.has(id)).map(([n]) => n);
+  assert.deepEqual(missing, [], `${FINISH_COUNT - missing.length} of ${FINISH_COUNT} finishes reachable`);
+  assert.ok(finishesOf(FINISHES.indexOf('Vidro'), 0).has(FIN.Glass), '"Vidro" puts glass on the walls');
+});

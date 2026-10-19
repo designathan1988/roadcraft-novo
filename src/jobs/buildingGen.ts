@@ -1640,7 +1640,9 @@ function design(g: Gen, ds: Design): void {
   const shop = zone === Zone.Commercial || zone === Zone.Mixed;
   const fh = ds.finish === 2 ? 3.6 : 3.2;
   const wallCol = ds.wall;
-  const arch = [ArchId.Colonial, ArchId.Brick, ArchId.Glass, ArchId.Modernist, ArchId.Industrial, ArchId.Tropical, ArchId.ArtDeco][ds.finish] ?? ArchId.Contemporary;
+  // the creator's wall finishes (world/design.ts FINISHES) -> the facade grammar; glass walls are curtain glass
+  const arch = DESIGN_ARCH[ds.finish] ?? ArchId.Contemporary;
+  const wallMat = ds.finish === 2 ? BMAT.Curtain : BMAT.Wall;
   const win = ds.windows ?? 0;
   const kind = (win === 1 || (!win && ds.finish === 2) ? Facade.Curtain : !win && ds.finish === 4 ? Facade.Industrial : Facade.Punched) | (shop ? Facade.ShopBit : 0);
   const colW = (win === 1 ? 1.6 : ds.finish === 2 ? 1.6 : ds.finish === 4 ? 4 : 3.1) * (win === 2 ? 1.7 : win === 3 ? 0.7 : 1);
@@ -1657,7 +1659,7 @@ function design(g: Gen, ds: Design): void {
   const lower = floors - set;
   const top1 = y0 + lower * fh;
   const top2 = top1 + set * fh;
-  const flat = 0x8f8b84, tile = ds.finish === 1 ? 0x6e3b2c : ds.finish === 4 ? 0x7f8b8f : 0x9b4a32;
+  const flat = 0x8f8b84, tile = DESIGN_SLATE.has(ds.finish) ? 0x55595e : DESIGN_METAL_ROOF.has(ds.finish) ? 0x7f8b8f : ds.finish === 1 ? 0x6e3b2c : 0x9b4a32;
   mb.curBase = y0;
   const facade = () => { setFac(mb, arch, seed, kind, colW, fh); if (win === 4) blank(mb); };
   facade();
@@ -1666,7 +1668,7 @@ function design(g: Gen, ds: Design): void {
     for (const side of wing === 3 ? [-1, 1] : wing === 1 ? [-1] : [1]) {
       const x0 = side < 0 ? -bw / 2 : bw / 2 - ww, x1 = x0 + ww, z0 = -bd / 2 + bd * 0.12, z1 = bd / 2;
       facade();
-      prism(mb, lf, x0, x1, z0, z1, f.base, wy, wallCol, BMAT.Wall, colW, flat, BMAT.RoofFlat);
+      prism(mb, lf, x0, x1, z0, z1, f.base, wy, wallCol, wallMat, colW, flat, BMAT.RoofFlat);
       blank(mb);
       if (lod < 2) parapet(mb, lf, x0, x1, z0, z1, wy, 0.9, 0.22, wallCol);
     }
@@ -1678,21 +1680,21 @@ function design(g: Gen, ds: Design): void {
   let topPoly: Array<[number, number]> | null = null;
   const pitched = ds.roof >= 2 && ds.roof <= 5;
   for (const [x0, x1, z0, z1] of rects) {
-    prism(mb, mf, x0, x1, z0, z1, f.base, top1, wallCol, BMAT.Wall, colW, pitched && !set ? -1 : flat, BMAT.RoofFlat);
+    prism(mb, mf, x0, x1, z0, z1, f.base, top1, wallCol, wallMat, colW, pitched && !set ? -1 : flat, BMAT.RoofFlat);
     if (set && x1 - x0 > inset * 2 + 4 && z1 - z0 > inset * 2 + 4) {
       setFac(mb, arch, seed, kind & 3, colW, fh); if (win === 4) blank(mb);
-      prism(mb, mf, x0 + inset, x1 - inset, z0 + inset, z1 - inset, top1, top2, wallCol, BMAT.Wall, colW, pitched ? -1 : flat, BMAT.RoofFlat);
+      prism(mb, mf, x0 + inset, x1 - inset, z0 + inset, z1 - inset, top1, top2, wallCol, wallMat, colW, pitched ? -1 : flat, BMAT.RoofFlat);
       topRects.push([x0 + inset, x1 - inset, z0 + inset, z1 - inset]);
     } else topRects.push([x0, x1, z0, z1]);
   }
   if (poly) {
-    polyPrism(mb, mf, poly, f.base, top1, wallCol, colW, pitched && !set ? -1 : flat, BMAT.RoofFlat);
+    polyPrism(mb, mf, poly, f.base, top1, wallCol, colW, pitched && !set ? -1 : flat, BMAT.RoofFlat, wallMat);
     topPoly = poly;
     if (set) {
       const k = 1 - inset * 2 / Math.min(bw, bd);
       topPoly = poly.map(([x, z]) => [x * k, z * k] as [number, number]);
       setFac(mb, arch, seed, kind & 3, colW, fh); if (win === 4) blank(mb);
-      polyPrism(mb, mf, topPoly, top1, top2, wallCol, colW, pitched ? -1 : flat, BMAT.RoofFlat);
+      polyPrism(mb, mf, topPoly, top1, top2, wallCol, colW, pitched ? -1 : flat, BMAT.RoofFlat, wallMat);
     }
   }
   const roofY = set ? top2 : top1;
@@ -1791,8 +1793,11 @@ WALL_FINISHES[ArchId.ModernHouse] = [FIN.Concrete, FIN.Plaster, FIN.Plaster, FIN
 WALL_FINISHES[ArchId.Sobrado] = [FIN.Plaster, FIN.Plaster, FIN.Brick];
 WALL_FINISHES[ArchId.Civic] = [FIN.Stone, FIN.Plaster];
 
-/** Creator finishes (design.ts FINISHES order) → finish id. */
-const DESIGN_FINISH = [FIN.Plaster, FIN.Brick, FIN.Panel, FIN.Concrete, FIN.Metal, FIN.Wood, FIN.Stone];
+/** Creator wall finishes (design.ts FINISHES order) → finish id, and the facade grammar each one draws. */
+const DESIGN_FINISH = [FIN.Plaster, FIN.Brick, FIN.Glass, FIN.Concrete, FIN.Metal, FIN.Wood, FIN.Stone, FIN.Ceramic, FIN.Stucco, FIN.Panel];
+const DESIGN_ARCH = [ArchId.Colonial, ArchId.Brick, ArchId.Glass, ArchId.Modernist, ArchId.Industrial, ArchId.Tropical, ArchId.ArtDeco, ArchId.Modernist, ArchId.ArtDeco, ArchId.Contemporary];
+/** Creator wall finishes whose pitched roof is slate (stone, stucco) or metal sheet (metal, glass, concrete, panel). */
+const DESIGN_SLATE = new Set([6, 8]), DESIGN_METAL_ROOF = new Set([2, 3, 4, 9]);
 
 /** The finish of each material of one building (shared table, filled per call). */
 export function finishTable(arch: number, seed: number, fn: number, zone: number, ds: Design | null): Uint8Array {
@@ -1801,6 +1806,15 @@ export function finishTable(arch: number, seed: number, fn: number, zone: number
   const list = WALL_FINISHES[fn ? ArchId.Civic : arch] ?? WALL_FINISHES[ArchId.Colonial];
   let wall = list[h % list.length];
   if (ds) wall = DESIGN_FINISH[ds.finish] ?? FIN.Plaster;
+  if (ds) {
+    // a design's roofs follow its wall finish, by the player's choice (no draw): every finish is reachable
+    finTable[BMAT.Wall] = finTable[BMAT.Shop] = finTable[BMAT.Curtain] = wall;
+    finTable[BMAT.Plain] = wall === FIN.Brick || wall === FIN.Ceramic || wall === FIN.Wood || wall === FIN.Panel || wall === FIN.Glass ? FIN.Plaster : wall;
+    const hard = DESIGN_METAL_ROOF.has(ds.finish);
+    finTable[BMAT.RoofFlat] = hard ? FIN.Concrete : FIN.Roofing;
+    finTable[BMAT.RoofTile] = DESIGN_SLATE.has(ds.finish) ? FIN.Slate : hard ? FIN.Metal : FIN.Tile;
+    return finTable;
+  }
   finTable[BMAT.Wall] = wall;
   finTable[BMAT.Shop] = wall;
   // trim and parapets follow a plain wall; brick, tile, wood and panel buildings get rendered parapets and cornices
