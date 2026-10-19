@@ -16,6 +16,7 @@ import { keyHelp, keyName } from './keys.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
 import { centreText } from './readouts.ts';
+import { closeRoadKeys, type RoadKeys } from './roadKeysPanel.ts';
 import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
 import {
   CATS, ShellState, categoriesOf, lineInfo, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
@@ -158,6 +159,8 @@ export interface HudActions extends OptionalActions {
   fogLevel(v: number): void;
   personSpec(p: { color: number; height: number; walk: boolean; count: number }): void;
   bombForce(f: number): void;
+  /** The road tool's keys changed in their panel (kept with the options). */
+  roadKeys(patch: Partial<RoadKeys>): void;
   // ---- added with the Roadcraft interface
   /** Simulation speed: 0 paused, 1, 2 or 4. */
   speed(n: number): void;
@@ -514,6 +517,8 @@ export class Hud {
     p.tabs.replaceChildren(); p.options.replaceChildren(); p.strip.replaceChildren(); p.tools.replaceChildren();
     p.note = undefined;
     const show = this.open && this.cat !== null && this.cat !== 'info';
+    // the keys panel belongs to the road tool
+    if (!show || this.cat !== 'roads') closeRoadKeys();
     if (show) {
       if (this.cat !== 'roads' && this.cat !== 'transit') this.catalog.visible = false;
       switch (this.cat) {

@@ -321,6 +321,7 @@ export class Game {
       personOptions: (o) => { this.personOptions = o; },
       peopleCatalog: () => this.vehicles.people.catalog(),
       bombForce: (f) => { this.bombForce = f; },
+      roadKeys: (patch) => { Object.assign(this.settings, patch); saveSettings(this.settings); },
       water: (w) => this.setWater(w),
       skyTool: (s) => { this.skyTool = s; this.skyHint(); },
       scatterClouds: (n, v) => this.scatterClouds(n, v),

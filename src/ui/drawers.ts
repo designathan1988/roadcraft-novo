@@ -17,6 +17,7 @@ import { svg } from './icons.ts';
 import { fmtDec, fmtInt, loose, plural, t } from './i18n.ts';
 import { BOMB_START, bombStep } from './strike.ts';
 import { lineName } from './transitNames.ts';
+import { openRoadKeys } from './roadKeysPanel.ts';
 
 export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
 
@@ -225,7 +226,8 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
       () => a.furniture(i)] as [string, boolean, () => void]), 'furniture'));
     furn.title = t('roadFurniture.tip');
     p.options.append(furn);
-    const keys = button('v2-pill rp-open', h.roadKeys(), () => a.options(), svg('keyboard', 16));
+    // the pill opens the keys' own small panel beside the options (Roadcraft 4.0 roads/keysPanel.ts, v2/shell.ts:1289)
+    const keys = button('v2-pill rp-open', h.roadKeys(), () => openRoadKeys(keys, () => a.settings(), (patch) => { a.roadKeys(patch); h.render(); }), svg('keyboard', 16));
     keys.title = t('roadKeys.title');
     p.options.append(orow(t('roadKeys.row'), keys));
     // the catalogue of ready roads: tabs by category, a card drawn for each

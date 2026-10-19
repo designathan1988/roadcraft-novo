@@ -781,6 +781,28 @@ export const SCENARIOS = {
     const by = g.canvas.getAttribute('aria-describedby');
     check('it describes the map', !!by && document.getElementById(by) === h && h.textContent.length > 5, 'describedby ' + by);
   `,
+  // The 4.0 road keys panel (roads/keysPanel.ts): the pill opens a small panel beside the options, a chip per key, the
+  // next key pressed is bound (a game key refused), Esc lets go and then closes, Reset gives the three defaults back
+  'road-keys-panel-4.0': `
+    click('[data-cat=roads]'); await frames(2);
+    click(Q('.v2-toolopts .rp-open')); await frames(2);
+    const panel = Q('.rp-keys');
+    check('the pill opens the keys panel, not the options', !!panel && !g.optionsPanel.isOpen && QA('.rp-keys .rp-key').length === 3, 'panel ' + !!panel + ', options open ' + g.optionsPanel.isOpen);
+    if (!panel) throw new Error('no panel');
+    click(QA('.rp-keys .rp-key')[1]); await frames(1);
+    check('a chip waits for the key', /Aperte|Press/.test(QA('.rp-keys .rp-key')[1].textContent), 'chip ' + QA('.rp-keys .rp-key')[1].textContent);
+    key('KeyR', { key: 'r' }); await frames(2);
+    check('a game key is refused (R turns the view)', A.settings().roadDown === 'PageDown' && /R/.test((Q('.rp-keys .rp-note') || {}).textContent || ''), 'roadDown ' + A.settings().roadDown + ', note ' + ((Q('.rp-keys .rp-note') || {}).textContent));
+    key('KeyJ', { key: 'j' }); await frames(2);
+    const st = A.settings();
+    check('the key pressed is bound, the tool stays', st.roadDown === 'KeyJ' && g.tool === 'road', 'roadDown ' + st.roadDown + ', tool ' + g.tool);
+    check('the pill shows it', /J/.test(Q('.v2-toolopts .rp-open').textContent), 'pill ' + Q('.v2-toolopts .rp-open').textContent);
+    click(byText('.rp-keys .rp-btn', 'Restaurar|Reset')); await frames(2);
+    const back = A.settings();
+    check('Reset gives the defaults back', back.roadUp === 'PageUp' && back.roadDown === 'PageDown' && back.roadAlign === 'KeyV', back.roadUp + ' ' + back.roadDown + ' ' + back.roadAlign);
+    key('Escape'); await frames(2);
+    check('Esc closes it and the tool stays', !Q('.rp-keys') && g.tool === 'road', 'panel ' + !!Q('.rp-keys') + ', tool ' + g.tool);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
