@@ -52,6 +52,7 @@ import { Inspector } from './ui/inspector.ts';
 import { installKeys } from './ui/keys.ts';
 import { attachPinch } from './ui/touch.ts';
 import { BOMB_START, bombRadius } from './ui/strike.ts';
+import { zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
@@ -386,7 +387,7 @@ export class Game {
       ring: (f) => { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); },
       terminal: (on) => { this.transitTerminal = on; },
       itemRemove: (on) => { this.itemRemove = on; },
-      cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
+      cameraNumbers: () => ({ zoom: zoomPercent(this.canvas.clientHeight, this.rig.dist, this.rig.persp.fov), x: this.rig.target.x, z: this.rig.target.z }),
       health: () => { if (this.developer) this.health.toggle(); },
       developer: () => this.developer,
       healthLevel: () => this.health?.level() ?? 'ok',

@@ -145,3 +145,14 @@ test('bomb force steps 1..50 and blast radius as Roadcraft 4.0', async () => {
   assert.ok(Math.abs(bombRadius(5) - 8) < 1e-9);
   assert.ok(Math.abs(bombRadius(50) - 57.5) < 1e-9);
 });
+
+// Roadcraft 4.0 v2/shell.ts:644-645 and render/isoViewport.ts:393-395: the Camera panel reads the zoom as screen pixels
+// per metre at the centre, in %, and the centre as "X · Y" with Y the map's north (three.js −z).
+test('camera readouts: zoom in % and centre X · Y as Roadcraft 4.0', async () => {
+  const { zoomPercent, centreText } = await import('../src/ui/readouts.ts');
+  // 1000 px tall, 45° field: at 500 m the view is 2·500·tan(22.5°) = 414.2 m tall → 2.414 px/m → 241 %
+  assert.equal(zoomPercent(1000, 500, 45), 241);
+  assert.equal(zoomPercent(1000, 1207.1, 45), 100);
+  assert.equal(centreText(1234.4, -567.6, (v) => String(Math.round(v))), 'X 1234 · Y 568');
+  assert.equal(centreText(0, 0.3, (v) => String(Math.round(v))), 'X 0 · Y 0');
+});

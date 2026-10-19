@@ -14,6 +14,7 @@ import { mountCompass, type Compass } from './compass.ts';
 import { keyHelp, keyName } from './keys.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
+import { centreText } from './readouts.ts';
 import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
 import {
   CATS, ShellState, categoriesOf, lineInfo, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
@@ -191,7 +192,7 @@ export interface HudActions extends OptionalActions {
   /** Street item clicks remove (on) or place (off). */
   itemRemove(on: boolean): void;
   /** Camera distance to its target (m) and the target on the map. */
-  cameraNumbers(): { dist: number; x: number; z: number };
+  cameraNumbers(): { zoom: number; x: number; z: number };
 }
 
 type PopId = 'menu' | 'layers' | 'sim' | 'camera' | 'help';
@@ -631,7 +632,8 @@ export class Hud {
       this.syncMetrics();
     } else if (id === 'camera') {
       body.classList.add('icons');
-      const cam = (key: string, icon: string, run: () => void, on = false): HTMLButtonElement => button(`v2-icon${on ? ' on' : ''}`, t(key), run, svg(icon, 18));
+      // the name without its key or its explanation: "Girar à esquerda", not "… (Q)" (Roadcraft 4.0 v2/shell.ts:759)
+      const cam = (key: string, icon: string, run: () => void, on = false): HTMLButtonElement => button(`v2-icon${on ? ' on' : ''}`, t(key).replace(/\s*[(·].*$/, ''), run, svg(icon, 18));
       body.append(
         cam('ui.camera.turnLeft', 'undo', () => a.turn(-1)),
         cam('camera.tiltDown', 'lower', () => a.tilt(-1)),
@@ -648,7 +650,8 @@ export class Hud {
       dl.append(el('dt', '', t('camera.zoom')), zoom, el('dt', '', t('camera.centre')), centre);
       const sync = (): void => {
         const c = a.cameraNumbers();
-        const zt = `${fmtInt(c.dist)} m`, ct = `X ${fmtInt(c.x)} · Z ${fmtInt(c.z)}`;
+        // as Roadcraft 4.0 (v2/shell.ts:644-645): pixels per metre in %, and the centre with Y the map's north
+        const zt = `${fmtInt(c.zoom)} %`, ct = centreText(c.x, c.z, fmtInt);
         if (zoom.textContent !== zt) zoom.textContent = zt;
         if (centre.textContent !== ct) centre.textContent = ct;
       };
