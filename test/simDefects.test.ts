@@ -714,3 +714,28 @@ test('C38: clearing the simulation (new map, load) leaves nothing of the old cit
   assert.ok(tr.occupancy.every((x) => x === 0), 'road occupancy');
   assert.equal(tr.docks.length, 0, 'docks of the old city');
 });
+
+test('C40: car trips never start or end at a node that only rails reach', async () => {
+  const { World } = await import('../src/world/world.ts');
+  const { planRoad, buildRoad, snap } = await import('../src/roads/build.ts');
+  const { PROFILES, PROFILE_INFO } = await import('../src/roads/profiles.ts');
+  const { SimNet } = await import('../src/sim/lanes.ts');
+  const { recordOps, mirror } = await import('./simCity.ts');
+  const railId = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.unlimited = true;
+  const ops = recordOps(w);
+  const build = (ax: number, az: number, bx: number, bz: number, prof: number) => {
+    const a = snap(w.roads, ax, az, 8), b = snap(w.roads, bx, bz, 8);
+    buildRoad(w, planRoad(w, a, null, b, prof, 0), a, b, prof);
+  };
+  build(-900, 300, 900, 300, railId); build(-900, -100, 900, -100, 0); build(0, -400, 0, 200, 0);
+  const sim = new SimNet(); mirror(sim, ops); sim.rebuild(); sim.removedSegs.length = 0;
+  const tr = traffic(sim);
+  const sc = sim.net.segs.cols, nc = sim.net.nodes.cols;
+  const railOnly = (n: number) => { for (const s of sim.net.segsOf(n, [])) if (!PROFILE_INFO[sc.profile[s]].rail) return false; return true; };
+  let picks = 0, rail = 0;
+  for (let i = 0; i < 2000; i++) { const n = inner(tr).zonedNode([1, 1, 1, 1, 1]); if (n < 0) continue; picks++; if (railOnly(n)) rail++; }
+  assert.ok(picks > 1000 && nc.deg.length > 0, `picks ${picks}`);
+  assert.equal(rail, 0, `${rail} of ${picks} trip ends at nodes only rails reach`);
+});

@@ -876,9 +876,16 @@ export class Traffic {
     if (t.size === 0) return -1;
     for (let i = 0; i < 20; i++) {
       const n = this.rng.int(0, t.end);
-      if (t.alive[n] && t.cols.deg[n] > 0) return n;
+      if (t.alive[n] && t.cols.deg[n] > 0 && this.byRoad(n)) return n;
     }
     return -1;
+  }
+
+  /** Does a road (not only rails) reach node `n`? Car trips start and end only there. */
+  private byRoad(n: number): boolean {
+    const net = this.sim.net, sc = net.segs.cols;
+    for (let k = 0; k < net.nodes.cols.deg[n]; k++) if (!PROFILE_INFO[sc.profile[net.adj[n * MAX_DEG + k]]].rail) return true;
+    return false;
   }
 
   /** Hour of day (from the page) and the player's multipliers. */
