@@ -186,6 +186,8 @@ export class RoadCatalog {
   private built = '';
   private cards = new Map<number, HTMLElement>();
   private art = new Map<string, string>();
+  /** Names of the models deleted in this session (their profiles stay registered for the roads that use them). */
+  private deleted = new Set<string>();
   private a: CatalogActions;
 
   constructor(a: CatalogActions) {
@@ -213,6 +215,8 @@ export class RoadCatalog {
   }
 
   private fromEditor(def: Omit<Profile, 'id'>, save: boolean): void {
+    // a model made (or saved) again under a deleted name is back in "Mine"
+    this.deleted.delete(def.name);
     if (save) {
       const list = readTemplates().filter((x) => x.name !== def.name);
       list.push({ ...def, category: 'meus', custom: true });
@@ -232,19 +236,24 @@ export class RoadCatalog {
   private build(): void {
     const items: Array<{ def: Omit<Profile, 'id'>; id: number; del?: () => void }> = [];
     if (this.cat === 'meus') {
-      for (const tp of readTemplates()) items.push({ def: tp, id: -1, del: () => { writeTemplates(readTemplates().filter((x) => x.name !== tp.name)); this.built = ''; this.build(); } });
-      for (const p of PROFILES) if (p.custom && !items.some((i) => i.def.name === p.name)) items.push({ def: p, id: p.id });
+      // a deleted model leaves "Mine" (Roadcraft 4.0 ui/roads/templates.ts:27); a road already drawn with it keeps its
+      // profile, which is no longer offered as a card
+      for (const tp of readTemplates()) items.push({ def: tp, id: -1, del: () => { writeTemplates(readTemplates().filter((x) => x.name !== tp.name)); this.deleted.add(tp.name); this.built = ''; this.build(); } });
+      for (const p of PROFILES) if (p.custom && !this.deleted.has(p.name) && !items.some((i) => i.def.name === p.name)) items.push({ def: p, id: p.id });
     } else for (const p of PROFILES) if (!p.custom && !p.ring && p.category === this.cat) items.push({ def: p, id: p.id });
     const key = `${this.cat}|${PROFILES.length}|${items.map((i) => i.def.name).join(',')}`;
     if (key !== this.built) {
       this.built = key;
       this.tabs.replaceChildren();
+      const mine = readTemplates();
       for (const [c, k] of CATS) {
         const b = el('button', `rc-tab${c === this.cat ? ' on' : ''}`);
         b.type = 'button';
         b.setAttribute('role', 'tab');
         b.dataset.category = c;
-        const count = c === 'meus' ? readTemplates().length + PROFILES.filter((p) => p.custom).length : PROFILES.filter((p) => !p.custom && !p.ring && p.category === c).length;
+        // "Mine" counts the cards it shows: the models, and the session's own profiles that are not one of them nor deleted
+        const count = c === 'meus' ? mine.length + PROFILES.filter((p) => p.custom && !this.deleted.has(p.name) && !mine.some((x) => x.name === p.name)).length
+          : PROFILES.filter((p) => !p.custom && !p.ring && p.category === c).length;
         b.append(el('span', '', t(k)), el('em', '', String(count)));
         b.addEventListener('click', (e) => { e.stopPropagation(); this.cat = c; this.build(); });
         this.tabs.append(b);

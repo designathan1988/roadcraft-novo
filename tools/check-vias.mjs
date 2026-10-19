@@ -116,6 +116,25 @@ const SCENARIOS = {
     g.commands.undo();
     check('undo brings the typed name back', w.streetNames.get(s) === 'Rua Digitada', 'name ' + w.streetNames.get(s));
   `,
+  // B49: deleting a road model the player used in this session takes its card out of "Mine"
+  'catalog-delete-template': `
+    localStorage.removeItem('cidade.modelosDeVia');
+    const cat = g.hud.catalog;
+    const def = { name: 'Modelo Teste', speed: 40, oneWay: false, priority: 0, category: 'meus', custom: true,
+      strips: [{ kind: 'sidewalk', width: 3 }, { kind: 'curb', width: 0.2 }, { kind: 'lane', width: 3.2, dir: 1 }, { kind: 'lane', width: 3.2, dir: -1 }, { kind: 'curb', width: 0.2 }, { kind: 'sidewalk', width: 3 }] };
+    cat.fromEditor(def, true);
+    cat.cat = 'meus'; cat.built = ''; cat.build();
+    const names = () => [...cat.grid.querySelectorAll('.rc-name')].map((e) => e.textContent);
+    check('the saved model has a card', names().includes('Modelo Teste'), 'cards: ' + names());
+    const card = [...cat.grid.querySelectorAll('.rc-card')].find((c) => c.querySelector('.rc-name').textContent === 'Modelo Teste');
+    const del = card && [...card.querySelectorAll('button.rc-custom')].find((b) => b.style.color.includes('danger'));
+    check('its card has a delete button', !!del, 'no button');
+    if (del) del.click();
+    check('the model is gone from the browser', !(JSON.parse(localStorage.getItem('cidade.modelosDeVia') || '[]')).some((p) => p.name === 'Modelo Teste'), 'still stored');
+    check('the deleted model leaves the catalogue', !names().includes('Modelo Teste'), 'cards: ' + names());
+    const tab = cat.tabs.querySelector('[data-category=meus] em');
+    check('the Mine tab counts the cards it shows', tab && tab.textContent === String(names().length), 'tab ' + (tab && tab.textContent) + ', cards ' + names().length);
+  `,
 };
 
 const pick = process.argv.slice(2);
