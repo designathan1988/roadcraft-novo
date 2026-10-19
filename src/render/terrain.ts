@@ -4,7 +4,7 @@
 // mesh on a camera-locked grid (a child of the terrain mesh), drawn only when the camera is near the ground.
 
 import * as THREE from 'three/webgpu';
-import { currentU, foamU, waveU } from './scene.ts';
+import { currentU, foamU, waterEnv, waveU } from './scene.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { ROCK_TILE, TERRAIN_NOISE, WATER_TEX } from './surfaceBake.ts';
@@ -55,6 +55,21 @@ const TUFT_EYE = 140;
 const BLADES = 7;
 
 type N = Node;
+
+/**
+ * The water's material: a standard one whose specular lobe is the water's Fresnel, as 4.0's (water.ts:359-366: both
+ * the direct and the environment lobe take mix(0.04, 1, F), F90 = 1), not the standard 0.04 everywhere.
+ */
+class WaterNodeMaterial extends THREE.MeshStandardNodeMaterial {
+  fresnelNode: Node | null = null;
+  override setupSpecular(): void {
+    if (!this.fresnelNode) { super.setupSpecular(); return; }
+    const s = mix(vec3(0.04), vec3(1), this.fresnelNode);
+    T.specularColor.assign(s);
+    T.specularColorBlended.assign(s);
+    T.specularF90.assign(1);
+  }
+}
 
 export class TerrainRenderer {
   readonly mesh: THREE.Mesh;
@@ -672,14 +687,14 @@ export class TerrainRenderer {
       const grad = vec2(gx, gz).div(float(WATER_SPACING * 3));
       const run = smoothstep(0.0003, 0.004, length(grad));
       vW.assign(vec4(w, normalize(grad.add(vec2(1e-7, 0))), run));
-      // waves: the surface rises and falls a little (up to 0.35 m)
-      const wave = T.sin(xz.x.mul(0.21).add(T.time.mul(1.3))).mul(T.sin(xz.y.mul(0.17).add(T.time.mul(1.1)))).mul(waveU.mul(0.35));
-      // at the mouth (level at the sea's) the river's surface drops under the sea plane: with waves the two crossed and blinked
-      const surf = select(w.lessThan(float(SEA_LEVEL + 0.6)), float(SEA_LEVEL - 0.3), w.add(wave));
+      // no displacement: 4.0's waves are in the normals only (water.ts:297-298, :346-350)
+      // at the mouth (level at the sea's) the river's surface drops under the sea plane, so the two never cross
+      const surf = select(w.lessThan(float(SEA_LEVEL + 0.6)), float(SEA_LEVEL - 0.3), w);
       const y = select(w.greaterThan(float(NO_WATER + 1)), surf, float(-2000));
       return vec3(xz.x, y, xz.y);
     });
-    const m = new THREE.MeshStandardNodeMaterial({ transparent: true });
+    const m = new WaterNodeMaterial({ transparent: true });
+    waterEnv(m);
     // the sea is a plane at sea level (scene.ts): no level to read and no current
     if (!sea) { m.positionNode = pos(); withPrevious(m); }
     const p = positionWorld;
@@ -720,11 +735,12 @@ export class TerrainRenderer {
     c = c.mul(tex(p.xz.mul(0.0031).add(vec2(0.0011, 0.0006).mul(t))).w.mul(0.12).add(0.94));
     const view = normalize(cameraPosition.sub(p));
     const F = float(0.06).add(float(0.94).mul(pow(float(1).sub(clamp(dot(view, n), 0, 1)), 3)));
+    m.fresnelNode = F;
     c = c.mul(float(1).sub(F.mul(0.6))).mul(mix(float(0.65), float(1), foam));
     c = mix(c, lin(0x6f95b8), F.mul(0.35).mul(float(1).sub(foam)));
     m.colorNode = vec4(mix(c, lin(0xe6eef2), foam), 1);
-    // opaque by 3 m (4.0's rivers were deeper: 5.6 m there left our shallow rivers see-through)
-    let alpha: N = max(mix(float(0.05), float(0.88), smoothstep(0.12, 3.0, depth)), foam.mul(0.9));
+    // 4.0 water.ts:324-326: the first shallow stretch shows the bed, near opaque by 5.6 m; the rim fades in by 0.28 m
+    let alpha: N = max(mix(float(0.05), float(0.88), smoothstep(0.12, 5.6, depth)), foam.mul(0.9));
     alpha = clamp(alpha.add(F.mul(0.5)), 0, 1).mul(smoothstep(0, 0.28, depth));
     m.opacityNode = alpha;
     m.roughnessNode = mix(float(0.15), float(0.72), foam);

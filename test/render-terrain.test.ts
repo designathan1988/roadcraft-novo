@@ -148,3 +148,15 @@ test('terrain (4.0 port): the grass, dirt and rock come from the 4.0 baked surfa
   const src = fs.readFileSync('src/render/terrain.ts', 'utf8');
   for (const k of ["COOKED['terrain-grass.map']", "COOKED['terrain-land.map']", "COOKED['terrain-land.normal']", "COOKED['terrain-grass.normal']"]) assert.ok(src.includes(k), `the terrain reads ${k}`);
 });
+
+// 4.0 water.ts:177: the water sees the sky at 0.42 where 4.0's usual finish sees 0.6 (ours: SkyEnvironment.INTENSITY)
+test('water sees the environment at 4.0 share (envMapIntensity 0.42)', async () => {
+  const sc = await import('../src/render/scene.ts') as Record<string, unknown> & typeof import('../src/render/scene.ts');
+  assert.equal(typeof sc.waterEnv, 'function', 'no per-material share of the environment');
+  const THREE = await import('three/webgpu');
+  const m = new THREE.MeshStandardNodeMaterial();
+  sc.waterEnv(m);
+  const scene = new THREE.Scene();
+  new sc.SkyEnvironment(null as never, scene, false).update(new THREE.Vector3(0, 1, 0), 1);
+  assert.ok(Math.abs(m.envMapIntensity - scene.environmentIntensity * 0.42 / 0.6) < 1e-9, `water ${m.envMapIntensity}, scene ${scene.environmentIntensity}`);
+});

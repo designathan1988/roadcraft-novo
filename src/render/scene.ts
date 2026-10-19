@@ -162,6 +162,24 @@ const ENV_STEP_LIGHT = 0.08;
  * glass and wet surfaces show it). A second SkyMesh in a probe scene, prefiltered by PMREM into one reused target;
  * refreshed only when the sun moves ≥ 2° or the daylight / cloud cover changes, never per frame.
  */
+/**
+ * Materials that see the sky at their own share of the environment, as 4.0's `envMapIntensity` (water: 0.42,
+ * water.ts:177). Ours lights everything at `SkyEnvironment.INTENSITY`, which stands for 4.0's usual 0.6 (finishes
+ * 0.4-1, finishRecipes.ts): a material registered with k sees k / 0.6 of it. The env map is set on the material
+ * because three's node materials only take their own intensity with their own map (`materialEnvIntensity`).
+ */
+const ownEnv: Array<{ m: THREE.Material & { envMap: THREE.Texture | null; envMapIntensity: number }; k: number }> = [];
+let lastEnv: { tex: THREE.Texture | null; intensity: number } = { tex: null, intensity: 1 };
+export function waterEnv(m: THREE.MeshStandardNodeMaterial, k = 0.42): void {
+  const e = { m, k };
+  ownEnv.push(e);
+  applyOwnEnv(e);
+}
+function applyOwnEnv(e: (typeof ownEnv)[number]): void {
+  if (lastEnv.tex && e.m.envMap !== lastEnv.tex) { e.m.envMap = lastEnv.tex; e.m.needsUpdate = true; }
+  e.m.envMapIntensity = lastEnv.intensity * e.k / 0.6;
+}
+
 export class SkyEnvironment {
   /** How much of the sky the materials see by day (Roadcraft: 0.6, with a sky fill of 0.8). */
   static readonly INTENSITY = 0.1;
@@ -190,6 +208,8 @@ export class SkyEnvironment {
   /** `dir` = toward the sun, `light` = daylight 0..1 (already dimmed by the clouds). */
   update(dir: THREE.Vector3, light: number): void {
     this.scene.environmentIntensity = SkyEnvironment.INTENSITY * (0.08 + 0.92 * light);
+    lastEnv.intensity = this.scene.environmentIntensity;
+    for (const e of ownEnv) applyOwnEnv(e);
     if (!this.pmrem) return;
     const moved = this.lastDir.angleTo(dir) * 180 / Math.PI;
     if (moved < ENV_STEP_DEG && Math.abs(light - this.lastLight) < ENV_STEP_LIGHT && this.target) return;
@@ -201,6 +221,8 @@ export class SkyEnvironment {
     this.probeSky.rayleigh.value = 2.2 * (0.35 + 0.65 * light);
     this.target = this.pmrem.fromScene(this.probe, 0.04, 0.1, 100, { size: 128, renderTarget: this.target });
     this.scene.environment = this.target.texture;
+    lastEnv.tex = this.target.texture;
+    for (const e of ownEnv) applyOwnEnv(e);
     this.refreshes++;
   }
 }
