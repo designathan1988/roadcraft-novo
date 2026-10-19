@@ -99,6 +99,8 @@ export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctio
   }
   const pr = (s: number) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
   let ctl = spec?.ctl ?? Ctl.Auto;
+  // a mid-block crossing or U-turn that got a third road is an ordinary junction now: automatic
+  if (isMidNode(ctl)) ctl = Ctl.Auto;
   const auto = ctl === Ctl.Auto;
   const sorted = segs.slice().sort((a, b) => pr(b) - pr(a));
   const p1 = pr(sorted[0]);

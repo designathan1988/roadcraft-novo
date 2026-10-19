@@ -659,3 +659,26 @@ test('D19: a street-wide profile and parking on one side land on the same side o
   const s2b = [-100, 0].map((x) => parkingSide(w2, w2.roads.nearestSeg(x, 0, 2)![0]));
   assert.equal(s2b[0], s2b[1], `parking on sides ${s2b.join(', ')}`);
 });
+
+test('D20: a mid-block crossing or U-turn node that gets a third road becomes an ordinary automatic junction', async () => {
+  const { addCrossing, addUTurn } = await import('../src/roads/build.ts');
+  const { effectiveControl } = await import('../src/roads/control.ts');
+  for (const kind of ['zebra', 'uturn'] as const) {
+    const w = flatWorld(1e9);
+    const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+    road(w, -100, 0, 100, 0, kind === 'uturn' ? avenue : 0);
+    const s = w.roads.nearestSeg(0, 0, 2)![0];
+    const r = kind === 'zebra' ? addCrossing(w, s, 0.5, Ctl.Zebra) : addUTurn(w, s, 0.5);
+    assert.ok(typeof r !== 'string', String(r));
+    assert.ok(r.settle());
+    let mid = -1;
+    for (let n = 0; n < w.roads.nodes.end; n++) if (w.roads.nodes.alive[n] && w.roads.junctions.has(n)) mid = n;
+    assert.ok(mid >= 0);
+    const nc = w.roads.nodes.cols;
+    road(w, nc.x[mid], nc.z[mid], nc.x[mid], nc.z[mid] - 80);
+    assert.equal(nc.deg[mid], 3);
+    const c = effectiveControl(w.roads, mid);
+    assert.equal(c.legs.size, 3, `the ${kind} node with a third road has rules for ${c.legs.size} legs`);
+    assert.ok(c.ctl !== Ctl.Zebra && c.ctl !== Ctl.UTurn, `the ${kind} node kept its two-road control (${c.ctl})`);
+  }
+});
