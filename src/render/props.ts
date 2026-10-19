@@ -19,6 +19,7 @@ import { nightU } from './scene.ts';
 import { PAINTS } from './vehicles.ts';
 import { windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
+import { PropBlocks } from './propBlocks.ts';
 
 const {
   Fn, If, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
@@ -47,11 +48,9 @@ export class PropRenderer {
   private extraAttr: THREE.StorageBufferAttribute;
   private visAttr: THREE.StorageBufferAttribute;
   private drawAttr: THREE.IndirectStorageBufferAttribute;
-  private freeBlocks: number[] = [];
-  private cellBlocks: Array<number[] | null> = new Array(CELL_COUNT).fill(null);
+  private blocks = new PropBlocks(CAP / BLOCK, CELL_COUNT);
   private cellVer = new Uint32Array(CELL_COUNT);
   private cellReq = new Uint32Array(CELL_COUNT);
-  private highBlock = 0;
   private usedU = uniform(0, 'uint');
   private camU = uniform(new THREE.Vector3());
   private planes: THREE.Vector4[] = Array.from({ length: 6 }, () => new THREE.Vector4());
@@ -93,7 +92,6 @@ export class PropRenderer {
     this.defs = buildPropDefs();
     // the impostor frames are measured from the tree meshes before the material reads them
     impostorFrames(impostorSources(this.defs));
-    for (let b = CAP / BLOCK - 1; b >= 0; b--) this.freeBlocks.push(b);
     this.poolAttr = new THREE.StorageBufferAttribute(this.data, 4);
     this.extraAttr = new THREE.StorageBufferAttribute(this.extra, 1);
     this.visAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS * REGION), 1);
@@ -400,20 +398,16 @@ export class PropRenderer {
 
   private setCell(c: number, p: PropColumns | null): void {
     if (!this.enabled) { this.setCellFallback(c, p); return; }
-    const old = this.cellBlocks[c];
-    if (old) {
+    const old = this.blocks.release(c);
+    if (old.length) {
       for (const b of old) {
         this.extra.fill(PROP_FREE, b * BLOCK, (b + 1) * BLOCK);
         this.extraAttr.addUpdateRange(b * BLOCK, BLOCK);
-        this.freeBlocks.push(b);
       }
       this.extraAttr.needsUpdate = true;
-      this.cellBlocks[c] = null;
     }
     if (!p || p.count === 0) return;
-    const need = Math.ceil(p.count / BLOCK);
-    const blocks: number[] = [];
-    for (let k = 0; k < need && this.freeBlocks.length; k++) blocks.push(this.freeBlocks.pop()!);
+    const blocks = this.blocks.place(c, p.count, BLOCK);
     let i = 0;
     for (const b of blocks) {
       const s0 = b * BLOCK;
@@ -424,11 +418,9 @@ export class PropRenderer {
       this.poolAttr.addUpdateRange(s0 * 4, BLOCK * 4);
       this.extraAttr.addUpdateRange(s0, BLOCK);
       i += n;
-      this.highBlock = Math.max(this.highBlock, b + 1);
     }
     this.poolAttr.needsUpdate = true;
     this.extraAttr.needsUpdate = true;
-    this.cellBlocks[c] = blocks;
   }
 
   /** WebGL 2: uma malha instanciada por tipo na célula (nível do meio, ou o único que houver). */
@@ -506,7 +498,7 @@ export class PropRenderer {
     for (let j = Math.max(0, tz - 1); j <= Math.min(MAP_TILES - 1, tz + 1); j++) for (let i = Math.max(0, tx - 1); i <= Math.min(MAP_TILES - 1, tx + 1); i++) top = Math.max(top, w.tileMax[tileId(i, j)]);
     const nearest = Math.min(TILE_SIZE, camPos.y - top - 60);
     for (let k = 0; k < DRAWS; k++) { const m = this.slotMesh[k]; if (m) m.visible = this.distArr[k] > nearest; }
-    this.usedU.value = this.highBlock * BLOCK;
+    this.usedU.value = this.blocks.highBlock * BLOCK;
     renderer.compute(this.reset);
     renderer.compute(this.cull);
     renderer.compute(this.clamp);
