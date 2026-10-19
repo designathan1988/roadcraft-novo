@@ -880,3 +880,20 @@ test('D38: applying a segment\'s profile to the whole street reaches the blocks 
   assert.ok(changeProfiles(w, chain, 0).settle());
   for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) assert.equal(net.segs.cols.profile[s], 0, 'a block kept its old profile');
 });
+
+test('D39: the preview\'s price of a planned road matches what building it costs', async () => {
+  const { planPrice } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  // sea in the middle: part of the road is a bridge
+  for (let gz = 0; gz < HEIGHT_MAP_RES; gz++) for (let gx = Math.round(sampleCoord(-30)); gx < Math.round(sampleCoord(30)); gx++) w.heights[heightIndex(gx, gz)] = -4;
+  for (const [ax, bx, prof] of [[-300, -100, 0], [-150, 150, 0], [-200, 200, PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]]) {
+    const a = snap(w.roads, ax, 0, 1), b = snap(w.roads, bx, 0, 1);
+    const p = planRoad(w, a, null, b, prof, 0);
+    assert.ok(p.ok, p.reason);
+    const shown = planPrice(w, p, prof);
+    const j = buildRoad(w, p, a, b, prof);
+    const real = j.price;
+    j.invert();
+    assert.ok(Math.abs(shown - real) <= real * 0.08, `the preview shows R$ ${shown}, building costs R$ ${real}`);
+  }
+});

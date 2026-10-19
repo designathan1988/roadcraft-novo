@@ -544,6 +544,34 @@ function overlapsRoad(net: RoadNetwork, q: Quad, table: Float64Array, profile: n
   return false;
 }
 
+/**
+ * What building the plan will cost, for the preview: the road cut where buildRoad cuts it (at the junctions, then in
+ * halves while longer than MAX_SEG_LEN or bending away from the straight line between its ends), each piece priced by how it is built over the ground and water (five samples, as the
+ * journal does). The roads it splits keep their value.
+ */
+export function planPrice(world: World, plan: RoadPlan, profile: number): number {
+  if (!plan.ok) return 0;
+  const q = plan.quad, table = arcTable(q, 64), len = table[table.length - 1];
+  const stops = [0, ...plan.junctions.map((j) => arcAtT(table, j[0])), len];
+  const p = new Float64Array(2);
+  let total = 0;
+  const piece = (s0: number, s1: number, depth: number) => {
+    const y0 = profileY(plan.profile, s0), y1 = profileY(plan.profile, s1), L = s1 - s0;
+    let worst = 0;
+    for (let f = 0.125; f < 1; f += 0.125) worst = Math.max(worst, Math.abs(profileY(plan.profile, s0 + L * f) - (y0 + (y1 - y0) * f)));
+    if ((L > MAX_SEG_LEN || (worst > 0.4 && L > 30)) && depth < 8) { const m = (s0 + s1) / 2; piece(s0, m, depth + 1); piece(m, s1, depth + 1); return; }
+    const kinds: number[] = [];
+    for (const f of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      const s = s0 + (s1 - s0) * f;
+      bez(q, tAtLength(table, s), p);
+      kinds.push(buildKindAt(y0 + (y1 - y0) * f, heightAt(world.heights, p[0], p[1]), waterAt(world.water, p[0], p[1])));
+    }
+    total += segmentPrice(profile, s1 - s0, dominantKind(kinds));
+  };
+  for (let i = 1; i < stops.length; i++) piece(stops[i - 1], stops[i], 0);
+  return chargeFor(total);
+}
+
 function arcAtT(table: Float64Array, t: number): number {
   const n = table.length - 1;
   const f = t * n, i = Math.min(n - 1, Math.floor(f));

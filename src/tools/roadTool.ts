@@ -3,7 +3,7 @@
 
 import type * as THREE from 'three/webgpu';
 import type { CommandStack } from '../core/commands.ts';
-import { RoadJournal, buildRoad, buildRoundabout, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
+import { RoadJournal, buildRoad, buildRoundabout, planPrice, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
 import { bez, type Quad } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { SegFlag } from '../roads/flags.ts';
@@ -13,6 +13,7 @@ import { heightAt } from '../world/heights.ts';
 import { demolishTarget, targetAt, type Target } from './demolish.ts';
 import { lotToWorld } from '../world/lotEdit.ts';
 import type { World } from '../world/world.ts';
+import { money, t } from '../ui/i18n.ts';
 
 const p2 = new Float64Array(2);
 
@@ -165,6 +166,8 @@ export class RoadTool {
     }
     const p = this.plan;
     pv.show(p.quad, PROFILE_INFO[this.profile].right, p.profile.at, p.profile.y, p.ok);
+    // what it will cost, while the player aims (the same pieces and build kinds as the journal will charge)
+    if (p.ok && (this.mode !== 'curve' || this.control)) this.hud.setHint(t('road.preview.cost', { price: money(this.world.unlimited ? 0 : planPrice(this.world, p, this.profile)) }));
   }
 
   /** Eyedropper: takes the profile of the road under the cursor. Returns the id, or -1. */
