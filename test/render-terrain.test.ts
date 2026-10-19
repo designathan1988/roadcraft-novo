@@ -93,3 +93,17 @@ test('E36: the terrain casts sun shadows round the camera, seen only by the shad
     assert.ok(typeof sunMod.SHADOW_ONLY_LAYER === 'number');
   }
 });
+
+test('E35: the grass shows by the eye\'s height over the ground under it, not over the tile\'s mean', async () => {
+  const { HEIGHT_TILE_RES } = await import('../src/config.ts');
+  const w = new World();
+  // a tile from 0 to 300 m: its mean is 150 m; the ground under the eye is at 290 m
+  w.heights.fill(290); w.tileMin.fill(0); w.tileMax.fill(300);
+  void HEIGHT_TILE_RES;
+  const terrain = new TerrainRenderer(w);
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 60000);
+  const eye = new THREE.Vector3(0, 340, 0); // 50 m over the ground
+  camera.position.copy(eye); camera.lookAt(0, 290, -100); camera.updateMatrixWorld();
+  terrain.update(camera, eye);
+  assert.equal(terrain.grassMesh.visible, true, 'the grass is hidden 50 m over the ground (190 m over the tile\'s mean)');
+});

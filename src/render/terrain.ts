@@ -16,6 +16,7 @@ import { tileX, tileId } from '../core/grid.ts';
 import { PAINT_COARSE } from '../jobs/roadPaint.ts';
 import { GROUND_COLORS, NO_WATER, WATER_SPACING, WATER_TILE_RES } from '../world/ground.ts';
 import type { World } from '../world/world.ts';
+import { heightAt } from '../world/heights.ts';
 
 /** Grid on the map switched on (0/1). */
 export const gridU = T.uniform(0);
@@ -633,11 +634,10 @@ export class TerrainRenderer {
     this.inst.needsUpdate = true;
   }
 
-  /** Ground height at a point from the tile bounds' table (cheap; enough to tell how high the eye is). */
+  /** Ground height under a point (the tile's mean was off by up to half the tile's relief: grass shown or hidden
+   *  100 m too early on hills). */
   private groundAt(x: number, z: number): number {
-    const tx = Math.min(MAP_TILES - 1, Math.max(0, tileX(x))), tz = Math.min(MAP_TILES - 1, Math.max(0, tileX(z)));
-    const t = tileId(tx, tz);
-    return (this.world.tileMin[t] + this.world.tileMax[t]) / 2;
+    return heightAt(this.world.heights, x, z);
   }
 
   private add(x: number, z: number, size: number, level: number): void {
