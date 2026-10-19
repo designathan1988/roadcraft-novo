@@ -12,7 +12,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, buildPropKinds, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, propCastsShadow, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -226,8 +226,7 @@ export class PropRenderer {
       const mesh = new THREE.Mesh(g, material);
       mesh.frustumCulled = false;
       mesh.userData.slot = t * LODS + l;
-      // only the near level casts shadows (and not the wires)
-      mesh.castShadow = l === 0 && d.type !== PROP.Wire;
+      mesh.castShadow = propCastsShadow(d, l);
       mesh.receiveShadow = true;
       this.group.add(mesh);
       this.slotMesh[t * LODS + l] = mesh;

@@ -294,3 +294,22 @@ test('E5, E25: each prop draw carries one variant only (a hydrant does not proce
   assert.deepEqual(mixed, [], 'draws that carry several variants');
   assert.ok(hydrant < 600, `a hydrant draws ${hydrant} vertices`);
 });
+
+test('E26: props that lie on the ground cast no sun shadow', async () => {
+  const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
+  const { PROP } = await import('../src/jobs/props.ts');
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs());
+  // the rule the renderer uses (before: every near level but the wires)
+  const casts = (PM.propCastsShadow as ((k: (typeof kinds)[number], l: number) => boolean) | undefined) ?? ((k, l) => l === 0 && k.type !== PROP.Wire);
+  const flat: string[] = [];
+  for (const k of kinds) {
+    const g = k.lods[0];
+    if (!g) continue;
+    g.computeBoundingBox();
+    const h = g.boundingBox!.max.y - Math.max(0, g.boundingBox!.min.y);
+    if (h < 0.3 && casts(k, 0)) flat.push(`type ${k.type}: ${h.toFixed(2)} m tall casts a shadow`);
+  }
+  assert.deepEqual(flat, [], 'ground-hugging props in the shadow maps');
+  const palm = kinds.find((k) => k.type === PROP.Ground && (k.lods[0]?.attributes.position.count ?? 0) > 0 && (k.lods[0]!.computeBoundingBox(), k.lods[0]!.boundingBox!.max.y > 5));
+  assert.ok(palm && casts(palm, 0), 'the ground palm (8 m) still casts');
+});

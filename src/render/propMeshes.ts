@@ -554,3 +554,17 @@ export function buildPropKinds(defs: PropDef[]): { kinds: PropKind[]; kindOf: Ui
   });
   return { kinds, kindOf };
 }
+
+/** Below this height (m) a prop lies on the ground: its sun shadow is under it, too small to see. */
+const FLAT_PROP = 0.3;
+
+/**
+ * Whether a kind's level casts a sun shadow: the near level only, never the wires (thin lines that alias in the map)
+ * nor what lies on the ground (pebbles, leaves, drain grates: they cast shadows before).
+ */
+export function propCastsShadow(k: PropKind, level: number): boolean {
+  const g = k.lods[level];
+  if (level !== 0 || !g || k.type === PROP.Wire) return false;
+  if (!g.boundingBox) g.computeBoundingBox();
+  return g.boundingBox!.max.y - Math.max(0, g.boundingBox!.min.y) >= FLAT_PROP;
+}
