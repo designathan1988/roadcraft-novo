@@ -1262,15 +1262,20 @@ function civic(g: Gen, fn: number): void {
       const fl = r.int(2, 4);
       const bw = Math.min(W - 4, 40), bd = Math.min(12, D * 0.35);
       box(-bw / 2, bw / 2, zf - 3 - bd, zf - 3, fl * 3.6, 0xf2e6c8, Facade.Punched, 3.4, 3.6);
-      box(-bw / 2, -bw / 2 + 10, zf - 3 - bd - 16, zf - 3 - bd, fl * 3.6, 0xf2e6c8, Facade.Punched, 3.4, 3.6);
+      // the wing of the L goes back as far as the lot lets it (up to 16 m)
+      const wingD = Math.min(16, zf - 3 - bd - (-D / 2 + 0.5)), wingW = Math.min(10, bw);
+      if (wingD >= 4) box(-bw / 2, -bw / 2 + wingW, zf - 3 - bd - wingD, zf - 3 - bd, fl * 3.6, 0xf2e6c8, Facade.Punched, 3.4, 3.6);
       if (lod < 2) ring(mb, f, -bw / 2, bw / 2, zf - 3 - bd, zf - 3, y0 + fl * 3.6, y0 + fl * 3.6 + 0.6, 0.3, 0x3d6aa0);
       if (lod > 0) break;
       ground(0x8a8478, BMAT.Paving);
-      // quadra: piso verde com linhas, alambrado
-      const cx = Math.min(bw / 2 - 12, 6), cz = zf - 3 - bd - 14;
-      solid(cx - 9, cx + 9, cz - 14, cz + 2, y0, y0 + 0.08, 0x2f7a4a);
-      solid(cx - 8.5, cx + 8.5, cz - 6.1, cz - 5.9, y0 + 0.08, y0 + 0.1, 0xf2f2ee);
-      for (const [a, b2] of [[cx - 9, cx - 8.9], [cx + 8.9, cx + 9]]) solid(a, b2, cz - 14, cz + 2, y0, y0 + 4, 0x6c7276, BMAT.Fence);
+      // court (green floor, a line, fences), beside the wing and behind the block, as big as fits (up to 18 × 16 m)
+      const ca = -bw / 2 + wingW + 1, cb = Math.min(ca + 18, W / 2 - 0.5), ct = zf - 3 - bd - 1, cbk = Math.max(ct - 16, -D / 2 + 0.5);
+      if (cb - ca >= 8 && ct - cbk >= 8) {
+        const cm = (ct + cbk) / 2;
+        solid(ca, cb, cbk, ct, y0, y0 + 0.08, 0x2f7a4a);
+        solid(ca + 0.5, cb - 0.5, cm - 0.1, cm + 0.1, y0 + 0.08, y0 + 0.1, 0xf2f2ee);
+        for (const [a, b2] of [[ca, ca + 0.1], [cb - 0.1, cb]]) solid(a, b2, cbk, ct, y0, y0 + 4, 0x6c7276, BMAT.Fence);
+      }
       lotWall(mb, heights, f, -W / 2, zf, W / 2, zf, 2.2, 0.2, 0xe8e2d4);
       break;
     }
@@ -1338,22 +1343,25 @@ function civic(g: Gen, fn: number): void {
     }
     case Fn.SportsCourt: {
       ground(0x6f9a4c, BMAT.Grass);
-      solid(-10, 10, -16, 16, y0, y0 + 0.08, 0x2f6a9a);
-      solid(-9.5, 9.5, -0.1, 0.1, y0 + 0.08, y0 + 0.1, 0xf2f2ee);
-      for (const z of [-15.5, 15.5]) solid(-1.5, 1.5, z - 0.1, z + 0.1, y0, y0 + 2.4, 0xf2f2ee, BMAT.Metal);
-      if (lod === 0) for (const [a, b2] of [[-10.2, -10], [10, 10.2]]) solid(a, b2, -16, 16, y0, y0 + 4, 0x6c7276, BMAT.Fence);
+      // a 20 × 32 m court, smaller on a smaller lot
+      const hw = Math.min(10, W / 2 - 0.5), hd = Math.min(16, D / 2 - 0.5);
+      solid(-hw, hw, -hd, hd, y0, y0 + 0.08, 0x2f6a9a);
+      solid(-hw + 0.5, hw - 0.5, -0.1, 0.1, y0 + 0.08, y0 + 0.1, 0xf2f2ee);
+      for (const z of [-hd + 0.5, hd - 0.5]) solid(-1.5, 1.5, z - 0.1, z + 0.1, y0, y0 + 2.4, 0xf2f2ee, BMAT.Metal);
+      if (lod === 0) for (const [a, b2] of [[-hw, -hw + 0.2], [hw - 0.2, hw]]) solid(a, b2, -hd, hd, y0, y0 + 4, 0x6c7276, BMAT.Fence);
       break;
     }
     case Fn.GasStation: {
       // cobertura sobre as bombas, lojinha, totem
-      const cz = zf - 9;
-      solid(-9, 9, cz - 6, cz + 6, y0 + 5, y0 + 5.9, 0xf2f2ee);
+      const cz = zf - 9, ch = Math.min(9, W / 2 - 0.6);
+      solid(-ch, ch, cz - 6, cz + 6, y0 + 5, y0 + 5.9, 0xf2f2ee);
       // faixa colorida 5 cm acima do teto da cobertura (no mesmo plano, as duas cores piscavam)
-      if (lod < 2) solid(-9.05, 9.05, cz - 6.05, cz + 6.05, y0 + 5.4, y0 + 5.95, r.next() < 0.5 ? 0xc8241c : 0x1f8a4a);
+      if (lod < 2) solid(-ch - 0.05, ch + 0.05, cz - 6.05, cz + 6.05, y0 + 5.4, y0 + 5.95, r.next() < 0.5 ? 0xc8241c : 0x1f8a4a);
       for (const [x, z] of [[-5, -3], [5, -3], [-5, 3], [5, 3]]) solid(x - 0.25, x + 0.25, cz + z - 0.25, cz + z + 0.25, y0, y0 + 5, 0xd8d6d0);
       if (lod > 0) break;
       for (const [x, z] of [[-5, 0], [5, 0]]) solid(x - 0.6, x + 0.6, cz + z - 1.2, cz + z + 1.2, y0, y0 + 1.6, 0x5a5f63, BMAT.Metal);
-      box(-W / 2 + 2, -W / 2 + 12, cz - 18, cz - 9, 3.6, 0xf2f2ee, Facade.Punched | Facade.ShopBit, 3, 3.6);
+      // the shop behind the canopy, as deep as the lot lets it (up to 9 m)
+      if (cz - 9 - Math.max(cz - 18, -D / 2 + 0.5) >= 4) box(-W / 2 + 2, -W / 2 + 12, Math.max(cz - 18, -D / 2 + 0.5), cz - 9, 3.6, 0xf2f2ee, Facade.Punched | Facade.ShopBit, 3, 3.6);
       solid(W / 2 - 2.5, W / 2 - 1.5, zf - 2, zf - 1.5, y0, y0 + 7, 0xc8241c);
       ground(0x6a6d70, BMAT.Paving);
       break;
@@ -1369,7 +1377,8 @@ function civic(g: Gen, fn: number): void {
       setFac(mb, ArchId.Glass, g.seed, Facade.Curtain, 1.6, 3.6);
       prism(mb, f, -8, 8, z1, z1 + 2, g.f.base, y0 + 6, 0x4a6274, BMAT.Curtain, 1.6, 0x8f8b84, BMAT.RoofFlat);
       ground(0x55585b, BMAT.Paving);
-      for (let x = -W / 2 + 3; x < W / 2 - 3; x += 2.6) solid(x, x + 0.1, z1 + 4, z1 + 9, y0 + 0.02, y0 + 0.05, 0xf2f2ee);
+      // painted bays in front of the entrance, when the lot has room for them (not in the street)
+      if (z1 + 9 <= D / 2 - 0.5) for (let x = -W / 2 + 3; x < W / 2 - 3; x += 2.6) solid(x, x + 0.1, z1 + 4, z1 + 9, y0 + 0.02, y0 + 0.05, 0xf2f2ee);
       break;
     }
     case Fn.CityHall: {
@@ -1387,7 +1396,8 @@ function civic(g: Gen, fn: number): void {
       }
       if (lod > 0) break;
       ground(0xd0cabe, BMAT.Paving);
-      for (let k = 0; k < 6; k++) treeGeo(mb, f, (k % 2 ? 1 : -1) * (bw / 2 + 2 + (k >> 1) * 3), zf - 3, y0, 7, 2.2);
+      // trees on both sides of the front, those that fit in the lot
+      for (let k = 0; k < 6; k++) { const x = bw / 2 + 2 + (k >> 1) * 3; if (x + 2.3 <= W / 2) treeGeo(mb, f, (k % 2 ? 1 : -1) * x, zf - 3, y0, 7, 2.2); }
       break;
     }
     case Fn.Police: case Fn.FireStation: {
@@ -1398,7 +1408,8 @@ function civic(g: Gen, fn: number): void {
       if (lod < 2) solid(-bw / 2, bw / 2, z1, z1 + 0.15, y0 + 6.3, y0 + 7.3, fire ? 0xf2f2ee : 0x1f3f8a);
       if (fire) {
         // portões da garagem e torre de treino
-        if (lod < 2) for (let k = 0; k < 3; k++) solid(-bw / 2 + 2 + k * 6, -bw / 2 + 6.5 + k * 6, z1, z1 + 0.1, y0, y0 + 4.5, 0xa02a1c);
+        // garage doors along the front, as many as fit (up to three)
+        if (lod < 2) for (let k = 0; k < 3 && -bw / 2 + 6.5 + k * 6 <= bw / 2 - 0.5; k++) solid(-bw / 2 + 2 + k * 6, -bw / 2 + 6.5 + k * 6, z1, z1 + 0.1, y0, y0 + 4.5, 0xa02a1c);
         setFac(mb, ArchId.Civic, g.seed, Facade.Punched, 2.4, 3.2);
         // torre 10 cm para fora das paredes do quartel (no mesmo plano, as janelas das duas piscavam)
         prism(mb, f, bw / 2 - 4.9, bw / 2 + 0.1, z1 - bd - 0.1, z1 - bd + 4.9, g.f.base, y0 + 18, 0xc8402c, BMAT.Wall, 2.4, 0x8f8b84, BMAT.RoofFlat);

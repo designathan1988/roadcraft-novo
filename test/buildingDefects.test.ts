@@ -376,3 +376,22 @@ test('F5: the creator reaches all 13 finishes by its choices, and "Vidro" is gla
   assert.deepEqual(missing, [], `${FINISH_COUNT - missing.length} of ${FINISH_COUNT} finishes reachable`);
   assert.ok(finishesOf(FINISHES.indexOf('Vidro'), 0).has(FIN.Glass), '"Vidro" puts glass on the walls');
 });
+
+test('F9: civic buildings and warehouses fit their lot', () => {
+  const heights = flatHeights(10);
+  const failures: string[] = [];
+  const kinds: Array<[string, number, number]> = [['school', Zone.Residential, Fn.School], ['church', Zone.Residential, Fn.Church], ['hospital', Zone.Commercial, Fn.Hospital],
+    ['clinic', Zone.Residential, Fn.Clinic], ['gas station', Zone.Commercial, Fn.GasStation], ['supermarket', Zone.Commercial, Fn.Supermarket],
+    ['city hall', Zone.Commercial, Fn.CityHall], ['police', Zone.Commercial, Fn.Police], ['fire station', Zone.Commercial, Fn.FireStation],
+    ['mall', Zone.Commercial, Fn.Mall], ['sports court', Zone.Residential, Fn.SportsCourt], ['square', Zone.Commercial, Fn.Square], ['warehouse', Zone.Industrial, 0]];
+  for (const [name, zone, fn] of kinds) for (const [W, D] of [[18, 26], [24, 32], [30, 44], [50, 60]]) for (const seed of [3, 44]) {
+    const b = oneBuilding(zone, 3, W, D, seed * 7919, 0);
+    b.fn[0] = fn;
+    const m = buildBuildings(heights, b, 0, 0, 256, 0)!;
+    let worst = 0;
+    // past the sides or the back of the lot; the front may overhang the sidewalk (marquees, canopies)
+    for (const [x, , z] of positions(m)) worst = Math.max(worst, Math.abs(x - 128) - W / 2, 128 - D / 2 - z, z - (128 + D / 2) - 3);
+    if (worst > 0.7) failures.push(`${name} on ${W}×${D}: ${worst.toFixed(1)} m past the lot`);
+  }
+  assert.deepEqual(failures, []);
+});
