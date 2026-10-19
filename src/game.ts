@@ -1060,7 +1060,9 @@ export class Game {
     renderer.setPixelRatio(window.devicePixelRatio * s.resolution);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.updatePixelScale();
-    this.weather.fixed = s.weather === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s.weather === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s.weather === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
+    // the option's weather; weather set by hand in the Sky panel (saved with the map) stays
+    if (this.weatherCtl) { const was = this.unsavedNow; this.setWeather(this.weatherCtl); this.unsavedNow = was; }
+    else this.weather.fixed = s.weather === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s.weather === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s.weather === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
     this.ambient.setVolume(s.volume ?? 0.6);
     setPaintStyle(s.paint ?? 'br');
     this.roadTool.furniture = s.furniture ?? 0;
