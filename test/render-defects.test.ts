@@ -596,3 +596,11 @@ test('E45: a mesh that comes back while fading out goes on from where it was', (
   assert.ok(fade(a) > 0.6, `the returning mesh restarted its fade at ${fade(a).toFixed(2)} (a visible jump)`);
 });
 
+test('E46: a hidden layer keeps its meshes\' data until they are really drawn', () => {
+  const { layer, show, mesh } = fadeRig();
+  layer.group.visible = false; // ?semdetalhe hides the detail layer
+  const a = mesh(1);
+  for (let i = 0; i < 4; i++) show([a], 10 + i * 0.02);
+  assert.ok((a.geometry.attributes.position.array as ArrayLike<number>).length > 0, 'the CPU copy was freed before the mesh ever reached the GPU');
+});
+

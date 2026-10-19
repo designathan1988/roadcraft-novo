@@ -420,10 +420,12 @@ export class CellLayer {
     let lostOutgoing = false;
     for (const f of this.fading) if ((f.mesh.userData as FadeData).dead) lostOutgoing = true;
     for (const m of this.shown) if (!this.next.has(m) && (m.userData as FadeData).dead) lostOutgoing = true;
+    // a hidden layer (?semdetalhe) draws nothing: its meshes' data must stay until they really reach the GPU
+    const drawn = this.group.visible;
     for (const mesh of this.next) {
       const u = mesh.userData as FadeData;
       // already drawn in an earlier frame: the data is on the GPU
-      if (!u.freed) { if (u.drawnAt === undefined) u.drawnAt = this.frame; else if (this.frame - u.drawnAt >= 2) { freeCpuCopy(mesh.geometry); u.freed = true; } }
+      if (!u.freed && drawn) { if (u.drawnAt === undefined) u.drawnAt = this.frame; else if (this.frame - u.drawnAt >= 2) { freeCpuCopy(mesh.geometry); u.freed = true; } }
       if (!this.shown.has(mesh)) {
         const i = this.fading.findIndex((f) => f.mesh === mesh);
         if (i >= 0) {
