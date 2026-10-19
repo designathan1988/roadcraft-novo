@@ -83,6 +83,8 @@ export class CellLayer {
   private tileCellsReady = new Uint8Array(TILE_COUNT);
   private cellFine = new Uint8Array(CELL_COUNT);
   private plateFar = new Uint8Array(PLATE_COUNT);
+  /** None of the plate's tiles held anything when last visited. */
+  private plateIdle = new Uint8Array(PLATE_COUNT);
   private frustum = new THREE.Frustum();
   private box = new THREE.Box3();
   private pv = new THREE.Matrix4();
@@ -96,6 +98,14 @@ export class CellLayer {
   private shown = new Set<THREE.Mesh>();
   private next = new Set<THREE.Mesh>();
   private fading: Array<{ mesh: THREE.Mesh; t0: number }> = [];
+  /** Meshes still fading in after the last frame. */
+  private fadingIn = 0;
+  /** Meshes set or requests made: a still frame with none is not visited again. */
+  private events = 0;
+  private lastEvents = -1;
+  private lastPV = new THREE.Matrix4();
+  private lastScale = 0;
+  private lastSun = new THREE.Vector3();
   private frame = 0;
   /** What the layer draws changed in the last `update` (the shadow cascades are redrawn). */
   changed = true;
@@ -142,6 +152,7 @@ export class CellLayer {
   /** Takes this kind's dirty cells and asks for the new meshes. */
   processDirty(): void {
     const cells = this.dirty.drain();
+    if (cells.length) this.events++;
     for (const c of cells) {
       this.cellVer[c]++;
       const t = tileOfCell(c);
@@ -197,6 +208,7 @@ export class CellLayer {
   }
 
   private setMesh(s: Slot, m: PackedMesh | null, version: number): void {
+    this.events++;
     const replacing = s.mesh !== null && m !== null;
     if (s.mesh) {
       (s.mesh.userData as FadeData).dead = true;
@@ -250,6 +262,11 @@ export class CellLayer {
   /** Chooses what to draw. */
   update(camera: THREE.Camera, camPos: THREE.Vector3): void {
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    // nothing can have changed (same view, scale and sun, no mesh came or went, no fade running): the choice of the
+    // last frame stands (visiting every plate and tile again each still frame cost with the map's size)
+    if (this.pv.equals(this.lastPV) && this.pixelScale === this.lastScale && this.events === this.lastEvents
+      && this.fading.length === 0 && this.fadingIn === 0 && sunDirection.equals(this.lastSun)) { this.changed = false; return; }
+    this.lastPV.copy(this.pv); this.lastScale = this.pixelScale; this.lastEvents = this.events; this.lastSun.copy(sunDirection);
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.camPos.copy(camPos);
     const budget = this.opt.budget ?? Infinity;
@@ -279,8 +296,15 @@ export class CellLayer {
     // tiles: asked for and kept unless the plate is far and ready to stand in for them
     const plateCovers = far && ps.mesh !== null;
     let tilesCover = true;
-    for (let j = 0; j < TILES_PER_PLATE; j++) for (let i = 0; i < TILES_PER_PLATE; i++) {
-      if (!this.manageTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j, limit > 0 && !plateCovers)) tilesCover = false;
+    // a far plate standing in for tiles that hold nothing (no mesh, no request, no cell): nothing to ask for or evict
+    // there, its tiles are not visited (a moving camera used to visit every tile of the map each frame)
+    if (!(plateCovers && this.plateIdle[p])) {
+      let idle = true;
+      for (let j = 0; j < TILES_PER_PLATE; j++) for (let i = 0; i < TILES_PER_PLATE; i++) {
+        if (!this.manageTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j, limit > 0 && !plateCovers)) tilesCover = false;
+        if (this.tileHolds(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j)) idle = false;
+      }
+      this.plateIdle[p] = idle ? 1 : 0;
     }
     // the camera came close and the tiles cover the plate: it leaves the GPU (it used to stay for the whole session,
     // pushing the memory ceiling down onto the near cells)
@@ -382,6 +406,18 @@ export class CellLayer {
     return cellsReady || ts.mesh !== null || (ts.built !== 0 && ts.built === this.tileVer[t]);
   }
 
+  /** Does a tile hold any mesh or request (its L2 or any of its cells)? */
+  private tileHolds(tx: number, tz: number): boolean {
+    if (tx >= MAP_TILES || tz >= MAP_TILES) return false;
+    const ts = this.tiles[tileId(tx, tz)];
+    if (ts.mesh || ts.requested) return true;
+    for (let j = 0; j < CELLS_PER_TILE; j++) for (let i = 0; i < CELLS_PER_TILE; i++) {
+      const c = cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j);
+      for (const level of this.cells) if (level[c].mesh || level[c].requested) return true;
+    }
+    return false;
+  }
+
   /** Draws a tile: its cells when they are all ready, else its L2. */
   private drawTile(tx: number, tz: number): void {
     if (tx >= MAP_TILES || tz >= MAP_TILES) return;
@@ -413,7 +449,7 @@ export class CellLayer {
     out.length = 0;
     this.frame++;
     // what is drawn changed this frame (a mesh came, left, was swapped or is fading): the shadow maps must follow
-    this.changed = this.fading.length > 0 || this.next.size !== this.shown.size;
+    this.changed = this.fading.length > 0 || this.fadingIn > 0 || this.next.size !== this.shown.size;
     if (!this.changed) for (const m of this.next) if (!this.shown.has(m)) { this.changed = true; break; }
     // an outgoing mesh thrown away mid-fade (evicted, rebuilt): what fades in where it was shows whole at once (its
     // dither left holes where the outgoing one no longer covered)
@@ -422,6 +458,7 @@ export class CellLayer {
     for (const m of this.shown) if (!this.next.has(m) && (m.userData as FadeData).dead) lostOutgoing = true;
     // a hidden layer (?semdetalhe) draws nothing: its meshes' data must stay until they really reach the GPU
     const drawn = this.group.visible;
+    this.fadingIn = 0;
     for (const mesh of this.next) {
       const u = mesh.userData as FadeData;
       // already drawn in an earlier frame: the data is on the GPU
@@ -438,6 +475,7 @@ export class CellLayer {
       }
       if (lostOutgoing) u.since = -1e9;
       u.fade = Math.min(1, (now - (u.since ?? -1e9)) / FADE);
+      if (u.fade < 1) this.fadingIn++;
       out.push(mesh);
     }
     for (const mesh of this.shown) {

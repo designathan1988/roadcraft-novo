@@ -604,3 +604,32 @@ test('E46: a hidden layer keeps its meshes\' data until they are really drawn', 
   assert.ok((a.geometry.attributes.position.array as ArrayLike<number>).length > 0, 'the CPU copy was freed before the mesh ever reached the GPU');
 });
 
+test('E3: with the camera still and nothing arriving, the layer does not visit the map again', () => {
+  const w = new World();
+  const layer = new CellLayer(farSource(), w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 650, plate: 4200 });
+  let visits = 0;
+  const inner = layer as unknown as { manageTile(tx: number, tz: number, n: boolean): boolean };
+  const manage = inner.manageTile.bind(layer);
+  inner.manageTile = (tx, tz, n) => { visits++; return manage(tx, tz, n); };
+  const { camera, eye } = cornerCamera();
+  for (let i = 0; i < 4; i++) layer.update(camera, eye);
+  visits = 0;
+  layer.update(camera, eye);
+  assert.equal(visits, 0, `a still frame visited ${visits} tiles`);
+});
+
+test('E3: moving, the tiles of far plates that stand in for them are not visited', () => {
+  const w = new World();
+  const layer = new CellLayer(farSource(), w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 650, plate: 4200 });
+  let visits = 0;
+  const inner = layer as unknown as { manageTile(tx: number, tz: number, n: boolean): boolean };
+  const manage = inner.manageTile.bind(layer);
+  inner.manageTile = (tx, tz, n) => { visits++; return manage(tx, tz, n); };
+  const { camera, eye } = cornerCamera();
+  for (let i = 0; i < 4; i++) { camera.position.x += 1; eye.x += 1; camera.updateMatrixWorld(); layer.update(camera, eye); }
+  visits = 0;
+  camera.position.x += 1; eye.x += 1; camera.updateMatrixWorld();
+  layer.update(camera, eye);
+  // the 10 km map has 100 tiles; from the corner, the plates beyond 4.6 km stand in for theirs
+  assert.ok(visits < 70, `a moving frame visited ${visits} of 100 tiles`);
+});
