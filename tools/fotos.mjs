@@ -10,12 +10,14 @@ const out = path.resolve(process.argv[2] ?? path.join(root, 'test-results', 'fot
 // Electron cannot write a photo into a folder that does not exist (the run used to hang there)
 fs.mkdirSync(out, { recursive: true });
 const c = 0; // the map is centered at (0, 0); angles in degrees
+// street and night: a commercial avenue crossing (the centre of the generated map is the river)
+const street = [177, 711];
 const wait = (ms) => `await new Promise(r=>setTimeout(r,${ms}));`;
-const view = (yaw, pitch, dist, hora, ms) => `(async()=>{window.__cidade.game.view(${c},${c},${yaw},${pitch},${dist},${hora});${wait(ms)}})()`;
+const view = (yaw, pitch, dist, hora, ms, [x, z] = [c, c]) => `(async()=>{window.__cidade.game.view(${x},${z},${yaw},${pitch},${dist},${hora});${wait(ms)}})()`;
 const seq = [
   [path.join(out, '02-bairro.png'), view(35, 50, 420, 11, 6000)],
   [path.join(out, '03-cidade.png'), view(35, 45, 2200, 11, 8000)],
-  [path.join(out, '04-noite.png'), view(35, 18, 90, 21, 6000)],
+  [path.join(out, '04-noite.png'), view(35, 18, 90, 21, 6000, street)],
 ];
 const env = {
   ...process.env,
@@ -26,6 +28,6 @@ delete env.ELECTRON_RUN_AS_NODE;
 const p = spawn(process.execPath, [
   path.join(root, 'tools', 'shot.mjs'),
   path.join(out, '01-rua.png'),
-  `?cidade&mapa=10&limpo&hora=11&cam=${c},${c},35,18,90`,
+  `?cidade&mapa=10&limpo&hora=11&cam=${street[0]},${street[1]},35,18,90`,
 ], { cwd: root, env, stdio: 'inherit' });
 p.on('exit', (code) => process.exit(code ?? 0));
