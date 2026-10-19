@@ -236,7 +236,7 @@ export class Game {
         const dx = x - col.x[id], dz = z - col.z[id];
         const s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
         const lx = dx * c - dz * s, lz = dx * s + dz * c;
-        if (Math.abs(lx) <= col.w[id] * 0.35 && Math.abs(lz) <= col.d[id] * 0.3) top = Math.max(top, heightAt(this.world.heights, col.x[id], col.z[id]) + 1.5 + wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id], col.seed[id], col.w[id], col.d[id]));
+        if (Math.abs(lx) <= col.w[id] * 0.35 && Math.abs(lz) <= col.d[id] * 0.3) top = Math.max(top, heightAt(this.world.heights, col.x[id], col.z[id]) + 1.5 + wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id]));
       });
       return top;
     };
@@ -1399,7 +1399,7 @@ export class Game {
       const rubble = new ItemsCommand(w.items, 'entulho');
       for (const id of doomed) {
         const gy = heightAt(w.heights, col.x[id], col.z[id]);
-        this.blast.collapse(col.x[id], gy, col.z[id], col.w[id], col.d[id], Math.max(3, wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id], col.seed[id], col.w[id], col.d[id])), col.rot[id]);
+        this.blast.collapse(col.x[id], gy, col.z[id], col.w[id], col.d[id], Math.max(3, wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id])), col.rot[id]);
         this.particles.burst(col.x[id], gy + 1, col.z[id], 4, 14, 10);
         const rec = w.buildingRec(id);
         j.removeBuilding(id);

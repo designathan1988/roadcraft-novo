@@ -59,8 +59,7 @@ function bigLevels(m: PackedMesh, minY: number): number[] {
   return [...areas].filter(([, a]) => a >= max * 0.5).map(([k]) => k / 100).sort((x, y) => x - y);
 }
 
-test('F2: the parapet coping and the cornice band do not put a lid over the whole roof', async () => {
-  const { civicProject } = await import('../src/jobs/buildingGen.ts');
+test('F2: the parapet coping and the cornice band do not put a lid over the whole roof', () => {
   const heights = flatHeights(10);
   const failures: string[] = [];
   // low blocks (parapet, cornice, slab and stepped crowns over every style), houses (the modern house slab) and designs
@@ -76,8 +75,6 @@ test('F2: the parapet coping and the cornice band do not put a lid over the whol
       cases.push([`design roof ${roof}, seed ${seed}`, b]);
     }
     for (const [name, fn] of [['school', Fn.School], ['hospital', Fn.Hospital]] as const) {
-      // the generator's own civic shapes (the records a catalog project takes are F7's)
-      if (civicProject(fn, seed * 7919, 50, 60)) continue;
       const b = oneBuilding(Zone.Commercial, 6, 50, 60, seed * 7919, 0);
       b.fn[0] = fn;
       cases.push([`${name}, seed ${seed}`, b]);
@@ -760,33 +757,4 @@ test('F14, F8: catalog walls run along their facing, and every kind of element i
   const present = new Set(catalogProjects().flatMap((p) => p.elements.map((e) => CAT_ELEMENTS[e.kind])));
   assert.deepEqual([...present].filter((k) => !kindsDrawn.has(k)), [], 'element kinds never drawn');
   assert.deepEqual(failures.slice(0, 10), [], `${failures.length} walls off their facing`);
-});
-
-test('F7: the 11 civic catalog projects appear on civic lots', async () => {
-  const gen: { civicProject?: (fn: number, seed: number, w: number, d: number) => number } = await import('../src/jobs/buildingGen.ts');
-  const civicProject = gen.civicProject;
-  const { catalogProjects } = await import('../src/world/catalog.ts');
-  const { CIVIC_CATALOG } = await import('../src/world/design.ts');
-  assert.ok(civicProject, 'civicProject(fn, seed, w, d) picks a civic catalog project for a civic record');
-  const seen = new Set<string>();
-  const fns = [Fn.School, Fn.Church, Fn.Hospital, Fn.CityHall, Fn.Police, Fn.FireStation, Fn.Courthouse, Fn.Cemetery, Fn.Bank];
-  const heights = flatHeights(10);
-  for (const fn of fns) for (let seed = 1; seed <= 40; seed++) {
-    const k: number = civicProject!(fn, seed * 7919, 90, 90);
-    if (!k) continue;
-    const p = catalogProjects()[k - 1];
-    seen.add(p.name);
-    // and the generator draws it: catalog facade rows (ids 117 and up) on the walls
-    if (seed <= 2) {
-      const b = oneBuilding(Zone.Commercial, 3, 90, 90, seed * 7919, 0);
-      b.fn[0] = fn;
-      const m = buildBuildings(heights, b, 0, 0, 256, 0)!;
-      let rows = 0;
-      for (let i = 0; i < m.vertexCount; i++) if (m.fac![i * 4 + 3] && m.fac![i * 4] >= 117) rows++;
-      assert.ok(rows > 0, `${p.name}: drawn from the catalog`);
-    }
-  }
-  assert.deepEqual([...CIVIC_CATALOG].filter((n) => !seen.has(n)).sort(), [], 'civic projects never picked');
-  // a lot too small for the project keeps the generator's own civic building
-  assert.equal(civicProject!(Fn.Hospital, 7919, 20, 20), 0);
 });
