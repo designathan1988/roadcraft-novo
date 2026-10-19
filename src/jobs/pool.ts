@@ -135,6 +135,15 @@ export class JobPool {
     return new Promise((resolve, reject) => this.submit(kind, payload, resolve, { ...opt, fail: (m) => reject(new Error(m)) }));
   }
 
+  /**
+   * Jobs whose key starts with `prefix` are dropped: queued ones fail at once, and the result of one already running is
+   * not delivered (it fails as cancelled). For the results of a city that is being replaced (its lots, for one).
+   */
+  cancel(prefix: string): void {
+    for (const p of this.queue.items) if (!p.cancelled && p.key?.startsWith(prefix)) { p.cancelled = true; this.queuedByKey.delete(p.key); this.tell(p, 'cancelled'); }
+    for (const p of this.busy) if (p?.key?.startsWith(prefix) && this.latest.get(p.key) === p.seq) this.latest.set(p.key, -p.seq);
+  }
+
   /** Promise for when nothing is queued or running (loading screen). */
   whenIdle(): Promise<void> {
     if (this.isIdle()) return Promise.resolve();
@@ -202,6 +211,8 @@ export class JobPool {
       if (msg.type === 'error') {
         console.error(`job ${p.kind} failed:`, msg.message);
         this.tell(p, msg.message);
+      } else if (p.key && this.latest.get(p.key) === -p.seq) {
+        this.tell(p, 'cancelled');
       } else if (!p.key || this.latest.get(p.key) === p.seq) {
         // a callback that throws is logged; the pool goes on with the next job
         try { p.done(msg.result); } catch (err) { console.error(`job ${p.kind}: the result's callback threw`, err); }

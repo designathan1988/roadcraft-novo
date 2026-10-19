@@ -197,3 +197,15 @@ test('A14: the same damaged save goes to quarantine once, and only the last thre
   assert.equal(left.length, 3, `${left}`);
   assert.ok(!left.includes(first!), 'the oldest went');
 });
+
+test('A17: cancelling a key prefix drops the queued jobs and the result of the one running', async () => {
+  const pool = new JobPool(shared(), 1, () => new FakeWorker() as unknown as Worker);
+  const running = outcome(pool, { slow: 30 }, 300, 'lots:1');
+  const queued = outcome(pool, {}, 300, 'lots:2');
+  const other = outcome(pool, {}, 300, 'props:2');
+  (pool as unknown as { cancel(prefix: string): void }).cancel('lots:');
+  assert.equal(await running, 'failed: cancelled', 'the lots being made for the old city are not delivered');
+  assert.equal(await queued, 'failed: cancelled');
+  assert.equal(await other, 'done', 'other jobs go on');
+  assert.equal(await outcome(pool, {}, 300, 'lots:1'), 'done', 'a new job of a cancelled key runs');
+});

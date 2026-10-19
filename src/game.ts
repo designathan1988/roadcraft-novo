@@ -1907,6 +1907,7 @@ export class Game {
     w.clearGround();
     w.roads.clear();
     this.growth.clear();
+    this.pool.cancel('lots:');
     for (const l of this.layers) l.reset();
     this.props.clear();
     this.transit.clear();
@@ -2224,6 +2225,8 @@ export class Game {
     w.clearGround();
     w.roads.clear();
     this.growth.clear();
+    // lots still being made for the city that was on screen are not taken in by this one
+    this.pool.cancel('lots:');
     for (const l of this.layers) l.reset();
     this.props.clear();
     this.transit.clear();

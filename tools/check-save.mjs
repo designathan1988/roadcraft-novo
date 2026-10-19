@@ -298,6 +298,23 @@ const SCENARIOS = {
     await g.load();
     check('then the save opens clean', !toasts.some((m) => /ilegíve|pedaço/.test(m)) && await quarantines() === 1, 'toasts: ' + toasts.join(' | ') + '; quarantines ' + (await quarantines()));
   `,
+  // A17: lots the workers were still making for the city on screen are not taken in by the city opened after it (no
+  // building of the old city grows in the new one)
+  'stale-lots': `
+    road(1500, 1500, 1700, 1500);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    // the workers get lot jobs 4 s late (as when they are busy), so the lots of the next road are still being made
+    for (const wk of g.pool.workers) { if (!wk) continue; const post = wk.postMessage.bind(wk); wk.postMessage = (m, tr) => m && m.kind === 'lots' ? setTimeout(() => post(m, tr), 4000) : post(m, tr); }
+    road(-3000, -3000, -2600, -3000);
+    a.zone(-2800, -3000, 80, 1);
+    await wait(500);
+    const r = await within(g.load(), 30000);
+    check('the save opens', r === 'returned' && !g.busy, 'load() ' + r);
+    await wait(9000);
+    let grown = 0;
+    w.buildingIndex.query(-3100, -3100, -2500, -2900, () => { grown++; });
+    check('no building of the city on screen before grows in the opened one', grown === 0 && !roadAt(-2800, -3000), grown + ' buildings where the old city had its zoned road');
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);
