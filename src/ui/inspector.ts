@@ -174,7 +174,9 @@ export class Inspector {
       box.append(actions(btn(t('inspector.joinAligned'), () => {
         const j = joinAt(this.world, n);
         if (j.empty) { this.a.toast(t('ui.insp.joinFail')); return; }
-        this.commands.push(j); this.a.toast(t('ui.insp.joined')); this.close();
+        // charged and tidied like every road edit (names and junction settings follow the joined road)
+        this.edit(j, t('ui.insp.joined'));
+        this.close();
       }, 'primary')));
       return;
     }
