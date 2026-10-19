@@ -155,7 +155,6 @@ export class World {
   setClock(minute: number): void {
     this.clock = minute;
     this.decayHeap.clear();
-    this.clock = 0;
     const t = this.buildings;
     for (let id = 0; id < t.end; id++) if (t.alive[id]) this.refreshDecay(id);
   }

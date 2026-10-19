@@ -13,6 +13,7 @@ import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { Dirty } from '../src/core/grid.ts';
+import { decayTenths } from '../src/world/decay.ts';
 
 function flatWorld(money: number, y = 10): World {
   const w = new World();
@@ -292,4 +293,12 @@ test('D9 and A41: decay tenths rebuild no mesh and mark no tile for saving', () 
   }
   assert.equal(w.saveDirty.reduce((a, b) => a + b, 0), 0, 'decay marked tiles for saving');
   assert.deepEqual(w.cellVersion, versions, 'decay bumped cell versions');
+});
+
+test('A40: setting the clock keeps the minute set and files every building again from it', () => {
+  const w = flatWorld(0);
+  const id = w.addBuilding({ x: 0, z: 0, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 3, style: 1, built: 0 });
+  w.setClock(20 * 1440);
+  assert.equal(w.clock, 20 * 1440, 'the clock went back to 0');
+  assert.equal(w.buildings.cols.decay[id], decayTenths(0, 20 * 1440));
 });
