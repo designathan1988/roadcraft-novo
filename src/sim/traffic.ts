@@ -123,6 +123,9 @@ export interface LineSpec {
   loop?: boolean;
 }
 
+/** Where trucks start and end (none, residential, commercial, industrial, mixed): goods between industry and commerce. */
+const TRUCK_ZONES = [0.05, 0.1, 0.6, 1, 0.4];
+
 const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
 const TERMINAL_DWELL = 75;
@@ -373,7 +376,6 @@ export class Traffic {
   readonly mvs = new Manoeuvres();
   /** Loading docks near the camera from the page: (x, z, yaw facing the street) per warehouse; their nearest nodes. */
   docks: Float32Array<ArrayBufferLike> = new Float32Array(0);
-  private dockNodes: number[] = [];
   /** A passenger gets out at (x, z) on the kerb (the worker makes a pedestrian there). */
   onDropOff: (x: number, z: number) => void = () => {};
   /** Counters for the measurements: kerb drop-offs, trucks at docks. */
@@ -404,13 +406,8 @@ export class Traffic {
     return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked, crossings, trains };
   }
 
-  /** Docks sent by the page; each gets the node trucks drive to. */
-  setDocks(pts: Float32Array): void {
-    this.docks = pts;
-    const nodes = new Set<number>();
-    for (let k = 0; k + 2 < pts.length; k += 3) { const n = this.sim.net.nearestNode(pts[k], pts[k + 1], 80); if (n >= 0) nodes.add(n); }
-    this.dockNodes = [...nodes];
-  }
+  /** Docks near the camera sent by the page: a truck arriving next to one backs into it (they never pick trips). */
+  setDocks(pts: Float32Array): void { this.docks = pts; }
 
   private nearCam(lane: number): boolean {
     const sc = this.sim.net.segs.cols, sg = laneSeg(lane);
@@ -867,10 +864,12 @@ export class Traffic {
 
   private spawn(): void {
     const net = this.sim.net, nc = net.nodes.cols;
-    const a = this.zonedNode(this.zoneWeights(true));
+    // the kind first: trucks carry goods between industry and commerce (anywhere in the city, never by the camera)
+    const r = this.rng.next(), kind = r < 0.88 ? 0 : r < 0.94 ? 1 : 2;
+    const a = this.zonedNode(kind === 2 ? TRUCK_ZONES : this.zoneWeights(true));
     if (a < 0) return;
     let b = -1;
-    const wd = this.zoneWeights(false);
+    const wd = kind === 2 ? TRUCK_ZONES : this.zoneWeights(false);
     for (let i = 0; i < 16; i++) {
       const cand = this.zonedNode(wd);
       if (cand < 0 || cand === a) continue;
@@ -880,12 +879,7 @@ export class Traffic {
     }
     if (b < 0) return;
     const v = this.veh.alloc();
-    this.initVehicle(v);
-    // part of the trucks carry cargo to a warehouse dock near the camera (they back into it on arrival)
-    if (this.veh.cols.kind[v] === 2 && this.dockNodes.length && this.rng.next() < 0.6) {
-      const d = this.dockNodes[this.rng.int(0, this.dockNodes.length)];
-      if (d !== a && net.nodes.alive[d] && Math.hypot(nc.x[d] - nc.x[a], nc.z[d] - nc.z[a]) < 3000) b = d;
-    }
+    this.initVehicle(v, kind);
     if (!this.plan(v, a, b)) { this.veh.release(v); return; }
     const seg = this.segBetween(a, this.routeAt(v, 1));
     if (seg < 0) { this.veh.release(v); return; }
@@ -933,10 +927,8 @@ export class Traffic {
     return true;
   }
 
-  private initVehicle(v: number): void {
+  private initVehicle(v: number, kind = 0): void {
     const c = this.veh.cols;
-    const r = this.rng.next();
-    const kind = r < 0.88 ? 0 : r < 0.94 ? 1 : 2;
     c.kind[v] = kind; c.len[v] = KIND_LEN[kind];
     c.vf[v] = (kind === 0 ? 0.9 : 0.8) + this.rng.next() * 0.2;
     c.color[v] = this.rng.int(0, 16);

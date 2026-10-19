@@ -212,3 +212,32 @@ test('C1: looking at a traffic jam does not cut the traffic of the whole city (t
   assert.ok(Math.abs(on.gov - off.gov) <= 0.05, `fleet share ${on.gov.toFixed(2)} with the camera on the jam, ${off.gov.toFixed(2)} away`);
   assert.ok(Math.abs(on.fleet - off.fleet) <= 0.1 * off.fleet, `fleet ${on.fleet} with the camera on the jam, ${off.fleet} away`);
 });
+
+test('C4: trucks do not head for the warehouse docks near the camera more than for anywhere else', () => {
+  const { sim } = gridCity(6, 100);
+  const tr = traffic(sim);
+  tr.density = 1 / 30;
+  // three docks near the camera (as the page sends them): their nearest nodes become dock nodes
+  const nc = sim.net.nodes.cols, docks: number[] = [];
+  for (let n = 0; n < sim.net.nodes.end && docks.length < 9; n++) if (sim.net.nodes.alive[n] && nc.deg[n] >= 3 && Math.hypot(nc.x[n], nc.z[n]) < 160) docks.push(nc.x[n] + 5, nc.z[n] + 5, 0);
+  tr.setDocks(new Float32Array(docks));
+  const dockNodes = new Set<number>();
+  for (let k = 0; k < docks.length; k += 3) dockNodes.add(sim.net.nearestNode(docks[k], docks[k + 1], 80));
+  let alive = 0;
+  for (let n = 0; n < sim.net.nodes.end; n++) if (sim.net.nodes.alive[n] && nc.deg[n] > 0) alive++;
+  const seen = new Set<number>();
+  let trucks = 0, toDock = 0;
+  for (let i = 0; i < 20 * 300; i++) {
+    tr.step(0.05);
+    if (i % 10 === 0) tr.checkWindow();
+    const c = tr.veh.cols;
+    for (let v = 0; v < tr.veh.end; v++) {
+      if (!tr.veh.alive[v] || c.kind[v] !== 2 || seen.has(v * 100000 + c.dest[v])) continue;
+      seen.add(v * 100000 + c.dest[v]);
+      trucks++; if (dockNodes.has(c.dest[v])) toDock++;
+    }
+  }
+  const share = dockNodes.size / alive;
+  assert.ok(trucks > 30, `trucks ${trucks}`);
+  assert.ok(toDock / trucks < Math.max(0.2, share * 3), `${(100 * toDock / trucks).toFixed(0)}% of the trucks went to the ${dockNodes.size} dock nodes near the camera (${(100 * share).toFixed(0)}% of the nodes)`);
+});
