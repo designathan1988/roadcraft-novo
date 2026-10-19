@@ -276,13 +276,14 @@ export class Peds {
     let best = -1, bd = r, n0 = 0;
     const doomed: number[] = [];
     for (const n of near) for (let p = this.head[n]; p >= 0; p = c.next[p]) {
-      if (!c.has[p]) continue;
+      if (!c.has[p] || c.mode[p] === 4) continue;
       const d = Math.hypot(c.px[p] - x, c.pz[p] - z);
       if (d > r) continue;
       if (one) { if (d < bd) { bd = d; best = p; } } else doomed.push(p);
     }
     if (one && best >= 0) doomed.push(best);
-    for (const p of doomed) { this.kill(p); n0++; }
+    // they drop out of sight over a moment (fading where they stood), not in a blink
+    for (const p of doomed) { this.fadeOut(p); n0++; }
     return n0;
   }
 

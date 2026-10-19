@@ -850,3 +850,22 @@ test('C26: a pedestrian whose way ahead was demolished walks round another way; 
   assert.ok(went >= watch.length * 0.6, `${went} of ${watch.length} walkers went round the demolished street (the rest vanished)`);
   assert.ok(faded > 0, 'nobody left on a demolished sidewalk was seen fading out');
 });
+
+test('C51: a pedestrian hit by a shot or a blast falls out of sight over a moment instead of vanishing', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { sim } = gridCity(4, 120);
+  const peds = new Peds(sim);
+  peds.density = 1 / 4;
+  for (let i = 0; i < 20 * 10; i++) peds.step(0.05);
+  peds.camX = 0; peds.camZ = 0; peds.checkWindow();
+  const out = new Float32Array(11 * 20000);
+  let n = peds.writePoses(out, 11, 0, 20000);
+  assert.ok(n > 10, `drawn ${n}`);
+  const x = out[4], z = out[6];
+  assert.equal(peds.hit(x, z, 1, true), 1, 'one hit');
+  peds.step(0.05);
+  n = peds.writePoses(out, 11, 0, 20000);
+  let fading = 0;
+  for (let i = 0; i < n; i++) if (out[i * 11 + 9] < 1 && Math.hypot(out[i * 11 + 4] - x, out[i * 11 + 6] - z) < 1.5) fading++;
+  assert.equal(fading, 1, 'the person hit vanished at once');
+});
