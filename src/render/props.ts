@@ -11,6 +11,7 @@ import { CELL_SIZE, MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
+import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
 import { buildPropDefs, buildSignAtlas, impostorSources, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, type PropDef } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
@@ -53,6 +54,8 @@ export class PropRenderer {
   private cellReq = new Uint32Array(CELL_COUNT);
   /** Version of the props a cell shows (-1: dropped, asked again when it comes back in range). */
   private cellHave = new Int32Array(CELL_COUNT);
+  /** Whether a cell's props were asked with its 4.0 buildings' parts (near cells only, jobs/parts40.ts PARTS_RANGE). */
+  private cellParts = new Uint8Array(CELL_COUNT);
   /** Cells whose props did not fit in the pool: asked again when blocks are freed. */
   private pending = new Set<number>();
   private residentAt = new THREE.Vector3(Infinity, 0, Infinity);
@@ -182,8 +185,9 @@ export class PropRenderer {
       const mesh = new THREE.Mesh(g, material);
       mesh.frustumCulled = false;
       mesh.userData.base = (t * LODS + l) * REGION;
-      // only the near level casts shadows (and not the wires)
-      mesh.castShadow = l === 0 && t !== PROP.Wire;
+      // only the near level casts shadows (and not the wires); of the building parts only the boxes (sills, fins: the
+      // shadow under a sill reads), the thin frames, railings and small props none (each cascade draws them again)
+      mesh.castShadow = l === 0 && t !== PROP.Wire && (!PART_TYPES.includes(t) || t === PROP.BBox || t === PROP.BLot);
       mesh.receiveShadow = true;
       this.group.add(mesh);
       this.slotMesh[t * LODS + l] = mesh;
@@ -208,6 +212,8 @@ export class PropRenderer {
     const vA = varyingProperty('vec4', 'vPropA');
     const vB = varyingProperty('vec4', 'vPropB');
     const vC = varyingProperty('vec4', 'vPropC');
+    // D = a building part's instance colour (linear), and whether it is one
+    const vD = varyingProperty('vec4', 'vPropD');
     const vFade = vA.x, vComp = vA.y, vVar = vA.z, vLit = vA.w;
     const vImpUV = vB.xy, vImpCS = vB.zw;
     const vAtlasUV = vC.xy, vAtlasBack = vC.z, vFlower = vC.w;
@@ -230,7 +236,22 @@ export class PropRenderer {
       }
       const w = uint(inst.w);
       const yaw = float(w.bitAnd(uint(4095))).mul(Math.PI * 2 / 4096);
-      const variant = float(w.shiftRight(uint(12)).bitAnd(uint(15)));
+      // a 4.0 building part (jobs/parts40.ts): scale per axis in the key (log code), its colour in w over the turn,
+      // a variant on top of the key for the types that hold several parts
+      const ptype = float(keyRaw.bitAnd(uint(31)));
+      const isPart = step(float(PART_TYPES[0] - 0.5), ptype).mul(step(ptype, float(PART_TYPES[PART_TYPES.length - 1] + 0.5)));
+      let isVarT: Node = float(0);
+      for (const t of VARIANT_TYPES) isVarT = isVarT.add(step(abs(ptype.sub(t)), float(0.5)));
+      const pkey = keyRaw.shiftRight(uint(5));
+      const q9 = (k: number) => float(pkey.shiftRight(uint(k * 9)).bitAnd(uint(511))).div(511);
+      const q8 = (k: number) => float(pkey.shiftRight(uint(k * 8)).bitAnd(uint(255))).div(255);
+      const sc = (k: number) => T.exp2(mix(q9(k), q8(k), isVarT).mul(SCALE_OCTAVES)).mul(SCALE_MIN);
+      const scale3 = vec3(sc(0), sc(1), sc(2));
+      const partVariant = float(pkey.shiftRight(uint(24)).bitAnd(uint(7)));
+      const pc12 = w.shiftRight(uint(12));
+      const partRgb = vec3(float(pc12.shiftRight(uint(8)).bitAnd(uint(15))), float(pc12.shiftRight(uint(4)).bitAnd(uint(15))), float(pc12.bitAnd(uint(15)))).div(15);
+      vD.assign(vec4(sRGBTransferEOTF(partRgb), isPart));
+      const variant = mix(float(w.shiftRight(uint(12)).bitAnd(uint(15))), partVariant, isPart);
       const scale = float(w.shiftRight(uint(16)).bitAnd(uint(63))).div(42).add(0.5);
       // ipê (like roadcraft's flowering trees): part of the variant-3 trees in flower, yellow, purple or pink
       const isTreeT = step(abs(float(keyRaw.bitAnd(uint(31))).sub(PROP.Tree)), float(0.5));
@@ -266,7 +287,7 @@ export class PropRenderer {
         float(1).sub(floor(cellK.div(SIGN_ATLAS.COLS)).add(float(0.5).sub(positionLocal.y.mul(0.5))).div(SIGN_ATLAS.ROWS))));
       backN = back;
       const local = mix(positionLocal, atlasP, isAtlas);
-      const p = mix(mix(local.mul(scale), wireP, isWire), barrierP, isBarrier).mul(float(1).sub(wrongFace)).toVar();
+      const p = mix(mix(mix(local.mul(scale), positionLocal.mul(scale3), isPart), wireP, isWire), barrierP, isBarrier).mul(float(1).sub(wrongFace)).toVar();
       // foliage sways a little with the wind
       const isCard = step(abs(pcol.w.mul(255).sub(PMAT.LeafCard)), float(0.5));
       const leaf = max(step(abs(pcol.w.mul(255).sub(PMAT.Leaf)), float(0.5)), isCard);
@@ -274,7 +295,7 @@ export class PropRenderer {
       const sway = sin(time.mul(windU.mul(2.2).add(1.3)).add(inst.x.mul(0.07)).add(inst.z.mul(0.05))).mul(windU.mul(0.09).add(0.03)).add(windU.mul(windU).mul(0.06)).mul(p.y).mul(leaf);
       const wx = p.x.mul(c).add(p.z.mul(s)).add(sway);
       const wz = p.x.negate().mul(s).add(p.z.mul(c));
-      const n = normalLocal;
+      const n = normalize(mix(normalLocal, normalLocal.div(scale3), isPart));
       vN.assign(vec3(n.x.mul(c).add(n.z.mul(s)), n.y, n.x.negate().mul(s).add(n.z.mul(c))));
       // traffic light: which lamp is lit
       const key = keyRaw.shiftRight(uint(5));
@@ -363,7 +384,7 @@ export class PropRenderer {
     const leafBase = base.mul(mix(vec3(1, 1, 1), leafK, isLeaf.max(isImpF)));
     const up = clamp(normalize(mix(vN, impNW, isImpF)).y, 0, 1);
     const through = leafBase.mul(float(0.1).add(up.mul(0.1))).mul(float(1).sub(nightU.mul(0.9))).mul(isLeaf.max(isImpF));
-    m.colorNode = vec4(mix(leafBase, bulbOff, isBulb), 1);
+    m.colorNode = vec4(mix(leafBase, bulbOff, isBulb).mul(mix(vec3(1, 1, 1), vD.xyz, vD.w)), 1);
     m.emissiveNode = through.add(pcol.xyz.mul(isBulb).mul(vLit).mul(mix(float(2.2), float(4), nightU)))
       .add(sRGBTransferEOTF(vec3(1, 0.86, 0.6)).mul(isGlass).mul(nightU).mul(6));
     m.roughnessNode = mix(mix(float(0.85), float(0.45), isMetal), float(0.95), isLeaf.max(isImpF));
@@ -402,6 +423,8 @@ export class PropRenderer {
   private requestCell(c: number, distance: number): void {
     const v = this.cellVer[c];
     this.cellReq[c] = v;
+    const parts40 = this.wantParts(c, distance);
+    this.cellParts[c] = parts40 ? 1 : 0;
     const w = this.world, net = w.roads;
     const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
     const segs: number[] = [];
@@ -409,9 +432,15 @@ export class PropRenderer {
     const boxes = w.gatherBoxes([c]);
     const graph = net.gather(segs, []);
     const items = w.items.gather(c, MAP_CELLS);
-    this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {
+    this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome, parts40 }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {
       key: `props:${c}`, priority: distance + 100, transfer: [...roadGraphTransfer(graph), ...boxTransfer(boxes), items.buffer as ArrayBuffer],
     });
+  }
+
+  /** Whether a cell at `d` wants its buildings' parts: within the range, kept a little past it (no asking again at the edge). */
+  private wantParts(c: number, d: number): boolean {
+    const r = PARTS_RANGE * this.pixelScale;
+    return this.cellParts[c] ? d < r * 1.25 : d < r;
   }
 
   /** How far props can be drawn now (the farthest level band), and the range kept beyond it. */
@@ -434,7 +463,12 @@ export class PropRenderer {
     this.residencyDue = false;
     for (const c of [...this.blocks.resident]) {
       const d = this.cellDistance(c, cam);
-      if (d > drop) this.dropCell(c); else this.blocks.setDistance(c, d);
+      if (d > drop) this.dropCell(c);
+      else {
+        this.blocks.setDistance(c, d);
+        // came near (or went far): asked again with (without) its buildings' parts
+        if (this.wantParts(c, d) !== (this.cellParts[c] === 1) && this.cellReq[c] === this.cellHave[c]) this.requestCell(c, d);
+      }
     }
     for (const c of [...this.pending]) if (this.cellDistance(c, cam) > drop) { this.pending.delete(c); this.cellHave[c] = -1; this.cellReq[c] = 0; }
     if (this.retryDue) {

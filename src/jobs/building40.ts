@@ -37,7 +37,8 @@ const PART_LOOK: Partial<Record<PartKind, [number, string, number]>> = {
 };
 /**
  * The parts drawn with the shell, in the cell's mesh (4.0 layerCells.ts:41 COARSE_PARTS): the panes and pool water; the
- * rest are the detail layer's (near only), as the 4.0 draws them by their size on the screen.
+ * rest (the lot's walls, kerbs and pavings among them) go to the props pool as instances (jobs/parts40.ts), drawn by
+ * their size on the screen as the 4.0 draws them.
  */
 export const COARSE_PARTS = new Set<string>(['glass', 'glassDark', 'water']);
 /** Parts not laid: the porch lamp's light on the wall (a decal of the night). */
@@ -75,12 +76,15 @@ export interface Lot40 {
 /** What one lot laid: shell vertices and part instances (for the counts). */
 export interface Laid40 { shell: number; parts: number }
 
+/** Where a part goes as a pool instance: its kind, place, turn, scale per axis and colour (sRGB hex). */
+export type PartSink = (kind: string, x: number, y: number, z: number, yaw: number, sx: number, sy: number, sz: number, rgb: number) => void;
+
 /**
- * Lays one lot's 4.0 building into `shell` (the faces and the COARSE_PARTS) and `detail` (the other parts' models),
+ * Lays one lot's 4.0 building: its faces and the COARSE_PARTS into `shell`, the other parts to `pool` as instances;
  * either may be null to leave it out. `paneRow`: the facade window row the panes are drawn with (a whole-pane row: the
  * room behind, blinds, night).
  */
-export function layLot40(lot: Lot40, shell: MeshBuilder | null, detail: MeshBuilder | null, paneRow: number): Laid40 {
+export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number): Laid40 {
   const rng = new Rng(lot.seed >>> 0);
   const plan = planLot(lotKind(lot.use, lot.density), lot.W, lot.D, rng);
   const env = plan.building;
@@ -121,11 +125,23 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, detail: MeshBuil
       laidShell += P.length / 3;
     }
   }
-  for (const parts of [shell, detail]) {
+  if (pool) {
+    for (const [kind, batch] of Object.entries(chunk.parts) as Array<[PartKind, typeof chunk.parts[PartKind]]>) {
+      if (!batch || batch.count === 0 || SKIPPED.has(kind) || COARSE_PARTS.has(kind)) continue;
+      const coloured = COLOURED_PARTS.has(kind) && batch.colours;
+      for (let i = 0; i < batch.count; i++) {
+        const o = i * POSE_FLOATS, Q = batch.poses;
+        const rgb = coloured ? hexOf(batch.colours![i * 3], batch.colours![i * 3 + 1], batch.colours![i * 3 + 2]) : 0xffffff;
+        pool(kind, Q[o], Q[o + 1], Q[o + 2], Math.atan2(Q[o + 4], Q[o + 3]), Q[o + 5], Q[o + 6], Q[o + 7], rgb);
+        laidParts++;
+      }
+    }
+  }
+  for (const parts of [shell]) {
     if (!parts) continue;
     models ??= partGeometries();
     for (const [kind, batch] of Object.entries(chunk.parts) as Array<[PartKind, typeof chunk.parts[PartKind]]>) {
-      if (!batch || batch.count === 0 || SKIPPED.has(kind) || COARSE_PARTS.has(kind) !== (parts === shell)) continue;
+      if (!batch || batch.count === 0 || SKIPPED.has(kind) || !COARSE_PARTS.has(kind)) continue;
       const g = models[kind];
       if (!g) continue;
       const pos = g.getAttribute('position'), nor = g.getAttribute('normal'), uv = g.getAttribute('uv'), vc = g.getAttribute('color');

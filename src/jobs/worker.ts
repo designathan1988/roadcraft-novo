@@ -58,7 +58,7 @@ const handlers: { [K in JobKind]: Handler<K> } = {
     return [{ cell: p.cell, lots }, lotTransfer(lots)];
   },
   props: (p) => {
-    const props = buildProps(H(), p.graph, p.boxes, p.cell, p.items, { ground: ground ?? undefined, water: water ?? undefined, biome: p.biome });
+    const props = buildProps(H(), p.graph, p.boxes, p.cell, p.items, { ground: ground ?? undefined, water: water ?? undefined, biome: p.biome, parts40: p.parts40 });
     return [{ cell: p.cell, props }, propTransfer(props)];
   },
   cityGen: (p) => {

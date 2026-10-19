@@ -6,6 +6,8 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
+import { partGeometries } from '../r40/render/buildings/kit.ts';
+import { PART_BASE, PART_DIST, POOL_PARTS, VARIANT_TYPES } from '../jobs/parts40.ts';
 import { cypressTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
@@ -454,6 +456,36 @@ function person(): PropDef {
   return { lods: [near, mid, null], dist: [90, 260, 0], radius: 1 };
 }
 
+/**
+ * The Roadcraft 4.0 building parts (jobs/parts40.ts): each type's mesh from the 4.0 kit's unit models (kit.ts
+ * partGeometries), in the kit's colours; a type that holds several kinds keeps each kind's vertices as its variant (the
+ * shader drops the others). Scale per axis and colour come with each instance.
+ */
+function buildingPartDefs(): Map<number, PropDef> {
+  const models = partGeometries() as unknown as Record<string, THREE.BufferGeometry>;
+  const byType = new Map<number, THREE.BufferGeometry[]>();
+  for (const [kind, [type, variant]] of Object.entries(POOL_PARTS)) {
+    const g = models[kind];
+    if (!g) continue;
+    const [rgb, metal] = PART_BASE[kind] ?? [0xffffff, false];
+    const mat = VARIANT_TYPES.has(type) ? PMAT.Sign0 + variant : metal ? PMAT.Metal : PMAT.Plain;
+    const one = part(g, rgb, mat);
+    // the models' own tones (the facade props are toned per vertex)
+    const tones = g.getAttribute('color');
+    if (tones) {
+      const flat = g.index ? g.toNonIndexed() : g;
+      const t = flat.getAttribute('color'), col = one.getAttribute('pcol');
+      for (let i = 0; i < col.count; i++) col.setXYZ(i, col.getX(i) * t.getX(i), col.getY(i) * t.getY(i), col.getZ(i) * t.getZ(i));
+    }
+    const list = byType.get(type) ?? [];
+    list.push(one);
+    byType.set(type, list);
+  }
+  const defs = new Map<number, PropDef>();
+  for (const [type, parts] of byType) defs.set(type, { lods: [merge(parts), null, null], dist: [PART_DIST[type] ?? 100, 0, 0], radius: 5 });
+  return defs;
+}
+
 /** Todas as peças, na ordem dos tipos. */
 export function buildPropDefs(): PropDef[] {
   const defs: PropDef[] = [];
@@ -475,6 +507,9 @@ export function buildPropDefs(): PropDef[] {
   defs[PROP.Person] = person();
   defs[PROP.Oak] = oak();
   defs[PROP.Palm] = palm();
+  // 18..23: the roads/vegetation work's, empty for now; 24..29 the 4.0 building parts
+  const parts = buildingPartDefs();
+  for (let t = PROP.Palm + 1; t < PROP_TYPES; t++) defs[t] = parts.get(t) ?? { lods: [null, null, null], dist: [0, 0, 0], radius: 0 };
   if (defs.length !== PROP_TYPES) throw new Error('tipos de peça');
   return defs;
 }

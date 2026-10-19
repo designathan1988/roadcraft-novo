@@ -18,7 +18,7 @@ import { CIVIC_CATALOG, CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign,
 import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
 import { BAY, catalogFacade } from '../world/catalogFacade.ts';
 import { FIN } from './buildingFinishes.ts';
-import { layLot40 } from './building40.ts';
+import { layLot40, type PartSink } from './building40.ts';
 import { FLAT_ROOFS, ROOF_COLOURS, planRoofPlant, type RoofPlantItem } from '../world/roofPlant.ts';
 
 export const GEN_VERSION = 15;
@@ -789,15 +789,16 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     if (ch) chimney(g.mb, f, ch[0], ch[1], f.base, hi + ch[2], g.lod);
   }
   else if (lod <= 0 && lod !== -3 && R40_ZONES.has(zone)) {
-    // the Roadcraft 4.0 building (jobs/building40.ts), near: its shell in the cell's mesh (level 0), its parts in the
-    // detail layer (level -1); the old body is still made, into nothing, for the footprint the yard's props avoid
-    if (lod === 0 || lod === -1) {
-      const dens = zoneDensity(zone);
-      const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
-      const density = dens === 0 || (use === 'residential' && floors <= 2) ? 'low' : dens === 2 || (use === 'commercial' && floors >= 8) ? 'high' : 'medium';
-      layLot40({ cx: fit.cx, cz: fit.cz, W, D, rot, use, density, seed: b.seed[i] || i + 1, groundAt: (x, z) => heightAt(heights, x, z) },
-        lod === 0 ? mb : null, lod === -1 ? mb : null, PANE_ROW);
-    } else {
+    // the Roadcraft 4.0 building (jobs/building40.ts), near: its shell in the cell's mesh (level 0), its parts to the
+    // props pool (the parts pass, level -2, when the props job asks for them); nothing in the detail layer (level -1);
+    // the old body is still made, into nothing, for the footprint the yard's props avoid
+    const dens = zoneDensity(zone);
+    const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
+    const density = dens === 0 || (use === 'residential' && floors <= 2) ? 'low' : dens === 2 || (use === 'commercial' && floors >= 8) ? 'high' : 'medium';
+    const lot40 = { cx: fit.cx, cz: fit.cz, W, D, rot, use, density, seed: b.seed[i] || i + 1, groundAt: (x: number, z: number) => heightAt(heights, x, z) } as const;
+    if (lod === 0) layLot40(lot40, mb, null, PANE_ROW);
+    else if (lod === -2 && parts40Out) layLot40(lot40, null, parts40Out, PANE_ROW);
+    if (lod === -2) {
       const keep = partsOut;
       partsOut = null;
       try { if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g); else if (zone === Zone.Commercial && floors >= 8) tower(g); else block(g); }
@@ -817,11 +818,14 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
  * Peças repetidas dos prédios (ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água) para o pool de
  * props: o mesmo gerador, no modo peças, com o mesmo sorteio da malha. Roda no job de peças da célula.
  */
-export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][]): void {
+export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink): void {
   partsOut = emit;
   footOut = foot ?? null;
-  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; footOut = null; footI = -1; }
+  parts40Out = parts40 ?? null;
+  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; footOut = null; footI = -1; parts40Out = null; }
 }
+/** Where the parts pass sends the 4.0 buildings' parts (pool instances), when the props job asks for them. */
+let parts40Out: PartSink | null = null;
 
 /** Whether (x, z) is within `margin` of one of the footprints (captureFoot) of a building. */
 export function inFootprints(rects: number[], x: number, z: number, margin: number): boolean {
