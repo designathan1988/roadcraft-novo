@@ -541,3 +541,20 @@ test('E41: every bus stop gets its shelter, past 2,048', async () => {
   assert.equal(shelters.count, 2500, `${shelters.count} shelters for 2,500 stops`);
 });
 
+test('E43: stop shelters cast shadows and are culled by camera', async () => {
+  const { TransitRenderer } = await import('../src/render/transit.ts');
+  const { Transit } = await import('../src/world/transit.ts');
+  const w = new World();
+  const transit = new Transit();
+  const { id, cmd } = transit.addLine();
+  cmd.apply();
+  transit.addStop(id, 1000, 1000)!.apply(); transit.addStop(id, 1100, 1000)!.apply();
+  const view = new TransitRenderer();
+  view.update(transit, w.roads, w.heights, transit.version, w.dirty);
+  const shelters = (view as unknown as { shelters: THREE.InstancedMesh }).shelters;
+  assert.equal(shelters.castShadow, true, 'shelters cast a sun shadow');
+  const cam = new THREE.PerspectiveCamera(50, 1, 1, 30000);
+  cam.position.set(-3000, 100, -3000); cam.lookAt(-4000, 0, -4000); cam.updateMatrixWorld();
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+  assert.equal(!shelters.frustumCulled || shelters.intersectsFrustum(frustum), false, 'shelters 5 km behind the camera are drawn');
+});

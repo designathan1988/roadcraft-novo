@@ -90,10 +90,12 @@ export class TransitRenderer {
 
   set showPaths(v: boolean) { this.paths.visible = v; }
 
+  /** Stop pieces: cast a sun shadow; culled per camera by the sphere round their instances (set when rebuilt). */
   private instanced(g: THREE.BufferGeometry, m: THREE.Material, cap: number): THREE.InstancedMesh {
     const mesh = new THREE.InstancedMesh(g, m, cap);
     mesh.count = 0;
-    mesh.frustumCulled = false;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     return mesh;
   }
 
@@ -209,5 +211,6 @@ export class TransitRenderer {
     this.shelters.instanceMatrix.needsUpdate = true;
     this.markers.instanceMatrix.needsUpdate = true;
     if (this.markers.instanceColor) this.markers.instanceColor.needsUpdate = true;
+    for (const m of [this.shelters, this.markers, this.platforms, this.entrances]) m.computeBoundingSphere();
   }
 }
