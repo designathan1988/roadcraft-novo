@@ -1853,6 +1853,7 @@ export class Traffic {
     }
     const sg = this.stopAhead(v, conn);
     if (sg >= 0 && sg - c.s[v] < gap) { gap = Math.max(0, sg - c.s[v]); vl = 0; }
+    if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2); // a lane change finishing on the way through
     const a = Math.max(-9, this.idm(c.v[v], v0, gap, vl, c.kind[v] ? A_HEAVY : A_MAX));
     const nv = Math.max(0, c.v[v] + a * dt);
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
@@ -1869,6 +1870,11 @@ export class Traffic {
     c.lane[v] = to;
     c.s[v] -= L;
     this.enterLane(v, c.s[v]);
+    // a lane change still under way goes on along the new segment (the lane on the same side of the new one)
+    if (c.lcT[v] < 1 && c.lcFrom[v] >= 0 && laneSeg(c.lcFrom[v]) === laneSeg(from)) {
+      const idx = laneIdx(to) + laneIdx(c.lcFrom[v]) - laneIdx(from), sg = laneSeg(to), dr = laneDir(to);
+      if (idx >= 0 && idx < laneCount(sim.net.segs.cols.profile[sg], dr)) c.lcFrom[v] = laneId(sg, dr, idx); else c.lcT[v] = 1;
+    }
     c.rIdx[v]++;
     // the route may have been broken (wrong lane): replan from the end of this lane;
     // heading to a median U-turn, replan (whoever overshot the destination turns there: the U-turn is a connection)
@@ -2418,13 +2424,23 @@ export class Traffic {
     for (let i = 0; i < this.microN; i++) {
       const v = this.micro[i];
       let lights = 0;
-      if (c.conn[v] >= 0) sim.connPoint(c.conn[v], c.s[v], p);
-      else {
+      // a lane change still under way (only between lanes of the same segment as the lane it is on or came from)
+      const changing = c.lcT[v] < 1 && c.lcFrom[v] >= 0 && c.lane[v] >= 0 && laneSeg(c.lcFrom[v]) === laneSeg(c.lane[v]) && sim.net.segs.alive[laneSeg(c.lcFrom[v])];
+      if (c.conn[v] >= 0) {
+        sim.connPoint(c.conn[v], c.s[v], p);
+        // into the junction mid-change: the sideways offset left at the end of the lane fades out on the way
+        if (changing) {
+          const lane = c.lane[v], L = sim.laneLen(lane), t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
+          sim.lanePoint(c.lcFrom[v], L, q); const qx = q[0], qz = q[2];
+          sim.lanePoint(lane, L, q);
+          p[0] += (qx - q[0]) * k; p[2] += (qz - q[2]) * k;
+        }
+      } else {
         const lane = c.lane[v];
         const L = sim.laneLen(lane);
         sim.lanePoint(lane, Math.min(L, c.s[v]), p);
         // smooth lane change: blend with the origin lane
-        if (c.lcT[v] < 1 && c.lcFrom[v] >= 0 && sim.net.segs.alive[laneSeg(c.lcFrom[v])]) {
+        if (changing) {
           sim.lanePoint(c.lcFrom[v], Math.min(L, c.s[v]), q);
           // lane-change indicator: toward the new lane's side (driver's right = (−cos, sin) of the heading)
           if (c.lcT[v] < 0.8) lights |= -Math.cos(p[3]) * (p[0] - q[0]) + Math.sin(p[3]) * (p[2] - q[2]) > 0 ? LIGHT_RIGHT : LIGHT_LEFT;

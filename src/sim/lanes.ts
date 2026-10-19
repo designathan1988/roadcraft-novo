@@ -254,6 +254,8 @@ export class SimNet {
     out[1] = k.y0[c] + (k.y1[c] - k.y0[c]) * t;
     const dx = 2 * s * (k.cx[c] - k.x0[c]) + 2 * t * (k.x1[c] - k.cx[c]);
     const dz = 2 * s * (k.cz[c] - k.z0[c]) + 2 * t * (k.z1[c] - k.cz[c]);
+    // a connection with no length (a splice where the lanes meet) has no direction of its own: the lane's
+    if (Math.abs(dx) + Math.abs(dz) < 1e-4) { const x = out[0], y = out[1], z = out[2]; this.lanePoint(k.from[c], this.laneLen(k.from[c]), out); out[0] = x; out[1] = y; out[2] = z; return; }
     out[3] = Math.atan2(dx, dz);
   }
 

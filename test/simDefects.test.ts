@@ -525,3 +525,34 @@ test('C18: a car pulling up at the kerb stops behind the car ahead, not inside i
   for (let i = 0; i < 20 * 5; i++) { tr.step(0.05); worst = Math.min(worst, c.s[ahead] - c.len[ahead] - c.s[v]); }
   assert.ok(worst > 0, `the car at the kerb ran ${(-worst).toFixed(1)} m into the car ahead`);
 });
+
+test('C10: a car that changed lanes just before a junction is drawn going on smoothly into it, without a jump', async () => {
+  const { laneCount, laneId } = await import('../src/sim/lanes.ts');
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const k = sim.conns.cols, sc = sim.net.segs.cols;
+  let conn = -1;
+  for (let x = 0; x < sim.conns.end && conn < 0; x++) {
+    if (!sim.conns.alive[x] || k.turn[x] !== 1) continue;
+    const f = k.from[x], seg = f >> 4, dir = (f & 8) ? -1 : 1;
+    if ((f & 7) === 0 && laneCount(sc.profile[seg], dir) >= 2 && sim.laneLen(f) > 30) conn = x;
+  }
+  assert.ok(conn >= 0, 'a two-lane approach');
+  const lane = k.from[conn], other = laneId(lane >> 4, (lane & 8) ? -1 : 1, 1);
+  const v = place(tr, lane, sim.laneLen(lane) - 6, k.to[conn], true);
+  const c = tr.veh.cols;
+  c.v[v] = 10; c.lcFrom[v] = other; c.lcT[v] = 0.3; // half-way through a lane change from the other lane
+  const out = new Float32Array(11 * 64);
+  let worst = 0, last: number[] | null = null;
+  for (let i = 0; i < 30; i++) {
+    tr.step(0.05);
+    const n = tr.writePoses(out, 11);
+    let o = -1;
+    for (let j = 0; j < n; j++) if (out[j * 11 + 10] === (v & 0xffff)) o = j * 11;
+    if (o < 0) break;
+    if (last) worst = Math.max(worst, Math.hypot(out[o + 4] - last[0], out[o + 6] - last[1]));
+    last = [out[o + 4], out[o + 6]];
+  }
+  assert.ok(worst < 1.2, `the car was drawn jumping ${worst.toFixed(2)} m in one step (driving 0.5 m a step)`);
+});
