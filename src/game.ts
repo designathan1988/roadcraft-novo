@@ -129,6 +129,8 @@ export class Game {
   private transitTerminal = false;
   /** Clicks with the street item tools remove instead of placing (Remove poles; Shift+click does the same). */
   private itemRemove = false;
+  /** A wall is being traced with the barrier tool (its first point was clicked). */
+  private wallOpen = false;
   private health!: HealthPanel;
   private creator!: Creator;
   private lineSel = 0;
@@ -952,7 +954,7 @@ export class Game {
         if (this.tool === 'inspect') { if (hit) this.inspector.pick(hit.x, hit.z); }
         else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
         else if (this.tool === 'barrier' && this.itemRemove) this.removePole(hit);
-        else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey);
+        else if (this.tool === 'streetscape' || this.tool === 'barrier') { this.itemTool.click(hit, e.shiftKey); if (this.tool === 'barrier' && !e.shiftKey && hit) this.wallOpen = true; }
         else if (this.tool === 'building') this.clickBuilding(hit, e.shiftKey);
         else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey || this.transitTerminal);
         else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
@@ -996,7 +998,9 @@ export class Game {
       },
       cancelStroke: () => {
         if (this.vehicles.follow) { this.vehicles.follow = null; return true; }
-        if (this.tool === 'barrier') this.itemTool.cancel(); // ItemTool does not say whether a line is being traced: Esc ends it and puts the tool down
+        // a wall being traced ends and the tool stays (the next Esc puts it down)
+        if (this.tool === 'barrier' && this.wallOpen) { this.itemTool.cancel(); this.wallOpen = false; return true; }
+        if (this.tool === 'building' && this.lotExtraPts.length) { this.lotExtraPts = []; this.preview.hideAll(); return true; }
         if (this.tool === 'building' && (this.lotPts?.length || this.polyPts.length || this.joinFirst >= 0)) { if (this.lotPts) this.lotPts.length = 0; this.polyPts.length = 0; this.joinFirst = -1; this.preview.hideAll(); return true; }
         if (this.tool === 'river' && this.riverPts.length) { this.riverPts.length = 0; this.preview.hideAll(); return true; }
         if (ROAD_TOOLS.includes(this.tool) && this.roadTool.busy) { this.roadTool.cancel(); return true; }
@@ -1037,7 +1041,7 @@ export class Game {
     if (t === 'building' && this.lotMode === 'poly' && c === 'Enter') { this.finishPoly(); return true; }
     if (t === 'building' && this.lotMode === 'poly' && c === 'Backspace') { this.polyPts.pop(); return true; }
     if (t === 'barrier' && c === 'Backspace') { this.itemTool.back(); return true; }
-    if (t === 'barrier' && c === 'Enter') { this.itemTool.cancel(); return true; }
+    if (t === 'barrier' && c === 'Enter') { this.itemTool.cancel(); this.wallOpen = false; return true; }
     if (t === 'river' && c === 'Enter') { this.finishRiver(); return true; }
     if (t === 'river' && c === 'Backspace') { this.riverPts.pop(); return true; }
     if (t === 'inspect' && (c === 'Delete' || c === 'Backspace') && this.inspector.seg >= 0) {
@@ -1120,6 +1124,7 @@ export class Game {
 
   private setTool(tool: Tool): void {
     if (tool !== this.tool) this.ambient.sfx('click');
+    this.wallOpen = false;
     this.tool = tool;
     zoneOverlayU.value = tool === 'zone' || this.zoneLayer ? 1 : 0;
     if (TERRAIN_TOOLS.includes(tool)) this.brush.mode = tool === 'landform' ? this.landformMode : tool as BrushParams['mode'];
