@@ -153,6 +153,13 @@ class TRAANode extends TempNode {
 		 * @private
 		 * @type {?RenderTarget}
 		 */
+		/**
+		 * Set to start the history again from the current frame (next update).
+		 *
+		 * @type {boolean}
+		 */
+		this.restartHistory = false;
+
 		this._historyRenderTarget = new RenderTarget( 1, 1, { depthBuffer: false, type: HalfFloatType, depthTexture: new DepthTexture() } );
 		this._historyRenderTarget.texture.name = 'TRAANode.history';
 
@@ -395,7 +402,9 @@ class TRAANode extends TempNode {
 
 		//
 
-		const needsRestart = this._historyRenderTarget.width !== width || this._historyRenderTarget.height !== height;
+		// a restart asked from outside (the final image switched to this TRAA's output after a while away)
+		const needsRestart = this.restartHistory === true || this._historyRenderTarget.width !== width || this._historyRenderTarget.height !== height;
+		this.restartHistory = false;
 		this.setSize( width, height );
 
 		// every time when the dimensions change we need fresh history data

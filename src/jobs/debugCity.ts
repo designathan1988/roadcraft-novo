@@ -7,7 +7,7 @@ import { HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TILES, SEA_LEVEL } from '../co
 import { Rng, fbm, hash2 } from '../core/rng.ts';
 import { tileX, tileId } from '../core/grid.ts';
 import { heightIndex, worldOfSample } from '../world/heights.ts';
-import { baseHeight } from './terrainGen.ts';
+import { baseHeight, waterLevelAt } from './terrainGen.ts';
 import { SHAPE_STRIDE, emptyBoxes, type BoxColumns } from './protocol.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 
@@ -30,7 +30,7 @@ export function gridNodeHeight(i: number, j: number, seed: number): number {
   let h = 0;
   for (const [dx, dz] of [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6]]) h += baseHeight(x + dx, z + dz, seed);
   h /= 5;
-  if (h < SEA_LEVEL + 1.2) return NaN;
+  if (h < SEA_LEVEL + 1.2 || waterLevelAt(x, z, seed) > h - 1.2) return NaN;
   if (Math.max(Math.abs(x), Math.abs(z)) > MAP_HALF - 300) return NaN; // edge mountains
   return h;
 }

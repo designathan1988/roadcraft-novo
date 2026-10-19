@@ -79,6 +79,8 @@ import { KeptFileMissing, SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, lim
 import { repairDanglingEnds } from './roads/repair.ts';
 
 const SLOT = 'cidade-1';
+/** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
+const STILL_FRAMES = 40;
 /** Segments that fit in the occupancy map (2 directions per segment). */
 export const OCCUPANCY_SEGS = 1 << 17;
 
@@ -246,8 +248,10 @@ export class Game {
     // per segment: occupancy a→b, b→a, asphalt wear (simulation), free
     this.occupancySab = new SharedArrayBuffer(OCCUPANCY_SEGS * 4);
     this.trafficLook = createTrafficLook(this.occupancySab);
-    this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook);
+    this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook, this.world.heights);
     this.layers = [this.roads, this.city, this.cityDetail];
+    // the near levels are chosen by the 3D distance (from high up the cells under the camera are far)
+    for (const l of this.layers) l.groundAt = (x, z) => heightAt(this.world.heights, x, z);
 
     const posesSab = createPoseBuffers();
     this.poses = new PoseReader(viewPoseBuffers(posesSab));
@@ -440,6 +444,8 @@ export class Game {
     const { scene, renderer } = this.parts;
     scene.add(this.terrain.mesh);
     scene.add(this.terrain.waterMesh);
+    // the sea plane gets the terrain's water (it reads the ground's height under each pixel)
+    this.parts.water.material = this.terrain.createSeaMaterial();
     for (const l of this.layers) scene.add(l.group);
     scene.add(this.preview.mesh, this.preview.marker, this.preview.circle);
     scene.add(this.vehicles.group);
@@ -527,6 +533,7 @@ export class Game {
       this.rig.restore(new Float64Array([x, z, yaw * Math.PI / 180, pitch * Math.PI / 180, dist, params.has('iso') ? 1 : 0]));
     }
     this.last = performance.now();
+    this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
     else if (params.has('cidade')) await this.generatedCity();
@@ -582,6 +589,7 @@ export class Game {
       const r = await this.pool.run('terrainGen', { seed: this.world.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
       this.world.tileMin[r.tile] = r.min;
       this.world.tileMax[r.tile] = r.max;
+      this.world.tileWater[r.tile] = r.hasWater ? 1 : 0; this.world.waterDirty.add(r.tile);
       this.world.layerDirty.add(r.tile);
       // the tile's props (trees) depend on the terrain
       const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
@@ -591,7 +599,22 @@ export class Game {
 
   // ----------------------------------------------------------------- frame
 
+  /** Frames in a row with nothing to draw (paused, camera still, no input, no work arriving). */
+  private stillFrames = 0;
+  private lastInput = 0;
+  private drawnView = new THREE.Matrix4();
+  private drawnProj = new THREE.Matrix4();
+
+  /** Input marks the frames as live (hover previews, brush ring, menus over the 3D view). */
+  private watchInput(): void {
+    const mark = () => { this.lastInput = performance.now(); this.stillFrames = 0; };
+    for (const e of ['pointermove', 'pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'resize']) window.addEventListener(e, mark, { capture: true, passive: true });
+    document.addEventListener('visibilitychange', mark);
+  }
+
   private frame(now: number): void {
+    // minimized or hidden: nothing is drawn; the simulation goes on in its worker (the clock does not jump on return)
+    if (document.hidden) { this.last = now; return; }
     this.health?.frame(now - this.last);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
@@ -607,7 +630,8 @@ export class Game {
     if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.busy && !this.saveBlocked) void this.save(true); }
     const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
-    this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
+    // the rain box round the eye; isometric: round what is looked at (round the perspective eye it was a block of rain)
+    this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.mode === 'iso' ? this.rig.target : this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
     setTimeOfDay(this.parts, this.hour, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
     this.particles.update(dt, this.rig.eye);
     this.textSigns.update(this.rig.eye);
@@ -656,6 +680,16 @@ export class Game {
     } else if (ROAD_TOOLS.includes(this.tool) && this.tool !== 'free' && this.drag !== 'pan' && this.drag !== 'rotate') this.roadTool.hover(hit);
     if ((this.tool === 'streetscape' || this.tool === 'barrier') && this.drag !== 'pan' && this.drag !== 'rotate' && this.drag !== 'row') this.itemTool.hover(hit);
 
+    // Drawn only when something visible can change: the camera, the simulation or the clock running, input, meshes
+    // arriving, weather. Paused and idle, after STILL_FRAMES (the anti-aliasing settles) nothing is drawn; water and
+    // leaves stand still until something moves.
+    const live = !this.paused || now - this.lastInput < 800 || !this.pool.isIdle() || this.generating || rainU.value > 0.01 || flashU.value > 0
+      || !this.drawnView.equals(cam.matrixWorld) || !this.drawnProj.equals(cam.projectionMatrix);
+    this.stillFrames = live ? 0 : this.stillFrames + 1;
+    this.drawnView.copy(cam.matrixWorld);
+    this.drawnProj.copy(cam.projectionMatrix);
+    if (this.stillFrames > STILL_FRAMES) return;
+
     const pf = this.perfLog, T0 = pf ? performance.now() : 0;
     for (const l of this.layers) l.processDirty();
     this.world.dirty.drain(Dirty.Terrain); // nothing but rendering depends on this yet
@@ -680,7 +714,13 @@ export class Game {
     this.props.update(renderer, cam, this.rig.eye, now);
     const T5 = pf ? performance.now() : 0;
 
-    if (this.post) { this.post.setCamera(cam); this.post.render(); }
+    if (this.post) {
+      // the shadow cascades are redrawn only when something casting changed or moves (render/post.ts prepareShadows)
+      if (this.props.changed || this.layers.some((l) => l.changed)) this.post.invalidateShadows();
+      this.props.changed = false;
+      this.post.setCamera(cam);
+      this.post.render(!this.paused || windU.value > 0.001);
+    }
     else renderer.render(scene, cam);
     // measurement (?perf): frames over 30 ms say where the time went
     if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); }
@@ -1562,7 +1602,8 @@ export class Game {
   /** Lines for the simulation and for rendering, when they change (or when the roads change). */
   private syncTransit(): void {
     const v = this.transit.version * 100000 + this.roadsVersion;
-    this.transitView.update(this.transit, this.world.roads, this.world.heights, v);
+    // the stops: rebuilt when the lines change or a road is edited near a stop (not on every road edit)
+    this.transitView.update(this.transit, this.world.roads, this.world.heights, this.transit.version, this.world.dirty);
     if (v !== this.linesSent) {
       this.linesSent = v;
       this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l), loop: !!l.loop })) } satisfies ToSim);
@@ -2308,7 +2349,7 @@ export class Game {
       if (!r && (last || !ref)) {
         // not in the save, or (as a last resort) unusable: the terrain comes back from the seed
         const gr = await this.pool.run('terrainGen', { seed: w.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
-        w.tileMin[t] = gr.min; w.tileMax[t] = gr.max;
+        w.tileMin[t] = gr.min; w.tileMax[t] = gr.max; w.tileWater[t] = gr.hasWater ? 1 : 0; w.waterDirty.add(t);
       }
       w.layerDirty.add(t);
       for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);

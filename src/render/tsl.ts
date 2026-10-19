@@ -55,3 +55,11 @@ export function lodFadeMask(): Node {
   const n = interleavedGradientNoise(screenCoordinate.xy);
   return select(fade.greaterThanEqual(0), fade.sub(n), n.add(fade).add(1e-4)).greaterThan(0);
 }
+
+/** A transparent material paints colour only: it leaves the normal and velocity of what is behind it (the occlusion
+ *  and the TRAA read those layers; otherwise rain and clouds turn into streaks and smudges). */
+export function colorOnly<M extends { mrtNode: Node }>(m: M): M {
+  const { mrt, output, vec4 } = T;
+  m.mrtNode = mrt({ output, normal: vec4(0, 0, 0, 0), velocity: vec4(0, 0, 0, 0) });
+  return m;
+}

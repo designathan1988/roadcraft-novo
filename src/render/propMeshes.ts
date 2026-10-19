@@ -1,26 +1,29 @@
-// Malhas das peças (perto, meio, longe), montadas uma vez na carga a partir de
-// primitivas. Cor por vértice; o canal alfa diz o acabamento:
-// 0 liso, 1 folhagem, 2 vidro de luminária, 3/4/5 lâmpadas vermelha/amarela/verde, 6 casca, 7 metal.
+// Prop meshes (near, mid, far), built once at load from
+// primitives. Colour per vertex; the alpha channel holds the finish:
+// 0 plain, 1 foliage, 2 lamp glass, 3/4/5 red/yellow/green lamps, 6 bark, 7 metal.
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
-import { cypressTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
+import { SMALL_CASTER } from './sun.ts';
+import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
-/** Faces por variante: Sign0 … Sign0 + 15. */
+/** Faces per variant: Sign0 … Sign0 + 15. */
 export const FACE_LAST = PMAT.Sign0 + 15;
-/** Partes de placa: acabamento Sign0 + variante (o shader some com as das outras variantes). */
+/** Sign parts: finish Sign0 + variant (the shader hides those of the other variants). */
 export const SIGN_PARTS = 4;
 
 export interface PropDef {
-  /** Malha por nível (null = não desenha). */
+  /** Mesh per level (null = not drawn). */
   lods: Array<THREE.BufferGeometry | null>;
-  /** Fim de cada nível (m, a 1080p). */
+  /** End of each level (m, at 1080p). */
   dist: [number, number, number];
-  /** Raio para o recorte. */
+  /** Radius for culling. */
   radius: number;
+  /** Other models of the type, drawn for the variants MODELS maps to them (index 1, 2…). */
+  alts?: PropDef[];
 }
 
 const m4 = new THREE.Matrix4();
@@ -63,18 +66,27 @@ const oak = () => cardTree(oakTree, 2, 7);
 const palm = () => cardTree(palmTree, 3, 7);
 
 function bush(): PropDef {
-  return { lods: [shrub(0), shrub(1), null], dist: [130, 420, 0], radius: 1.6 };
+  return {
+    lods: [shrub(0), shrub(1), null], dist: [130, 420, 0], radius: 1.6,
+    alts: [
+      { lods: [floweringBush(0), floweringBush(1), null], dist: [130, 420, 0], radius: 1.6 },
+      { lods: [hedge(0), hedge(1), null], dist: [150, 480, 0], radius: 2 },
+    ],
+  };
 }
+
+/** The ipê of Roadcraft 4.0: impostor columns 4 (yellow) and 5 (pink). */
+const ipe = (bloom: 'yellow' | 'pink', column: number): PropDef => cardTree((lod) => ipeTree(lod, bloom), column, 8);
 
 const CONCRETE = 0xb4b0a8;
 
 function lamp(double: boolean): PropDef {
   const arms = double ? [1, -1] : [1];
-  // na calçada: poste de concreto da rede elétrica com cruzeta (fios ao longo da via) e braço da luminária
+  // on the sidewalk: concrete utility pole with crossarm (wires along the road) and the lamp arm
   const utility = double ? [] : [
     part(cyl(0.17, 0.1, WIRE_Y + 0.4, 8), CONCRETE, PMAT.Plain),
     part(box(1.7, 0.12, 0.12), CONCRETE, PMAT.Plain, 0, WIRE_Y - 0.06, 0),
-    part(box(0.5, 0.5, 0.5), 0x5c6064, PMAT.Metal, 0, 6.6, -0.32), // transformador pequeno
+    part(box(0.5, 0.5, 0.5), 0x5c6064, PMAT.Metal, 0, 6.6, -0.32), // small transformer
   ];
   const near = merge([
     ...(double ? [part(cyl(0.12, 0.08, 8.2, 8), POLE, PMAT.Metal), part(cyl(0.2, 0.2, 0.5, 8), POLE, PMAT.Metal)] : utility),
@@ -121,7 +133,7 @@ function signalHead(x: number, y: number, z: number, big: boolean, detail = true
 }
 
 function signal(): PropDef {
-  // poste na esquina, braço sobre a via (para −x local), focos olhando para +z
+  // pole at the corner, arm over the road (towards local −x), lights facing +z
   const near = merge([
     part(cyl(0.13, 0.1, 5.8, 8), 0x3a3e42, PMAT.Metal),
     part(box(3.6, 0.12, 0.12), 0x3a3e42, PMAT.Metal, -1.8, 5.5, 0),
@@ -152,7 +164,7 @@ function bin(): PropDef {
   return { lods: [near, null, null], dist: [130, 0, 0], radius: 0.8 };
 }
 
-/** Vão de fios: três cabos de 0 a 1 em z (o shader estica até o próximo poste e faz a barriga). */
+/** Wire span: three cables from 0 to 1 in z (the shader stretches it to the next pole and makes the sag). */
 function wire(): PropDef {
   const strand = (x: number, y: number) => {
     const g = new THREE.BoxGeometry(0.035, 0.035, 1, 1, 1, 12).translate(x, y, 0.5);
@@ -272,7 +284,7 @@ function sign(): PropDef {
   return { lods: [merge(parts), null, null], dist: [140, 0, 0], radius: 1.5 };
 }
 
-/** Poste de rede elétrica sem luminária (linhas desenhadas pelo jogador). */
+/** Utility pole without a lamp (lines drawn by the player). */
 function pole(): PropDef {
   const near = merge([
     part(cyl(0.17, 0.1, WIRE_Y + 0.4, 8), CONCRETE, PMAT.Plain),
@@ -283,86 +295,86 @@ function pole(): PropDef {
   return { lods: [near, mid, null], dist: [220, 750, 0], radius: 5 };
 }
 
-/** Mobiliário de calçada: todas as variantes na mesma malha (o shader mostra só a da instância). */
+/** Sidewalk furniture: all variants in the same mesh (the shader shows only the instance's). */
 function furniture(): PropDef {
   const v = (k: number) => PMAT.Sign0 + k;
   const parts = [
-    // hidrante vermelho
+    // red hydrant
     part(cyl(0.16, 0.14, 0.62, 10), 0xc0261d, v(FURN.Hydrant)),
     part(ball(0.15, 1), 0xc0261d, v(FURN.Hydrant), 0, 0.64, 0),
     part(cyl(0.07, 0.07, 0.42, 6).rotateZ(Math.PI / 2), 0xa31f18, v(FURN.Hydrant), 0.21, 0.42, 0),
-    // caixa de correio amarela
+    // yellow postbox
     part(cyl(0.06, 0.06, 0.8, 6), 0x5a5f63, v(FURN.Postbox)),
     part(box(0.48, 0.62, 0.38), 0xf2c21a, v(FURN.Postbox), 0, 0.8, 0),
     part(box(0.3, 0.04, 0.02), 0x1f4f9a, v(FURN.Postbox), 0, 1.25, 0.2),
-    // orelhão: concha laranja num poste
+    // payphone: orange shell on a post
     part(cyl(0.06, 0.06, 1.9, 6), 0x5a5f63, v(FURN.Phone)),
     part(ball(0.62, 1), 0xe46a1c, v(FURN.Phone), 0, 1.95, 0.12, 1, 1.15, 0.85),
     part(box(0.22, 0.32, 0.12), 0x2a2d30, v(FURN.Phone), 0, 1.45, 0.3),
-    // boca de lobo: grelha no meio-fio
+    // storm drain: grate at the kerb
     part(box(0.9, 0.06, 0.5), 0x3c3f42, v(FURN.Drain), 0, -0.04, 0),
-    // frade (balizador) de concreto
+    // concrete bollard
     part(cyl(0.16, 0.13, 0.75, 10), 0xb4b0a8, v(FURN.Bollard)),
-    // floreira
+    // planter
     part(box(1.0, 0.5, 1.0), 0x9d8f7c, v(FURN.Planter)),
     part(ball(0.55, 1), 0x4f7a34, v(FURN.Planter), 0, 0.65, 0, 1, 0.7, 1),
-    // ---- peças de fachada dos prédios (sessão prédios): origem no pé da parede, +z para fora
-    // ar-condicionado de parede (condensadora com grade e mãos-francesas)
+    // ---- building facade pieces (buildings session): origin at the foot of the wall, +z outwards
+    // wall air conditioner (condenser with grille and brackets)
     part(box(0.8, 0.55, 0.3), 0xe4e4e0, v(FURN.WallAc), 0, 0.04, 0.17),
     part(box(0.36, 0.36, 0.02), 0x8d9296, v(FURN.WallAc), 0.14, 0.13, 0.33),
     part(box(0.04, 0.04, 0.34), 0x8a8e92, v(FURN.WallAc), -0.3, 0, 0.17),
     part(box(0.04, 0.04, 0.34), 0x8a8e92, v(FURN.WallAc), 0.3, 0, 0.17),
-    // condensadora de telhado (caixa com ventilador em cima)
+    // rooftop condenser (box with a fan on top)
     part(box(1.2, 0.9, 0.9), 0xd4d4d0, v(FURN.RoofAc), 0, 0, 0),
     part(box(1.22, 0.5, 0.92), 0xbfc1c0, v(FURN.RoofAc), 0, 0.15, 0),
     part(cyl(0.34, 0.34, 0.06, 14), 0x3c3f42, v(FURN.RoofAc), 0, 0.9, 0),
     part(box(0.05, 0.12, 0.7), 0x8a8e92, v(FURN.RoofAc), 0, 0.92, 0),
-    // vaso de barro com planta
+    // clay pot with a plant
     part(cyl(0.16, 0.22, 0.38, 10), 0xa65a3c, v(FURN.Vase)),
     part(ball(0.3, 1), 0x4f7a34, v(FURN.Vase), 0, 0.62, 0, 1, 0.9, 1),
-    // varal de chão com roupa (ao longo da parede)
+    // standing clothesline with clothes (along the wall)
     part(box(0.03, 1.4, 0.03), 0xc9ccce, v(FURN.Clothesline), -0.9, 0, 0),
     part(box(0.03, 1.4, 0.03), 0xc9ccce, v(FURN.Clothesline), 0.9, 0, 0),
     ...[-0.12, 0, 0.12].map((z) => part(box(1.8, 0.015, 0.015), 0xd8dadc, v(FURN.Clothesline), 0, 1.38, z)),
     part(box(0.42, 0.55, 0.02), 0xf2f2ee, v(FURN.Clothesline), -0.5, 0.83, 0),
     part(box(0.36, 0.45, 0.02), 0x3d6aa0, v(FURN.Clothesline), 0.05, 0.93, 0.12),
     part(box(0.3, 0.6, 0.02), 0xc8402c, v(FURN.Clothesline), 0.55, 0.78, -0.12),
-    // antena parabólica
+    // satellite dish
     part(box(0.05, 0.75, 0.05), 0x8a8e92, v(FURN.Dish), 0, 0, 0),
     part(ball(0.38, 1), 0xe8e8e4, v(FURN.Dish), 0, 0.85, 0.12, 1, 1, 0.22),
     part(box(0.03, 0.03, 0.35), 0x8a8e92, v(FURN.Dish), 0, 0.85, 0.3),
-    // exaustor eólico (cano e turbina)
+    // wind-driven roof vent (pipe and turbine)
     part(cyl(0.12, 0.12, 0.6, 8), 0xa9adb0, v(FURN.Vent)),
     part(ball(0.22, 1), 0xc9ccce, v(FURN.Vent), 0, 0.72, 0, 1, 0.75, 1),
-    // cadeira de plástico
+    // plastic chair
     part(box(0.45, 0.05, 0.45), 0xf2f2ee, v(FURN.Chair), 0, 0.42, 0),
     part(box(0.45, 0.45, 0.04), 0xf2f2ee, v(FURN.Chair), 0, 0.47, -0.21),
     ...[[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]].map(([x, z]) => part(box(0.035, 0.42, 0.035), 0xe6e6e2, v(FURN.Chair), x, 0, z)),
-    // caixa d'água de fibra (azul) com tampa
+    // fibreglass water tank (blue) with lid
     part(cyl(0.62, 0.72, 0.85, 14), 0x2f6fb5, v(FURN.Tank)),
     part(cyl(0.64, 0.64, 0.07, 14), 0x285e98, v(FURN.Tank), 0, 0.85, 0),
   ];
   return { lods: [merge(parts), null, null], dist: [140, 0, 0], radius: 1.5 };
 }
 
-/** Muros, cercas, sebes, defensas e gradis: peça de z = 0 a 1 (o shader estica até o comprimento e inclina no desnível). */
+/** Walls, fences, hedges, guardrails and railings: piece from z = 0 to 1 (the shader stretches it to length and tilts it on slopes). */
 function barrier(): PropDef {
   const v = (k: number) => PMAT.Sign0 + k;
   const near = merge([
-    // cerca de madeira: mourão no começo, três tábuas
+    // wooden fence: post at the start, three boards
     part(box(0.12, 1.3, 0.12), 0x7a5a3a, v(BARRIER.Fence), 0, 0, 0.06),
     part(box(0.05, 0.12, 1), 0x8a6844, v(BARRIER.Fence), 0, 0.35, 0.5),
     part(box(0.05, 0.12, 1), 0x8a6844, v(BARRIER.Fence), 0, 0.7, 0.5),
     part(box(0.05, 0.12, 1), 0x8a6844, v(BARRIER.Fence), 0, 1.05, 0.5),
-    // muro de alvenaria rebocado
+    // rendered masonry wall
     part(box(0.22, 1.9, 1), 0xd8d0c2, v(BARRIER.Wall), 0, 0, 0.5),
     part(box(0.3, 0.08, 1), 0xb8b0a2, v(BARRIER.Wall), 0, 1.9, 0.5),
-    // sebe
+    // hedge
     part(box(0.8, 1.3, 1), 0x3f6a2e, v(BARRIER.Hedge), 0, 0, 0.5),
-    // defensa metálica (guard-rail)
+    // metal crash barrier (guard-rail)
     part(box(0.1, 0.75, 0.1), 0x8a8e92, v(BARRIER.Guardrail), 0, 0, 0.05),
     part(box(0.06, 0.32, 1), 0xb8bcc0, v(BARRIER.Guardrail), 0.06, 0.42, 0.5),
-    // gradil urbano
+    // urban railing
     part(box(0.05, 1.1, 0.05), 0x2c3034, v(BARRIER.Railing), 0, 0, 0.03),
     part(box(0.04, 0.05, 1), 0x2c3034, v(BARRIER.Railing), 0, 1.05, 0.5),
     part(box(0.04, 0.05, 1), 0x2c3034, v(BARRIER.Railing), 0, 0.15, 0.5),
@@ -378,15 +390,16 @@ function barrier(): PropDef {
   return { lods: [near, mid, null], dist: [180, 700, 0], radius: 4 };
 }
 
-/** Malhas de perto das árvores, para fotografar os impostores (na ordem das colunas do atlas). */
+/** Near meshes of the trees, to photograph the impostors (in the order of the atlas columns). */
 export function impostorSources(defs: PropDef[]): THREE.BufferGeometry[] {
-  return [defs[PROP.Tree].lods[0]!, defs[PROP.Conifer].lods[0]!, defs[PROP.Oak].lods[0]!, defs[PROP.Palm].lods[0]!];
+  return [defs[PROP.Tree].lods[0]!, defs[PROP.Conifer].lods[0]!, defs[PROP.Oak].lods[0]!, defs[PROP.Palm].lods[0]!,
+    defs[PROP.Tree].alts![0].lods[0]!, defs[PROP.Oak].alts![0].lods[0]!];
 }
 
-/** Carro estacionado: mesmas proporções dos carros da rua; a pintura vem da variante. */
+/** Parked car: same proportions as the street cars; the paint comes from the variant. */
 function parkedCar(): PropDef {
   const P = 0xffffff, GL = 0x1a2430, TI = 0x161616;
-  // o mesmo perfil dos carros da rua (render/vehicles.ts carModel): capô, para-brisa, teto, porta-malas
+  // the same profile as the street cars (render/vehicles.ts carModel): bonnet, windscreen, roof, boot
   const profile = (pts: Array<[number, number]>, width: number) => {
     const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y))), { depth: width, bevelEnabled: false, curveSegments: 1 });
     g.deleteAttribute('uv');
@@ -402,7 +415,7 @@ function parkedCar(): PropDef {
   return { lods: [near, mid, null], dist: [200, 650, 0], radius: 3 };
 }
 
-/** Elementos do chão: as 11 variantes na mesma malha (o shader mostra só a da instância), um tufo de ~1,5 m. */
+/** Ground elements: the 11 variants in the same mesh (the shader shows only the instance's), a ~1.5 m clump. */
 function ground(): PropDef {
   const v = (k: number) => PMAT.Sign0 + k;
   const parts: THREE.BufferGeometry[] = [];
@@ -428,7 +441,7 @@ function ground(): PropDef {
     parts.push(part(cyl(0.03, 0.025, 0.12, 5), 0xece3d0, v(10), x, 0, z));
     parts.push(part(cone(0.1, 0.08, 7), [0xc0392b, 0xb5835a][i % 2], v(10), x, 0.11, z));
   });
-  // 11: palmeira (tronco curvo em gomos e leque de folhas)
+  // 11: palm (curved segmented trunk and a fan of fronds)
   for (let k = 0; k < 7; k++) parts.push(part(cyl(0.2 - k * 0.012, 0.19 - k * 0.012, 1.15, 6), 0x8a6f4d, v(11), k * 0.07, k * 1.1, 0));
   for (let k = 0; k < 8; k++) {
     const a = k / 8 * Math.PI * 2;
@@ -437,7 +450,7 @@ function ground(): PropDef {
   return { lods: [merge(parts), null, null], dist: [260, 0, 0], radius: 6 };
 }
 
-/** Pessoa do criador: roupa pintada pela variante (paleta dos veículos), pele, cabelo e calça fixos. */
+/** Creator's person: clothes painted by the variant (vehicle palette), fixed skin, hair and trousers. */
 function person(): PropDef {
   const SKIN = 0xc68a62, HAIR = 0x2a1d14, PANTS = 0x2f3b48, SHOE = 0x1b1b1b;
   const near = merge([
@@ -454,10 +467,10 @@ function person(): PropDef {
   return { lods: [near, mid, null], dist: [90, 260, 0], radius: 1 };
 }
 
-/** Todas as peças, na ordem dos tipos. */
+/** All props, in type order. */
 export function buildPropDefs(): PropDef[] {
   const defs: PropDef[] = [];
-  defs[PROP.Tree] = tree();
+  defs[PROP.Tree] = { ...tree(), alts: [ipe('yellow', 4)] };
   defs[PROP.Conifer] = conifer();
   defs[PROP.Bush] = bush();
   defs[PROP.Lamp] = lamp(false);
@@ -473,8 +486,149 @@ export function buildPropDefs(): PropDef[] {
   defs[PROP.Pole] = pole();
   defs[PROP.Ground] = ground();
   defs[PROP.Person] = person();
-  defs[PROP.Oak] = oak();
+  defs[PROP.Oak] = { ...oak(), alts: [ipe('pink', 5)] };
   defs[PROP.Palm] = palm();
   if (defs.length !== PROP_TYPES) throw new Error('tipos de peça');
   return defs;
+}
+
+/** One thing the renderer draws: a prop type, or one variant (or group of variants) of a type whose variants are
+ *  different meshes. */
+export interface PropKind {
+  type: number;
+  /** Mesh per level (null = not drawn). */
+  lods: Array<THREE.BufferGeometry | null>;
+  dist: [number, number, number];
+  radius: number;
+}
+
+/** Variants a type's instance can have (4 bits in the pose). */
+export const VARIANTS = 16;
+
+/**
+ * Types whose variants are different meshes, and the kind each variant draws with (index into that type's kinds).
+ * Everything in one mesh, the shader collapsing the wrong ones, made every instance process the vertices of all of
+ * them: ~3,624 per furniture piece, ~5,860 per ground piece.
+ */
+const SPLIT: Record<number, number[]> = {
+  [PROP.Furniture]: Array.from({ length: VARIANTS }, (_, v) => v),
+  [PROP.Ground]: Array.from({ length: VARIANTS }, (_, v) => Math.min(v, 11)),
+  [PROP.Barrier]: Array.from({ length: VARIANTS }, (_, v) => Math.min(v, 4)),
+  // signs share the post and the face quads; only the street-name blades are a mesh of their own
+  [PROP.Sign]: Array.from({ length: VARIANTS }, (_, v) => (v === SIGN.Name ? 1 : 0)),
+};
+
+/**
+ * Types whose variants are other models (PropDef.alts): variant → model (0 = the type's own). The generator gives trees
+ * and bushes variants 0..3: tree 3 is the yellow ipê, oak 3 the pink ipê, bush 2 the flowering bush, bush 3 the hedge.
+ */
+const MODELS: Record<number, number[]> = {
+  [PROP.Tree]: Array.from({ length: VARIANTS }, (_, v) => (v === 3 ? 1 : 0)),
+  [PROP.Oak]: Array.from({ length: VARIANTS }, (_, v) => (v === 3 ? 1 : 0)),
+  [PROP.Bush]: Array.from({ length: VARIANTS }, (_, v) => (v === 2 ? 1 : v === 3 ? 2 : 0)),
+};
+
+/** Kind of each (type, variant): index = type × VARIANTS + variant. The same table on the CPU and in the cull pass. */
+export function propKindTable(): { kindOf: Uint32Array; count: number } {
+  const kindOf = new Uint32Array(PROP_TYPES * VARIANTS);
+  let k = 0;
+  for (let t = 0; t < PROP_TYPES; t++) {
+    const split = SPLIT[t] ?? MODELS[t];
+    const subs = split ? Math.max(...split) + 1 : 1;
+    for (let v = 0; v < VARIANTS; v++) kindOf[t * VARIANTS + v] = k + (split ? split[v] : 0);
+    k += subs;
+  }
+  return { kindOf, count: k };
+}
+
+/** The part of a mesh a group of variants draws: its own variant parts plus the shared parts (other materials). */
+function variantPart(g: THREE.BufferGeometry | null, keep: (variant: number) => boolean): THREE.BufferGeometry | null {
+  if (!g) return null;
+  const col = g.attributes.pcol as THREE.BufferAttribute;
+  const tris: number[] = [];
+  for (let t = 0; t < col.count / 3; t++) {
+    const mat = Math.round(col.getW(t * 3) * 255);
+    const variant = mat >= PMAT.Sign0 && mat <= FACE_LAST ? mat - PMAT.Sign0 : -1;
+    if (variant < 0 || keep(variant)) tris.push(t);
+  }
+  if (tris.length === 0) return null;
+  const out = new THREE.BufferGeometry();
+  for (const name of Object.keys(g.attributes)) {
+    const a = g.attributes[name] as THREE.BufferAttribute, n = a.itemSize;
+    const arr = new Float32Array(tris.length * 3 * n);
+    tris.forEach((t, i) => arr.set((a.array as Float32Array).subarray(t * 3 * n, (t + 1) * 3 * n), i * 3 * n));
+    out.setAttribute(name, new THREE.BufferAttribute(arr, n));
+  }
+  return out;
+}
+
+/**
+ * How far a kind's meshes reach from the instance's origin at scale 1 (m): the farthest vertex, plus the corner offset
+ * of the leaf cards (they turn to the camera round their centre). Impostor quads are the photo of the near mesh.
+ */
+function reachOf(lods: Array<THREE.BufferGeometry | null>): number {
+  let r = 0;
+  for (const g of lods) {
+    if (!g) continue;
+    const p = g.attributes.position as THREE.BufferAttribute, e = g.attributes.pext as THREE.BufferAttribute, c = g.attributes.pcol as THREE.BufferAttribute;
+    if (Math.round(c.getW(0) * 255) === PMAT.Impostor) continue;
+    for (let i = 0; i < p.count; i++) r = Math.max(r, Math.hypot(p.getX(i), p.getY(i), p.getZ(i)) + Math.hypot(e.getZ(i), e.getW(i)));
+  }
+  return r;
+}
+
+/** How a kind's scale bits stretch it: 0 uniform scale, 1 wire span (m), 2 wall length (dm). */
+export function propStretch(k: PropKind): number {
+  return k.type === PROP.Wire ? 1 : k.type === PROP.Barrier ? 2 : 0;
+}
+
+/**
+ * Cull radius of one instance (m), the same as the cull pass computes it: the kind's reach times the instance's scale,
+ * or plus the span for wires and walls (their z runs 0..1 and the shader stretches it).
+ */
+export function propCullRadius(k: PropKind, poseW: number): number {
+  const bits = (poseW >>> 16) & 63, mode = propStretch(k);
+  return mode === 1 ? k.radius + bits : mode === 2 ? k.radius + bits * 0.1 : k.radius * (bits / 42 + 0.5);
+}
+
+/** The kinds the renderer draws, in kind order (`propKindTable`). */
+export function buildPropKinds(defs: PropDef[]): { kinds: PropKind[]; kindOf: Uint32Array } {
+  const { kindOf } = propKindTable();
+  const kinds: PropKind[] = [];
+  defs.forEach((d, type) => {
+    const split = SPLIT[type];
+    if (MODELS[type]) {
+      for (const m of [d, ...(d.alts ?? [])]) kinds.push({ type, lods: m.lods, dist: m.dist, radius: reachOf(m.lods) });
+      return;
+    }
+    if (!split) { kinds.push({ type, lods: d.lods, dist: d.dist, radius: reachOf(d.lods) }); return; }
+    const subs = Math.max(...split) + 1;
+    for (let s = 0; s < subs; s++) {
+      const lods = d.lods.map((g) => variantPart(g, (v) => split[v] === s));
+      kinds.push({ type, lods, dist: d.dist, radius: reachOf(lods) });
+    }
+  });
+  return { kinds, kindOf };
+}
+
+/** Below this height (m) a prop lies on the ground: its sun shadow is under it, too small to see. */
+const FLAT_PROP = 0.3;
+
+/**
+ * Whether a kind's level casts a sun shadow: the near level only, never the wires (thin lines that alias in the map)
+ * nor what lies on the ground (pebbles, leaves, drain grates: they cast shadows before).
+ */
+export function propCastsShadow(k: PropKind, level: number): boolean {
+  const g = k.lods[level];
+  if (level !== 0 || !g || k.type === PROP.Wire) return false;
+  if (!g.boundingBox) g.computeBoundingBox();
+  return g.boundingBox!.max.y - Math.max(0, g.boundingBox!.min.y) >= FLAT_PROP;
+}
+
+/** A prop low enough to cast only into the near cascade (sun.ts SMALL_CASTER_LAYER). */
+export function propIsSmallCaster(k: PropKind): boolean {
+  const g = k.lods[0] ?? k.lods[1];
+  if (!g) return true;
+  if (!g.boundingBox) g.computeBoundingBox();
+  return g.boundingBox!.max.y - Math.max(0, g.boundingBox!.min.y) < SMALL_CASTER;
 }

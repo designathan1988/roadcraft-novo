@@ -34,7 +34,7 @@ const H = (): Float32Array => {
 };
 
 const handlers: { [K in JobKind]: Handler<K> } = {
-  terrainGen: (p) => [{ tile: p.tile, ...generateTerrainTile(H(), p.tile, p.seed) }, []],
+  terrainGen: (p) => [{ tile: p.tile, ...generateTerrainTile(H(), p.tile, p.seed, water ?? undefined) }, []],
   debugTile: (p) => {
     const mm = conformTileToGrid(H(), p.tile, p.seed);
     const roads = debugTileRoads(p.tile, p.seed);

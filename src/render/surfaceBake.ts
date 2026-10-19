@@ -1,10 +1,10 @@
-// Texturas de piso assadas uma vez na carga (receitas do roadcraft, `render/materials.ts`): asfalto com brita,
-// desgaste, remendos e manchas de óleo; calçada de bloquete de concreto em fiada corrida com chanfro e sujeira
-// nas juntas. Cada uma repete sem emenda e o shader lê uma vez por pixel (some no mipmap de longe).
+// Paving textures baked once at load (roadcraft recipes, `render/materials.ts`): asphalt with aggregate chips,
+// wear, patches and oil stains; sidewalk of concrete pavers in running bond with chamfer and dirt in the
+// joints. Each one tiles seamlessly and the shader reads it once per pixel (it fades in the far mipmap).
 
 import * as THREE from 'three/webgpu';
 
-/** Ruído de valor 2D com período inteiro (repete sem emenda). */
+/** 2D value noise with an integer period (tiles seamlessly). */
 function makeNoise(seed: number): (x: number, y: number, period: number) => number {
   const seedHash = Math.imul(seed, 2_246_822_519);
   const hash = (x: number, y: number): number => {
@@ -45,29 +45,29 @@ function texture(data: Uint8Array, size: number): THREE.DataTexture {
   return t;
 }
 
-/** Lado do ladrilho do asfalto (m). */
+/** Side of the asphalt tile (m). */
 export const ASPHALT_TILE = 10.4;
-/** Lado do ladrilho da calçada (m): 32 fiadas de bloquete de 11 cm. */
+/** Side of the sidewalk tile (m): 32 courses of 11 cm pavers. */
 export const FOOTWAY_TILE = 3.52;
 
 /**
- * Asfalto: R = tom relativo (0,5 = a cor da via), G = brilho do desgaste (trilha polida). 512² em 10,4 m.
+ * Asphalt: R = relative tone (0.5 = the road colour), G = wear sheen (polished track). 512² over 10.4 m.
  */
 function asphalt(): THREE.DataTexture {
   const size = 512, base = 0.215, data = new Uint8Array(size * size * 4);
   const grain = makeNoise(0x51ed), macro = makeNoise(0x9a17), patch = makeNoise(0x2b64), oil = makeNoise(0x6d05);
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const u = x / size, v = y / size;
-    // brita em contraste baixo (é o que aparece de perto), desgaste e reparos largos
+    // low-contrast aggregate (what shows up close), wear and broad repairs
     const chips = fbm(grain, u * 128, v * 128, 128, 2);
     const wear = fbm(macro, u * 6, v * 6, 6, 3);
     const repair = fbm(patch, u * 3 + 11, v * 3 + 7, 3, 2);
     const stain = fbm(oil, u * 14, v * 3, 14, 2);
     const drip = stain > 0.66 ? (stain - 0.66) * 0.12 : 0;
-    // pedrinhas claras no ligante escuro
+    // light pebbles in the dark binder
     const stone = grain(u * 420 + 3, v * 420 + 9, 420);
     const flecks = stone > 0.74 ? (stone - 0.74) * 0.5 : stone < 0.2 ? -0.02 : 0;
-    // remendo: retângulo de asfalto mais novo (mais escuro) onde abriram vala
+    // patch: rectangle of newer (darker) asphalt where a trench was dug
     const pu = Math.floor(u * 5), pv = Math.floor(v * 3);
     const patchy = cellHash(pu, pv, 0x91c) > 0.82 && u * 5 - pu > 0.15 && u * 5 - pu < 0.75 && v * 3 - pv > 0.2 && v * 3 - pv < 0.6;
     const tone = base + (chips - 0.5) * 0.055 + flecks + (wear - 0.5) * 0.04 + (repair > 0.74 ? 0.022 : 0) - (patchy ? 0.03 : 0) - drip;
@@ -80,8 +80,8 @@ function asphalt(): THREE.DataTexture {
 }
 
 /**
- * Calçada: bloquete de concreto cinza em fiada corrida (22 × 11 cm), chanfro, sujeira e musgo nas juntas.
- * R = tom relativo (0,5 = a cor da calçada), G = face da peça (0 na junta, 1 no meio).
+ * Sidewalk: grey concrete pavers in running bond (22 × 11 cm), chamfer, dirt and moss in the joints.
+ * R = relative tone (0.5 = the sidewalk colour), G = paver face (0 at the joint, 1 in the middle).
  */
 function footway(): THREE.DataTexture {
   const size = 512, PAVER = 16, bevel = 2, data = new Uint8Array(size * size * 4);
@@ -110,12 +110,12 @@ function footway(): THREE.DataTexture {
   return texture(data, size);
 }
 
-/** Lado do ladrilho da grama (m). */
+/** Side of the grass tile (m). */
 export const GRASS_TILE = 19.2;
 
 /**
- * Grama (roadcraft `terrain.ts`, `terrainBakes`): tufos com o domínio torcido (sem quadrados de ruído), manchas
- * secas, terra nas falhas e o grão das folhas. RGB = cor relativa por canal (0,5 = a cor do bioma), 512² em 19,2 m.
+ * Grass (roadcraft `terrain.ts`, `terrainBakes`): tufts with a warped domain (no noise squares), dry
+ * patches, soil in the gaps and the grain of the blades. RGB = relative colour per channel (0.5 = the biome colour), 512² over 19.2 m.
  */
 function grass(): THREE.DataTexture {
   const size = 512, data = new Uint8Array(size * size * 4);
@@ -151,3 +151,87 @@ function grass(): THREE.DataTexture {
 export const GRASS_TEX = grass();
 export const ASPHALT_TEX = asphalt();
 export const FOOTWAY_TEX = footway();
+
+/**
+ * Water normals as Roadcraft 4.0's (`render/water.ts` waterNormalTexels): height = ridged crests (period 24, 3
+ * octaves) × 0.62 + a long swell (period 6) × 0.38, normals by central differences (relief 0.014 × size); alpha holds a
+ * foam noise (period 9) for the shore lace, the whitecaps and the churn. One 256² tile, sampled at three scales.
+ */
+function waterNormals(): THREE.DataTexture {
+  const N = 256, data = new Uint8Array(N * N * 4), h = new Float32Array(N * N);
+  const crestN = makeNoise(91), longN = makeNoise(37), foamN = makeNoise(53);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const crest = 1 - Math.abs(fbm(crestN, x * 24 / N, y * 24 / N, 24, 3) - 0.5) * 2;
+    const long = fbm(longN, x * 6 / N, y * 6 / N, 6, 3);
+    h[y * N + x] = crest * 0.62 + long * 0.38;
+  }
+  const relief = N * 0.014;
+  const at = (x: number, y: number) => h[((y + N) % N) * N + ((x + N) % N)];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    // exactly as 4.0's water.ts:105-111 (no ½ on the central difference; z stored as 1 / length)
+    const dx = (at(x + 1, y) - at(x - 1, y)) * relief, dy = (at(x, y + 1) - at(x, y - 1)) * relief;
+    const l = Math.hypot(dx, dy, 1), o = (y * N + x) * 4;
+    data[o] = Math.round((-dx / l * 0.5 + 0.5) * 255);
+    data[o + 1] = Math.round((-dy / l * 0.5 + 0.5) * 255);
+    data[o + 2] = Math.round((1 / l) * 255);
+    data[o + 3] = Math.round(fbm(foamN, x * 9 / N, y * 9 / N, 9, 3) * 255);
+  }
+  return texture(data, N);
+}
+export const WATER_TEX = waterNormals();
+
+/** Side of the rock texture's tile (m): Roadcraft 4.0's ROCK_WORLD. */
+export const ROCK_TILE = 23.2;
+
+/**
+ * Rock face as Roadcraft 4.0's granite recipe (`bake/terrainRecipes.ts`): grey (0.46, 0.455, 0.44) broken by broad
+ * mottling, vertical streaks, dark joints and lichen patches; the normal from the same height (relief 2.2). Two 512²
+ * maps: albedo (rgb) + roughness (a), normal (rgb).
+ */
+function rock(): [THREE.DataTexture, THREE.DataTexture] {
+  const N = 512, alb = new Uint8Array(N * N * 4), nrm = new Uint8Array(N * N * 4), h = new Float32Array(N * N);
+  const mottle = makeNoise(101), streakN = makeNoise(103), jointN = makeNoise(107), lichenN = makeNoise(109), grainN = makeNoise(113);
+  const col = new Float32Array(N * N * 3);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const u = x / N, v = y / N, i = y * N + x;
+    const m = fbm(mottle, u * 8, v * 8, 8, 5);
+    const streak = fbm(streakN, u * 32, v * 4, 32, 3);
+    // joints: thin dark lines where a stretched noise crosses its middle
+    const jv = fbm(jointN, u * 6, v * 3, 6, 4);
+    const joint = Math.max(0, 1 - Math.abs(jv - 0.5) * 40);
+    const lichen = Math.max(0, (fbm(lichenN, u * 12, v * 12, 12, 4) - 0.62) * 5);
+    const grain = grainN(u * 128, v * 128, 128);
+    const k = (0.78 + 0.44 * m) * (0.9 + 0.2 * streak) * (1 - 0.45 * joint) * (0.93 + 0.14 * grain);
+    let r = 0.46 * k, g = 0.455 * k, b = 0.44 * k;
+    const l = Math.min(1, lichen);
+    r += (0.55 * k - r) * l * 0.6; g += (0.56 * k - g) * l * 0.6; b += (0.36 * k - b) * l * 0.6;
+    col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
+    h[i] = m * 0.6 + streak * 0.25 - joint * 0.3 + grain * 0.08;
+  }
+  const relief = 2.2 * N / 64;
+  const at = (x: number, y: number) => h[((y + N) % N) * N + ((x + N) % N)];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x, o = i * 4;
+    alb[o] = Math.round(Math.min(1, col[i * 3]) * 255); alb[o + 1] = Math.round(Math.min(1, col[i * 3 + 1]) * 255); alb[o + 2] = Math.round(Math.min(1, col[i * 3 + 2]) * 255);
+    alb[o + 3] = Math.round((0.86 + 0.1 * (1 - h[i])) * 255);
+    const dx = (at(x + 1, y) - at(x - 1, y)) * 0.5 * relief, dy = (at(x, y + 1) - at(x, y - 1)) * 0.5 * relief;
+    const len = Math.hypot(dx, dy, 1);
+    nrm[o] = Math.round((-dx / len * 0.5 + 0.5) * 255); nrm[o + 1] = Math.round((-dy / len * 0.5 + 0.5) * 255); nrm[o + 2] = Math.round((1 / len * 0.5 + 0.5) * 255); nrm[o + 3] = 255;
+  }
+  return [texture(alb, N), texture(nrm, N)];
+}
+export const [ROCK_TEX, ROCK_NORMAL] = rock();
+
+/**
+ * Tileable noise for the terrain's blend wander (Roadcraft 4.0 reads its dirt texture's channels at four scales):
+ * r, g, b, a = value noise of periods 4, 8, 16 and 32 over one 256² tile.
+ */
+function terrainNoise(): THREE.DataTexture {
+  const N = 256, data = new Uint8Array(N * N * 4), ns = [makeNoise(201), makeNoise(203), makeNoise(207), makeNoise(211)];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const o = (y * N + x) * 4;
+    [4, 8, 16, 32].forEach((p, k) => { data[o + k] = Math.round(fbm(ns[k], x * p / N, y * p / N, p, 2) * 255); });
+  }
+  return texture(data, N);
+}
+export const TERRAIN_NOISE = terrainNoise();

@@ -156,17 +156,65 @@ export const Dirty = {
 } as const;
 export type DirtyKind = (typeof Dirty)[keyof typeof Dirty];
 
+/** One consumer's own list of dirty cells of a kind: draining it leaves the other consumers' lists alone. */
+export class DirtyReader {
+  readonly kind: DirtyKind;
+  private flags = new Uint8Array(CELL_COUNT);
+  private list: number[] = [];
+
+  constructor(kind: DirtyKind) { this.kind = kind; }
+
+  /** Called by DirtyCells.mark. */
+  push(cid: number): void {
+    if (this.flags[cid]) return;
+    this.flags[cid] = 1;
+    this.list.push(cid);
+  }
+
+  /** Removes and returns this consumer's dirty cells. */
+  drain(): number[] {
+    const l = this.list;
+    if (l.length === 0) return [];
+    this.list = [];
+    for (const c of l) this.flags[c] = 0;
+    return l;
+  }
+
+  get pending(): number { return this.list.length; }
+}
+
 /**
  * Dirty cells per kind. Marking is O(1); the consumer drains only the list of
- * cells of that kind and never scans the grid.
+ * cells of that kind and never scans the grid. A kind with more than one consumer (the building layer and its detail
+ * layer) gives each one a reader with its own list; such a kind has no shared list.
  */
 export class DirtyCells {
   private flags = new Uint8Array(CELL_COUNT);
   private lists = new Map<number, number[]>();
+  /** Readers by kind bit (index = log2 of the kind). */
+  private readers: DirtyReader[][] = [];
+  /** Kinds consumed through readers. */
+  private readKinds = 0;
+
+  /** A new consumer of a kind, with its own list (cells marked from now on). */
+  reader(kind: DirtyKind): DirtyReader {
+    const r = new DirtyReader(kind);
+    const bit = Math.log2(kind);
+    (this.readers[bit] ??= []).push(r);
+    this.readKinds |= kind;
+    return r;
+  }
 
   mark(cid: number, kinds: number): void {
+    const read = kinds & this.readKinds;
+    if (read) {
+      for (let bit = 0; bit < this.readers.length; bit++) {
+        if (!(read & (1 << bit))) continue;
+        for (const r of this.readers[bit]) r.push(cid);
+      }
+    }
     const old = this.flags[cid];
-    const fresh = kinds & ~old;
+    const fresh = kinds & ~this.readKinds & ~old;
     if (!fresh) return;
     this.flags[cid] = old | fresh;
     for (let k = 1; k <= fresh; k <<= 1) {
@@ -186,6 +234,7 @@ export class DirtyCells {
 
   /** Removes and returns the dirty cells of a kind. */
   drain(kind: DirtyKind): number[] {
+    if (kind & this.readKinds) throw new Error(`dirty kind ${kind} is read through readers: drain the reader`);
     const l = this.lists.get(kind);
     if (!l || l.length === 0) return [];
     this.lists.set(kind, []);
@@ -194,6 +243,7 @@ export class DirtyCells {
   }
 
   pending(kind: DirtyKind): number {
+    if (kind & this.readKinds) return Math.max(...this.readers[Math.log2(kind)].map((r) => r.pending));
     return this.lists.get(kind)?.length ?? 0;
   }
 }

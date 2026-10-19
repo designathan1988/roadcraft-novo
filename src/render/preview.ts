@@ -5,7 +5,7 @@
 import * as THREE from 'three/webgpu';
 import type { Quad } from '../roads/geometry.ts';
 import { T, type Node } from './tsl.ts';
-import { colorOnly } from './post.ts';
+import { colorOnly } from './tsl.ts';
 
 const { Fn, attribute, uniform, uniformArray, vec2, vec3, vec4, float, int, mix, normalize, fract, abs, smoothstep, floor } = T;
 
