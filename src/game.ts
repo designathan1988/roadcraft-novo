@@ -553,7 +553,7 @@ export class Game {
     else if (params.has('carregar')) await this.load();
     else if (!params.has('cam') && !params.has('vazio')) {
       // start screen (automated photos skip it with ?cam, ?teste or ?cidade)
-      new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
+      this.startMenu = new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
         newCity: (seed, tiles) => {
           if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
           this.world.seed = seed; void this.generatedCity();
@@ -988,6 +988,8 @@ export class Game {
       tool: () => this.tool,
       setTool: (t) => this.setTool(t),
       openCategory: (c) => this.hud.openCategory(c),
+      dialog: () => this.optionsPanel.isOpen || this.hud.aboutOpen || !!this.startMenu?.open,
+      closeDialog: () => { if (this.optionsPanel.isOpen) this.optionsPanel.close(); else this.hud.closeAbout(); },
       closeMenu: () => this.hud.escape(),
       closePanel: () => {
         if (this.optionsPanel.isOpen) { this.optionsPanel.close(); return true; }
@@ -1538,6 +1540,8 @@ export class Game {
   }
 
   private lineMode = 0;
+  /** The start screen (shown at start, and again from the menu). */
+  private startMenu: StartMenu | null = null;
   /** The impossible junction the top bar's warning showed last. */
   private impossibleVisit = -1;
 

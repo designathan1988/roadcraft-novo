@@ -521,6 +521,9 @@ export class Hud {
   }
 
   get helpOpen(): boolean { return this.popId === 'help'; }
+  /** The About box (a dialog over the game). */
+  get aboutOpen(): boolean { return this.about.isOpen; }
+  closeAbout(): void { this.about.close(); }
 
   /** Esc: closes the open menu, then the About box. False: nothing was open here. */
   escape(): boolean {

@@ -27,7 +27,7 @@ function deps(over: Partial<GameKeyDeps> = {}): { d: GameKeyDeps; calls: string[
   const log = (name: string) => () => { calls.push(name); };
   const d: GameKeyDeps = {
     tool: () => 'camera', setTool: (t) => calls.push(`tool ${t}`), openCategory: (c) => calls.push(`category ${c}`),
-    closeMenu: () => false, closePanel: () => false, cancelStroke: () => false, toolKey: () => false,
+    dialog: () => false, closeDialog: () => undefined, closeMenu: () => false, closePanel: () => false, cancelStroke: () => false, toolKey: () => false,
     undo: log('undo'), redo: log('redo'), save: log('save'), help: log('help'), health: log('health'), pause: log('pause'),
     nextSpeed: log('speed'), toggleIso: log('iso'), congestion: log('congestion'), follow: log('follow'), wake: () => undefined,
     camera: { keyDown: (c) => calls.push(`camera ${c}`), keyUp: () => undefined, clearKeys: () => undefined },

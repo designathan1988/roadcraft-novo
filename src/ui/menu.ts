@@ -63,6 +63,7 @@ export class StartMenu {
     this.root = r;
   }
 
+  get open(): boolean { return !this.root.classList.contains('hidden'); }
   show(): void { this.root.classList.remove('hidden'); }
   hide(): void { this.root.classList.add('hidden'); }
 }

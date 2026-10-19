@@ -23,6 +23,9 @@ export interface GameKeyDeps {
   tool(): Tool;
   setTool(t: Tool): void;
   openCategory(c: Category): void;
+  /** A dialog over the game (options, About, the start screen): the game's keys wait; Escape closes it. */
+  dialog(): boolean;
+  closeDialog(): void;
   /** Escape, step 1: the open menu or box of the top bar. */
   closeMenu(): boolean;
   /** Escape, step 2: the open panel (options, health, section editor, inspector). */
@@ -58,6 +61,7 @@ const TOOL_KEYS: Readonly<Record<string, Tool>> = {
 
 export function gameKeyRules(d: GameKeyDeps): KeyRule[] {
   return [
+    { when: () => d.dialog(), prevent: false, run: (e) => { if (e.code === 'Escape') d.closeDialog(); } },
     { code: 'F9', run: () => d.health() },
     { code: 'F1', run: () => d.help() },
     { code: 'Escape', run: () => (d.closeMenu() || d.closePanel() || d.cancelStroke() ? 'done' : d.tool() !== 'camera' ? (d.setTool('camera'), 'done') : 'pass') },
