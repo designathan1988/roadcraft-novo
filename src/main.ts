@@ -1,5 +1,6 @@
 import { Game, status } from './game.ts';
 import { initLang, storedLang, t } from './ui/i18n.ts';
+import { bootGame } from './ui/boot.ts';
 
 async function boot(): Promise<void> {
   // ?lang=en forces English (photos and tests)
@@ -8,18 +9,13 @@ async function boot(): Promise<void> {
   document.title = t('ui.title');
   document.getElementById('loading-text')!.textContent = t('map.loading');
   const canvas = document.getElementById('view') as HTMLCanvasElement;
-  if (!crossOriginIsolated) {
-    document.getElementById('loading-text')!.textContent = t('ui.error.isolation');
-    return;
-  }
-  const game = new Game(canvas);
-  try {
-    await game.start();
-  } catch (err) {
-    console.error(err);
-    status.value = 'falhou';
-    game.hud.fatal(t('ui.error.start', { message: err instanceof Error ? err.message : String(err) }));
-  }
+  const loading = document.getElementById('loading')!;
+  await bootGame({
+    isolated: crossOriginIsolated,
+    create: () => new Game(canvas),
+    show: (text) => { document.getElementById('loading-text')!.textContent = text; loading.classList.add('error'); loading.classList.remove('hidden'); },
+    failed: () => { status.value = 'falhou'; },
+  });
 }
 
 void boot();

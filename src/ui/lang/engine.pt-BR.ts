@@ -1,7 +1,7 @@
 // Keys of what the engine has and Roadcraft did not (Brazilian Portuguese). Same keys in engine.en.ts.
 export const ENGINE_PT: Record<string, string> = {
   'ui.title': 'Roadcraft',
-  'ui.error.isolation': 'A página precisa de isolamento de origem (COOP/COEP). Abra pelo servidor do jogo (npm start) ou pelo executável.',
+  'ui.error.isolation': 'A página precisa de isolamento de origem (COOP/COEP). Abra o jogo pelo executável Roadcraft ou pelo jogar.bat (jogar.sh) da pasta do jogo.',
   'ui.error.start': 'Não foi possível iniciar: {message}',
   'ui.soon': 'em construção',
   'ui.soon.buildings': 'em construção (construtor de prédios)',

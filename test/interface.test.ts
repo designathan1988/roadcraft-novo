@@ -62,3 +62,16 @@ test('B46: the money tip says the refund the game gives on demolishing (roads/tu
     assert.ok(tip.includes('{refund}'), `${name}: "${tip}" does not take the refund from the tuning (${pct} %)`);
   }
 });
+
+test('B56: a game that fails to start says why, in words for the player', async () => {
+  const { ENGINE_PT } = await import('../src/ui/lang/engine.pt-BR.ts');
+  const { ENGINE_EN } = await import('../src/ui/lang/engine.en.ts');
+  for (const d of [ENGINE_PT, ENGINE_EN]) assert.ok(!/npm/.test(d['ui.error.isolation']), `the isolation error tells the player to run a developer command: "${d['ui.error.isolation']}"`);
+  const { bootGame } = await import('../src/ui/boot.ts');
+  const shown: string[] = [];
+  await bootGame({ isolated: true, create: () => { throw new Error('no GPU adapter'); }, show: (s) => shown.push(s), failed: () => undefined });
+  assert.ok(shown.some((s) => s.includes('no GPU adapter')), `a failure building the game shows: ${JSON.stringify(shown)}`);
+  shown.length = 0;
+  await bootGame({ isolated: true, create: () => ({ start: () => Promise.reject(new Error('shader')) }), show: (s) => shown.push(s), failed: () => undefined });
+  assert.ok(shown.some((s) => s.includes('shader')), `a failure starting the game shows: ${JSON.stringify(shown)}`);
+});
