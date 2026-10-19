@@ -286,12 +286,28 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   room = room.mul(float(1).sub(hz.mul(0.45)));
   // a dark piece of furniture/partition at the back of some rooms
   room = room.mul(mix(float(1), float(0.55), step(float(0.7), rnd2).mul(step(iz, min(ix, iy)))));
+  // a shop's room: walls lined with shelves of goods, a counter at the back, a light tiled floor (the 4.0 furnishes
+  // its shops; here the same read in the interior mapping)
+  const hx = fx.add(sx.mul(tmin)), hy = fy.add(sy.mul(tmin)), onBack = step(iz, min(ix, iy));
+  const along = select(onBack.greaterThan(0.5), hx, hz);
+  const shelfRow = fract(hy.mul(5));
+  const shelfZone = step(float(0.2), hy).mul(step(hy, float(0.78)));
+  const goodsCell = hash(floor(along.mul(16)).add(floor(hy.mul(5)).mul(37)).add(seed.mul(11)));
+  const goodsC = mix(mix(vec3(0.75, 0.25, 0.18), vec3(0.2, 0.42, 0.7), step(float(0.33), goodsCell)), mix(vec3(0.85, 0.72, 0.3), vec3(0.3, 0.6, 0.35), step(float(0.8), goodsCell)), step(float(0.6), goodsCell));
+  const goods = shelfZone.mul(step(float(0.12), shelfRow)).mul(step(shelfRow, float(0.62))).mul(step(float(0.25), goodsCell));
+  const shelfC = mix(vec3(0.8, 0.77, 0.7), vec3(0.42, 0.3, 0.2), step(float(0.5), hash(seed.add(41))));
+  let shopWall: Node = mix(mix(vec3(0.86, 0.83, 0.77), shelfC, shelfZone.mul(step(shelfRow, float(0.1)))), goodsC, goods);
+  shopWall = mix(shopWall, shelfC.mul(0.7), onBack.mul(step(hy, float(0.22))).mul(step(abs(hx.sub(0.5)), float(0.35))));
+  const tile = mod(floor(hx.mul(6)).add(floor(hz.mul(10))), 2);
+  const shopFloor = mix(vec3(0.72, 0.7, 0.66), vec3(0.6, 0.58, 0.55), tile);
+  const shopRoom = select(iy.lessThan(min(ix, iz)), select(sy.lessThan(0), shopFloor, vec3(0.9, 0.9, 0.88)), shopWall.mul(select(onBack.greaterThan(0.5), float(1), float(0.85))));
+  room = select(inShop.greaterThan(0.5), shopRoom.mul(float(1).sub(hz.mul(0.25))), room);
 
   // night: some rooms lit (fewer later); shops and signs always
   const lit = step(rnd, mix(float(0.15), float(0.62), sty)).max(inShop);
   const lamp = mix(vec3(1.0, 0.84, 0.58), vec3(0.85, 0.92, 1.0), step(float(0.75), rnd2));
   const night = nightU;
-  const dayInside = room.mul(select(inShop.greaterThan(0.5), float(0.3), float(0.11)));
+  const dayInside = room.mul(select(inShop.greaterThan(0.5), float(0.26), float(0.11)));
   const nightInside = room.mul(lamp).mul(lit).mul(select(inShop.greaterThan(0.5), float(1.7), float(1.5)));
   // a blind (slats, down to some height) or curtains (panels at the sides) in some windows
   const r3 = hash(cu.mul(17).add(fl.add(64).mul(733)).add(seed.mul(53)).add(91));
@@ -434,7 +450,11 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const ax2 = fwidth(fxw).add(1e-4), ay2 = fwidth(fyw).add(1e-4);
   const edgeBar = float(1).sub(band(float(0.045), float(0.955), fxw, ax2).mul(band(float(0.045), float(0.955), fyw, ay2)));
   const crossBar = max(band(float(0.482), float(0.518), fxw, ax2), band(float(0.662), float(0.698), fyw, ay2));
-  const paneFrame = max(edgeBar, crossBar).mul(win).mul(plainWin).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt))
+  // the shopfront's frame the same (4.0 buildingMesh.ts:1659-1661: frame over the glass of the shop window)
+  const sxw = fx.sub(0.05).div(0.9), syw = fy.sub(0.05).div(0.71), sax = fwidth(sxw).add(1e-4), say = fwidth(syw).add(1e-4);
+  const shopBars = float(1).sub(band(float(0.03), float(0.97), sxw, sax).mul(band(float(0.04), float(0.96), syw, say)))
+    .max(band(float(0.488), float(0.512), sxw, sax)).max(band(float(0.665), float(0.69), syw, say));
+  const paneFrame = max(max(edgeBar, crossBar).mul(plainWin), shopBars.mul(inShop)).mul(win).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt))
     .mul(clamp(float(1.6).sub(max(ax2, ay2).mul(12)), 0, 1));
   const albedo = mix(mix(mix(mix(wallFinal, glassC.mul(mix(float(1), float(0.6), darkPane)), winAmt), rollerC, rollAmt), trimC, paneFrame), signC, signMask.mul(detail));
   m.colorNode = vec4(albedo, 1);
