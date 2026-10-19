@@ -1,7 +1,7 @@
 // Node shape, the same for drawing (mesh worker) and for traffic (simulation
 // worker): the arm of each segment end and the setback of each arm.
 
-import { armAngle, armRetreats, closestT, type Arm, type Quad } from './geometry.ts';
+import { armAngle, armRetreats, closestT, lineLine, type Arm, type Quad } from './geometry.ts';
 import { PROFILE_INFO } from './profiles.ts';
 import type { RoadNetwork } from './network.ts';
 
@@ -43,8 +43,67 @@ export function junctionRetreats(arms: Arm[], lens: number[], out: Float64Array,
   for (let i = 0; i < n; i++) order.push(i);
   if (n < 2) { if (n === 1) out[0] = bulb ? bulbRetreat(arms[0], lens[0]) : 0; return; }
   order.sort((a, b) => armAngle(arms[a].dx, arms[a].dz) - armAngle(arms[b].dx, arms[b].dz));
-  armRetreats(order.map((i) => arms[i]), n >= 3 ? 3 : 0.3, tmp);
-  for (let k = 0; k < n; k++) out[order[k]] = Math.min(tmp[k], lens[order[k]] * 0.45);
+  if (n === 2) {
+    // a road going on through the node (bend, width step): the mitre and the 1:8 taper
+    armRetreats(order.map((i) => arms[i]), 0.3, tmp);
+    for (let k = 0; k < n; k++) out[order[k]] = Math.min(tmp[k], lens[order[k]] * 0.45);
+    return;
+  }
+  // a junction: each leg set back as far as its two corners need (Roadcraft trim.ts: the largest demand)
+  for (let k = 0; k < n; k++) tmp[k] = 0;
+  for (let k = 0; k < n; k++) {
+    const f = cornerFillet(arms[order[k]], arms[order[(k + 1) % n]]);
+    tmp[k] = Math.max(tmp[k], f.trimA);
+    tmp[(k + 1) % n] = Math.max(tmp[(k + 1) % n], f.trimB);
+  }
+  for (let k = 0; k < n; k++) out[order[k]] = Math.max(0, Math.min(tmp[k], 60, lens[order[k]] * 0.45));
+}
+
+/** Kerb return radius bounds (m) and the angles under which a corner is not rounded (Roadcraft corners.ts). */
+const CURB_R_MIN = 2.8, CURB_R_MAX = 7.2, TAPER_ANGLE = (12 * Math.PI) / 180, ACUTE = (12 * Math.PI) / 180, CORNER_MITER = 2.5;
+
+/** The corner between arm `a` and the next arm counter-clockwise, `b`, where a's left kerb meets b's right kerb. */
+export interface Corner {
+  /** fillet: a circular kerb return; bevel: a straight cut (very sharp corner); taper: a width step on a near-straight
+   *  pair; none: the arms run opposite (no corner between them). */
+  mode: 'fillet' | 'bevel' | 'taper' | 'none';
+  /** How far along each arm (from the node) the corner reaches: the arm's mouth may not be nearer than this. */
+  trimA: number; trimB: number;
+  /** The kerb return: radius and centre (fillet only). */
+  r: number; cx: number; cz: number;
+}
+
+/**
+ * Roadcraft 4.0 `junction/corners.ts` on this engine's arms: the kerbs (carriageway edges) of two neighbouring arms
+ * meet at a point; a fillet of radius clamp(0.5 × the narrower road's half width, 2.8, 7.2) m rounds them, tangent
+ * to both, and each arm is cut where its tangent point is. A corner sharper than 12°, or whose kerbs meet more than
+ * 2.5 half widths out, is bevelled at the distance where the two carriageways stand side by side. A near-straight
+ * pair with a width step tapers at 12°.
+ */
+export function cornerFillet(a: Arm, b: Arm): Corner {
+  const none: Corner = { mode: 'none', trimA: 0, trimB: 0, r: 0, cx: 0, cz: 0 };
+  const aw = a.asphLeft, bw = b.asphRight;
+  const dot = Math.max(-1, Math.min(1, a.dx * b.dx + a.dz * b.dz));
+  const psi = Math.acos(dot);
+  if (psi > Math.PI - 1e-3) return none;
+  const step = Math.abs(aw - bw);
+  if (Math.PI - psi < TAPER_ANGLE) {
+    if (step < 0.05) return none;
+    const run = step / Math.tan(TAPER_ANGLE) / 2;
+    return { mode: 'taper', trimA: run, trimB: run, r: 0, cx: 0, cz: 0 };
+  }
+  // a's left kerb: (a.dz, −a.dx)·aw + a·s; b's right kerb: (−b.dz, b.dx)·bw + b·t
+  const hit = lineLine(a.dz * aw, -a.dx * aw, a.dx, a.dz, -b.dz * bw, b.dx * bw, b.dx, b.dz);
+  const maxHw = Math.max(a.left, a.right, b.left, b.right);
+  if (!hit || psi < ACUTE || Math.hypot(a.dz * aw + a.dx * hit[0], -a.dx * aw + a.dz * hit[0]) > CORNER_MITER * maxHw || hit[0] < -maxHw || hit[1] < -maxHw) {
+    const t = (1.02 * (aw + bw)) / (2 * Math.sin(Math.max(psi, 1e-3) / 2));
+    return { mode: 'bevel', trimA: t, trimB: t, r: 0, cx: 0, cz: 0 };
+  }
+  const r = Math.max(CURB_R_MIN, Math.min(CURB_R_MAX, 0.5 * Math.min(a.left, b.right)));
+  const run = r / Math.tan(psi / 2);
+  const xx = a.dz * aw + a.dx * hit[0], xz = -a.dx * aw + a.dz * hit[0];
+  const bx = a.dx + b.dx, bz = a.dz + b.dz, bl = Math.hypot(bx, bz) || 1, k = r / Math.sin(psi / 2);
+  return { mode: 'fillet', trimA: hit[0] + run, trimB: hit[1] + run, r, cx: xx + (bx / bl) * k, cz: xz + (bz / bl) * k };
 }
 
 const bulbQ: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
