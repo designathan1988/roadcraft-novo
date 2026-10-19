@@ -36,7 +36,8 @@ export type FromSim =
   /** Automatic mode switched the node's control based on measured flow (Flow: 1 traffic light, 2 signs). The page can
    *  pass the same `flow` to `effectiveControl` (paint, signs, signal heads, inspector). */
   | { type: 'autoControl'; node: number; flow: number }
-  | { type: 'stats'; cars: number; micro: number; peds: number; arrived: number; lost: number; speed: number; stopped: number;
+  /** `simTime`: the simulation clock (s), for rates per simulated minute or hour (the speed may be 0, 1, 2 or 4). */
+  | { type: 'stats'; cars: number; micro: number; peds: number; arrived: number; lost: number; speed: number; stopped: number; simTime: number;
       lines: Array<{ id: number; buses: number; perHour: number; waiting: number }> }
   | { type: 'error'; message: string }
   /** A network change failed and the worker's mirror of the network may differ from the page's: the page sends the
@@ -74,6 +75,8 @@ let next = 0;
 let windowTimer = 0;
 
 let statsTimer = 0;
+/** Simulation clock at the last stats (boardings per hour are reckoned over simulated time). */
+let statsSim = 0;
 
 /** When each distinct error was last reported (by its first line). */
 const reported = new Map<string, number>();
@@ -136,7 +139,9 @@ function stepInner(): void {
   if (statsTimer >= 1000) {
     statsTimer = 0;
     const speedNow = traffic.avgSpeed();
-    scope.postMessage({ type: 'stats', cars: traffic.count, micro: traffic.microN, peds: peds.count, arrived: traffic.arrived, lost: traffic.lost, speed: speedNow, stopped: traffic.stopped, lines: traffic.lineStats(1) });
+    const simDt = traffic.time - statsSim;
+    statsSim = traffic.time;
+    scope.postMessage({ type: 'stats', cars: traffic.count, micro: traffic.microN, peds: peds.count, arrived: traffic.arrived, lost: traffic.lost, speed: speedNow, stopped: traffic.stopped, simTime: traffic.time, lines: traffic.lineStats(simDt) });
   }
 }
 

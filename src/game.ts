@@ -697,8 +697,9 @@ export class Game {
   private lastTrips: { t: number; arrived: number; lost: number } | null = null;
   private trackTrips(st: Extract<FromSim, { type: 'stats' }>): void {
     this.simStats = st;
-    const t = performance.now();
-    if (!this.lastTrips || st.arrived < this.lastTrips.arrived) { this.lastTrips = { t, arrived: st.arrived, lost: st.lost }; return; }
+    // per simulated minute (at 2x and 4x as at 1x; paused, the figures stay)
+    const t = st.simTime * 1000;
+    if (!this.lastTrips || st.arrived < this.lastTrips.arrived || t < this.lastTrips.t) { this.lastTrips = { t, arrived: st.arrived, lost: st.lost }; return; }
     if (t - this.lastTrips.t < 10000) return;
     const k = 60000 / (t - this.lastTrips.t);
     this.tripsPerMin = (st.arrived - this.lastTrips.arrived) * k;

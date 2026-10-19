@@ -2394,9 +2394,12 @@ export class Traffic {
   lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> {
     return this.lines.map((ln, i) => {
       const have = this.busSets[i].size;
-      const rate = ln.boardings / Math.max(1e-3, dtReport) * 3600;
-      ln.perHour = ln.perHour === 0 ? rate : ln.perHour * 0.9 + rate * 0.1;
-      ln.boardings = 0;
+      // per simulated hour (paused: nothing to measure, the figure stays)
+      if (dtReport > 0) {
+        const rate = ln.boardings / dtReport * 3600;
+        ln.perHour = ln.perHour === 0 ? rate : ln.perHour * 0.9 + rate * 0.1;
+        ln.boardings = 0;
+      }
       let w = 0;
       for (let k = 0; k < ln.waiting.length; k++) w += Math.min(120, ln.waiting[k] + (this.time - ln.lastT[k]) * WAIT_RATE);
       return { id: ln.id, buses: have, perHour: Math.round(ln.perHour), waiting: Math.round(w) };

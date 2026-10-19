@@ -81,3 +81,19 @@ test('C14: every different simulation error is reported, not only the first one'
     assert.ok(errors.some((m) => m.includes('failure A')) && errors.some((m) => m.includes('failure B')), `reported: ${JSON.stringify(errors)}`);
   } finally { Traffic.prototype.step = real; fakeClock(false); }
 });
+
+test('C29: per-hour and per-minute figures use simulated time, not real time (at 4x speed too)', () => {
+  fakeClock(true);
+  const real = Traffic.prototype.lineStats;
+  const asked: number[] = [];
+  try {
+    Traffic.prototype.lineStats = function (dt: number) { asked.push(dt); return real.call(this, dt); };
+    send({ type: 'speed', value: 4 });
+    posted.length = 0;
+    for (let i = 0; i < 45; i++) fire();
+    const stats = posted.filter((m) => m.type === 'stats') as Array<{ simTime?: number }>;
+    assert.ok(asked.length >= 2, `line figures asked ${asked.length} times`);
+    assert.ok(Math.abs(asked[asked.length - 1] - 4) < 0.01, `boardings per hour reckoned over ${asked[asked.length - 1]} s for 4 simulated seconds`);
+    assert.ok(stats.length >= 2 && typeof stats[1].simTime === 'number' && Math.abs(stats[1].simTime - stats[0].simTime! - 4) < 0.01, 'the stats carry the simulated time (for trips per minute)');
+  } finally { Traffic.prototype.lineStats = real; send({ type: 'speed', value: 1 }); fakeClock(false); }
+});
