@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-18, 22h15.
+Atualizado: 2026-10-18, 22h35.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -30,6 +30,11 @@ Atualizado: 2026-10-18, 22h15.
   coordenadora: cidade de 10 km pronta em 15,8 s no `.exe`, 4 fotos em `test-results/fotos-pacote/`),
   `npm run package:web` (zip de 22,5 MB, ainda exige Node), `fotos:pacote`/`fotos:navegador`. Visto no teste:
   na vista cidade os prédios longe são caixas lisas de cor chapada (devolvido à sessão de prédios).
+- 22h35: funcionalidades completas (`957a471`): transporte com passageiros, nós impossíveis contados, roteiros em
+  modo livre (correção das 10 falhas), pose com id de aparência. Em `main`: tsc limpo, 102 testes,
+  **`verificar.mjs` 146/146**, budget ok. Frentes novas: funcionalidades → escala 16/20/24 km (`docs/ESCALA.md`);
+  ex-pessoas → zip sem Node e teste de jogador no `.exe` (`docs/DEFEITOS.md`); interface → ligar ações novas,
+  nós impossíveis, painel de linhas, textos nos dicionários; vias → cancela e placas de nome.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
