@@ -38,6 +38,8 @@ export interface LayerOptions {
   shadows?: boolean;
   /** Sparse layer (detail near the camera): draws the cells it has, without waiting for the whole tile. */
   sparse?: boolean;
+  /** Set to 1 for each cell whose level-0 mesh is on screen at full fade (0 otherwise): what another layer reads. */
+  publish?: Uint8Array;
 }
 
 interface Slot { mesh: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number }
@@ -47,7 +49,7 @@ const FADE = 0.35;
 const PLATE_COUNT = MAP_PLATES * MAP_PLATES;
 const TILES_PER_PLATE = PLATE_SIZE / TILE_SIZE;
 
-interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number }
+interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number; /** cell meshes: the cell and the level */ cell?: number; level?: number; /** a mesh of a publishing layer */ publisher?: boolean }
 
 /** Once the mesh is on the GPU the CPU copy is no longer needed: swap it for an empty one (count stays). */
 function freeCpuCopy(g: THREE.BufferGeometry): void {
@@ -161,7 +163,7 @@ export class CellLayer {
     if (!this.src.hasContent(c)) { this.setMesh(s, null, v); return; }
     const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
     const pr = this.distTo(cellOriginX(cx), cellOriginX(cz), CELL_SIZE) + level * 300;
-    this.src.buildCell(c, level, pr, (m) => { if (s.requested === v) this.setMesh(s, m, v); });
+    this.src.buildCell(c, level, pr, (m) => { if (s.requested === v) this.setMesh(s, m, v, c, level); });
   }
 
   private requestTile(t: number): void {
@@ -183,7 +185,7 @@ export class CellLayer {
     this.src.buildPlate(p, pr, (m) => { if (s.requested === v) this.setMesh(s, m, v); });
   }
 
-  private setMesh(s: Slot, m: PackedMesh | null, version: number): void {
+  private setMesh(s: Slot, m: PackedMesh | null, version: number, cell = -1, level = -1): void {
     const replacing = s.mesh !== null && m !== null;
     if (s.mesh) {
       (s.mesh.userData as FadeData).dead = true;
@@ -219,6 +221,8 @@ export class CellLayer {
     mesh.receiveShadow = true;
     // a rebuild after an edit swaps at once (no fade hole)
     (mesh.userData as FadeData).instant = replacing;
+    if (cell >= 0) { (mesh.userData as FadeData).cell = cell; (mesh.userData as FadeData).level = level; }
+    if (this.opt.publish) (mesh.userData as FadeData).publisher = true;
     (mesh as { parent: THREE.Object3D | null }).parent = this.group;
     s.mesh = mesh;
     s.minY = m.originY + m.minY;
@@ -376,6 +380,22 @@ export class CellLayer {
       out.push(f.mesh);
     }
     const t = this.shown; this.shown = this.next; this.next = t;
+    this.publishShown();
+  }
+
+  /** The cells published last frame (cleared one by one: never a pass over the map). */
+  private published: number[] = [];
+  private publishShown(): void {
+    const out = this.opt.publish;
+    if (!out) return;
+    for (const c of this.published) out[c] = 0;
+    this.published.length = 0;
+    for (const mesh of this.shown) {
+      const u = mesh.userData as FadeData;
+      if (u.cell === undefined || u.level !== 0 || (u.fade ?? 0) < 1) continue;
+      out[u.cell] = 1;
+      this.published.push(u.cell);
+    }
   }
 
   /** Forgets everything (when loading another city). */

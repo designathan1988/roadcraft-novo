@@ -4,7 +4,7 @@
 
 import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
-import { Dirty, cellId, cellOriginX, tileOriginX } from '../core/grid.ts';
+import { CELL_COUNT, Dirty, cellId, cellOriginX, tileOriginX } from '../core/grid.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer } from '../jobs/protocol.ts';
 import type { World } from '../world/world.ts';
@@ -15,9 +15,10 @@ import { ARCHES, ARCH_COUNT, facadeWindowTable } from '../world/arch.ts';
 import { cutMask } from './inside.ts';
 import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
 import { FINISH_BY_MAT, FINISH_COUNT, FINISH_LOOKS, FINISH_SIZE } from '../jobs/buildingFinishes.ts';
+import { WIN_REVEAL_SHADE } from '../jobs/buildingGen.ts';
 
 const {
-  attribute, vec3, vec4, float, int, mix, clamp, fract, fwidth, smoothstep, floor, mod, select, hash, min, abs,
+  attribute, uniform, vec3, vec4, float, int, mix, clamp, fract, fwidth, smoothstep, floor, mod, select, hash, min, abs,
   positionWorld, cameraPosition, sRGBTransferEOTF, dot, max, step, normalize, pow, texture, vec2, cross, transformNormalToView,
 } = T;
 
@@ -119,6 +120,9 @@ export function createCity(world: World, pool: JobPool): CellLayer {
  * Detalhe das fachadas perto da câmera: peitoris e vergas em 3D (lod −1 no gerador). Uma camada à parte, só
  * de células, com raio curto: longe ela não existe (o shader desenha a janela sozinho).
  */
+/** Cells whose window detail is on screen at full fade (the detail layer writes it): there the walls open at the windows. */
+export const DETAIL_SHOWN = new Uint8Array(CELL_COUNT);
+
 export function createCityDetail(world: World, pool: JobPool, material: THREE.Material): CellLayer {
   const src: LayerSource = {
     hasContent: (c) => world.cellBuildings[c] > 0,
@@ -132,8 +136,15 @@ export function createCityDetail(world: World, pool: JobPool, material: THREE.Ma
     buildTile: (_t, _p, done) => done(null),
     buildPlate: (_p, _q, done) => done(null),
   };
-  return new CellLayer(src, world.dirty, Dirty.Buildings, material, { near: 1100, evict: 1400, margin: 30, detail: 220, budget: 48e6, shadows: false, sparse: true }, false, true);
+  return new CellLayer(src, world.dirty, Dirty.Buildings, material, { near: 1100, evict: 1400, margin: 30, detail: 220, budget: 48e6, shadows: false, sparse: true, publish: DETAIL_SHOWN }, false, true);
 }
+
+/** Direction to the sun (from the scene's directional light, read once per render). */
+let sunLight: THREE.DirectionalLight | null = null;
+const SUN_DIR = T.uniform(new THREE.Vector3(0, 1, 0)).onRenderUpdate(({ scene }: { scene: THREE.Scene | null }, self: { value: THREE.Vector3 }) => {
+  if (!sunLight && scene) scene.traverse((o) => { if (!sunLight && (o as THREE.DirectionalLight).isDirectionalLight) sunLight = o as THREE.DirectionalLight; });
+  if (sunLight) self.value.copy(sunLight.position).sub(sunLight.target.position).normalize();
+});
 
 /** Faixa [lo, hi] de x, filtrada pela largura do pixel w. */
 function band(lo: Node, hi: Node, x: Node, w: Node): Node {
@@ -149,8 +160,6 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
   const n = useCompactVertex(m, 'vBldNormal');
   // dither da troca de nível e o corte do "ver por dentro"
-  m.maskNode = lodFadeMask().and(cutMask());
-
   bakeFinishesOnce();
   const col = attribute('col', 'vec4');
   const matByte = floor(col.w.mul(255).add(0.5));
@@ -169,14 +178,19 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const kind = mod(kindByte, 4);
   const shop = mod(floor(kindByte.div(4)), 2);
   const fh = floor(kindByte.div(8)).mul(0.1).add(2.5);
-  const colW = fac.w.div(20);
+  // column width in decimetres x 2; the low bit: the wall opens at its windows where the detail layer draws them
+  const facW = floor(fac.w.add(0.5));
+  const colW = floor(facW.div(2)).div(10);
+  const openBit = mod(facW, 2);
   const seed = floor(fac.y.add(0.5)).add(floor(fac.x.add(0.5)).mul(256));
 
   const isCurtain = step(abs(mat.sub(3)), float(0.5));
   const isWall = step(mat, float(0.5));
   const isMetal = step(abs(mat.sub(5)), float(0.5));
+  // the pane at the back of an opening (detail layer): all window, no painted recess
+  const isGlass = step(abs(mat.sub(10)), float(0.5));
   const vertical = step(abs(n.y), float(0.3));
-  const hasWin = step(float(0.5), colW).mul(vertical).mul(max(max(isWall, isCurtain), isMetal));
+  const hasWin = step(float(0.5), colW).mul(vertical).mul(max(max(max(isWall, isCurtain), isMetal), isGlass));
 
   // coordenadas da fachada: colunas (cortina: sala a cada 2 colunas) e andares
   const ground = shop.mul(4.4);
@@ -219,6 +233,19 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const sign = band(float(0.8), float(0.95), fy, wy).mul(band(float(0.02), float(0.98), fx, wu));
   win = select(inShop.greaterThan(0.5), shopWin, win);
   win = win.mul(hasWin).mul(step(float(0), yy).max(inShop)).mul(bayOn);
+  win = max(win, isGlass);
+  // the opening: on a level-0 wall of a cell whose detail is on screen, the window (1 cm in from its edges, under
+  // the reveals) is cut out and the detail's reveals and recessed pane show through
+  const opened = uniform(0).onObjectUpdate(({ object }: { object: { userData: { cell?: number; level?: number; publisher?: boolean } } }) => {
+    const u = object.userData;
+    return !u.publisher && u.level === 0 && u.cell !== undefined && DETAIL_SHOWN[u.cell] ? 1 : 0;
+  });
+  const eu = float(0.01).div(colW), ey = float(0.01).div(fh);
+  const hardWin = step(ww.add(eu), fx).mul(step(fx, float(1).sub(ww).sub(eu))).mul(step(wLow.add(ey), fy)).mul(step(fy, wHigh.sub(ey)));
+  const hole = opened.mul(openBit).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(hardWin);
+  m.maskNode = lodFadeMask().and(cutMask()).and(hole.lessThan(0.5));
+  // the shadow keeps the wall whole: the sun through an opening lights the room, not the street behind the building
+  m.maskShadowNode = lodFadeMask().and(cutMask());
   const signMask = sign.mul(inShop).mul(hasWin).mul(step(float(0.35), rnd2));
 
   // interior falso: raio da câmera dentro de uma sala do tamanho da janela
@@ -267,7 +294,18 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const cover = blinds.max(curtains).mul(float(1).sub(inShop));
   const coverC = select(blinds.greaterThan(0.5), blindC.mul(slats), curtC);
   // tecido de dia: iluminado pela luz que entra; à noite, aceso por trás se a sala está acesa
-  const inside = mix(mix(dayInside, coverC.mul(0.32), cover), mix(nightInside, coverC.mul(lamp).mul(lit).mul(0.9), cover), night);
+  const insideLit = mix(mix(dayInside, coverC.mul(0.32), cover), mix(nightInside, coverC.mul(lamp).mul(lit).mul(0.9), cover), night);
+  const pick = floor(hash(cu.mul(23).add(fl.add(64).mul(389)).add(seed.mul(17)).add(5)).mul(20));
+  const plainWin = step(kind, float(0.5)).max(step(float(1.5), kind)).mul(float(1).sub(inShop));
+  // a pane 1.8 m or wider is the 4.0 wide window or ribbon: dark one in five, no roller
+  const widePane = step(float(1.8), float(1).sub(ww.mul(2)).mul(colW));
+  const darkPane = step(pick, mix(float(4.5), float(3.5), widePane)).mul(plainWin);
+  const inside = insideLit.mul(mix(float(1), float(0.3), darkPane));
+  // the roller shutter: down from the head a quarter to 70 % of the pane, slats every 5 cm, 5 cm in front of the glass
+  const rollDown = pick.sub(9).mul(0.15).add(0.25);
+  const roller = step(float(8.5), pick).mul(step(pick, float(12.5))).mul(plainWin).mul(float(1).sub(widePane)).mul(step(float(1).sub(rollDown), ly));
+  const rollSlat = fract(fy.mul(fh).div(0.05));
+  const rollerC = mix(vec3(0.4, 0.4, 0.38), vec3(0.6, 0.59, 0.56), smoothstep(float(0.15), float(0.5), rollSlat).mul(smoothstep(float(0.95), float(0.75), rollSlat)).mul(clamp(float(1).sub(fwidth(fy.mul(fh).div(0.05)).mul(1.5)), 0, 1)).add(0.25).min(1));
 
   // vidro: reflexo pelo ângulo (Fresnel de Schlick)
   const cosV = clamp(dot(V.negate(), n), 0, 1);
@@ -282,9 +320,9 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const avgWin = select(kind.lessThan(0.5), float(0.6 * 0.56), select(kind.lessThan(1.5), float(0.74), select(kind.lessThan(2.5), float(0.2), float(0.2))))
     .mul(hasWin).mul(step(float(0), yy).max(inShop)).mul(mix(avgBay, float(1), inShop));
   const avgLit = mix(float(0.15), float(0.62), sty).max(inShop);
-  const winAmt = mix(avgWin, win, detail);
+  const winAmt = max(mix(avgWin, win, detail), isGlass);
   // de longe, à noite: média das janelas mais fraca e amarela (forte demais deixava a fachada inteira marrom)
-  const insideAmt = mix(mix(vec3(0.07, 0.065, 0.06), vec3(1.0, 0.88, 0.64).mul(avgLit).mul(0.42), night), inside, detail);
+  const insideAmt = mix(mix(vec3(0.07, 0.065, 0.06), vec3(1.0, 0.88, 0.64).mul(avgLit).mul(0.42), night), inside, max(detail, isGlass));
 
   // espaço entre andares da cortina de vidro: opaco, cor do vidro escurecida
   const wallC = select(isCurtain.greaterThan(0.5), base.mul(0.55), base);
@@ -314,8 +352,14 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const plain = float(1).sub(isCurtain).mul(float(1).sub(hasFin));
   const winCol = band(ww, float(1).sub(ww), fx, wu).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy));
   // escorrido de chuva sob a janela (mais escuro perto do peitoril)
-  const streakN = wn.g;
-  const streak = winCol.mul(step(fy, wLow)).mul(smoothstep(float(0), wLow, fy)).mul(streakN).mul(0.16).mul(step(kind, float(0.5)).max(step(float(1.5), kind)));
+  const sh = hash(cu.mul(41).add(fl.add(64).mul(211)).add(seed.mul(29)).add(7));
+  const reach = min(wLow.mul(fh).sub(0.11), floor(fract(sh.mul(7.31)).mul(7)).mul(0.12).add(0.7));
+  const half = floor(fract(sh.mul(3.17)).mul(5)).mul(0.03).add(0.32).mul(float(1).sub(ww.mul(2)));
+  const below = wLow.sub(fy).mul(fh).sub(0.06);
+  const streakOn = step(float(1 / 3), sh).mul(step(float(0.5), wLow.mul(fh).sub(0.06))).mul(step(abs(fx.sub(0.5)), half))
+    .mul(step(float(0), below)).mul(step(below, reach)).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy));
+  const streak = streakOn.mul(float(1).sub(below.div(reach.max(0.1)))).mul(wn.g.mul(0.5).add(0.75)).mul(0.1)
+    .mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(float(1).sub(isMetal));
   // laje: friso escuro no piso de cada andar (só nas fachadas de janelas soltas)
   const slab = band(float(-0.012), float(0.03), fy, wy).mul(step(kind, float(0.5))).mul(hasWin).mul(float(1).sub(inShop)).mul(step(float(0.5), yy));
   // peitoril claro (pega o sol de cima) e a sombra dele logo abaixo
@@ -333,16 +377,27 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const offY = V.y.div(inward).mul(recess).div(fh);
   const glassSeen = band(ww, float(1).sub(ww), fx.add(offU), wu).mul(band(wLow, wHigh, fy.add(offY), wy));
   const deepWin = step(kind, float(0.5)).max(step(float(1.5), kind)).mul(float(1).sub(inShop));
-  const reveal = clamp(punched.sub(glassSeen), 0, 1).mul(winCol).mul(deepWin).mul(detail);
-  const glassC = mix(glassTint.add(skyRefl.mul(refl)), wallC.mul(0.42), reveal);
-  const albedo = mix(mix(wallFinal, glassC, winAmt), signC, signMask.mul(detail));
+  const reveal = clamp(punched.sub(glassSeen), 0, 1).mul(winCol).mul(deepWin).mul(detail).mul(float(1).sub(isGlass));
+  // which face: a jamb (normal ±tangent) where the ray leaves the opening sideways, else the head (down) or the sill (up)
+  const gx = fx.add(offU), gy = fy.add(offY);
+  const outX = max(ww.sub(gx), gx.sub(float(1).sub(ww))).mul(colW), outY = max(wLow.sub(gy), gy.sub(wHigh)).mul(fh);
+  const jambN = select(gx.lessThan(0.5), tng, tng.negate());
+  const capN = select(gy.lessThan(0.5), vec3(0, 1, 0), vec3(0, -1, 0));
+  const faceN = select(outX.greaterThan(outY), jambN, capN);
+  // the 4.0 reveal: trim x 0.68 in its own shade, lifted where the sun reaches it (relative to the wall's own light)
+  const litFace = clamp(dot(faceN, SUN_DIR), 0, 1), litWall = clamp(dot(n, SUN_DIR), 0, 1);
+  const revealK = float(WIN_REVEAL_SHADE).mul(float(0.45).add(litFace.mul(0.55)).div(float(0.45).add(litWall.mul(0.55))));
+  const glassC = mix(glassTint.add(skyRefl.mul(refl)), wallC.mul(revealK.mul(float(1).sub(night.mul(0.6)))), reveal);
+  // the roller over the pane where it is down (near and mid; far it is in the average)
+  const rollAmt = roller.mul(win).mul(detail).mul(float(1).sub(reveal));
+  const albedo = mix(mix(mix(wallFinal, glassC.mul(mix(float(1), float(0.6), darkPane)), winAmt), rollerC, rollAmt), signC, signMask.mul(detail));
   m.colorNode = vec4(albedo, 1);
-  m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
+  m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
 
   const rough0 = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
   const rough = mix(rough0, finA.w, hasFin);
-  m.roughnessNode = mix(rough, float(0.12), winAmt);
-  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), finN.w.mul(hasFin)).mul(float(1).sub(winAmt));
+  m.roughnessNode = mix(mix(rough, float(0.12), winAmt.mul(float(1).sub(reveal))), float(0.6), rollAmt);
+  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), finN.w.mul(hasFin)).mul(float(1).sub(winAmt)).mul(float(1).sub(rollAmt));
   // relevo do acabamento (fora do vidro), na base da face
   const nm = finN.xyz.mul(2).sub(1);
   const nk = look.y.mul(hasFin).mul(float(1).sub(winAmt)).mul(float(1).sub(sillAmt));

@@ -132,7 +132,7 @@ function untagged(mb: MeshBuilder, draw: () => void): void {
 const ROOF_FLATS = [0x8f8b84, 0xa8a49b, 0x5d5f61, 0x77736c, 0x6f8a55, 0xb9b2a6];
 
 /** Materiais dos prédios (canal alfa da cor). */
-export const BMAT = { Wall: 0, RoofFlat: 1, RoofTile: 2, Curtain: 3, Plain: 4, Metal: 5, Paving: 6, Grass: 7, Fence: 8, Shop: 9 } as const;
+export const BMAT = { Wall: 0, RoofFlat: 1, RoofTile: 2, Curtain: 3, Plain: 4, Metal: 5, Paving: 6, Grass: 7, Fence: 8, Shop: 9, WinGlass: 10 } as const;
 /** Tipo de fachada (bits 0-1 do byte de tipo); bit 2 = térreo de loja. */
 export const Facade = { Punched: 0, Curtain: 1, House: 2, Industrial: 3, ShopBit: 4 } as const;
 
@@ -159,13 +159,15 @@ function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
   if (footOut) captureFoot(f, x0, x1, z0, z1, y0);
   if (detailOut && mb !== detailOut) {
     const fc = mb.curFac, kind = fc[2] & 3;
-    if (fc[3] > 0 && kind !== Facade.Curtain && ((wallMat & 15) === BMAT.Wall || (wallMat & 15) === BMAT.Metal)) {
-      windowDetail(detailOut, f, x0, x1, z0, z1, y0, y1, mb.curBase, (fc[2] & 4) !== 0, colW, (fc[2] >> 3) / 10 + 2.5, fc[0]);
+    if (opensWindows(fc, wallMat)) {
+      windowDetail(detailOut, f, x0, x1, z0, z1, y0, y1, mb.curBase, (fc[2] & 4) !== 0, colW, (fc[2] >> 3) / 10 + 2.5, fc[0], fc[1], skip);
     } else if (fc[3] > 0 && kind === Facade.Curtain) curtainFins(detailOut, f, x0, x1, z0, z1, y0, y1, colW * 2);
     return;
   }
   const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]]; // frente, direita, fundo, esquerda
   const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+  const open = opensWindows(mb.curFac, wallMat), fac3 = mb.curFac[3];
+  if (open) mb.curFac[3] |= 1;
   for (let k = 0; k < 4; k++) {
     // a side against a wall (skip bit k: 1 front, 2 right, 4 back, 8 left) is never seen
     if (skip & (1 << k)) continue;
@@ -183,6 +185,7 @@ function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
     mb.quad(a, b, c, d, NX, 0, NZ);
   }
   mb.curU = 0;
+  mb.curFac[3] = fac3;
   if (top >= 0) {
     const t = corners.map(([x, z]) => mb.vert(wx(f, x, z), y1, wz(f, x, z), 0, 1, 0, top, topMat));
     mb.quad(t[0], t[1], t[2], t[3], 0, 1, 0);
@@ -762,7 +765,11 @@ interface Gen {
  */
 function setFac(mb: MeshBuilder, style: number, seed: number, kind: number, colW: number, fh: number): void {
   const fhq = Math.max(0, Math.min(31, Math.round((fh - 2.5) * 10)));
-  mb.curFac[0] = style; mb.curFac[1] = seed & 255; mb.curFac[2] = (kind & 7) | (fhq << 3); mb.curFac[3] = Math.min(255, Math.round(colW * 20));
+  mb.curFac[0] = style; mb.curFac[1] = seed & 255; mb.curFac[2] = (kind & 7) | (fhq << 3); mb.curFac[3] = Math.min(127, Math.round(colW * 10)) * 2;
+}
+/** Whether a wall with the current facade has its windows drawn open by the detail layer (and opens in the shader). */
+function opensWindows(fc: Uint8Array | number[], mat: number): boolean {
+  return fc[3] > 0 && (fc[2] & 3) !== Facade.Curtain && ((mat & 15) === BMAT.Wall || (mat & 15) === BMAT.Metal);
 }
 /** Parede cega (platibandas, casas de máquinas, aparelhos). */
 function blank(mb: MeshBuilder): void { mb.curFac[3] = 0; }
@@ -1125,55 +1132,77 @@ const WIN_TABLE = facadeWindowTable();
  * loja com 4,4 m). Só a frente e as pontas de cada peça (o fundo encosta na parede).
  */
 function windowDetail(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, wy0: number, wy1: number,
-  base: number, shop: boolean, colW: number, fh: number, arch: number): void {
+  base: number, shop: boolean, colW: number, fh: number, arch: number, seed = 0, skip = 0): void {
   const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
   const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
-  for (let k = 0; k < 4; k++) windowDetailWall(mb, f, corners[k][0], corners[k][1], corners[(k + 1) & 3][0], corners[(k + 1) & 3][1], normals[k][0], normals[k][1], wy0, wy1, base, shop, colW, fh, arch);
+  for (let k = 0; k < 4; k++) if (!(skip & (1 << k))) windowDetailWall(mb, f, corners[k][0], corners[k][1], corners[(k + 1) & 3][0], corners[(k + 1) & 3][1], normals[k][0], normals[k][1], wy0, wy1, base, shop, colW, fh, arch, seed);
 }
 
 /** The window pieces of one wall, from (ax, az) to (bx, bz) facing (nxl, nzl) (local), as windowDetail draws each side. */
 function windowDetailWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx: number, bz: number, nxl: number, nzl: number,
-  wy0: number, wy1: number, base: number, shop: boolean, colW: number, fh: number, arch: number): void {
+  wy0: number, wy1: number, base: number, shop: boolean, colW: number, fh: number, arch: number, seed = 0): void {
   const [ww, wLow, wHigh] = WIN_TABLE[arch] ?? WIN_TABLE[0];
   const style = facadeArch(arch);
   const trim = (ARCHES[style] ?? ARCHES[0]).trim;
   const bays = WIN_TABLE[arch]?.[3] ?? 0;
   const ground = shop ? 4.4 : 0;
   const y0 = base;
-  const first = Math.max(0, Math.ceil((wy0 - base - ground) / fh - wLow - 1e-3));
-  const rows = Math.floor((wy1 - base - ground) / fh - wHigh + 1e-3) + 1;
+  // every row whose window overlaps the wall (the shader paints, and opens, the part inside it)
+  const first = Math.max(0, Math.floor((wy0 - base - ground) / fh - wHigh + 1e-3) + 1);
+  const rows = Math.ceil((wy1 - base - ground) / fh - wLow - 1e-3);
   if (rows <= first || colW <= 0.5) return;
-  blank(mb);
-  // peitoril e verga de pedra clara (como no prédio de verdade), puxando um pouco para o acabamento do estilo
-  const sillCol = mixHex(0xe4dfd4, trim, 0.15), headCol = mixHex(0xd9d3c7, trim, 0.2);
+  const len = Math.hypot(bx - ax, bz - az);
+  if (len < 1e-3) return;
+  const cols = Math.max(1, Math.round(len / colW)), cw = len / cols;
+  const dx = (bx - ax) / len, dz = (bz - az) / len;
+  // Roadcraft 4.0 emitBay: the reveals in the wall's shadow (trim x 0.68), the head's a little darker, the inner
+  // sill in the trim; the frame 3 cm in front of the glass; the sill 7 cm proud with a drip under its front.
+  const reveal = shadeHex(mixHex(0xe4dfd4, trim, 0.35), WIN_REVEAL_SHADE), head = shadeHex(reveal, 0.8), inner = shadeHex(mixHex(0xe4dfd4, trim, 0.35), 0.92);
+  const sillCol = mixHex(0xe4dfd4, trim, 0.15);
   const frameCol = FRAME_COLORS[style] ?? 0xe6e6e2;
   const molded = (ARCHES[style] ?? ARCHES[0]).frame, moldCol = mixHex(0xeeeae2, trim, 0.4);
-  {
-    const len = Math.hypot(bx - ax, bz - az);
-    if (len < 1e-3) return;
-    const cols = Math.max(1, Math.round(len / colW)), cw = len / cols;
-    const dx = (bx - ax) / len, dz = (bz - az) / len;
-    for (let c = 0; c < cols; c++) {
-      if ((bays & 4 && c % 3 === 1) || (bays & 8 && c % 3 !== 0)) continue; // the pattern's blank bays
-      const u0 = (c + ww) * cw - 0.06, u1 = (c + 1 - ww) * cw + 0.06;
-      for (let fl = first; fl < rows; fl++) {
-        const yb = y0 + ground + (fl + wLow) * fh, yt = y0 + ground + (fl + wHigh) * fh;
-        // só as faces que aparecem (metade da malha: menos para subir à GPU quando a quadra chega)
-        ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0 - 0.04, u1 + 0.04, yb - 0.09, yb, 0.16, sillCol, LEDGE_SILL);
-        ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0, u1, yt, yt + 0.11, 0.07, headCol, LEDGE_HEAD);
-        // moldura de argamassa em volta do vão (estilos com moldura)
-        if (molded) {
-          ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0 - 0.1, u0 + 0.02, yb, yt + 0.11, 0.035, moldCol, LEDGE_JAMB);
-          ledge(mb, f, ax, az, dx, dz, nxl, nzl, u1 - 0.02, u1 + 0.1, yb, yt + 0.11, 0.035, moldCol, LEDGE_JAMB);
-        }
-        // caixilho: marco em volta do vão, montante no meio das janelas largas e travessa nas altas
-        const a0 = (c + ww) * cw, a1 = (c + 1 - ww) * cw, t = 0.06;
-        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a0 + t, yb, yt, 0.05, frameCol, LEDGE_JAMB);
-        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a1 - t, a1, yb, yt, 0.05, frameCol, LEDGE_JAMB);
-        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a1, yt - t, yt, 0.05, frameCol, LEDGE_BAR);
-        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a1, yb, yb + t, 0.05, frameCol, LEDGE_BAR);
-        if (a1 - a0 > 1.1) { const m = (a0 + a1) / 2; ledge(mb, f, ax, az, dx, dz, nxl, nzl, m - 0.025, m + 0.025, yb, yt, 0.04, frameCol, LEDGE_JAMB); }
-        if (yt - yb > 1.7) { const y = yb + (yt - yb) * 0.72; ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a1, y - 0.025, y + 0.025, 0.04, frameCol, LEDGE_BAR); }
+  const D = WIN_REVEAL;
+  const NX = nx(f, nxl, nzl), NZ = nz(f, nxl, nzl), TX = nx(f, dx, dz), TZ = nz(f, dx, dz);
+  /** A point of the wall: u along it, o out of it (negative: into the opening), y up. */
+  const P = (u: number, o: number): [number, number] => [ax + dx * u + nxl * o, az + dz * u + nzl * o];
+  const V = (u: number, o: number, y: number, n0: number, n1: number, n2: number, col: number, mat: number) => { const q = P(u, o); return mb.vert(wx(f, q[0], q[1]), y, wz(f, q[0], q[1]), n0, n1, n2, col, mat); };
+  for (let c = 0; c < cols; c++) {
+    if ((bays & 4 && c % 3 === 1) || (bays & 8 && c % 3 !== 0)) continue; // the pattern's blank bays
+    const a0 = (c + ww) * cw, a1 = (c + 1 - ww) * cw;
+    for (let fl = first; fl < rows; fl++) {
+      const yb0 = y0 + ground + (fl + wLow) * fh, yt0 = y0 + ground + (fl + wHigh) * fh;
+      const yb = Math.max(yb0, wy0), yt = Math.min(yt0, wy1), cutB = yb > yb0, cutT = yt < yt0;
+      if (yt - yb < 0.02) continue;
+      blank(mb);
+      // the reveals: the opening's sides, head and sill, from the wall's face D into it (the main wall opens here,
+      // render/city.ts, where this layer is drawn)
+      mb.quad(V(a0, 0, yb, TX, 0, TZ, reveal, BMAT.Plain), V(a0, -D, yb, TX, 0, TZ, reveal, BMAT.Plain), V(a0, -D, yt, TX, 0, TZ, reveal, BMAT.Plain), V(a0, 0, yt, TX, 0, TZ, reveal, BMAT.Plain), TX, 0, TZ);
+      mb.quad(V(a1, 0, yb, -TX, 0, -TZ, reveal, BMAT.Plain), V(a1, -D, yb, -TX, 0, -TZ, reveal, BMAT.Plain), V(a1, -D, yt, -TX, 0, -TZ, reveal, BMAT.Plain), V(a1, 0, yt, -TX, 0, -TZ, reveal, BMAT.Plain), -TX, 0, -TZ);
+      if (!cutT) mb.quad(V(a0, 0, yt, 0, -1, 0, head, BMAT.Plain), V(a1, 0, yt, 0, -1, 0, head, BMAT.Plain), V(a1, -D, yt, 0, -1, 0, head, BMAT.Plain), V(a0, -D, yt, 0, -1, 0, head, BMAT.Plain), 0, -1, 0);
+      if (!cutB) mb.quad(V(a0, 0, yb, 0, 1, 0, inner, BMAT.Plain), V(a1, 0, yb, 0, 1, 0, inner, BMAT.Plain), V(a1, -D, yb, 0, 1, 0, inner, BMAT.Plain), V(a0, -D, yb, 0, 1, 0, inner, BMAT.Plain), 0, 1, 0);
+      // the glass at the back of the opening, with the wall's facade: the shader draws the pane, the room behind it,
+      // the blind or the curtain, and the light at night (material WinGlass: no painted recess on it)
+      setFac(mb, arch, seed, shop ? Facade.ShopBit : Facade.Punched, colW, fh);
+      mb.curBase = base;
+      mb.curU = c + ww; const g0 = V(a0, -D, yb, NX, 0, NZ, 0x101418, BMAT.WinGlass), g3 = V(a0, -D, yt, NX, 0, NZ, 0x101418, BMAT.WinGlass);
+      mb.curU = c + 1 - ww; const g1 = V(a1, -D, yb, NX, 0, NZ, 0x101418, BMAT.WinGlass), g2 = V(a1, -D, yt, NX, 0, NZ, 0x101418, BMAT.WinGlass);
+      mb.quad(g0, g1, g2, g3, NX, 0, NZ);
+      mb.curU = 0;
+      blank(mb);
+      // the frame: a bar round the pane 3 cm in front of it, a mullion in a wide pane, a transom in a tall one
+      const t = 0.06, fo = -D;
+      const bar = (u0: number, u1: number, ya: number, yb2: number) => ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0, u1, ya, yb2, 0.03, frameCol, 1, fo);
+      bar(a0, a0 + t, yb, yt); bar(a1 - t, a1, yb, yt); if (!cutT) bar(a0, a1, yt - t, yt);
+      if (!cutB) bar(a0, a1, yb, yb + t);
+      if (a1 - a0 > 1.1) { const m = (a0 + a1) / 2; bar(m - 0.03, m + 0.03, yb, yt); }
+      if (yt0 - yb0 > 1.7) { const y = yb0 + (yt0 - yb0) * 0.72; if (y - 0.03 > yb && y + 0.03 < yt) bar(a0, a1, y - 0.03, y + 0.03); }
+      // the sill: 7 cm out past the wall, 6 cm thick, with its drip
+      if (!cutB && yb - y0 > 0.25) ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0 - 0.07, a1 + 0.07, yb - 0.06, yb, 0.07, sillCol, LEDGE_SILL | 8);
+      // a moulded surround in the styles that have one
+      if (molded && !cutT && !cutB) {
+        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0 - 0.12, a0, yb, yt + 0.12, 0.035, moldCol, LEDGE_JAMB);
+        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a1, a1 + 0.12, yb, yt + 0.12, 0.035, moldCol, LEDGE_JAMB);
+        ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0, a1, yt, yt + 0.12, 0.035, moldCol, LEDGE_HEAD | 2);
       }
     }
   }
@@ -1194,7 +1223,9 @@ function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
 }
 
 /** Faces de uma peça saliente: 1 frente, 2 topo, 4 base, 8 pontas. */
-const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4, LEDGE_JAMB = 1 | 8, LEDGE_BAR = 1 | 2 | 4;
+const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4, LEDGE_JAMB = 1 | 8;
+/** Depth of a window's opening (Roadcraft 4.0 REVEAL) and how much light its reveals keep (REVEAL_SHADE). */
+export const WIN_REVEAL = 0.2, WIN_REVEAL_SHADE = 0.68;
 /** Cor do caixilho por estilo: alumínio branco, preto nos contemporâneos, madeira nas casas antigas. */
 const FRAME_COLORS: number[] = [];
 FRAME_COLORS[ArchId.Colonial] = 0xf2efe8; FRAME_COLORS[ArchId.ArtDeco] = 0x4a4f53; FRAME_COLORS[ArchId.Modernist] = 0xe8e8e4;
@@ -1204,8 +1235,9 @@ FRAME_COLORS[ArchId.ModernHouse] = 0x2c3034; FRAME_COLORS[ArchId.Sobrado] = 0x7a
 
 /** Peça saliente na parede: de u0 a u1 ao longo da parede, de y0 a y1, saindo `out` metros (faces escolhidas). */
 function ledge(mb: MeshBuilder, f: Frame, ax: number, az: number, dx: number, dz: number, nxl: number, nzl: number,
-  u0: number, u1: number, y0: number, y1: number, out: number, col: number, faces = LEDGE_ALL): void {
-  const p = (u: number, o: number): [number, number] => [ax + dx * u + nxl * o, az + dz * u + nzl * o];
+  u0: number, u1: number, y0: number, y1: number, out: number, col: number, faces = LEDGE_ALL, from = 0): void {
+  // `from`: the piece stands out of a plane that far from the wall (into an opening when negative)
+  const p = (u: number, o: number): [number, number] => [ax + dx * u + nxl * (from + o), az + dz * u + nzl * (from + o)];
   const W = (q: [number, number]) => [wx(f, q[0], q[1]), wz(f, q[0], q[1])];
   const [a0x, a0z] = W(p(u0, 0)), [b0x, b0z] = W(p(u1, 0)), [a1x, a1z] = W(p(u0, out)), [b1x, b1z] = W(p(u1, out));
   const NX = nx(f, nxl, nzl), NZ = nz(f, nxl, nzl), TX = nx(f, dx, dz), TZ = nz(f, dx, dz);
@@ -2075,20 +2107,23 @@ function catalogStoreys(v: CatVolume, top: number, drawn: number): CatStorey[] {
 function facadeWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx: number, bz: number, nxl: number, nzl: number,
   y0: number, y1: number, col: number, mat: number, colW: number): void {
   if (detailOut && mb !== detailOut) {
-    const fc = mb.curFac, kind = fc[2] & 3;
-    if (fc[3] > 0 && kind !== Facade.Curtain && ((mat & 15) === BMAT.Wall || (mat & 15) === BMAT.Metal))
-      windowDetailWall(detailOut, f, ax, az, bx, bz, nxl, nzl, y0, y1, mb.curBase, (fc[2] & 4) !== 0, colW, (fc[2] >> 3) / 10 + 2.5, fc[0]);
+    const fc = mb.curFac;
+    if (opensWindows(fc, mat))
+      windowDetailWall(detailOut, f, ax, az, bx, bz, nxl, nzl, y0, y1, mb.curBase, (fc[2] & 4) !== 0, colW, (fc[2] >> 3) / 10 + 2.5, fc[0], fc[1]);
     return;
   }
   const len = Math.hypot(bx - ax, bz - az);
   if (len < 1e-3) return;
   const NX = nx(f, nxl, nzl), NZ = nz(f, nxl, nzl);
+  const fac3 = mb.curFac[3];
+  if (opensWindows(mb.curFac, mat)) mb.curFac[3] |= 1;
   mb.curU = 0;
   const a = mb.vert(wx(f, ax, az), y0, wz(f, ax, az), NX, 0, NZ, col, mat), d = mb.vert(wx(f, ax, az), y1, wz(f, ax, az), NX, 0, NZ, col, mat);
   mb.curU = Math.max(1, Math.round(len / colW));
   const b = mb.vert(wx(f, bx, bz), y0, wz(f, bx, bz), NX, 0, NZ, col, mat), c = mb.vert(wx(f, bx, bz), y1, wz(f, bx, bz), NX, 0, NZ, col, mat);
   mb.quad(a, b, c, d, NX, 0, NZ);
   mb.curU = 0;
+  mb.curFac[3] = fac3;
 }
 
 /**
