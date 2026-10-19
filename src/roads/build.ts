@@ -205,8 +205,26 @@ export class RoadJournal implements Command {
   /** Appends another (not yet charged) journal to this one: it becomes a single undo step. */
   append(other: RoadJournal): void { this.ops.push(...other.ops); this.value += other.value; this.freeValue += other.freeValue; }
 
-  apply(): void { for (const op of this.ops) this.exec(op, true); this.world.money -= this.charge; }
-  invert(): void { for (let i = this.ops.length - 1; i >= 0; i--) this.exec(this.ops[i], false); this.world.money += this.charge; }
+  /** Redo: runs the ops in order. If one throws, those already run go back and the error goes on: nothing changed. */
+  apply(): void {
+    const ops = this.ops;
+    let k = 0;
+    try { for (; k < ops.length; k++) this.exec(ops[k], true); } catch (err) {
+      for (let i = k - 1; i >= 0; i--) this.exec(ops[i], false);
+      throw err;
+    }
+    this.world.money -= this.charge;
+  }
+  /** Undo: runs the ops backwards. If one throws, those already undone are done again and the error goes on. */
+  invert(): void {
+    const ops = this.ops;
+    let k = ops.length - 1;
+    try { for (; k >= 0; k--) this.exec(ops[k], false); } catch (err) {
+      for (let i = k + 1; i < ops.length; i++) this.exec(ops[i], true);
+      throw err;
+    }
+    this.world.money += this.charge;
+  }
 }
 
 // --------------------------------------------------------------- snapping

@@ -187,13 +187,17 @@ export class ItemsCommand implements Command {
     this.items.remove(id);
   }
 
-  apply(): void {
-    for (const r of this.removed) this.items.remove(r[0]);
-    for (const r of this.added) this.items.add(r, r[0]);
-  }
+  apply(): void { this.swap(this.removed, this.added); }
+  invert(): void { this.swap(this.added, this.removed); }
 
-  invert(): void {
-    for (const r of this.added) this.items.remove(r[0]);
-    for (const r of this.removed) this.items.add(r, r[0]);
+  /** Takes `out` away and puts `in` back with their ids; if an id is taken, everything goes back as it was and the error goes on. */
+  private swap(out: ItemRec[], back: ItemRec[]): void {
+    for (const r of out) this.items.remove(r[0]);
+    let k = 0;
+    try { for (; k < back.length; k++) this.items.add(back[k], back[k][0]); } catch (err) {
+      for (let i = 0; i < k; i++) this.items.remove(back[i][0]);
+      for (const r of out) this.items.add(r, r[0]);
+      throw err;
+    }
   }
 }

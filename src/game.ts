@@ -36,7 +36,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { followLanguage, onLanguageReload, setLang, t } from './ui/i18n.ts';
+import { followLanguage, loose, onLanguageReload, setLang, t } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -403,6 +403,10 @@ export class Game {
     };
     this.commands.onChange = () => {
       this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh(); };
+    this.commands.onError = (err, c, redo) => {
+      console.error(err);
+      this.hud.toast(t(redo ? 'history.redoFailed' : 'history.undoFailed', { label: loose(c.label), message: (err as Error)?.message ?? String(err) }));
+    };
     // changing the language reloads the page: the city is saved first; if that fails, the player decides
     onLanguageReload(async () => {
       if (!this.unsaved && !this.world.saveDirty.includes(1)) return true;

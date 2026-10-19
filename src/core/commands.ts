@@ -3,6 +3,7 @@
 
 export interface Command {
   readonly label: string;
+  /** Applies the edit. A command that fails half way should put back what it did before throwing (RoadJournal does). */
   apply(): void;
   invert(): void;
   /** Tries to absorb a following command (e.g. brush dabs of the same stroke). */
@@ -18,6 +19,11 @@ export class CommandStack {
   onChange: () => void = () => {};
   /** A new command was added (not called on merge, undo or redo). */
   onPush: (cmd: Command) => void = () => {};
+  /**
+   * An undo or redo threw. The step stays where it was (still to undo, or still to redo), so the player can try again
+   * once whatever blocked it is gone; the command itself rolled back what it had done (see Command.apply).
+   */
+  onError: (err: unknown, cmd: Command, redo: boolean) => void = (err) => { console.error(err); };
 
   constructor(limit = 500) { this.limit = limit; }
 
@@ -45,21 +51,25 @@ export class CommandStack {
 
   endGroup(): void { this.open = null; }
 
+  /** Undoes the last step. False when there is none or it failed (then it stays the last step, see onError). */
   undo(): boolean {
     this.open = null;
-    const c = this.done.pop();
+    const c = this.done[this.done.length - 1];
     if (!c) return false;
-    c.invert();
+    try { c.invert(); } catch (err) { this.onError(err, c, false); return false; }
+    this.done.pop();
     this.undone.push(c);
     this.onChange();
     return true;
   }
 
+  /** Redoes the last undone step. False when there is none or it failed (then it stays to redo, see onError). */
   redo(): boolean {
     this.open = null;
-    const c = this.undone.pop();
+    const c = this.undone[this.undone.length - 1];
     if (!c) return false;
-    c.apply();
+    try { c.apply(); } catch (err) { this.onError(err, c, true); return false; }
+    this.undone.pop();
     this.done.push(c);
     this.onChange();
     return true;

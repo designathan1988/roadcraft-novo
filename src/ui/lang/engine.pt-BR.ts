@@ -9,6 +9,8 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.perMin': '{n}/min',
   'ui.money.tip': 'Dinheiro em caixa. Vias custam pela largura e pelo comprimento; pontes e túneis custam mais. Demolir devolve metade.',
   'ui.money.unlimited': 'R$ ∞',
+  'history.undoFailed': 'Não foi possível desfazer "{label}": {message}. Nada mudou; o passo continua lá para desfazer.',
+  'history.redoFailed': 'Não foi possível refazer "{label}": {message}. Nada mudou; o passo continua lá para refazer.',
   'ui.stats.tip': '{residents} moradores · {jobs} empregos · {buildings} prédios · {speed} km/h de média perto daqui',
   'ui.cat.roads': 'Vias',
   'ui.cat.zones': 'Zoneamento e lotes',

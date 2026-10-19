@@ -9,6 +9,8 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.perMin': '{n}/min',
   'ui.money.tip': 'Cash. Roads cost by width and length; bridges and tunnels cost more. Demolishing refunds half.',
   'ui.money.unlimited': 'R$ ∞',
+  'history.undoFailed': 'Could not undo "{label}": {message}. Nothing was changed; the step is still there to undo.',
+  'history.redoFailed': 'Could not redo "{label}": {message}. Nothing was changed; the step is still there to redo.',
   'ui.stats.tip': '{residents} residents · {jobs} jobs · {buildings} buildings · {speed} km/h average nearby',
   'ui.cat.roads': 'Roads',
   'ui.cat.zones': 'Zoning and lots',
