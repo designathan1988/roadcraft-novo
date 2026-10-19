@@ -743,8 +743,16 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
   const doomed: number[] = [];
   world.buildingIndex.query(minX - reach - 40, minZ - reach - 40, maxX + reach + 40, maxZ + reach + 40, (id) => {
     const r = Math.hypot(col.w[id], col.d[id]) / 2;
-    const [d, i] = nearest(col.x[id], col.z[id]);
-    if (d >= half + r * 0.8) return;
+    const [d] = nearest(col.x[id], col.z[id]);
+    if (d >= half + r) return;
+    // the road's footprint (centreline points widened by its half width) over any part of the lot's rectangle
+    const c = Math.cos(col.rot[id]), s = Math.sin(col.rot[id]), hw = col.w[id] / 2 + half - 0.3, hd = col.d[id] / 2 + half - 0.3;
+    let i = -1;
+    for (let k = 0; k < n && i < 0; k++) {
+      const dx = px[k] - col.x[id], dz = pz[k] - col.z[id];
+      if (Math.abs(dx * c - dz * s) < hw && Math.abs(dx * s + dz * c) < hd) i = k;
+    }
+    if (i < 0) return;
     // a deck that passes over the roof, or a tunnel deep under the lot, leaves the building standing
     const g = heightAt(world.heights, col.x[id], col.z[id]);
     if (py[i] - DECK_DEPTH > g + buildingTop(col, id)) return;

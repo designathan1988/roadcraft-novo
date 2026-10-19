@@ -938,3 +938,14 @@ test('D32: one square per neighbourhood, even after the lots are cut again', asy
   }
   assert.equal(squares, 1, `${squares} squares in one neighbourhood`);
 });
+
+test('D35: a new road through any part of a lot clears it; a lot beside the road stays', () => {
+  const w = flatWorld(1e9);
+  // a deep lot (20 m front, 100 m deep) whose back end the new road crosses, 45 m from its centre
+  const deep = w.addBuilding({ x: 0, z: 0, w: 20, d: 100, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Industrial, floors: 2, style: 1 });
+  // a lot whose side runs 1 m clear of the road's sidewalk
+  const beside = w.addBuilding({ x: 60, z: 45 - 5.9 - 1 - 10, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 2, zone: Zone.Residential, floors: 2, style: 1 });
+  road(w, -100, 45, 100, 45);
+  assert.equal(w.buildings.alive[deep], 0, 'the deep lot the road runs across still stands');
+  assert.equal(w.buildings.alive[beside], 1, 'the lot beside the road was demolished');
+});
