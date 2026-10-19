@@ -1,6 +1,6 @@
-// Placas com texto escrito pelo jogador (nome de rua, informação, direção…). São poucas, então
-// cada uma é uma plaquinha com textura de canvas (cache por texto), acima do poste da placa.
-// A lista é refeita só quando a câmera anda ou os textos mudam, por consulta no índice dos itens.
+// Signs with text written by the player (street name, information, direction…). There are few, so
+// each one is a small plate with a canvas texture (cached per text), above the sign's post.
+// The list is rebuilt only when the camera moves or the texts change, by a query on the items' index.
 
 import * as THREE from 'three/webgpu';
 import type { World } from '../world/world.ts';
@@ -9,7 +9,7 @@ import { heightAt } from '../world/heights.ts';
 
 const RADIUS = 450;
 
-/** Chave de posição de uma placa (os ids mudam ao carregar; a posição não). */
+/** A sign's position key (ids change on load; the position does not). */
 export const signKey = (x: number, z: number) => `${Math.round(x * 10)},${Math.round(z * 10)}`;
 
 export class TextSigns {
@@ -61,7 +61,7 @@ export class TextSigns {
       if (!text) return;
       const street = c.variant[i] === 2;
       const y = (c.z1[i] !== 0 ? c.z1[i] : heightAt(this.world.heights, c.x0[i], c.z0[i])) + (street ? 2.75 : 2.35);
-      // frente e verso (o texto lê certo dos dois lados)
+      // front and back (the text reads right from both sides)
       for (const turn of [0, Math.PI]) {
         const m = new THREE.Mesh(this.plane, this.material(text, street));
         m.position.set(c.x0[i], y, c.z0[i]);
@@ -72,7 +72,7 @@ export class TextSigns {
     });
   }
 
-  /** Material de amostra (compila na carga). */
+  /** A sample material (compiles at load). */
   warmup(): THREE.Mesh {
     const m = new THREE.Mesh(this.plane, this.material('Rua', true));
     m.position.set(0, -5000, 0);

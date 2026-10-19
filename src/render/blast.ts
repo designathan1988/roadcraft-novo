@@ -1,6 +1,6 @@
-// Explosão e desabamento: clarão (esfera que cresce e some) e, para cada prédio atingido, um
-// bloco do tamanho dele que afunda no chão em poucos segundos. Só efeitos na página; o mundo
-// (prédio vira entulho) muda por comando. Objetos de vida curta, sem estado no quadro quando parados.
+// Explosion and collapse: a flash (a sphere that grows and fades) and, for each building hit, a
+// block of its size that sinks into the ground in a few seconds. Page effects only; the world
+// (building turns to rubble) changes by command. Short-lived objects, no per-frame state when idle.
 
 import * as THREE from 'three/webgpu';
 
@@ -21,7 +21,7 @@ export class Blast {
     this.group.add(this.flash);
   }
 
-  /** Clarão em (x, y, z) com o raio da explosão. */
+  /** A flash at (x, y, z) with the explosion's radius. */
   boom(x: number, y: number, z: number, r: number): void {
     this.flash.position.set(x, y + 2, z);
     this.flash.scale.setScalar(r * 0.3);
@@ -30,7 +30,7 @@ export class Blast {
     this.flash.visible = true;
   }
 
-  /** Um prédio que desaba: bloco w × d × h girado, afundando. */
+  /** A building collapsing: a w × d × h block, turned, sinking. */
   collapse(x: number, y: number, z: number, w: number, d: number, h: number, rot: number): void {
     const m = new THREE.Mesh(this.box, this.wallMat);
     m.position.set(x, y, z);
@@ -52,7 +52,7 @@ export class Blast {
     for (let i = this.falling.length - 1; i >= 0; i--) {
       const f = this.falling[i];
       f.t += dt;
-      // cai acelerando, inclina um pouco e some no chão
+      // falls accelerating, tilts a little and vanishes into the ground
       const k = Math.min(1, (f.t / 2.4) ** 2);
       f.mesh.scale.y = Math.max(0.01, f.h * (1 - k));
       f.mesh.rotation.z = 0.06 * k;
@@ -60,7 +60,7 @@ export class Blast {
     }
   }
 
-  /** Malhas de amostra (compilam na carga). */
+  /** Sample meshes (they compile at load). */
   warmup(): THREE.Object3D[] {
     const a = new THREE.Mesh(this.box, this.wallMat); a.position.y = -5000;
     const b = new THREE.Mesh(this.flash.geometry, this.flashMat); b.position.y = -5000;

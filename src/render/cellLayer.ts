@@ -1,8 +1,8 @@
-// Camada de desenho em níveis: L0 e L1 por célula, L2 por ladrilho, L3 por
-// placa. As malhas vêm prontas dos workers, só para o que está sujo. A escolha
-// desce placa → ladrilho → célula pela distância (erro de tela) e cai no nível
-// mais grosso que estiver pronto. Toda troca de nível esmaece por pontilhado:
-// a malha que entra e a que sai usam máscaras complementares por 0,35 s.
+// Drawing layer in levels: L0 and L1 per cell, L2 per tile, L3 per
+// plate. Meshes come ready from the workers, only for what is dirty. The choice
+// goes down plate → tile → cell by distance (screen error) and falls back to the
+// coarsest level that is ready. Every level change fades by dithering:
+// the incoming and outgoing meshes use complementary masks for 0.35 s.
 
 import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
@@ -10,33 +10,33 @@ import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOr
 import type { PackedMesh } from '../jobs/protocol.ts';
 
 export interface LayerSource {
-  /** Pede a malha de uma célula no nível 0 (tudo) ou 1 (sem peças pequenas). */
+  /** Asks for a cell's mesh at level 0 (everything) or 1 (without small parts). */
   buildCell(c: number, level: number, priority: number, done: (m: PackedMesh | null) => void): void;
-  /** Pede a malha fundida de um ladrilho (L2). */
+  /** Asks for a tile's merged mesh (L2). */
   buildTile(t: number, priority: number, done: (m: PackedMesh | null) => void): void;
-  /** Pede a malha fundida de uma placa (L3), se a camada tiver. */
+  /** Asks for a plate's merged mesh (L3), if the layer has plates. */
   buildPlate?(p: number, priority: number, done: (m: PackedMesh | null) => void): void;
-  /** A célula tem algo a desenhar? */
+  /** Does the cell have anything to draw? */
   hasContent(c: number): boolean;
 }
 
 export interface LayerOptions {
-  /** Distância em que um ladrilho passa a desenhar por células. */
+  /** Distance at which a tile starts drawing by cells. */
   near: number;
-  /** Além disto as malhas de célula saem da GPU. */
+  /** Beyond this, cell meshes leave the GPU. */
   evict: number;
-  /** Folga horizontal das caixas (malhas que passam da borda da célula). */
+  /** Horizontal slack of the boxes (meshes that reach past the cell's edge). */
   margin: number;
-  /** Além disto nem o ladrilho é desenhado (0 = sem limite). */
+  /** Beyond this not even the tile is drawn (0 = no limit). */
   far?: number;
-  /** Até aqui a célula usa L0; depois L1 (0 = só L0). */
+  /** Up to here the cell uses L0; beyond, L1 (0 = L0 only). */
   detail?: number;
-  /** Além disto a placa inteira usa L3 (0 = sem placas). */
+  /** Beyond this the whole plate uses L3 (0 = no plates). */
   plate?: number;
-  /** Teto de memória de vídeo (bytes): passando, as células saem mais perto. */
+  /** Video memory ceiling (bytes): past it, cells leave closer in. */
   budget?: number;
   shadows?: boolean;
-  /** Camada esparsa (detalhe perto da câmera): desenha as células que tiver, sem esperar o ladrilho inteiro. */
+  /** Sparse layer (detail near the camera): draws the cells it has, without waiting for the whole tile. */
   sparse?: boolean;
 }
 
@@ -49,7 +49,7 @@ const TILES_PER_PLATE = PLATE_SIZE / TILE_SIZE;
 
 interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number }
 
-/** Depois que a malha subiu para a GPU, a cópia na CPU não serve mais: troca por um vazio (count fica). */
+/** Once the mesh is on the GPU the CPU copy is no longer needed: swap it for an empty one (count stays). */
 function freeCpuCopy(g: THREE.BufferGeometry): void {
   for (const k of Object.keys(g.attributes)) {
     const a = g.attributes[k] as THREE.BufferAttribute;
@@ -85,10 +85,10 @@ export class CellLayer {
   private next = new Set<THREE.Mesh>();
   private fading: Array<{ mesh: THREE.Mesh; t0: number }> = [];
   private frame = 0;
-  /** Escala das distâncias pela resolução (1 = 1080p, 45°). */
+  /** Distance scale by resolution (1 = 1080p, 45°). */
   pixelScale = 1;
   gpuBytes = 0;
-  /** Encolhe o raio de descarte quando a memória passa do teto. */
+  /** Shrinks the eviction radius when memory passes the ceiling. */
   private evictScale = 1;
 
   constructor(src: LayerSource, dirty: DirtyCells, kind: DirtyKind, material: THREE.Material, opt: LayerOptions, extra = false, facade = false) {
@@ -104,7 +104,7 @@ export class CellLayer {
     this.group.matrixAutoUpdate = false;
   }
 
-  /** Malha mínima com o mesmo formato de vértice, para compilar o shader na carga. */
+  /** A minimal mesh with the same vertex format, to compile the shader at load. */
   warmupMesh(): THREE.Mesh {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Int16Array(12), 4, true));
@@ -126,7 +126,7 @@ export class CellLayer {
     return ((tz / TILES_PER_PLATE) | 0) * MAP_PLATES + ((tx / TILES_PER_PLATE) | 0);
   }
 
-  /** Consome as células sujas deste tipo e pede as malhas novas. */
+  /** Takes this kind's dirty cells and asks for the new meshes. */
   processDirty(): void {
     const cells = this.dirty.drain(this.kind);
     for (const c of cells) {
@@ -217,7 +217,7 @@ export class CellLayer {
     mesh.frustumCulled = false;
     mesh.castShadow = this.opt.shadows ?? true;
     mesh.receiveShadow = true;
-    // reconstrução por edição troca na hora (sem buraco do esmaecimento)
+    // a rebuild after an edit swaps at once (no fade hole)
     (mesh.userData as FadeData).instant = replacing;
     (mesh as { parent: THREE.Object3D | null }).parent = this.group;
     s.mesh = mesh;
@@ -227,7 +227,7 @@ export class CellLayer {
     this.gpuBytes += s.bytes;
   }
 
-  /** Escolhe o que desenhar. */
+  /** Chooses what to draw. */
   update(camera: THREE.Camera, camPos: THREE.Vector3): void {
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
@@ -289,7 +289,7 @@ export class CellLayer {
     const near = this.tileNear[t] ? dist < nearD * 1.12 : dist < nearD * 0.88;
     this.tileNear[t] = near ? 1 : 0;
     const ts = this.tiles[t];
-    // o ladrilho (L2) só fica na GPU na faixa em que pode ser desenhado
+    // the tile (L2) stays on the GPU only in the band where it can be drawn
     const keep = this.tileKeep();
     if (dist < keep) { if (ts.requested !== this.tileVer[t]) this.requestTile(t); }
     else if (dist > keep * 1.15 && (ts.mesh || ts.requested)) { this.setMesh(ts, null, 0); ts.requested = 0; }
@@ -308,7 +308,7 @@ export class CellLayer {
           const want = fine ? 0 : 1;
           this.requestCell(c, want);
           if (!this.opt.sparse && !this.cells[want][c].mesh && !(levels > 1 && this.cells[1 - want][c].mesh) && this.src.hasContent(c)) cellsReady = false;
-          // L0 longe da câmera sai da GPU (o L1 cobre)
+          // L0 far from the camera leaves the GPU (L1 covers it)
           if (levels > 1 && cd > detail * 1.6) {
             const s0 = this.cells[0][c];
             if (s0.mesh || s0.requested) { this.setMesh(s0, null, 0); s0.requested = 0; }
@@ -345,7 +345,7 @@ export class CellLayer {
     }
   }
 
-  /** Esmaecimento: quem entrou sobe, quem saiu desce, com máscaras complementares. */
+  /** Fading: what came in rises, what left goes down, with complementary masks. */
   private applyFades(): void {
     const now = performance.now() / 1000;
     const out = this.group.children;
@@ -353,7 +353,7 @@ export class CellLayer {
     this.frame++;
     for (const mesh of this.next) {
       const u = mesh.userData as FadeData;
-      // já foi desenhada num quadro anterior: os dados estão na GPU
+      // already drawn in an earlier frame: the data is on the GPU
       if (!u.freed) { if (u.drawnAt === undefined) u.drawnAt = this.frame; else if (this.frame - u.drawnAt >= 2) { freeCpuCopy(mesh.geometry); u.freed = true; } }
       if (!this.shown.has(mesh)) {
         u.since = u.instant || this.shown.size === 0 ? -1e9 : now;
@@ -378,7 +378,7 @@ export class CellLayer {
     const t = this.shown; this.shown = this.next; this.next = t;
   }
 
-  /** Esquece tudo (ao carregar outra cidade). */
+  /** Forgets everything (when loading another city). */
   reset(): void {
     for (const level of this.cells) for (const s of level) { this.setMesh(s, null, 0); s.requested = 0; }
     for (const s of this.tiles) { this.setMesh(s, null, 0); s.requested = 0; }

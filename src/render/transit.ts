@@ -1,6 +1,6 @@
-// Paradas de ônibus (abrigo + placa na cor da linha) e o traçado das linhas
-// quando a ferramenta de ônibus está ativa. Poucas instâncias: refeitas só
-// quando as linhas ou as vias mudam.
+// Bus stops (shelter + sign in the line's colour) and the lines' path
+// when the bus tool is active. Few instances: rebuilt only
+// when the lines or the roads change.
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -38,7 +38,7 @@ export class TransitRenderer {
   private built = -1;
 
   constructor() {
-    // abrigo: teto, fundo de vidro escuro, banco; frente para +z (a via)
+    // shelter: roof, dark glass back, bench; facing +z (the road)
     const shelter = mergeGeometries([
       coloredBox(3.2, 0.12, 1.6, 0, 2.5, 0, 0xd6d8da),
       coloredBox(0.08, 2.5, 0.08, -1.5, 0, -0.6, 0x5a5f64), coloredBox(0.08, 2.5, 0.08, 1.5, 0, -0.6, 0x5a5f64),
@@ -49,12 +49,12 @@ export class TransitRenderer {
     this.shelters = new THREE.InstancedMesh(shelter, shelterMat, CAP);
     this.shelters.count = 0;
     this.shelters.frustumCulled = false;
-    // placa da linha num poste ao lado
+    // the line's sign on a post beside it
     const marker = mergeGeometries([coloredBox(0.06, 2.9, 0.06, 1.9, 0, 0.4, 0xffffff), coloredBox(0.5, 0.5, 0.06, 1.9, 2.6, 0.4, 0xffffff)])!;
     this.markers = new THREE.InstancedMesh(marker, new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.5 }), CAP);
     this.markers.count = 0;
     this.markers.frustumCulled = false;
-    // instâncias e um traço de mentira para os shaders compilarem na carga
+    // instances and a dummy path so the shaders compile at load
     this.markers.setColorAt(0, new THREE.Color(1, 1, 1));
     this.m.makeTranslation(0, -5000, 0);
     this.shelters.setMatrixAt(0, this.m); this.markers.setMatrixAt(0, this.m);
@@ -64,17 +64,17 @@ export class TransitRenderer {
     g.setAttribute('color', new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1], 3));
     this.paths.add(new THREE.Line(g, this.lineMat));
     this.paths.renderOrder = 10;
-    // estação de trem: plataforma de 60 m com cobertura (uma de cada lado do trilho)
+    // train station: 60 m platform with a canopy (one on each side of the track)
     const platform = mergeGeometries([
       coloredBox(3.4, 1.05, 60, 0, 0, 0, 0xb9b4aa),
-      coloredBox(3.4, 0.05, 60, 0, 1.05, 0, 0xe8c840), // faixa amarela de segurança (borda)
+      coloredBox(3.4, 0.05, 60, 0, 1.05, 0, 0xe8c840), // yellow safety strip (edge)
       coloredBox(3.0, 0.15, 36, 0.2, 4.4, 0, 0xd6d8da),
       ...[-15, -5, 5, 15].map((z) => coloredBox(0.15, 3.4, 0.15, 1.2, 1.05, z, 0x5a5f64)),
       coloredBox(0.6, 0.6, 1.6, 1.0, 3.6, 0, 0x1f4f9a),
     ])!;
     this.platforms = new THREE.InstancedMesh(platform, shelterMat, 512);
     this.platforms.count = 0; this.platforms.frustumCulled = false;
-    // entrada do metrô: escada coberta com placa
+    // metro entrance: covered stairs with a sign
     const entrance = mergeGeometries([
       coloredBox(3.2, 0.9, 6, 0, 0, 0, 0x8a8e92),
       coloredBox(3.4, 0.12, 6.4, 0, 2.6, 0, 0xd6d8da),
@@ -91,7 +91,7 @@ export class TransitRenderer {
 
   set showPaths(v: boolean) { this.paths.visible = v; }
 
-  /** Refaz as instâncias quando as linhas ou as vias mudam. */
+  /** Rebuilds the instances when the lines or the roads change. */
   update(transit: Transit, net: RoadNetwork, heights: Float32Array, version: number): void {
     if (version === this.built) return;
     this.built = version;
@@ -108,7 +108,7 @@ export class TransitRenderer {
       for (let k = 0; k * 2 < l.stops.length && n < CAP; k++) {
         const x = l.stops[k * 2], z = l.stops[k * 2 + 1];
         let y = heightAt(heights, x, z) + 0.15;
-        // de frente para a via mais próxima (estação: alinhada ao trilho)
+        // facing the nearest road (station: aligned with the track)
         let yaw = 0;
         const hit = net.nearestSeg(x, z, 40);
         if (hit) {
@@ -130,7 +130,7 @@ export class TransitRenderer {
                 this.platforms.setMatrixAt(np++, this.m);
               }
             } else if (ne < 512) {
-              // metrô no subsolo: entrada na superfície, ao lado do traçado
+              // underground metro: entrance on the surface, beside the path
               const u = half + 4;
               const gx = x + lx * u, gz = z + lz * u;
               this.m.compose(new THREE.Vector3(gx, heightAt(heights, gx, gz), gz), this.q, new THREE.Vector3(1, 1, 1));
@@ -143,7 +143,7 @@ export class TransitRenderer {
           }
         }
         this.q.setFromAxisAngle(this.up, yaw);
-        // terminal: abrigo comprido (três vezes) e mais alto
+        // terminal: long shelter (three times) and taller
         const term = transit.terminalNear(x, z, 9) >= 0;
         this.m.compose(new THREE.Vector3(x, y, z), this.q, term ? new THREE.Vector3(3.2, 1.35, 1.4) : new THREE.Vector3(1, 1, 1));
         this.shelters.setMatrixAt(n, this.m);
