@@ -275,4 +275,6 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.people.outfit.work': "Work",
   'save.discardConfirm': 'This city has changes that are not saved yet. Discard them and go on?',
   'save.languageDiscard': 'The city could not be saved before changing the language. Change anyway and lose what is not saved?',
+  'save.tilesMissing.one': '1 part of the map was gone from the save and came back as the original terrain, without roads or buildings. The save was kept as it was in "{folder}".',
+  'save.tilesMissing.other': '{count} parts of the map were gone from the save and came back as the original terrain, without roads or buildings. The save was kept as it was in "{folder}".',
 };

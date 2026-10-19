@@ -36,7 +36,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { followLanguage, onLanguageReload, setLang, t } from './ui/i18n.ts';
+import { followLanguage, onLanguageReload, plural, setLang, t } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -2189,16 +2189,17 @@ export class Game {
         this.setWeather(extra.weather ?? null);
       } catch { /* old save */ }
       w.tileInSave.set(meta.tiles);
-      let corrupt = 0;
+      let corrupt = 0, missing = 0;
       await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
         if (meta.tiles[t]) {
           const r = await this.pool.run('loadTile', { slot: SLOT, tile: t }, { key: `terrain:${t}`, priority: 0 });
-          if (r.corrupt) {
-            // unreadable tile: its terrain comes back from the seed; the save goes to quarantine below
-            corrupt++;
+          if (r.corrupt || !r.found) {
+            // unreadable tile, or listed and gone: its terrain comes back from the seed (never the terrain of the city
+            // that was on screen); the save goes to quarantine below
+            if (r.corrupt) corrupt++; else missing++;
             const g = await this.pool.run('terrainGen', { seed: w.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
             w.tileMin[t] = g.min; w.tileMax[t] = g.max;
-          } else if (r.found) {
+          } else {
             w.tileMin[t] = r.min; w.tileMax[t] = r.max;
             if (r.boxes) this.insertBoxes(r.boxes);
             if (r.roads) roads.push(r.roads);
@@ -2226,10 +2227,9 @@ export class Game {
       // old maps: dead ends lying inside another road become junctions (marked to save)
       const repaired = repairDanglingEnds(w);
       if (repaired) this.unsaved = true;
-      if (corrupt) {
-        const q = await quarantineSlot(SLOT).catch(() => null);
-        this.hud.toast(`${corrupt} ${corrupt === 1 ? 'pedaço do mapa estava ilegível e voltou' : 'pedaços do mapa estavam ilegíveis e voltaram'} do relevo original${q ? `; o salvamento original foi guardado intacto em "${q}"` : ''}.`);
-      }
+      const q = corrupt || missing ? await quarantineSlot(SLOT).catch(() => null) : null;
+      if (corrupt) this.hud.toast(`${corrupt} ${corrupt === 1 ? 'pedaço do mapa estava ilegível e voltou' : 'pedaços do mapa estavam ilegíveis e voltaram'} do relevo original${q ? `; o salvamento original foi guardado intacto em "${q}"` : ''}.`);
+      if (missing) this.hud.toast(plural('save.tilesMissing', missing, { folder: q ?? '—' }));
       if (repaired) this.hud.toast(`Mapa reparado: ${repaired} ${repaired === 1 ? 'ponta solta dentro de outra via virou cruzamento' : 'pontas soltas dentro de outras vias viraram cruzamentos'}.`);
       this.rig.restore(meta.camera);
       this.hud.setView(this.rig.mode);

@@ -275,4 +275,6 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.people.outfit.work': "Trabalho",
   'save.discardConfirm': 'Esta cidade tem alterações que ainda não foram salvas. Descartar e continuar?',
   'save.languageDiscard': 'Não foi possível salvar a cidade antes de trocar o idioma. Trocar mesmo assim e perder o que não foi salvo?',
+  'save.tilesMissing.one': '1 pedaço do mapa sumiu do salvamento e voltou do relevo original, sem vias nem prédios. O salvamento foi guardado como estava em "{folder}".',
+  'save.tilesMissing.other': '{count} pedaços do mapa sumiram do salvamento e voltaram do relevo original, sem vias nem prédios. O salvamento foi guardado como estava em "{folder}".',
 };
