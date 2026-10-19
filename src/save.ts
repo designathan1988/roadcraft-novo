@@ -33,6 +33,20 @@ export class MapSizeError extends Error {
   constructor(tiles: number) { super(`salvamento de um mapa de ${tiles} km`); this.tiles = tiles; }
 }
 
+/**
+ * The ids and the listed tiles of a map description, for any map size (`decodeMeta` refuses other sizes). Throws when
+ * the bytes are not a map description.
+ */
+export function metaHeader(data: Uint8Array): { seed: number; gameId: number; tiles: Uint8Array } {
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  if (data.byteLength < 20 || dv.getUint32(0, true) !== MAGIC_META) throw new Error('not a map description');
+  const count = dv.getUint32(16, true);
+  if (count > 4096 || data.byteLength < 20 + Math.ceil(count / 8)) throw new Error('map description cut short');
+  const tiles = new Uint8Array(count);
+  for (let i = 0; i < count; i++) tiles[i] = (dv.getUint8(20 + (i >> 3)) >> (i & 7)) & 1;
+  return { seed: dv.getUint32(8, true), gameId: dv.getUint32(12, true), tiles };
+}
+
 export function encodeMeta(m: SaveMeta): Uint8Array {
   const bitBytes = Math.ceil(TILE_COUNT / 8);
   const prof = new TextEncoder().encode(m.profiles ?? '');

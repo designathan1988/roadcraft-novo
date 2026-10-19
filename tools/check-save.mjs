@@ -227,6 +227,27 @@ const SCENARIOS = {
     r = await within(g.load(), 30000);
     check('once the storage works the save opens with its road', r === 'returned' && !g.busy && !g.saveBlocked && roadAt(1600, 1500), 'load() ' + r + ' blocked=' + g.saveBlocked + ' road=' + roadAt(1600, 1500));
   `,
+  // A36: exporting packs only the files of the city saved now (never tiles of a city saved earlier in the same slot),
+  // and opening an old package that carries such a file does not take it in
+  'export-this-city': `
+    road(-4000, -4000, -3800, -4000);
+    check('the first city is saved', await g.save(false) === true, 'save() did not complete');
+    await g.newMap();
+    w.unlimited = true;
+    road(1500, 1500, 1700, 1500);
+    check('the second city is saved', await g.save(false) === true, 'save() did not complete');
+    const listed = () => w.tileInSave.reduce((s, v) => s + v, 0);
+    let names = (await unpack(await a.packMap())).map(([n]) => n);
+    check('the export holds one file per tile of this city', names.filter((n) => n.startsWith('tile_')).length === listed(), names.length + ' files: ' + names + '; tiles listed ' + listed());
+    // an old-style package (meta.bin + tile_NNNN.bin) that also carries a file of a tile its map does not list
+    const old = (await unpack(await a.packMap())).filter(([n]) => n === 'meta.bin' || /^tile_[0-9]{4}[.]bin$/.test(n));
+    if (old.length) {
+      old.push(['tile_0000.bin', old.find(([n]) => n.startsWith('tile_'))[1]]);
+      await g.importMap(pack(old));
+      names = (await unpack(await a.packMap())).map(([n]) => n);
+      check('a stray tile file of an opened package is not taken in', names.filter((n) => n.startsWith('tile_')).length === listed(), names + '; tiles listed ' + listed());
+    }
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);

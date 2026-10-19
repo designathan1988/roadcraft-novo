@@ -1,7 +1,24 @@
 // Map as a file: bundles the save files (meta and tiles, already compressed) into a single file
 // for download, and does the reverse. Does not read the world: it copies what the save wrote.
 
+import { metaHeader } from './save.ts';
+
 const MAGIC = 'CIDADE-MAPA-1';
+
+/**
+ * The files of a save that its map description lists: meta.bin and the tile files of the tiles it lists. Tile files
+ * of other tiles (left in the folder by a city saved there earlier) are not part of it.
+ */
+function ofThisSave(files: Array<[string, Uint8Array]>): Array<[string, Uint8Array]> {
+  const meta = files.find(([n]) => n === 'meta.bin') ?? files.find(([n]) => n.startsWith('meta'));
+  if (!meta) return files;
+  let listed: Uint8Array;
+  try { listed = metaHeader(meta[1]).tiles; } catch { return files; } // not readable: kept whole (it is checked later)
+  return files.filter(([n]) => {
+    const m = /^tile_(\d{4})\.bin$/.exec(n);
+    return m ? listed[Number(m[1])] === 1 : n === meta[0];
+  });
+}
 
 async function slotDir(slot: string, create: boolean): Promise<FileSystemDirectoryHandle | null> {
   try {
@@ -11,22 +28,18 @@ async function slotDir(slot: string, create: boolean): Promise<FileSystemDirecto
   } catch { return null; }
 }
 
-/** The save files in one package: [MAGIC][n] and, for each one, [name][size][bytes]. */
+/** The save's files in one package: [MAGIC][n] and, for each one, [name][size][bytes]. Only the files of this save. */
 export async function packSlot(slot: string): Promise<Blob | null> {
-  const dir = await slotDir(slot, false);
-  if (!dir) return null;
   const parts: BlobPart[] = [];
   const enc = new TextEncoder();
   const head = enc.encode(MAGIC);
   let count = 0;
   const body: BlobPart[] = [];
-  for await (const [name, h] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
-    if (h.kind !== 'file') continue;
-    const data = new Uint8Array(await (await (h as FileSystemFileHandle).getFile()).arrayBuffer());
+  for (const [name, data] of ofThisSave(await slotFiles(slot))) {
     const nm = enc.encode(name);
     const hdr = new DataView(new ArrayBuffer(8));
     hdr.setUint32(0, nm.length, true); hdr.setUint32(4, data.length, true);
-    body.push(hdr.buffer, nm, data);
+    body.push(hdr.buffer, nm, data as BlobPart);
     count++;
   }
   if (count === 0) return null;
@@ -88,7 +101,8 @@ async function slotFiles(slot: string): Promise<Array<[string, Uint8Array]>> {
  * if writing fails it is put back. Returns the folder the previous city was kept in (null: there was none).
  */
 export async function unpackToSlot(slot: string, file: Blob, check: (meta: Uint8Array) => void): Promise<string | null> {
-  const files = await readPackage(file);
+  // stray tile files an older export carried from an earlier city are left out
+  const files = ofThisSave(await readPackage(file));
   check(files.find(([n]) => n.startsWith('meta'))![1]);
   const before = await slotFiles(slot);
   const kept = before.length ? await keepPreviousCity(slot) : null;
