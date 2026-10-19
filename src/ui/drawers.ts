@@ -12,7 +12,7 @@ import { DEFAULT_PERSON_OPTIONS, type PersonOptions } from '../render/people/cre
 import { renderPeople } from './peoplePanel.ts';
 import type { HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hud.ts';
 import type { RoadCatalog } from './roadCatalog.ts';
-import { button, card, choices, el, orow, range, select, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
+import { button, card, choices, dropdown, el, orow, range, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, fmtInt, loose, plural, t } from './i18n.ts';
 
@@ -317,7 +317,7 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
     })))));
   }
   if (s.lotMode === 'rect' || s.lotMode === 'poly') {
-    p.options.append(orow(t('v2.zone.use'), select(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
+    p.options.append(orow(t('v2.zone.use'), dropdown(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
       (v) => { s.lotUse = Number(v); a.lotUse(s.lotUse); })));
   }
 }
@@ -347,9 +347,9 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
       // the address under the title (the decay has its own row below, with Renovate)
       const address = b.address || (a.addressOf?.() ?? '');
       if (address) p.options.append(el('div', 'v2-pop-sub', address));
-      p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
+      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
       p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(b.floors === 0 && d < 0 ? 0 : Math.max(1, Math.min(60, b.floors + d))); })));
-      p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
+      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
       p.options.append(orow(t('ui.build.actions'),
         button('v2-act danger', t('inspector.demolish'), () => a.demolishBuilding(), svg('demolish', 16)),
         button(`v2-act${h.insideFloor() >= 0 ? ' on' : ''}`, t('inside.toggle'), () => a.inside('toggle'), svg('interiorView', 16)),
@@ -365,8 +365,8 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
     } else {
       p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
       p.options.append(subhead(t('ui.build.next')));
-      p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { s.nextArch = Number(v); a.style(s.nextArch); })));
-      p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { s.nextFn = Number(v); a.buildingFn(s.nextFn); })));
+      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { s.nextArch = Number(v); a.style(s.nextArch); })));
+      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { s.nextFn = Number(v); a.buildingFn(s.nextFn); })));
     }
     // extension point: the buildings session mounts its editor here (src/ui/creator.ts)
     p.options.append(h.buildingSlot);
@@ -374,7 +374,7 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
     const draw = section(p.strip, t('builder.category.draw'));
     draw.append(card(t('zone.lot.shape.rect'), s.lotMode === 'rect', () => { s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, svg('plus', 30)),
       card(t('zone.lot.shape.polygon'), s.lotMode === 'poly', () => { s.lotMode = 'poly'; a.lotMode('poly'); h.render(); }, svg('lotPolygon', 30)));
-    p.options.append(orow(t('v2.zone.use'), select(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
+    p.options.append(orow(t('v2.zone.use'), dropdown(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
       (v) => { s.lotUse = Number(v); a.lotUse(s.lotUse); })));
   }
 }
@@ -517,7 +517,7 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     poles.append(card(t('pole.mode.build'), poleOn && !s.itemRemove, () => { s.itemRemove = false; a.itemRemove(false); s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_build', 30)));
     poles.append(card(t('pole.mode.remove'), poleOn && s.itemRemove, () => { s.itemRemove = true; a.itemRemove(true); s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_remove', 30)));
     if (cur === 'streetscape' && s.item === Item.Sign) {
-      p.options.append(orow(t('v2.row.sign'), select(t('sign.type'), SIGNS.map(([k, key]) => [k, t(key)] as const), s.sign, (v) => { s.sign = Number(v); a.signType(s.sign); h.render(); })));
+      p.options.append(orow(t('v2.row.sign'), dropdown(t('sign.type'), SIGNS.map(([k, key]) => [k, t(key)] as const), s.sign, (v) => { s.sign = Number(v); a.signType(s.sign); h.render(); })));
       // words only on the signs that carry them: speed, street name, direction, information (Roadcraft 4.0)
       if ([0, 2, 9, 10].includes(s.sign)) p.options.append(orow(t('v2.row.text'), textInput(t(s.sign === 2 ? 'sign.street.placeholder' : s.sign === 0 ? 'sign.text.speed' : 'sign.text'), s.signText, (v) => { s.signText = v; a.signText(v); })));
     }

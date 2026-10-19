@@ -7,7 +7,7 @@
 import './shell.css';
 import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
-import { button, el, orow, range, choices } from './dom.ts';
+import { button, closeDropdown, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
 import { mountCompass, type Compass } from './compass.ts';
@@ -473,6 +473,7 @@ export class Hud {
   private render(): void {
     for (const [id, b] of this.catButtons) b.classList.toggle('on', this.open && id === this.cat);
     const p = this.parts;
+    closeDropdown();
     // the same panel rebuilt (a pick in it): the strip keeps its scroll (Roadcraft 4.0)
     const signature = `${this.cat}|${this.current}|${this.s.landTab}|${this.s.transitTab}`;
     const scroll = p.strip.scrollLeft;

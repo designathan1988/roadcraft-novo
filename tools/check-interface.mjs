@@ -41,6 +41,10 @@ const mapClick = async (x, z, o = {}) => {
   await frames(2);
 };
 const road = (ax, az, bx, bz, profile = 0) => { const r = a.road(ax, az, bx, bz, profile); if (r !== 'ok') throw new Error('road refused: ' + r); };
+/** The list of an options row (a themed list or a native select): pick a value, read the value shown. */
+const listOf = (re) => { const r = QA('.v2-toolopts .v2-orow').find((x) => re.test(x.getAttribute('aria-label'))); return r && (r.querySelector('.v2-dd') || r.querySelector('select')); };
+const choose = async (re, v) => { const l = listOf(re); if (l.tagName === 'SELECT') { l.value = String(v); l.dispatchEvent(new Event('change')); } else { l.click(); await frames(1); Q('.v2-dd-list [data-value="' + v + '"]').click(); } await frames(2); };
+const listValue = (re) => { const l = listOf(re); return l ? (l.tagName === 'SELECT' ? l.value : l.dataset.value) : undefined; };
 w.unlimited = true;
 `;
 
@@ -284,13 +288,10 @@ export const SCENARIOS = {
   // B22: the next drawn lot shows the style and function that will be used
   'B22-next-lot-choice': `
     click('[data-cat=build]'); await frames(2);
-    const sel = QA('.v2-toolopts select');
-    sel[0].value = '2'; sel[0].dispatchEvent(new Event('change')); await frames(1);
-    sel[1].value = '3'; sel[1].dispatchEvent(new Event('change')); await frames(1);
+    await choose(/Estilo|Style/, 2); await choose(/Função|Function/, 3);
     click('[data-cat=roads]'); await frames(2); click('[data-cat=build]'); await frames(2);
-    const again = QA('.v2-toolopts select');
-    check('the style shown is the one chosen', again[0].value === '2' && g.newArch === 2, 'shows ' + again[0].value + ', next ' + g.newArch);
-    check('the function shown is the one chosen', again[1].value === '3' && g.newFn === 3, 'shows ' + again[1].value + ', next ' + g.newFn);
+    check('the style shown is the one chosen', listValue(/Estilo|Style/) === '2' && g.newArch === 2, 'shows ' + listValue(/Estilo|Style/) + ', next ' + g.newArch);
+    check('the function shown is the one chosen', listValue(/Função|Function/) === '3' && g.newFn === 3, 'shows ' + listValue(/Função|Function/) + ', next ' + g.newFn);
   `,
   // B23: the water panel shows the values of the map that was opened
   'B23-panels-show-map': `
@@ -641,10 +642,9 @@ export const SCENARIOS = {
     check('weather ranges as 4.0 (wind 30, direction step 5, lightning 30)', r(/^Vento|^Wind/).max === '30' && r(/Direção|direction/i).step === '5' && r(/Raios|Lightning/).max === '30', 'wind ' + r(/^Vento|^Wind/).max + ', dir step ' + r(/Direção|direction/i).step + ', lightning ' + r(/Raios|Lightning/).max);
     click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
     click(byText('.v2-card', '^Placa|^Sign')); await frames(2);
-    const sel = Q('.v2-toolopts select');
-    sel.value = '4'; sel.dispatchEvent(new Event('change')); await frames(2);
+    await choose(/Placa|Sign/, 4);
     check('a Stop sign has no text box', !Q('.v2-toolopts .v2-search'), 'text box shown');
-    const sel2 = Q('.v2-toolopts select'); sel2.value = '0'; sel2.dispatchEvent(new Event('change')); await frames(2);
+    await choose(/Placa|Sign/, 0);
     check('a speed sign has its text box', !!Q('.v2-toolopts .v2-search'), 'no text box');
     check('street items have their help note', note().length > 20, 'note: ' + note());
     click(byText('.v2-card', '^Muro|^Wall')); await frames(2);
@@ -703,6 +703,27 @@ export const SCENARIOS = {
     const cut = QA('.v2-strip .v2-card-name').filter((n) => n.scrollWidth > n.clientWidth + 1).map((n) => n.textContent);
     check('no card name cut inside a word', cut.length === 0, 'cut: ' + cut.join(', '));
   ` },
+  // The 4.0 themed lists (shell.ts:971-1040) in place of the browser's white select: Down, Up, Home, End and Enter in the
+  // list, Esc closes it (the tool stays) and gives the focus back
+  'dropdown-4.0': `
+    click('[data-cat=build]'); await frames(2);
+    const natives = QA('.v2-toolopts select, .v2-drawer select').filter((x) => x.offsetParent !== null);
+    check('no native select in the panels', natives.length === 0, natives.length + ' native selects: ' + natives.map((x) => x.getAttribute('aria-label') || x.title).join(', '));
+    const dd = listOf(/Estilo|Style/);
+    if (!dd || dd.tagName === 'SELECT') throw new Error('no themed list');
+    click(dd); await frames(2);
+    const list = Q('.v2-dd-list');
+    check('the list opens in the theme, the choice focused', !!list && document.activeElement && document.activeElement.classList.contains('on'), 'list ' + !!list + ', focus ' + (document.activeElement && document.activeElement.className));
+    for (const k of ['ArrowDown', 'ArrowDown']) document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, bubbles: true, cancelable: true }));
+    const at = document.activeElement.dataset.value;
+    check('Down moves through the list', at === '1', 'focused ' + at);
+    document.activeElement.click(); await frames(2);
+    check('a pick sets the style', g.newArch === 1 && listValue(/Estilo|Style/) === '1', 'next ' + g.newArch + ', shows ' + listValue(/Estilo|Style/));
+    click(listOf(/Estilo|Style/)); await frames(2);
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); await frames(2);
+    check('Esc closes the list and keeps the tool', !Q('.v2-dd-list') && g.tool === 'building', 'list open ' + !!Q('.v2-dd-list') + ', tool ' + g.tool);
+    check('the focus goes back to the list button', document.activeElement === listOf(/Estilo|Style/), 'focus ' + (document.activeElement && document.activeElement.className));
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
