@@ -6,6 +6,7 @@
 // zebra crossings. High segments become bridges (deck, parapet, piers) and
 // buried segments become tunnels with a portal.
 
+import { SEA_LEVEL } from '../config.ts';
 import { arcTable, bez, bezD, tAtLength, type Arm, type Quad } from '../roads/geometry.ts';
 import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, cornerFillet, junctionRetreats } from '../roads/junction.ts';
 import { PROFILE_INFO, Paving, Surface, type ProfileInfo, type Strip } from '../roads/profiles.ts';
@@ -30,7 +31,28 @@ function rampShare(d: number): number {
   if (d <= RAMP_TO) return 0;
   return Math.min(1, (d - RAMP_TO) / RAMP_FLARE);
 }
-const PILLAR_EVERY = 26;
+/** Bridges (Roadcraft render/structures.ts): pier spacing on land (viaduct) and over water, the crossbeam's height and
+ *  overhang, an abutment's length, and how near an abutment a pier may stand. */
+export const PIER_SPACING_ELEVATED = 29.6, PIER_SPACING_BRIDGE = 38.4;
+const CAP_H = 0.72, CAP_OVERHANG = 0.64, ABUTMENT_LEN = 1.6, ABUTMENT_CLEAR = 10.4, PARAPET_FROM = 0.64, PARAPET_FULL = 1.28;
+const smooth01 = (t: number) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
+
+/** Where the piers of a span from s0 to s1 go: every `spacing` from half a spacing in, never within ABUTMENT_CLEAR of an
+ *  abutment; one at mid-span when none fits. */
+export function pierStations(s0: number, s1: number, spacing: number, abutments: readonly number[]): number[] {
+  const out: number[] = [];
+  for (let d = s0 + spacing * 0.5; d < s1 - spacing * 0.35; d += spacing) if (!abutments.some((a) => Math.abs(a - d) < ABUTMENT_CLEAR)) out.push(d);
+  if (!out.length) { const mid = (s0 + s1) / 2; if (!abutments.some((a) => Math.abs(a - mid) < ABUTMENT_CLEAR)) out.push(mid); }
+  return out;
+}
+
+/** A bent under a deck of half width `halfDeck`: column offsets across the road, the column's width (thicker when
+ *  taller: an eighth of its height, between r and 1.8 r) and r (wider over water). */
+export function bentColumns(halfDeck: number, height: number, overWater: boolean): { offsets: number[]; width: number; radius: number } {
+  const radius = overWater ? 1.28 : 1.04;
+  const spread = Math.max(0, Math.min(0.55 * halfDeck, halfDeck - radius - 1));
+  return { offsets: spread > 0 ? [-spread, spread] : [0], width: Math.min(radius * 1.8, Math.max(radius, height / 8)), radius };
+}
 
 const COLOR = {
   asphalt: 0x3a3c40, parking: 0x404246, bike: 0x9a4a3e, shoulder: 0x4a4c4f,
@@ -348,23 +370,26 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
       if (prev && (bridge(k) || bridge(k - 1))) mb.quad(prev[0], a, b, prev[1], 0, -1, 0);
       prev = [a, b];
     }
-    // parapets on both edges where it is high
+    // parapets on both edges, growing in with the deck's height over the ground (Roadcraft: smoothstep 0.64–1.28 m)
+    const lift = (k: number) => F[k * 5 + 4] - ground[k];
+    const railed = (k: number) => lift(k) > PARAPET_FROM;
+    const parapet = (k: number) => CURB_H + (1.0 - CURB_H) * smooth01((lift(k) - PARAPET_FROM) / (PARAPET_FULL - PARAPET_FROM));
     const top = (h: number) => () => h;
     for (const [u, inward] of [[first.u0, true], [last.u1, false]] as Array<[number, boolean]>) {
       const w = inward ? 0.25 : -0.25;
-      wall(u, top(CURB_H), top(1.0), !inward, COLOR.concrete, RMAT.Concrete, bridge);
-      wall(u + w, top(CURB_H), top(1.0), inward, COLOR.concrete, RMAT.Concrete, bridge);
+      wall(u, top(CURB_H), parapet, !inward, COLOR.concrete, RMAT.Concrete, railed);
+      wall(u + w, top(CURB_H), parapet, inward, COLOR.concrete, RMAT.Concrete, railed);
       // parapet coping: the top of the wall, a little wider than it
       let pc: [number, number] | null = null;
       for (let k = 0; k < n; k++) {
         const o = k * 5;
-        const lx = F[o + 3], lz = -F[o + 2], y = F[o + 4] + 1.0;
+        const lx = F[o + 3], lz = -F[o + 2], y = F[o + 4] + parapet(k);
         const ua = u - (inward ? 0.03 : -0.03), ub = u + w + (inward ? 0.03 : -0.03);
         const cur: [number, number] = [
           mb.vert(F[o] + lx * ua, y, F[o + 1] + lz * ua, 0, 1, 0, COLOR.curb, RMAT.Concrete),
           mb.vert(F[o] + lx * ub, y, F[o + 1] + lz * ub, 0, 1, 0, COLOR.curb, RMAT.Concrete),
         ];
-        if (pc && bridge(k) && bridge(k - 1)) mb.quad(pc[0], cur[0], cur[1], pc[1], 0, 1, 0);
+        if (pc && railed(k) && railed(k - 1)) mb.quad(pc[0], cur[0], cur[1], pc[1], 0, 1, 0);
         pc = cur;
       }
     }
@@ -386,21 +411,35 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
         }
       }
     }
-    // piers
-    const width = last.u1 - first.u0;
-    for (let d = s0 + PILLAR_EVERY / 2; d < s1; d += PILLAR_EVERY) {
+    // Roadcraft structures.ts: an abutment where the deck leaves the ground, piers spaced by kind (over water wider)
+    // clear of the abutments, each a two-column bent under a crossbeam, the columns thicker the taller they are
+    const width = last.u1 - first.u0, halfDeck = width / 2;
+    const abutments: number[] = [];
+    let wet = false;
+    for (let k = 0; k < n; k++) {
+      if (ground[k] < SEA_LEVEL + 0.3) wet = true;
+      if (k + 1 < n && elevated(k) !== elevated(k + 1)) abutments.push(at[elevated(k) ? k + 1 : k]);
+    }
+    for (const d of abutments) {
+      frameAt(g, s, q, table, len, d, f);
+      const gy = heightAt(heights, f[0], f[1]), soffit = f[4] - DECK;
+      mb.box(f[0], f[1], Math.min(gy, soffit) - 1, soffit, f[2], f[3], ABUTMENT_LEN / 2, halfDeck + 0.3, COLOR.concrete, RMAT.Concrete, true);
+    }
+    for (const d of pierStations(s0, s1, wet ? PIER_SPACING_BRIDGE : PIER_SPACING_ELEVATED, abutments)) {
       frameAt(g, s, q, table, len, d, f);
       const gy = heightAt(heights, f[0], f[1]);
-      if (f[4] - gy < 3) continue;
+      const soffit = f[4] - DECK - 1.1, beam = soffit - CAP_H;
+      if (f[4] - gy <= 1.2 || beam - gy < 0.36) continue;
+      const bent = bentColumns(halfDeck, beam - gy, gy < SEA_LEVEL + 0.3);
       const lx = f[3], lz = -f[2];
-      const offs = width > 16 ? [-width / 4, width / 4] : [0];
-      for (const off of offs) {
+      for (const off of bent.offsets) {
         // round pier near (octagonal prism), square farther
-        if (lod === 0) prism(mb, f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK - 1.1, 0.62, 8, COLOR.concrete, RMAT.Concrete);
-        else mb.box(f[0] + lx * off, f[1] + lz * off, gy - 1, f[4] - DECK - 1.1, f[2], f[3], 0.6, 0.6, COLOR.concrete, RMAT.Concrete);
+        if (lod === 0) prism(mb, f[0] + lx * off, f[1] + lz * off, gy - 1, beam, bent.width / 2, 8, COLOR.concrete, RMAT.Concrete);
+        else mb.box(f[0] + lx * off, f[1] + lz * off, gy - 1, beam, f[2], f[3], bent.width / 2, bent.width / 2, COLOR.concrete, RMAT.Concrete);
       }
-      // pier cap (crossbeam) under the girders
-      mb.box(f[0], f[1], f[4] - DECK - 2.1, f[4] - DECK - 1.1, f[2], f[3], 0.8, width / 2 - 0.3, COLOR.concrete, RMAT.Concrete, true);
+      // crossbeam under the girders, past the columns by its overhang
+      const reach = bent.offsets.length > 1 ? Math.abs(bent.offsets[0]) + bent.width / 2 + CAP_OVERHANG : halfDeck - 0.3;
+      mb.box(f[0], f[1], beam, soffit, f[2], f[3], bent.width * 1.1, Math.min(halfDeck - 0.1, reach), COLOR.concrete, RMAT.Concrete, true);
     }
   }
 
