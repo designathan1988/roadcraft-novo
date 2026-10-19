@@ -620,3 +620,19 @@ test('C32: level crossing barriers close for trains far from the camera too, and
   assert.ok(closed > 0, 'the barrier never closed for a train away from the camera');
   assert.ok(carWaited, 'a far car crossed the rails with the barrier down');
 });
+
+test('C42: a car stopped at the kerb when the camera leaves finishes its drop-off instead of vanishing', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const k = sim.conns.cols, conn = someConn(sim), lane = k.from[conn];
+  const v = place(tr, lane, 20, k.to[conn], true);
+  const c = tr.veh.cols;
+  c.v[v] = 0; c.dying[v] = 4; c.dwell[v] = 2; c.served[v] = 1; // passenger getting out
+  const arrived = tr.arrived, lost = tr.lost;
+  tr.camX = 8000; tr.camZ = 8000; tr.checkWindow();
+  for (let i = 0; i < 20 * 5; i++) tr.step(0.05);
+  assert.equal(tr.lost, lost, 'counted as a lost trip');
+  assert.equal(tr.arrived, arrived + 1, `the drop-off trip was not counted (arrived ${arrived} → ${tr.arrived})`);
+  assert.ok(tr.veh.alive[v] && !c.dying[v], 'the car did not drive on to its next trip');
+});

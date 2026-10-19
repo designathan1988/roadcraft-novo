@@ -2365,6 +2365,15 @@ export class Traffic {
       if (c.conn[v] >= 0 || c.dying[v] === 2) continue;
       const lane = c.lane[v];
       if (this.inWindowOut(lane)) continue;
+      // what only exists near the camera ends here, counted: a drop-off at the kerb finishes its trip and the car goes
+      // on to the next; a car or truck manoeuvring into its bay or dock has arrived; one fading out leaves
+      if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
+      if (c.dying[v] === 3 || c.dying[v] === 1) { this.finish(v); continue; }
+      if (c.dying[v] === 4) {
+        c.dying[v] = 0; c.served[v] = 0;
+        if (!this.dropOffTrip(v, this.sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; this.finish(v); continue; }
+      }
+      c.pk[v] = 0;
       this.unlink(v);
       this.removeMicro(v);
       this.mesoEnter(v, lane, true);
