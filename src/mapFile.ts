@@ -116,6 +116,9 @@ async function foldersOf(store: FileStore, prefix: string, slot: string): Promis
   return (await store.folders()).filter((n) => n.startsWith(`${prefix}-`) && n.endsWith(`-${slot}`)).sort();
 }
 
+/** The reason written in a quarantine note when tiles could not be read (a log line, not shown to the player). */
+export const QUARANTINE_UNREADABLE_TILES = 'tiles that cannot be read';
+
 /** How many previous cities and quarantined saves are kept per slot (the oldest beyond that are removed). */
 const PREVIOUS_KEPT = 3;
 const QUARANTINES_KEPT = 3;

@@ -80,7 +80,7 @@ import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParam
 import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
-import { MapFileError, keepPreviousCity, packSlot, previousCities, quarantineSlot, readPackage, restorePrevious, savedIn, type SaveActions } from './mapFile.ts';
+import { MapFileError, QUARANTINE_UNREADABLE_TILES, keepPreviousCity, packSlot, previousCities, quarantineSlot, readPackage, restorePrevious, savedIn, type SaveActions } from './mapFile.ts';
 import { KeptFileMissing, SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation, type Opened } from './saveFiles.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
 
@@ -2512,7 +2512,7 @@ export class Game {
       if (order.length > 1) for (let k = 0; k < order.length && !report; k++) report = await this.openGeneration(slot, (used = order[k]), false);
       if (!report) report = await this.openGeneration(slot, (used = order[0]), true);
       const fellBack = used.gen !== opened.newest;
-      const q = fellBack || report!.missing || report!.damaged ? await quarantineSlot(slot, opened.problems.join('; ') || 'tiles that cannot be read') : null;
+      const q = fellBack || report!.missing || report!.damaged ? await quarantineSlot(slot, opened.problems.join('; ') || QUARANTINE_UNREADABLE_TILES) : null;
       if (fellBack) this.hud.toast(t('save.fallback', { folder: q ?? '—' }));
       if (report!.damaged) this.hud.toast(plural('save.tilesUnreadable', report!.damaged, { folder: q ?? '—' }));
       if (report!.missing) this.hud.toast(plural('save.tilesMissing', report!.missing, { folder: q ?? '—' }));

@@ -464,7 +464,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       from = to;
     }
   }
-  tidyGraph(nx, nz, ny, segs, strength, (x, z) => H(x, z) > SEA_LEVEL + 1.2);
+  tidyGraph(nx, nz, ny, segs, strength, (x, z) => { const h = H(x, z); return h > SEA_LEVEL + 1.2 && waterLevelAt(x, z, seed) < h - 1.2; });
   // only the nodes in use, with new indices
   const remap = new Int32Array(nx.length).fill(-1);
   const out: number[] = [];

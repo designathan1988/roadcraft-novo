@@ -59,9 +59,23 @@ test('the generated city keeps out of the river: no street node in its water, st
   const c = generateCity(SEED);
   const wetAt = (x: number, z: number) => level(x, z) > gen.baseHeight(x, z, SEED) - 0.5;
   const n = c.nodes.length / 3;
+  // a junction or a dead end never stands in the water; a node in the middle of a bridge (two legs, the generator
+  // cuts long edges into pieces) does, as long as the bridge it is on lands on dry ground at both ends
+  const legs: number[][] = Array.from({ length: n }, () => []);
+  for (let s = 0; s < c.segs.length; s += 5) { legs[c.segs[s]].push(c.segs[s + 1]); legs[c.segs[s + 1]].push(c.segs[s]); }
+  const wet = (i: number) => wetAt(c.nodes[i * 3], c.nodes[i * 3 + 1]);
   let wetNodes = 0;
-  for (let i = 0; i < n; i++) if (wetAt(c.nodes[i * 3], c.nodes[i * 3 + 1])) wetNodes++;
-  assert.equal(wetNodes, 0, `${wetNodes} street nodes in the water`);
+  for (let i = 0; i < n; i++) {
+    if (!wet(i)) continue;
+    if (legs[i].length !== 2) { wetNodes++; continue; }
+    // follow the bridge both ways through its middle nodes: it must reach a dry node each way
+    for (const first of legs[i]) {
+      let prev = i, at = first, steps = 0;
+      while (wet(at) && legs[at].length === 2 && steps++ < 50) { const next = legs[at][0] === prev ? legs[at][1] : legs[at][0]; prev = at; at = next; }
+      if (wet(at)) { wetNodes++; break; }
+    }
+  }
+  assert.equal(wetNodes, 0, `${wetNodes} street nodes in the water that are not the middle of a bridge`);
   // a street over water is a bridge: from dry ground to dry ground, never more than 320 m of it
   let along = 0;
   for (let s = 0; s < c.segs.length; s += 5) {
