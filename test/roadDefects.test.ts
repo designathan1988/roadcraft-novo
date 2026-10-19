@@ -624,3 +624,38 @@ test('D18: widening a road clears the buildings the wider road covers and settle
   assert.ok(k.settle());
   assert.ok(ground(w, -30, half - 3) < 11, `the bump under the widened road is still ${ground(w, -30, half - 3).toFixed(2)} m`);
 });
+
+/** World side (sign of z off the centreline) of the first parking strip of segment s on an east-west street. */
+function parkingSide(w: World, s: number): number {
+  const net = w.roads, sc = net.segs.cols, nc = net.nodes.cols, info = PROFILE_INFO[sc.profile[s]];
+  const e = info.edges.find((x) => x.strip.kind === 'parking');
+  assert.ok(e, `segment ${s} has no parking`);
+  const dx = nc.x[sc.b[s]] - nc.x[sc.a[s]], dz = nc.z[sc.b[s]] - nc.z[sc.a[s]], l = Math.hypot(dx, dz);
+  const u = (e.u0 + e.u1) / 2;
+  return Math.sign((-dx / l) * u); // left normal (dz, −dx): its z part is −dx
+}
+
+test('D19: a street-wide profile and parking on one side land on the same side of every block, whichever way each was drawn', async () => {
+  const { changeProfiles, streetChain, roadBetweenJunctions } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  const net = w.roads;
+  const n = [-150, -50, 50, 150].map((x) => net.addNode({ x, z: 0, y: 10 }));
+  net.addSeg({ a: n[0], b: n[1], cx: -100, cz: 0, profile: 0, flags: 16 });
+  net.addSeg({ a: n[2], b: n[1], cx: 0, cz: 0, profile: 0, flags: 16 }); // drawn the other way
+  net.addSeg({ a: n[2], b: n[3], cx: 100, cz: 0, profile: 0, flags: 16 });
+  const one = PROFILE_INFO.findIndex((p) => p.name === 'Estacionamento de um lado');
+  const first = net.nearestSeg(-100, 0, 2)![0];
+  const j = changeProfiles(w, streetChain(w, first), one);
+  assert.ok(j.settle());
+  const sides = [-100, 0, 100].map((x) => parkingSide(w, net.nearestSeg(x, 0, 2)![0]));
+  assert.ok(sides.every((v) => v === sides[0]), `the parking is on sides ${sides.join(', ')} along the street`);
+  // the inspector's parking chip on a reversed block: the whole road between junctions gets it on the same side
+  const w2 = flatWorld(1e9), m = [-150, -50, 50].map((x) => w2.roads.addNode({ x, z: 0, y: 10 }));
+  w2.roads.addSeg({ a: m[0], b: m[1], cx: -100, cz: 0, profile: 0, flags: 16 });
+  w2.roads.addSeg({ a: m[2], b: m[1], cx: 0, cz: 0, profile: 0, flags: 16 });
+  const s2 = w2.roads.nearestSeg(0, 0, 2)![0];
+  const k = changeProfiles(w2, roadBetweenJunctions(w2, s2), one, s2);
+  assert.ok(k.settle());
+  const s2b = [-100, 0].map((x) => parkingSide(w2, w2.roads.nearestSeg(x, 0, 2)![0]));
+  assert.equal(s2b[0], s2b[1], `parking on sides ${s2b.join(', ')}`);
+});

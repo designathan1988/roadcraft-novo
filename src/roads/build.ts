@@ -797,10 +797,53 @@ export function streetChain(world: World, s0: number): number[] {
 }
 
 /** Changes the profile of several segments in a single command. */
-export function changeProfiles(world: World, segs: number[], profile: number): RoadJournal {
+export function changeProfiles(world: World, segs: number[], profile: number, ref = segs[0]): RoadJournal {
   const j = new RoadJournal(world, 'trocar perfil da rua');
-  j.guard(() => { for (const s of segs) if (!(world.roads.segs.cols.flags[s] & SegFlag.Ring)) { j.setProfile(s, profile); settleUnder(j, world, s); } });
+  const net = world.roads;
+  // a profile that is not the same seen from both ends (parking on one side, a bus lane…) is laid the way `ref` runs:
+  // segments of the street drawn the other way are turned round first, so it lands on the same side of every block
+  const along = mirrorSymmetric(profile) ? null : alongStreet(world, segs, ref);
+  j.guard(() => {
+    for (let s of segs) {
+      if (!net.segs.alive[s] || (net.segs.cols.flags[s] & SegFlag.Ring)) continue;
+      if (along && along.get(s) === false) {
+        const r = j.removeSeg(s);
+        s = j.addSeg({ a: r.b, b: r.a, cx: r.cx, cz: r.cz, profile: r.profile, flags: r.flags, zl: r.zr, zr: r.zl });
+      }
+      j.setProfile(s, profile);
+      settleUnder(j, world, s);
+    }
+  });
   return j;
+}
+
+/** The profile reads the same from both ends (its strips mirrored, with each lane's direction turned, are itself). */
+export function mirrorSymmetric(profile: number): boolean {
+  const st = PROFILE_INFO[profile].strips, n = st.length;
+  for (let i = 0; i < n; i++) {
+    const a = st[i], b = st[n - 1 - i];
+    if (a.kind !== b.kind || Math.abs(a.width - b.width) > 0.01 || !!a.bus !== !!b.bus || !!a.rail !== !!b.rail || (a.pave ?? 0) !== (b.pave ?? 0)) return false;
+    if (a.kind === 'lane' && (a.dir ?? 1) !== -(b.dir ?? 1)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether each segment of a connected street runs the way `ref` does (true) or against it, walking from `ref` through
+ * the nodes the segments share.
+ */
+export function alongStreet(world: World, segs: number[], ref: number): Map<number, boolean> {
+  const sc = world.roads.segs.cols, set = new Set(segs);
+  const out = new Map<number, boolean>([[ref, true]]);
+  const queue = [ref];
+  while (queue.length) {
+    const s = queue.pop()!, fwd = out.get(s)!;
+    // the node where the street leaves s going forward, and where it comes in
+    const ahead = fwd ? sc.b[s] : sc.a[s], behind = fwd ? sc.a[s] : sc.b[s];
+    for (const t of world.roads.segsOf(ahead, [])) if (set.has(t) && !out.has(t)) { out.set(t, sc.a[t] === ahead); queue.push(t); }
+    for (const t of world.roads.segsOf(behind, [])) if (set.has(t) && !out.has(t)) { out.set(t, sc.b[t] === behind); queue.push(t); }
+  }
+  return out;
 }
 
 /**

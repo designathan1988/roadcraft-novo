@@ -448,7 +448,7 @@ export class Inspector {
         const c = chip(t(key), `out${has ? '' : ' off'}`, () => {
           const to = withParking(sc.profile[s], right, !has);
           if (to < 0) { this.a.toast(t('ui.catalog.tooMany')); return; }
-          this.edit(changeProfiles(w, roadBetweenJunctions(w, s), to), t(has ? 'ui.insp.parkingOff' : 'ui.insp.parkingOn'));
+          this.edit(changeProfiles(w, roadBetweenJunctions(w, s), to, s), t(has ? 'ui.insp.parkingOff' : 'ui.insp.parkingOn'));
         });
         c.title = t(has ? 'parking.none' : 'parking.parallel');
         r.append(c);
