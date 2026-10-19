@@ -177,6 +177,23 @@ export const SCENARIOS = {
     click(byText('.v2-dialog button', '^Aplicar$|^Apply$')); await wait(1500);
     check('applying the options keeps rain 100%', g.weather.fixed && g.weather.fixed.rain === 1, 'fixed ' + JSON.stringify(g.weather.fixed));
   `,
+  // B39: the chosen line's colour and ring have buttons in the transit panel
+  'B39-line-colour-loop': `
+    road(0, 100, 400, 100);
+    a.line(0, [100, 108, 300, 108], 1);
+    const l = g.transit.lines[0], c0 = l.color;
+    click('[data-cat=transit]'); await frames(4);
+    const sw = QA('.v2-line-colours .v2-swatch').find((b) => !b.classList.contains('on'));
+    check('the panel has colour swatches for the line', !!sw, 'no swatch');
+    if (sw) { click(sw); await frames(2); }
+    check('a swatch changes the line colour', l.color !== c0, 'colour ' + c0 + ' → ' + l.color);
+    const ring = byText('.v2-toolopts .v2-choice', 'Circular|Ring');
+    check('the panel has the ring choice', !!ring, 'no ring button');
+    if (ring) { click(ring); await frames(2); }
+    check('the ring choice makes the line a ring', l.loop === true, 'loop ' + l.loop);
+    key('KeyZ', { ctrlKey: true }); await frames(2);
+    check('undo takes the ring back', !l.loop, 'loop ' + l.loop);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

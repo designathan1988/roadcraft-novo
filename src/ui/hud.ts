@@ -61,6 +61,10 @@ export interface OptionalActions {
   streetNameAt?(x: number, z: number): string;
   /** Regional road paint of this map, saved with it. */
   mapPaint?(style: string): void;
+  /** Colour of the chosen transit line (index into the vehicle paints, world/transit.ts LINE_COLORS). */
+  lineColor?(color: number): void;
+  /** The chosen bus line as a ring (true) or out and back. */
+  lineLoop?(loop: boolean): void;
   /** The people creator's choices (people front, src/render/people/creator.ts). */
   personOptions?(o: Partial<PersonOptions>): void;
   /** What the people creator offers; null until the cooked people load. */
@@ -655,7 +659,7 @@ export class Hud {
 
   // ================================================================ what the game tells
   setLines(rows: LineRow[], current: number): void {
-    const key = `${current}|${rows.map((r) => `${r.id},${r.mode},${r.buses},${r.stops},${Math.round(r.perHour / 10)}`).join(';')}`;
+    const key = `${current}|${rows.map((r) => `${r.id},${r.mode},${r.color},${r.loop},${r.buses},${r.stops},${Math.round(r.perHour / 10)}`).join(';')}`;
     if (key === this.rowsKey) return;
     this.rowsKey = key;
     this.rows = rows;

@@ -6,6 +6,8 @@ import { Item } from '../world/items.ts';
 import { GROUND_COLORS, Ground } from '../world/ground.ts';
 import { ARCHES, FN_NAMES } from '../world/arch.ts';
 import { PROFILES } from '../roads/profiles.ts';
+import { LINE_COLORS } from '../world/transit.ts';
+import { PAINTS } from '../render/vehicles.ts';
 import { DEFAULT_PERSON_OPTIONS, type PersonOptions } from '../render/people/creator.ts';
 import { renderPeople } from './peoplePanel.ts';
 import type { HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hud.ts';
@@ -129,7 +131,8 @@ export class ShellState {
 }
 
 /** A transit line as the panel lists it. */
-export interface LineRow { id: number; mode: number; color: number; buses: number; stops: number; perHour: number; waiting: number }
+/** A transit line as the panel lists it (`color`: index into the vehicle paints, `loop`: a ring instead of out and back). */
+export interface LineRow { id: number; mode: number; color: number; loop: boolean; buses: number; stops: number; perHour: number; waiting: number }
 
 /** The building picked with the Build tool. */
 export interface BuildingInfo { fn: number; zone: number; floors: number; arch: number; address?: string; decay?: number }
@@ -524,7 +527,7 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
   for (const l of rows) {
     const row = el('div', `v2-transit-line${l.id === current ? ' on' : ''}`);
     const sw = el('i');
-    sw.style.background = hex(l.color);
+    sw.style.background = hex(PAINTS[l.color & 15]);
     const name = el('b', '', t('ui.transit.line', { n: l.id }));
     const info = el('span', '', `${t(`transit.mode.${['bus', 'train', 'metro'][l.mode] ?? 'bus'}`)} · ${plural(l.mode ? 'ui.transit.stations' : 'ui.transit.stops', l.stops)} · ${t('ui.transit.perHour', { n: fmtInt(l.perHour) })}`);
     const count = el('span', 'v2-transit-count', String(l.buses));
@@ -538,6 +541,26 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
     items.append(row);
   }
   p.strip.append(el('p', 'v2-note', t(`ui.transit.help.${now}`)));
+  // the chosen line: its colour, and for buses whether it runs out and back or as a ring
+  const line = rows.find((l) => l.id === current);
+  if (line && a.lineColor) {
+    const sws = el('div', 'v2-swatches v2-line-colours');
+    for (const c of LINE_COLORS) {
+      const b = el('button', `v2-swatch${line.color === c ? ' on' : ''}`);
+      b.type = 'button';
+      b.style.setProperty('--c', hex(PAINTS[c & 15]));
+      b.title = t('ui.transit.colour');
+      b.addEventListener('click', (e) => { e.stopPropagation(); a.lineColor?.(c); });
+      sws.append(b);
+    }
+    p.options.append(el('div', 'v2-pop-title', t('ui.transit.line', { n: line.id })), orow(t('ui.transit.colour'), sws));
+  }
+  if (line && line.mode === 0 && a.lineLoop) {
+    p.options.append(orow(t('ui.transit.route'), choices([
+      { label: t('ui.transit.outBack'), on: !line.loop, run: () => a.lineLoop?.(false) },
+      { label: t('ui.transit.ring'), on: line.loop, run: () => a.lineLoop?.(true) },
+    ])));
+  }
 }
 
 // ------------------------------------------------------------------ demolish

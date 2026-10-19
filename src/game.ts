@@ -1593,7 +1593,7 @@ export class Game {
       const stats = this.simStats?.type === 'stats' ? this.simStats.lines : [];
       this.hud.setLines(this.transit.lines.map((l) => {
         const q = stats.find((x) => x.id === l.id);
-        return { id: l.id, mode: l.mode ?? 0, color: l.color, buses: l.buses, stops: l.stops.length / 2, perHour: q ? q.perHour : 0, waiting: q ? q.waiting : 0 };
+        return { id: l.id, mode: l.mode ?? 0, color: l.color, loop: !!l.loop, buses: l.buses, stops: l.stops.length / 2, perHour: q ? q.perHour : 0, waiting: q ? q.waiting : 0 };
       }), this.lineSel);
     }
   }
