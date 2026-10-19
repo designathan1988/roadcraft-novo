@@ -509,7 +509,7 @@ export class Game {
     this.hud.buildingSlot.append(this.creator.el);
     followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
-    this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
+    this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
       [['Carregar o pior caso', 'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)', () => { if (this.discardOk()) void this.testCity(); }],
         ['Dinheiro ilimitado (liga/desliga)', 'Modo livre: nada é cobrado neste mapa', () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? 'Modo livre: dinheiro ilimitado.' : 'Dinheiro de volta ao caixa.'); }]]);
     await this.applySettings(this.settings, false);

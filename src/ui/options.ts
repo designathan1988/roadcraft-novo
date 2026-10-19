@@ -62,16 +62,16 @@ export function saveSettings(s: Settings): void {
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignored */ }
 }
 
-/** The options dialog. `apply` receives the new options. */
+/** The options dialog. `apply` receives the new options; `current` gives the game's options as they are now. */
 export class OptionsPanel {
   readonly root: HTMLElement;
-  private s: Settings;
+  private current: () => Settings;
   private apply: (s: Settings) => void;
   private webgpu: boolean;
   private extra: Array<[string, string, () => void]>;
 
-  constructor(parent: HTMLElement, s: Settings, webgpu: boolean, apply: (s: Settings) => void, extra: Array<[string, string, () => void]> = []) {
-    this.s = s;
+  constructor(parent: HTMLElement, current: () => Settings, webgpu: boolean, apply: (s: Settings) => void, extra: Array<[string, string, () => void]> = []) {
+    this.current = current;
     this.extra = extra;
     this.apply = apply;
     this.webgpu = webgpu;
@@ -82,13 +82,14 @@ export class OptionsPanel {
     parent.append(this.root);
   }
 
-  open(): void { this.root.classList.remove('hidden'); this.render(); }
+  /** The game's options when the dialog opened. */
+  private opened: Settings = {} as Settings;
+  open(): void { this.opened = { ...this.current() }; this.root.classList.remove('hidden'); this.render({ ...this.opened }); }
   close(): void { this.root.classList.add('hidden'); }
   get isOpen(): boolean { return !this.root.classList.contains('hidden'); }
 
-  private render(): void {
-    // a copy: Close leaves the game's options untouched
-    const s: Settings = { ...this.s };
+  /** `s`: a copy of the game's options, taken when the dialog opens (Close leaves the game's options untouched). */
+  private render(s: Settings): void {
     const box = document.createElement('div');
     box.className = 'v2-dialog';
     const h = document.createElement('h2');
@@ -124,7 +125,7 @@ export class OptionsPanel {
     const custom = (): void => { s.preset = 'personalizado'; presetSel.value = 'personalizado'; };
     const presetSel = select(s.preset, [['baixo', t('quality.low')], ['medio', t('quality.medium')], ['alto', t('quality.high')], ['ultra', t('quality.ultra')], ['personalizado', t('ui.options.custom')]], (v) => {
       if (v !== 'personalizado') Object.assign(s, PRESETS[v as Preset]);
-      s.preset = v; this.s = { ...this.s, ...s }; this.render();
+      s.preset = v; this.render(s);
     }, !this.webgpu);
     row(t('gfx.preset'), presetSel);
     row(t('ui.options.resolution'), range(s.resolution, 0.5, 1, 0.05, pct, (v) => { s.resolution = v; custom(); }));
@@ -177,7 +178,12 @@ export class OptionsPanel {
     }
     const buttons = document.createElement('div'); buttons.className = 'opt-buttons';
     const ok = document.createElement('button'); ok.className = 'v2-btn primary'; ok.textContent = t('ui.options.apply');
-    ok.addEventListener('click', () => { this.s = s; saveSettings(s); this.apply({ ...s }); this.close(); });
+    // what other panels changed while the dialog was open (simulation, road paint and furniture) is kept
+    ok.addEventListener('click', () => {
+      const now = this.current(), opened = this.opened;
+      for (const k of Object.keys(s) as Array<keyof Settings>) if (s[k] === opened[k] && now[k] !== opened[k]) (s as unknown as Record<string, unknown>)[k] = now[k];
+      saveSettings(s); this.apply({ ...s }); this.close();
+    });
     const cancel = document.createElement('button'); cancel.className = 'v2-btn'; cancel.textContent = t('gfx.close');
     cancel.addEventListener('click', () => this.close());
     buttons.append(cancel, ok);
