@@ -121,15 +121,19 @@ export class ZoneTool {
     this.world.buildingIndex.query(sc.mx[s] - sc.len[s] / 2 - 70, sc.mz[s] - sc.len[s] / 2 - 70, sc.mx[s] + sc.len[s] / 2 + 70, sc.mz[s] + sc.len[s] / 2 + 70, (id) => {
       if (col.zone[id] === keepZone || col.zone[id] === 0) return;
       // projected on the segment: it must be on the right side and within 70 m of the road
-      let best = Infinity, bu = 0;
+      let best = Infinity, bu = 0, tx = 0, tz = 0;
       for (let i = 0; i <= 16; i++) {
         bez(q, i / 16, p2); bezD(q, i / 16, d2);
         const dx = col.x[id] - p2[0], dz = col.z[id] - p2[1];
         const dist = dx * dx + dz * dz;
-        if (dist < best) { best = dist; const l = Math.hypot(d2[0], d2[1]) || 1; bu = dx * (d2[1] / l) + dz * (-d2[0] / l); }
+        if (dist < best) { best = dist; tx = -dx; tz = -dz; const l = Math.hypot(d2[0], d2[1]) || 1; bu = dx * (d2[1] / l) + dz * (-d2[0] / l); }
       }
       const u = side === 0 ? bu : -bu;
-      if (u > half && u < half + 70) doomed.push(id);
+      if (!(u > half && u < half + 70)) return;
+      // only a building whose front looks at this street: a corner lot facing the cross street stays
+      const tl = Math.hypot(tx, tz) || 1;
+      if ((tx * Math.sin(col.rot[id]) + tz * Math.cos(col.rot[id])) / tl < 0.5) return;
+      doomed.push(id);
     });
     for (const id of doomed) j.removeBuilding(id);
   }

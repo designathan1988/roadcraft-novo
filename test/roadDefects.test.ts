@@ -703,3 +703,20 @@ test('D21: a road over another one, or a second road between the same two nodes,
   assert.ok(tryRoad(0, -60, 0, 60, 1).ok, 'a crossing road was refused');
   assert.ok(tryRoad(-60, 40, 60, 40, 1).ok, 'a road 40 m alongside was refused');
 });
+
+test('D22: repainting a street\'s zone leaves the corner buildings that front the cross street', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const w = flatWorld(1e9);
+  road(w, -150, 0, 150, 0);
+  road(w, 0, -150, 0, 150);
+  const z = new RoadJournal(w, 'zone');
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && Math.abs(w.roads.segs.cols.mz[s]) < 1) { z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential); }
+  // facing the main street (front towards −z), and on the corner facing the cross street (front towards −x)
+  const onMain = w.addBuilding({ x: 60, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  const onCross = w.addBuilding({ x: 20, z: 30, w: 14, d: 26, h: 0, rot: -Math.PI / 2, color: 0, seed: 2, zone: Zone.Residential, floors: 2, style: 1 });
+  const tool = new ZoneTool(w, new CommandStack());
+  tool.zone = Zone.Commercial; tool.radius = 30;
+  tool.begin(); tool.dab(50, 16); tool.end();
+  assert.equal(w.buildings.alive[onMain], 0, 'the house facing the rezoned street stays (it should give way)');
+  assert.equal(w.buildings.alive[onCross], 1, 'the corner house facing the cross street was demolished');
+});
