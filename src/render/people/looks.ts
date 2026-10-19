@@ -25,6 +25,11 @@ export function hash32(x: number): number {
 
 /** Natural walking speed of the cooked walk at its own rate, m/s (Rocketbox: ~1.5 m a cycle of ~1.1 s). */
 const WALK_SPEED = 1.4;
+/**
+ * Fastest playback: the brisk walk (1.6x) at the fastest simulation speed (4x). The rate follows the ground speed seen
+ * on screen, so at 2x and 4x the feet keep step with the ground instead of sliding.
+ */
+const MAX_RATE = 1.6 * 4;
 /** Speed at which the cooked pedalling (one turn a second) matches the wheels. */
 const PEDAL_SPEED = 5;
 
@@ -47,11 +52,11 @@ export function pickLook(info: number, speed: number, bike: boolean, rain: numbe
   const s = (h >>> 8) % 20;
   if (bike) {
     out.clip = CLIP.pedal;
-    out.rate = quantize(Math.min(1.6, Math.max(0, speed / PEDAL_SPEED)));
+    out.rate = quantize(Math.min(MAX_RATE, Math.max(0, speed / PEDAL_SPEED)));
   } else if (speed > 0.3) {
     out.clip = umbrella ? CLIP.walkUmbrella : s < 2 ? CLIP.walkPhone : s < 4 ? CLIP.walkCarry : CLIP.walk;
     const height = meta.variations[v].height;
-    out.rate = quantize(Math.min(1.6, Math.max(0.6, speed / (WALK_SPEED * height / 1.75))));
+    out.rate = quantize(Math.min(MAX_RATE, Math.max(0.6, speed / (WALK_SPEED * height / 1.75))));
   } else {
     out.clip = umbrella ? CLIP.umbrella : s < 4 ? CLIP.phone : s < 6 ? CLIP.read : s < 8 ? CLIP.drink : CLIP.idle;
     out.rate = 1;

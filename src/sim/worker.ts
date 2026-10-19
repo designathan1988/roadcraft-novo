@@ -75,6 +75,8 @@ let next = 0;
 let windowTimer = 0;
 
 let statsTimer = 0;
+/** The standing-still poses of the pause were published. */
+let pausedOut = false;
 /** Simulation clock at the last stats (boardings per hour are reckoned over simulated time). */
 let statsSim = 0;
 
@@ -129,10 +131,16 @@ function stepInner(): void {
   windowTimer += dt * Math.max(1, speed);
   if (windowTimer >= 0.5) { windowTimer = 0; traffic.checkWindow(); peds.checkWindow(); }
   let n = -1;
-  if (speed > 0) {
+  // paused: published once more standing still (previous pose = current), so nobody walks in place
+  if (speed > 0 || !pausedOut) {
     n = Math.min(MAX_AGENTS, traffic.writePoses(writer.data, POSE_STRIDE));
     n += traffic.writeStopPeople(writer.data, POSE_STRIDE, n, MAX_AGENTS);
     n += peds.writePoses(writer.data, POSE_STRIDE, n, MAX_AGENTS);
+    if (speed === 0) {
+      const d = writer.data;
+      for (let i = 0; i < n; i++) { const o = i * POSE_STRIDE; d[o] = d[o + 4]; d[o + 1] = d[o + 5]; d[o + 2] = d[o + 6]; d[o + 3] = d[o + 7]; }
+    }
+    pausedOut = speed === 0;
   }
   if (n >= 0) writer.publish(n, performance.timeOrigin + performance.now(), dtMs, tick);
   statsTimer += dtMs;

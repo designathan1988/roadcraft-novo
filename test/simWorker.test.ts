@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FromSim, ToSim } from '../src/sim/worker.ts';
-import { createPoseBuffers } from '../src/sim/poses.ts';
+import { createPoseBuffers, PoseReader, viewPoseBuffers, POSE_STRIDE } from '../src/sim/poses.ts';
 import { Traffic } from '../src/sim/traffic.ts';
 import { encodeOps } from '../src/sim/lanes.ts';
 import type { NetOp } from '../src/roads/network.ts';
@@ -38,7 +38,8 @@ const send = (m: ToSim) => scope.onmessage!({ data: m });
 
 fakeClock(true);
 await import('../src/sim/worker.ts');
-send({ type: 'init', poses: createPoseBuffers(), heights: new SharedArrayBuffer(4), occupancy: new SharedArrayBuffer(1 << 16), signals: new SharedArrayBuffer(1 << 14), tickHz: 20 });
+const poseSab = createPoseBuffers();
+send({ type: 'init', poses: poseSab, heights: new SharedArrayBuffer(4), occupancy: new SharedArrayBuffer(1 << 16), signals: new SharedArrayBuffer(1 << 14), tickHz: 20 });
 fakeClock(false);
 
 test('C13: after a slow step the simulation does not run steps back to back without limit to catch up the clock', () => {
@@ -96,4 +97,40 @@ test('C29: per-hour and per-minute figures use simulated time, not real time (at
     assert.ok(Math.abs(asked[asked.length - 1] - 4) < 0.01, `boardings per hour reckoned over ${asked[asked.length - 1]} s for 4 simulated seconds`);
     assert.ok(stats.length >= 2 && typeof stats[1].simTime === 'number' && Math.abs(stats[1].simTime - stats[0].simTime! - 4) < 0.01, 'the stats carry the simulated time (for trips per minute)');
   } finally { Traffic.prototype.lineStats = real; send({ type: 'speed', value: 1 }); fakeClock(false); }
+});
+
+test('C30: paused, people and vehicles are published standing (previous pose = current), so nobody walks in place', () => {
+  fakeClock(true);
+  try {
+    // a straight road of 1.2 km with traffic, the camera on it
+    const ops: NetOp[] = [{ t: 'clear' }];
+    for (let i = 0; i <= 6; i++) ops.push({ t: 'addNode', rec: { id: 10 + i, x: i * 200, z: 50, y: 10 } });
+    for (let i = 0; i < 6; i++) ops.push({ t: 'addSeg', rec: { id: 10 + i, a: 10 + i, b: 11 + i, cx: i * 200 + 100, cz: 50, profile: 0, flags: 0, zl: 2, zr: 2 } });
+    const extra: string[] = []; const e = encodeOps(ops, extra);
+    send({ type: 'ops', ops: e, extra });
+    send({ type: 'camera', x: 600, z: 50 });
+    send({ type: 'density', value: 1 / 15 });
+    for (let i = 0; i < 20 * 30; i++) fire();
+    const reader = new PoseReader(viewPoseBuffers(poseSab));
+    reader.acquire();
+    assert.ok(reader.count > 3, `agents published ${reader.count}`);
+    send({ type: 'speed', value: 0 });
+    for (let i = 0; i < 10; i++) fire();
+    reader.acquire();
+    const d = reader.data;
+    let moving = 0;
+    for (let i = 0; i < reader.count; i++) { const o = i * POSE_STRIDE; if (Math.hypot(d[o + 4] - d[o], d[o + 6] - d[o + 2]) > 1e-4) moving++; }
+    assert.equal(moving, 0, `${moving} of ${reader.count} agents still published moving while paused`);
+  } finally { send({ type: 'speed', value: 1 }); fakeClock(false); }
+});
+
+test('C30: at 2x and 4x the walk is played faster with the ground speed, so the feet do not slide', async () => {
+  const { pickLook } = await import('../src/render/people/looks.ts');
+  const meta = { variations: Array.from({ length: 4 }, () => ({ band: 'adult', height: 1.75 })) } as unknown as import('../src/render/people/format.ts').CookedPeople;
+  const out = { variation: 0, clip: 0, rate: 1, phase: 0, hash: 0 };
+  // someone walking 1.4 m/s seen at 4x: 5.6 m/s on screen
+  const l = pickLook(3 * 256, 5.6, false, 0, meta, out, 7);
+  assert.ok(l.rate >= 3.5, `walk played at ${l.rate}x for 4x the walking speed`);
+  const b = pickLook(5 * 256, 20, true, 0, meta, out, 7);
+  assert.ok(b.rate >= 3.5, `pedalling at ${b.rate}x for 4x the cycling speed`);
 });
