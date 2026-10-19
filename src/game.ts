@@ -389,6 +389,7 @@ export class Game {
         else { this.preview.hide(); this.preview.circle.visible = false; }
       },
       streetName: (x, z) => this.hudActions.streetNameAt?.(x, z) ?? '',
+      editProfile: (p, apply) => this.hud.catalog.editFor(p, apply),
       nameStreet: (seg, name) => this.commands.run(nameStreetCommand(this.world, seg, name, () => { this.textSigns.version++; this.unsaved = true; this.inspector.refresh(); })),
     });
     this.commands.onPush = (c) => {

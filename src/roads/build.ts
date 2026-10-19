@@ -16,7 +16,8 @@ import { SegFlag } from './flags.ts';
 import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
 import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPrice, withKind } from './economy.ts';
-import { remapSpec, type JunctionSpec } from './control.ts';
+import { dirOut, remapSpec, type JunctionSpec } from './control.ts';
+import { MIN_LEG_ANGLE } from './impossible.ts';
 import { ROAD_TUNING } from './tuning.ts';
 import { ARCHES, archFor, eraAt } from '../world/arch.ts';
 import { NO_WATER, waterAt } from '../world/ground.ts';
@@ -1294,6 +1295,76 @@ export function moveNode(world: World, n: number, x: number, z: number): RoadJou
     }
   });
   return j;
+}
+
+/**
+ * Bends a road (Roadcraft 4.0 core/bezier.ts controlPoint, ui/inspector.ts:325-341): its control point `h` metres off
+ * the chord (signed, left of a → b positive) at `t` (0.15..0.85) along it. Refused like a moved node: longer than the
+ * spatial index holds, running into another road at its level, or leaving a leg sharper than MIN_LEG_ANGLE to its
+ * neighbour at either end. What stands in the way goes and the terrain settles under it, like a new road.
+ */
+export function bendRoad(world: World, s: number, t: number, h: number): RoadJournal | string {
+  const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
+  if (sc.flags[s] & SegFlag.Ring) return text('road.bend.ring');
+  const a = sc.a[s], b = sc.b[s];
+  const dx = nc.x[b] - nc.x[a], dz = nc.z[b] - nc.z[a], L = Math.hypot(dx, dz) || 1;
+  const tt = Math.max(0.15, Math.min(0.85, t));
+  // left of a → b: (dz, −dx) in this engine's frame (as the profiles' u)
+  const cx = nc.x[a] + dx * tt + (dz / L) * h, cz = nc.z[a] + dz * tt - (dx / L) * h;
+  const q: Quad = { x0: nc.x[a], z0: nc.z[a], cx, cz, x1: nc.x[b], z1: nc.z[b] };
+  if (bezLength(q) > MAX_SEG_LEN) return text('road.move.tooLong', { max: MAX_SEG_LEN });
+  const eq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
+  let crosses = false;
+  net.forSegsNear(Math.min(q.x0, q.cx, q.x1), Math.min(q.z0, q.cz, q.z1), Math.max(q.x0, q.cx, q.x1), Math.max(q.z0, q.cz, q.z1), (o) => {
+    if (crosses || o === s || sc.a[o] === a || sc.b[o] === a || sc.a[o] === b || sc.b[o] === b) return;
+    net.quad(o, eq);
+    for (const [ts, to] of intersectQuads(q, eq)) if (Math.abs(nc.y[a] + (nc.y[b] - nc.y[a]) * ts - segHeightAt(net, o, to)) < 4.5) crosses = true;
+  });
+  if (crosses) return text('road.move.crosses');
+  // the leg's new direction at each end against the other roads there
+  for (const [n, tx, tz] of [[a, cx - nc.x[a], cz - nc.z[a]], [b, cx - nc.x[b], cz - nc.z[b]]] as Array<[number, number, number]>) {
+    const ang = Math.atan2(tz, tx);
+    for (const o of net.segsOf(n, [])) {
+      if (o === s) continue;
+      const d = dirOut(net, n, o);
+      let gap = Math.abs(Math.atan2(d[1], d[0]) - ang) % (2 * Math.PI);
+      gap = Math.min(gap, 2 * Math.PI - gap) * 180 / Math.PI;
+      if (gap < MIN_LEG_ANGLE) return text('road.bend.sharp', { angle: Math.round(gap) });
+    }
+  }
+  const j = new RoadJournal(world, 'curvar via');
+  const r = j.removeSeg(s);
+  j.guard(() => {
+    const id = j.addSeg({ ...r, cx, cz });
+    const sq = net.quad(id), tab = arcTable(sq, 32), len = tab[tab.length - 1];
+    const ya = nc.y[a], yb = nc.y[b];
+    clearAndConform(j, world, sq, sc.profile[id], (d) => ya + (yb - ya) * d / len, tab, (sc.flags[id] & SegFlag.Wall) !== 0);
+  });
+  return j;
+}
+
+/** Roadcraft 4.0's upgrade ladder (world/roadTypes.ts:232-233: local, urban, avenue, boulevard), by our profiles' names. */
+const UPGRADE_LADDER = ['Rua local', 'Rua urbana', 'Avenida', 'Bulevar'];
+
+/**
+ * The class one step up the ladder from `profile` (by its priority: a street with parking is on the urban rung),
+ * or −1 at the top, and for highways, rails and rings, which are not on the ladder.
+ */
+export function upgradeStep(profile: number): number {
+  const info = PROFILE_INFO[profile];
+  if (!info || info.ring || info.rail || (info.priority ?? 0) >= 4) return -1;
+  const rungs = UPGRADE_LADDER.map((name) => PROFILE_INFO.findIndex((p) => p?.name === name)).filter((i) => i >= 0);
+  const next = rungs.find((i) => (PROFILE_INFO[i].priority ?? 0) > (info.priority ?? 0) && i !== profile);
+  return next ?? -1;
+}
+
+/** A height point on the road (Roadcraft 4.0 ui/inspector.ts:264): the road split in the middle; its new node. */
+export function addHeightPoint(world: World, s: number): { journal: RoadJournal; node: number } | string {
+  const L = world.roads.segs.cols.len[s];
+  if (L < 16) return text('road.heightPoint.short');
+  const j = new RoadJournal(world, 'ponto de altura');
+  const node = splitSeg(j, world.roads, s, 0.5, null);
+  return { journal: j, node };
 }
 
 /** An identical road parallel to the road between junctions, alongside (to the right of the drawing direction). */

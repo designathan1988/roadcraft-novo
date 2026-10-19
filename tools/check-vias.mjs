@@ -112,7 +112,7 @@ const SCENARIOS = {
     await wait(200);
     check('an empty name takes the typed name away', !w.streetNames.has(s), 'name ' + w.streetNames.get(s));
     const title = document.querySelector('.inspector h3');
-    check('the generated name is back', title && title.textContent === generated, 'title ' + (title && title.textContent) + ', generated ' + generated);
+    check('the generated name is back', title && title.textContent.split(' · ')[0] === generated, 'title ' + (title && title.textContent) + ', generated ' + generated);
     g.commands.undo();
     check('undo brings the typed name back', w.streetNames.get(s) === 'Rua Digitada', 'name ' + w.streetNames.get(s));
   `,
