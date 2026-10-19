@@ -2495,8 +2495,9 @@ export class Traffic {
       if (c.dying[v]) { this.finish(v); v = next; continue; }
       const span = c.tExit[v] - c.tIn[v];
       const est = span > 0 ? c.s0[v] + (L - c.s0[v]) * Math.min(1, Math.max(0, (this.time - c.tIn[v]) / span)) : L;
-      const s = Math.min(est, limit);
-      if (s < c.len[v]) break;
+      // (one that has just come in stands at the start of the lane, whole)
+      if (limit < c.len[v]) break;
+      const s = Math.max(c.len[v], Math.min(est, limit));
       this.mesoUnlink(v);
       c.s[v] = s; c.conn[v] = -1; c.held[v] = 0; c.wait[v] = 0;
       // in a queue it stands; otherwise it drives at what the lane has been driving at

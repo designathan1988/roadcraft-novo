@@ -944,10 +944,11 @@ test('C33: inside the camera window every vehicle is a drawn one (none stays inv
   for (let v = 0; v < tr.veh.end; v++) {
     if (!tr.veh.alive[v] || c.lane[v] < 0) continue;
     all++;
-    // (one waiting to fit behind a full queue of drawn vehicles stays out of sight until there is room)
+    // (one waiting to fit behind a full queue of drawn vehicles stays out of sight until there is room, and those behind
+    // it in its lane wait their turn)
     const tail = tr.laneTail[c.lane[v]];
     const room = tail < 0 || c.s[tail] - c.len[tail] - 2 >= c.len[v];
-    if (!c.micro[v] && T.inWindow(c.lane[v]) && room) hidden++;
+    if (!c.micro[v] && T.inWindow(c.lane[v]) && room && c.mprev[v] < 0) hidden++;
   }
   assert.ok(all > 50, `vehicles ${all}`);
   assert.equal(hidden, 0, `${hidden} of ${all} vehicles inside the window are invisible (far model)`);
