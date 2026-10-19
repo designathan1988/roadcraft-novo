@@ -479,7 +479,7 @@ function piers(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
 }
 
 /** Telhado de quatro águas com beiral (casas). */
-function hip(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, roofCol: number, soffit: number): void {
+export function hip(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, roofCol: number, soffit: number): void {
   const o = 0.6;
   const X0 = x0 - o, X1 = x1 + o, Z0 = z0 - o, Z1 = z1 + o;
   const w = X1 - X0, d = Z1 - Z0;
@@ -505,7 +505,8 @@ function hip(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: 
   if (w >= d) {
     face([A, B, RB, RA]); face([C, D, RA, RB]); face([B, C, RB]); face([D, A, RA]);
   } else {
-    face([B, C, RB, RA]); face([D, A, RA, RB]); face([A, B, RA]); face([C, D, RB]);
+    // ridge along z: RA at the back (Z0, side C-D), RB at the front (Z1, side A-B)
+    face([B, C, RA, RB]); face([D, A, RB, RA]); face([A, B, RB]); face([C, D, RA]);
   }
   // forro do beiral
   const u = [A, B, C, D].map((p) => mb.vert(p[0], p[1], p[2], 0, -1, 0, soffit, BMAT.Plain));

@@ -88,3 +88,22 @@ test('F2: the parapet coping and the cornice band do not put a lid over the whol
   }
   assert.deepEqual(failures, []);
 });
+
+test('F3: a hip roof deeper than wide covers its plan once, without holes or folds', async () => {
+  const { hip } = await import('../src/jobs/buildingGen.ts');
+  const { MeshBuilder } = await import('../src/jobs/meshBuilder.ts');
+  for (const [w, d] of [[10, 16], [16, 10], [12, 12]]) {
+    const mb = new MeshBuilder(false, true);
+    const f = { cx: 0, cz: 0, c: 1, s: 0, base: 0 };
+    hip(mb, f, -w / 2, w / 2, -d / 2, d / 2, 6, 3, 0x993322, 0xdddddd);
+    // the roof planes, seen from above, must cover the plan with eaves exactly once
+    let area = 0;
+    for (let i = 0; i < mb.t; i += 3) {
+      const a = mb.idx[i] * 3, b = mb.idx[i + 1] * 3, c = mb.idx[i + 2] * 3, P = mb.pos;
+      if (P[a + 1] < 5.9 && P[b + 1] < 5.9 && P[c + 1] < 5.9) continue; // the soffit under the eaves
+      area += Math.abs((P[b] - P[a]) * (P[c + 2] - P[a + 2]) - (P[c] - P[a]) * (P[b + 2] - P[a + 2])) / 2;
+    }
+    const plan = (w + 1.2) * (d + 1.2);
+    assert.ok(Math.abs(area - plan) < 0.01, `${w}×${d}: the roof covers ${area.toFixed(2)} m² of a ${plan.toFixed(2)} m² plan`);
+  }
+});
