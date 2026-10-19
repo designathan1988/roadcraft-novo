@@ -809,11 +809,16 @@ export class Traffic {
   private segBetween(a: number, b: number): number {
     const net = this.sim.net, sc = net.segs.cols;
     const o = a * MAX_DEG, d = net.nodes.cols.deg[a];
+    // two segments between the same nodes: the one with lanes from a to b (the shorter, if both)
+    let any = -1, best = -1;
     for (let k = 0; k < d; k++) {
       const s = net.adj[o + k];
-      if ((sc.a[s] === a && sc.b[s] === b) || (sc.b[s] === a && sc.a[s] === b)) return s;
+      const fwd = sc.a[s] === a && sc.b[s] === b, back = sc.b[s] === a && sc.a[s] === b;
+      if (!fwd && !back) continue;
+      if (any < 0) any = s;
+      if (laneCount(sc.profile[s], fwd ? 1 : -1) > 0 && (best < 0 || sc.len[s] < sc.len[best])) best = s;
     }
-    return -1;
+    return best >= 0 ? best : any;
   }
 
   /** Route from `from`, reached by the vehicle's current lane (if any): only movements the lanes make, U-turns too. */

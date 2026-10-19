@@ -739,3 +739,20 @@ test('C40: car trips never start or end at a node that only rails reach', async 
   assert.ok(picks > 1000 && nc.deg.length > 0, `picks ${picks}`);
   assert.equal(rail, 0, `${rail} of ${picks} trip ends at nodes only rails reach`);
 });
+
+test('C45: with two segments between the same nodes, a car takes the one it may drive that way', async () => {
+  const { SimNet } = await import('../src/sim/lanes.ts');
+  const { PROFILES } = await import('../src/roads/profiles.ts');
+  const one = PROFILES.findIndex((p) => p.oneWay && !p.name.toLowerCase().includes('ferro'));
+  assert.ok(one >= 0, 'a one-way profile');
+  const sim = new SimNet();
+  sim.apply({ t: 'addNode', rec: { id: 0, x: 0, z: 0, y: 10 } });
+  sim.apply({ t: 'addNode', rec: { id: 1, x: 200, z: 0, y: 10 } });
+  // first a one-way street from 1 to 0 (curving north), then a one-way from 0 to 1 (curving south)
+  sim.apply({ t: 'addSeg', rec: { id: 0, a: 1, b: 0, cx: 100, cz: 60, profile: one, flags: 0, zl: 0, zr: 0 } });
+  sim.apply({ t: 'addSeg', rec: { id: 1, a: 0, b: 1, cx: 100, cz: -60, profile: one, flags: 0, zl: 0, zr: 0 } });
+  sim.rebuild();
+  const tr = traffic(sim);
+  assert.equal(inner(tr).segBetween(0, 1), 1, 'from node 0 to node 1 by the street that runs that way');
+  assert.equal(inner(tr).segBetween(1, 0), 0, 'and back by the other');
+});
