@@ -2,7 +2,7 @@
 // The page only does input, interface, choosing what to draw, and drawing.
 
 import * as THREE from 'three/webgpu';
-import { CELLS_PER_TILE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
+import { CELLS_PER_TILE, MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
 
 /** Changes the map size: the world arrays are sized to the map, so the page reloads. */
 const FLASH_COLOR = new THREE.Color(0xdde6ff);
@@ -338,7 +338,12 @@ export class Game {
       newMap: () => { if (this.discardOk()) void this.newMap(); },
       testCity: () => { if (this.discardOk()) void this.testCity(); },
       // another city: a seed of its own (the title screen takes a chosen seed)
-      generate: () => { if (this.discardOk()) { this.world.seed = (Math.random() * 2 ** 31) >>> 0 || 1; void this.generatedCity(); } },
+      // Roadcraft 4.0's New world (main.ts:2123-2128): always asked, then a city over the whole map with a seed of its own
+      generate: () => {
+        const dirty = this.unsaved || this.world.saveDirty.includes(1);
+        if (!window.confirm(t('ui.confirm.newWorld', { km: fmtInt(MAP_SIZE / 1000) }) + (dirty ? ` ${t('save.discardConfirm')}` : ''))) return;
+        this.world.seed = (Math.random() * 2 ** 31) >>> 0 || 1; void this.generatedCity();
+      },
       startScreen: () => this.showStart(),
       options: () => this.optionsPanel?.open(),
       help: () => this.hud.toggleHelp(),

@@ -10,6 +10,7 @@ import { RoadCatalog } from './roadCatalog.ts';
 import { button, closeDropdown, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
+import { MAP_SIZE } from '../config.ts';
 import { mountCompass, type Compass } from './compass.ts';
 import { keyHelp, keyName } from './keys.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
@@ -589,13 +590,15 @@ export class Hud {
     if (id === 'menu') {
       const st = a.settings();
       body.append(
+        // Roadcraft 4.0's order (v2/shell.ts:710-714): New map, New city over the whole map, Open, Save; then this
+        // game's own: the last game, the save slot and the title screen
         this.row(t('action.newMap'), () => a.newMap(), 'm_new'),
-        this.row(t('ui.menu.start'), () => a.startScreen(), 'roads'),
-        this.row(t('ui.menu.generate'), () => a.generate(), 'generate'),
-        this.row(t('ui.menu.load'), () => a.load(), 'm_open'),
+        this.row(t('ui.menu.newWorld', { km: fmtInt(MAP_SIZE / 1000) }), () => a.generate(), 'm_new'),
         this.row(t('action.openMap'), () => this.fileIn.click(), 'm_open'),
-        this.row(t('ui.menu.save'), () => a.save(), 'm_save'),
         this.row(t('action.saveMap'), () => a.exportMap(), 'm_save'),
+        this.row(t('ui.menu.load'), () => a.load(), 'm_open'),
+        this.row(t('ui.menu.save'), () => a.save(), 'm_save'),
+        this.row(t('ui.menu.start'), () => a.startScreen(), 'roads'),
         el('hr'),
         // the four quality presets in the menu, as in Roadcraft 4.0 (Graphics options has the rest)
         this.seg(t('menu.quality'), (['baixo', 'medio', 'alto', 'ultra'] as const).map((q) => [q, t(`quality.${q === 'baixo' ? 'low' : q === 'medio' ? 'medium' : q === 'alto' ? 'high' : 'ultra'}`)] as const), st.preset, (v) => a.quality(v)),

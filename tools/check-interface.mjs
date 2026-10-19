@@ -728,6 +728,26 @@ export const SCENARIOS = {
     check('Esc closes the list and keeps the tool', !Q('.v2-dd-list') && g.tool === 'building', 'list open ' + !!Q('.v2-dd-list') + ', tool ' + g.tool);
     check('the focus goes back to the list button', document.activeElement === listOf(/Estilo|Style/), 'focus ' + (document.activeElement && document.activeElement.className));
   `,
+  // The 4.0 "New world" (v2/shell.ts:712, main.ts:2123-2128): second row of the menu, a new city over the whole map
+  // with a seed of its own, always asked first
+  'new-world-4.0': `
+    click('[data-pop=menu]'); await frames(2);
+    const rows = QA('.v2-pop .v2-row').map((r) => r.textContent.trim());
+    check('the menu opens with New map, then the new city over the whole map', /^Novo mapa/.test(rows[0]) && /^Nova cidade \\(10 km × 10 km\\)/.test(rows[1]), 'rows: ' + rows.join(' / '));
+    const asked = [], made = [];
+    const confirm0 = window.confirm;
+    g.generatedCity = async () => { made.push(w.seed); };
+    window.confirm = (m) => { asked.push(m); return false; };
+    const seed = w.seed;
+    click(byText('.v2-pop .v2-row', '^Nova cidade|^New city')); await frames(2);
+    check('it asks first, naming the map', asked.length === 1 && /10 km/.test(asked[0]), 'asked: ' + asked.join(' / '));
+    check('saying no keeps the city', made.length === 0 && w.seed === seed, 'made ' + made.length);
+    window.confirm = (m) => { asked.push(m); return true; };
+    click('[data-pop=menu]'); await frames(2);
+    click(byText('.v2-pop .v2-row', '^Nova cidade|^New city')); await frames(2);
+    window.confirm = confirm0;
+    check('saying yes makes a city with a new seed', made.length === 1 && made[0] !== seed, 'made ' + made.join(',') + ' (seed was ' + seed + ')');
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
