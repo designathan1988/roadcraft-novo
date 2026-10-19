@@ -168,14 +168,14 @@ test('A3: a job that fails tells whoever asked for it (save, load and new map ca
   const shared = { heights: new SharedArrayBuffer(4), ground: new SharedArrayBuffer(4), water: new SharedArrayBuffer(4) };
   const pool = new JobPool(shared, 1, () => new FakeWorker() as unknown as Worker);
   const told = await new Promise<string>((resolve) => {
-    pool.submit('saveMeta', { slot: 's', meta: new Uint8Array(1), fail: true } as never, () => resolve('done'), { fail: (m: string) => resolve(`failed: ${m}`) } as never);
+    pool.submit('terrainGen', { slot: 's', meta: new Uint8Array(1), fail: true } as never, () => resolve('done'), { fail: (m: string) => resolve(`failed: ${m}`) } as never);
     setTimeout(() => resolve('never told'), 200);
   });
   assert.equal(told, 'failed: disk full');
   const run = (pool as unknown as { run?: (k: string, p: unknown) => Promise<unknown> }).run;
   assert.equal(typeof run, 'function', 'the pool has a promise form for code that awaits a job');
-  await assert.rejects(run!.call(pool, 'saveMeta', { slot: 's', meta: new Uint8Array(1), fail: true }), /disk full/);
-  assert.deepEqual(await run!.call(pool, 'saveMeta', { slot: 's', meta: new Uint8Array(1) }), { ok: true });
+  await assert.rejects(run!.call(pool, 'terrainGen', { slot: 's', meta: new Uint8Array(1), fail: true }), /disk full/);
+  assert.deepEqual(await run!.call(pool, 'terrainGen', { slot: 's', meta: new Uint8Array(1) }), { ok: true });
 });
 
 test('A4: a callback that throws does not stop the pool', async () => {
@@ -185,8 +185,8 @@ test('A4: a callback that throws does not stop the pool', async () => {
   const errors = console.error; console.error = () => {};
   try {
     const second = new Promise<string>((resolve) => {
-      pool.submit('saveMeta', { slot: 's', meta: new Uint8Array(1) }, () => { throw new Error('bug in a callback'); });
-      pool.submit('saveMeta', { slot: 's', meta: new Uint8Array(1) }, () => resolve('second ran'));
+      pool.submit('terrainGen', { seed: 1, tile: 0 }, () => { throw new Error('bug in a callback'); });
+      pool.submit('terrainGen', { seed: 1, tile: 0 }, () => resolve('second ran'));
       setTimeout(() => resolve('pool stopped'), 200);
     });
     assert.equal(await second, 'second ran');

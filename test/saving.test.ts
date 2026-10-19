@@ -40,7 +40,7 @@ class FakeWorker {
 function outcome(pool: JobPool, payload: Record<string, unknown>, ms = 300, key?: string): Promise<string> {
   return new Promise((resolve) => {
     try {
-      pool.submit('saveMeta', payload as never, () => resolve('done'), { key, fail: (m) => resolve(`failed: ${m}`) });
+      pool.submit('terrainGen', payload as never, () => resolve('done'), { key, fail: (m) => resolve(`failed: ${m}`) });
     } catch (err) { resolve(`submit threw: ${(err as Error).message}`); return; }
     setTimeout(() => resolve('never told'), ms);
   });
@@ -98,4 +98,88 @@ test('A6: a keyed job superseded while queued or while running tells its sender 
   assert.equal(await running, 'failed: superseded', 'the running job whose key was submitted again');
   assert.equal(await queuedLater, 'done');
   assert.equal(await supersedesRunning, 'done');
+});
+
+// ------------------------------------------------------------------ save generations (saveFiles.ts)
+
+import { SaveSlot, StoreError, type FileEntry, type FileStore } from '../src/saveFiles.ts';
+import { encodeMeta } from '../src/save.ts';
+import { TILE_COUNT } from '../src/core/grid.ts';
+
+/** Folders in memory; `failWrite(name)` returning true makes that write fail like a full disk. */
+class MemoryStore implements FileStore {
+  dirs = new Map<string, Map<string, Uint8Array>>();
+  failWrite: (name: string) => boolean = () => false;
+  private dir(f: string) { let d = this.dirs.get(f); if (!d) this.dirs.set(f, (d = new Map())); return d; }
+  async read(f: string, n: string) { return this.dirs.get(f)?.get(n)?.slice() ?? null; }
+  async write(f: string, n: string, data: Uint8Array) { if (this.failWrite(n)) throw new StoreError('disk full'); this.dir(f).set(n, data.slice()); }
+  async list(f: string): Promise<FileEntry[]> { return [...(this.dirs.get(f) ?? new Map<string, Uint8Array>())].map(([name, b]) => ({ name, size: b.length })); }
+  async remove(f: string, n: string) { this.dirs.get(f)?.delete(n); }
+  async folders() { return [...this.dirs.keys()].filter((k) => k !== ''); }
+  async removeFolder(f: string) { this.dirs.delete(f); }
+}
+
+const metaOf = (game: number, listed: number[]) => { const tiles = new Uint8Array(TILE_COUNT); for (const t of listed) tiles[t] = 1; return encodeMeta({ seed: 7, gameId: game, tiles, camera: new Float64Array(0) }); };
+const bytes = (...v: number[]) => new Uint8Array(v);
+const { sha256 } = await import('../src/jobs/storage.ts');
+
+async function saveGen(slot: SaveSlot, tiles: Array<[number, Uint8Array]>, listed: number[], kept: Awaited<ReturnType<SaveSlot['open']>>['generations'][0] | null) {
+  const w = await slot.begin();
+  for (const [t, b] of tiles) await w.tile(t, b, await sha256(b));
+  return w.commit(metaOf(5, listed), listed, kept, 5, 7);
+}
+
+test('A9: a save that fails before its commit leaves the save before it as the one that opens, intact', async () => {
+  const store = new MemoryStore(), slot = new SaveSlot(store, 'cidade-1');
+  const g1 = await saveGen(slot, [[3, bytes(1, 1, 1)], [4, bytes(2, 2)]], [3, 4], null);
+  // the next save rewrites tile 3 and adds tile 9, then the commit (or the manifest, or the map description) fails
+  for (const failing of [/^current/, /^manifest/, /^meta/]) {
+    store.failWrite = (n) => failing.test(n);
+    await assert.rejects(saveGen(slot, [[3, bytes(9, 9, 9, 9)], [9, bytes(5)]], [3, 4, 9], g1));
+    store.failWrite = () => false;
+    const { generations } = await slot.open();
+    assert.equal(generations[0].gen, g1.gen, `after a failed ${failing} the save before opens`);
+    assert.deepEqual([...generations[0].tiles.keys()], [3, 4]);
+    assert.deepEqual(await slot.readTile(generations[0], 3), bytes(1, 1, 1), 'tile 3 as it was saved, not as the failed save wrote it');
+  }
+});
+
+test('A9: a committed save keeps the generation before it as a fallback and removes only what neither uses', async () => {
+  const store = new MemoryStore(), slot = new SaveSlot(store, 'cidade-1');
+  const g1 = await saveGen(slot, [[3, bytes(1)], [4, bytes(2)]], [3, 4], null);
+  const g2 = await saveGen(slot, [[3, bytes(3, 3)]], [3, 4], g1);
+  let o = await slot.open();
+  assert.deepEqual(o.generations.map((g) => g.gen), [g2.gen, g1.gen]);
+  assert.equal(o.generations[0].tiles.get(4)!.file, g1.tiles.get(4)!.file, 'an unchanged tile keeps its file');
+  // the newest manifest damaged: the generation before opens
+  const man = g2.manifest!.file;
+  await store.write('cidade-1', man, bytes(...new TextEncoder().encode('{"format":1')));
+  o = await slot.open();
+  assert.equal(o.generations[0].gen, g1.gen);
+  assert.equal(o.newest, g2.gen, 'the caller knows it fell back');
+  // a third save built on g1: the files only g2 used go
+  const g3 = await saveGen(slot, [[4, bytes(4, 4, 4)]], [3, 4], g1);
+  const names = (await store.list('cidade-1')).map((e) => e.name).sort();
+  assert.ok(!names.includes(g2.tiles.get(3)!.file) && !names.includes(man), `g2's files removed: ${names}`);
+  assert.ok(names.includes(g1.tiles.get(3)!.file) && names.includes(g3.tiles.get(4)!.file));
+  // a tile file that is gone is reported, not hidden
+  await store.remove('cidade-1', g3.tiles.get(4)!.file);
+  o = await slot.open();
+  assert.deepEqual([...o.generations[0].missing.keys()], [4]);
+});
+
+test('A9: a save from before generations opens as generation 0 and the first new save builds on it', async () => {
+  const store = new MemoryStore(), slot = new SaveSlot(store, 'cidade-1');
+  await store.write('cidade-1', 'meta.bin', metaOf(5, [3, 4]));
+  await store.write('cidade-1', 'tile_0003.bin', bytes(1));
+  await store.write('cidade-1', 'tile_0004.bin', bytes(2));
+  await store.write('cidade-1', 'tile_0050.bin', bytes(8)); // a tile its map does not list
+  const g0 = (await slot.open()).generations[0];
+  assert.equal(g0.gen, 0);
+  assert.deepEqual([...g0.tiles.keys()], [3, 4]);
+  const g1 = await saveGen(slot, [[3, bytes(7)]], [3, 4], g0);
+  assert.equal(g1.tiles.get(4)!.file, 'tile_0004.bin');
+  const names = (await store.list('cidade-1')).map((e) => e.name);
+  assert.ok(!names.includes('tile_0050.bin') && names.includes('meta.bin'), `${names}`);
+  assert.equal((await slot.open()).generations[1].gen, 0, 'generation 0 is the fallback');
 });

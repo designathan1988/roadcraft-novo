@@ -1,5 +1,5 @@
-// Binary per-tile save, compressed, in the origin private file system (OPFS).
-// Runs in the worker. Only tiles that changed are written.
+// A tile's save file: binary, compressed, with its SHA-256. Encoded and decoded in the workers; the page writes and
+// reads the files (saveFiles.ts).
 
 import { HEIGHT_TILE_RES, MAP_TILES, SAVE_VERSION, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { heightIndex } from '../world/heights.ts';
@@ -58,9 +58,9 @@ export function encodeTile(tile: number, heights: Uint16Array, boxes: BoxColumns
 
 export function decodeTile(data: Uint8Array): { tile: number; heights: Uint16Array; boxes: BoxColumns; roads: RoadSave; ground?: Uint32Array; water?: Float32Array } {
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  if (dv.getUint32(0, true) !== MAGIC_TILE) throw new Error('arquivo de ladrilho inválido');
+  if (dv.getUint32(0, true) !== MAGIC_TILE) throw new Error('not a tile file');
   const version = dv.getUint32(4, true);
-  if (version > SAVE_VERSION) throw new Error(`versão de salvamento ${version} mais nova que o jogo`);
+  if (version > SAVE_VERSION) throw new Error(`save version ${version} is newer than the game`);
   const tile = dv.getUint32(8, true);
   const hn = dv.getUint32(12, true);
   let o = 16;
@@ -131,79 +131,20 @@ function widenSegs(old: Float32Array): Float32Array {
   return out;
 }
 
-async function compress(data: Uint8Array): Promise<Uint8Array> {
+export async function compress(data: Uint8Array): Promise<Uint8Array> {
   const s = new Blob([data as BlobPart]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(s).arrayBuffer());
 }
 
-async function decompress(data: Uint8Array): Promise<Uint8Array> {
+export async function decompress(data: Uint8Array): Promise<Uint8Array> {
   const s = new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(s).arrayBuffer());
 }
 
-/** The storage says the entry is not there (anything else it throws is a failure of the storage itself). */
-const notThere = (err: unknown) => { const n = (err as { name?: string })?.name; return n === 'NotFoundError' || n === 'TypeMismatchError'; };
-
-/** The save folder; null when it does not exist. Throws when the storage fails (never reported as "no save"). */
-async function slotDir(slot: string, create: boolean): Promise<FileSystemDirectoryHandle | null> {
-  try {
-    const root = await navigator.storage.getDirectory();
-    const saves = await root.getDirectoryHandle('saves', { create });
-    return await saves.getDirectoryHandle(slot, { create });
-  } catch (err) {
-    if (notThere(err)) return null;
-    throw new Error(`the save storage failed: ${(err as Error)?.message ?? String(err)}`);
-  }
-}
-
-async function writeFile(dir: FileSystemDirectoryHandle, name: string, data: Uint8Array): Promise<void> {
-  const fh = await dir.getFileHandle(name, { create: true });
-  const w = await fh.createWritable();
-  await w.write(data as BlobPart);
-  await w.close();
-}
-
-/** The file's bytes; null when it does not exist. Throws when the storage fails to read it. */
-async function readFile(dir: FileSystemDirectoryHandle, name: string): Promise<Uint8Array | null> {
-  try {
-    const fh = await dir.getFileHandle(name);
-    return new Uint8Array(await (await fh.getFile()).arrayBuffer());
-  } catch (err) {
-    if (notThere(err)) return null;
-    throw new Error(`the save storage failed to read ${name}: ${(err as Error)?.message ?? String(err)}`);
-  }
-}
-
-const tileName = (t: number) => `tile_${t.toString().padStart(4, '0')}.bin`;
-
-export async function saveTile(slot: string, tile: number, heights: Uint16Array, boxes: BoxColumns, roads: RoadSave, ground?: Uint32Array, water?: Float32Array): Promise<number> {
-  const dir = await slotDir(slot, true);
-  if (!dir) throw new Error('armazenamento indisponível');
-  const z = await compress(encodeTile(tile, heights, boxes, roads, ground, water));
-  await writeFile(dir, tileName(tile), z);
-  return z.byteLength;
-}
-
-/** A tile file's compressed bytes; null when it does not exist. Throws when the storage fails. */
-export async function readTile(slot: string, tile: number): Promise<Uint8Array | null> {
-  const dir = await slotDir(slot, false);
-  return dir ? readFile(dir, tileName(tile)) : null;
-}
-
-/** Decodes a tile file's bytes. Throws when they are not a tile (a damaged file). */
-export async function unpackTile(z: Uint8Array) {
-  return decodeTile(await decompress(z));
-}
-
-export async function saveMeta(slot: string, meta: Uint8Array): Promise<number> {
-  const dir = await slotDir(slot, true);
-  if (!dir) throw new Error('armazenamento indisponível');
-  await writeFile(dir, 'meta.bin', meta);
-  return meta.byteLength;
-}
-
-export async function loadMeta(slot: string): Promise<Uint8Array | null> {
-  const dir = await slotDir(slot, false);
-  if (!dir) return null;
-  return readFile(dir, 'meta.bin');
+/** SHA-256 of the bytes, in hex. */
+export async function sha256(data: Uint8Array): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', data as Uint8Array<ArrayBuffer>));
+  let s = '';
+  for (const b of d) s += b.toString(16).padStart(2, '0');
+  return s;
 }

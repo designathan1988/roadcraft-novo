@@ -81,11 +81,13 @@ export interface JobPayloads {
   props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number };
   cityGen: { seed: number };
   conform: { tile: number; segs: Float32Array };
-  /** ground and water: the tile's painted ground and water, copied by the page with the rest of the snapshot. */
-  saveTile: { slot: string; tile: number; heights: Uint16Array; boxes: BoxColumns; roads: RoadSave; ground?: Uint32Array; water?: Float32Array };
-  saveMeta: { slot: string; meta: Uint8Array };
-  loadTile: { slot: string; tile: number };
-  loadMeta: { slot: string };
+  /**
+   * A tile's save file made from the page's snapshot (the page writes it). ground and water: the tile's painted ground
+   * and water, copied by the page with the rest of the snapshot.
+   */
+  packTile: { tile: number; heights: Uint16Array; boxes: BoxColumns; roads: RoadSave; ground?: Uint32Array; water?: Float32Array };
+  /** A tile's save file read by the page: checked against `hash` ('' = not recorded), decoded, terrain written. */
+  unpackTile: { tile: number; data: Uint8Array; hash: string };
 }
 
 export interface JobResults {
@@ -98,10 +100,10 @@ export interface JobResults {
   props: { cell: number; props: PropColumns };
   cityGen: { nodes: Float32Array; segs: Int32Array; centers: Float32Array };
   conform: { tile: number; min: number; max: number };
-  saveTile: { tile: number; bytes: number };
-  saveMeta: { bytes: number };
-  loadTile: { tile: number; found: boolean; min: number; max: number; boxes: BoxColumns | null; roads: RoadSave | null; hasWater?: boolean; /** the file exists but cannot be read */ corrupt?: boolean };
-  loadMeta: { meta: Uint8Array | null };
+  /** The compressed file and its SHA-256. */
+  packTile: { tile: number; data: Uint8Array; hash: string };
+  /** ok false: the file cannot be used (`reason`), and nothing was written. hash: the file's SHA-256. */
+  unpackTile: { tile: number; ok: boolean; reason?: string; hash: string; min: number; max: number; boxes: BoxColumns | null; roads: RoadSave | null; hasWater?: boolean };
 }
 
 export type JobKind = keyof JobPayloads;

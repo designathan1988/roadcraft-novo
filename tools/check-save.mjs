@@ -114,15 +114,13 @@ const SCENARIOS = {
     road(1500, 1500, 1700, 1500);
     const before = w.roads.segs.size, marked = dirtyTiles();
     check('an edit marks tiles to save', marked.length > 0 && g.unsaved, 'unsaved=' + g.unsaved + ' tiles=' + marked);
-    const P = g.pool, submit = P.submit.bind(P);
-    let fail = true;
-    P.submit = (k, p, d, o) => submit(k, k === 'saveTile' && fail ? { ...p, slot: '' } : p, d, o);
+    const heal = await failWrites(/^tile/);
     const r = await within(g.save(false), 10000);
     check('a failed save returns', r === 'returned', 'save() ' + r);
     check('the game is free after a failed save', g.busy === false, 'busy=' + g.busy);
     check('a failed save leaves the work unsaved', g.unsaved === true, 'unsaved=' + g.unsaved);
     check('a failed save keeps the tiles marked', marked.every((t) => w.saveDirty[t]), 'marked now: ' + dirtyTiles());
-    fail = false;
+    heal();
     const r2 = await within(g.save(false), 10000);
     check('the next save works', r2 === 'returned' && !g.unsaved && dirtyTiles().length === 0, 'save() ' + r2 + ' unsaved=' + g.unsaved + ' tiles=' + dirtyTiles());
     const r3 = await within(g.load(), 30000);
@@ -184,6 +182,27 @@ const SCENARIOS = {
   `, `
     const r = await within(g.load(), 30000);
     check('the road built before closing is there', r === 'returned' && w.roads.segs.size > 0, 'load() ' + r + ', segments ' + w.roads.segs.size);
+  `],
+  // A9: a save interrupted between the tile files and its commit (the map description fails to be written, then the
+  // game is closed while the close save fails the same way) leaves the save before it intact, and that save opens
+  'interrupted-save': [`
+    road(1500, 1500, 1700, 1500);
+    check('the first save completes', await g.save(false) === true, 'save() did not complete');
+    // after it: another road in the same tile (its file is written again) and one in a tile not saved yet
+    road(1500, 1620, 1700, 1620);
+    road(-3000, -3000, -2800, -3000);
+    await failWrites(/^(meta|current|manifest)/);
+    check('the interrupted save reports that it did not complete', await g.save(false) === false, 'save() said it completed');
+    console.log('CHECK END');
+    window.roadcraftApp.quit();
+    await wait(30000);
+  `, `
+    const r = await within(g.load(), 30000);
+    check('the save before the interrupted one opens', r === 'returned' && !g.busy && !g.saveBlocked, 'load() ' + r + ' busy=' + g.busy + ' blocked=' + g.saveBlocked);
+    check('it is that save, intact: its road and none of the later ones', roadAt(1600, 1500) && !roadAt(1600, 1620) && !roadAt(-2900, -3000),
+      'roads: first ' + roadAt(1600, 1500) + ', same tile later ' + roadAt(1600, 1620) + ', other tile later ' + roadAt(-2900, -3000));
+    check('no road ends on a missing node', deadEnds() === 0, deadEnds() + ' segments with a dead end');
+    check('no errors', errors.length === 0, errors.join(' | '));
   `],
   // A15: a tile the save lists but whose file is gone comes back from the seed (not with the terrain of the city that
   // was on screen), and the player is told

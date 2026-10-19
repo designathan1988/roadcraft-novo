@@ -1,6 +1,7 @@
 // Pool worker: receives jobs, returns transferred buffers.
 
 import { setCustomProfiles } from '../roads/profiles.ts';
+import { HEIGHT_TILE_RES } from '../config.ts';
 import { NO_WATER, WATER_TILE_RES } from '../world/ground.ts';
 import type { FromWorker, JobKind, JobPayloads, JobResults, ToWorker } from './protocol.ts';
 import { boxTransfer, lotTransfer, meshTransfer, propTransfer } from './protocol.ts';
@@ -66,21 +67,23 @@ const handlers: { [K in JobKind]: Handler<K> } = {
     return [r, [r.nodes.buffer as ArrayBuffer, r.segs.buffer as ArrayBuffer, r.centers.buffer as ArrayBuffer]];
   },
   conform: (p) => [{ tile: p.tile, ...conformTile(H(), p.tile, p.segs) }, []],
-  saveTile: async (p) => {
+  packTile: async (p) => {
     // the ground and water the page copied with the rest of the snapshot (read here only if it sent none)
     const gl = WATER_TILE_RES * WATER_TILE_RES, wl = gl;
     const g = p.ground ?? (ground ? ground.slice(p.tile * gl, (p.tile + 1) * gl) : undefined);
     const w = p.water ?? (water ? water.slice(p.tile * wl, (p.tile + 1) * wl) : undefined);
-    return [{ tile: p.tile, bytes: await storage.saveTile(p.slot, p.tile, p.heights, p.boxes, p.roads, g, w) }, []];
+    const data = await storage.compress(storage.encodeTile(p.tile, p.heights, p.boxes, p.roads, g, w));
+    return [{ tile: p.tile, data, hash: await storage.sha256(data) }, [data.buffer as ArrayBuffer]];
   },
-  saveMeta: async (p) => [{ bytes: await storage.saveMeta(p.slot, p.meta) }, []],
-  loadTile: async (p) => {
-    // the storage failing to read throws (the job fails: the page stops the opening and touches nothing); a file that
-    // is there but cannot be decoded is reported as damaged (the page puts the save in quarantine)
-    const z = await storage.readTile(p.slot, p.tile);
-    if (!z) return [{ tile: p.tile, found: false, min: 0, max: 0, boxes: null, roads: null }, []];
-    let t: Awaited<ReturnType<typeof storage.unpackTile>>;
-    try { t = await storage.unpackTile(z); } catch { return [{ tile: p.tile, found: false, corrupt: true, min: 0, max: 0, boxes: null, roads: null }, []]; }
+  unpackTile: async (p) => {
+    const hash = await storage.sha256(p.data);
+    // a file that cannot be used is reported (the page decides what to do), and nothing of it is written
+    const refuse = (reason: string): [JobResults['unpackTile'], Transferable[]] => [{ tile: p.tile, ok: false, reason, hash, min: 0, max: 0, boxes: null, roads: null }, []];
+    if (p.hash && hash !== p.hash) return refuse('its contents do not match the save (damaged)');
+    let t: ReturnType<typeof storage.decodeTile>;
+    try { t = storage.decodeTile(await storage.decompress(p.data)); } catch (err) { return refuse(`it cannot be decoded (${err instanceof Error ? err.message : String(err)})`); }
+    if (t.tile !== p.tile) return refuse(`it holds tile ${t.tile}`);
+    if (t.heights.length !== HEIGHT_TILE_RES * HEIGHT_TILE_RES) return refuse(`it holds ${t.heights.length} heights`);
     const mm = storage.unpackTileHeights(H(), p.tile, t.heights);
     let hasWater = false;
     if (t.ground && ground && t.ground.length === WATER_TILE_RES * WATER_TILE_RES) ground.set(t.ground, p.tile * t.ground.length);
@@ -88,12 +91,8 @@ const handlers: { [K in JobKind]: Handler<K> } = {
       water.set(t.water, p.tile * t.water.length);
       for (let i = 0; i < t.water.length && !hasWater; i++) if (t.water[i] !== NO_WATER) hasWater = true;
     }
-    return [{ tile: p.tile, found: true, ...mm, boxes: t.boxes, roads: t.roads, hasWater },
+    return [{ tile: p.tile, ok: true, hash, ...mm, boxes: t.boxes, roads: t.roads, hasWater },
       [...boxTransfer(t.boxes), t.roads.nodes.buffer as ArrayBuffer, t.roads.segs.buffer as ArrayBuffer, ...(t.roads.items ? [t.roads.items.buffer as ArrayBuffer] : [])]];
-  },
-  loadMeta: async (p) => {
-    const meta = await storage.loadMeta(p.slot);
-    return [{ meta }, meta ? [meta.buffer as ArrayBuffer] : []];
   },
 };
 
