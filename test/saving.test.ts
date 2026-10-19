@@ -183,3 +183,17 @@ test('A9: a save from before generations opens as generation 0 and the first new
   assert.ok(!names.includes('tile_0050.bin') && names.includes('meta.bin'), `${names}`);
   assert.equal((await slot.open()).generations[1].gen, 0, 'generation 0 is the fallback');
 });
+
+test('A14: the same damaged save goes to quarantine once, and only the last three quarantines are kept', async () => {
+  const { quarantineSlot } = await import('../src/mapFile.ts');
+  const store = new MemoryStore(), slot = new SaveSlot(store, 'cidade-1');
+  await store.write('cidade-1', 'meta.bin', bytes(1, 2, 3));
+  const q = (why: string) => (quarantineSlot as (s: SaveSlot, why: string) => Promise<string | null>)(slot, why);
+  const first = await q('damaged');
+  assert.equal(await q('damaged'), first, 'opening the same damaged save again does not copy it again');
+  assert.equal((await store.folders()).filter((f) => f.startsWith('quarentena-')).length, 1);
+  for (let k = 0; k < 4; k++) { await store.write('cidade-1', 'meta.bin', bytes(9, k)); await new Promise((r) => setTimeout(r, 2)); await q(`damaged ${k}`); }
+  const left = (await store.folders()).filter((f) => f.startsWith('quarentena-'));
+  assert.equal(left.length, 3, `${left}`);
+  assert.ok(!left.includes(first!), 'the oldest went');
+});

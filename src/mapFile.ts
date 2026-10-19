@@ -116,8 +116,9 @@ async function foldersOf(store: FileStore, prefix: string, slot: string): Promis
   return (await store.folders()).filter((n) => n.startsWith(`${prefix}-`) && n.endsWith(`-${slot}`)).sort();
 }
 
-/** How many previous cities are kept per slot (the oldest beyond that are removed). */
+/** How many previous cities and quarantined saves are kept per slot (the oldest beyond that are removed). */
 const PREVIOUS_KEPT = 3;
+const QUARANTINES_KEPT = 3;
 
 async function prune(store: FileStore, folders: string[], keep: number): Promise<void> {
   for (const old of folders.slice(0, Math.max(0, folders.length - keep))) await store.removeFolder(old).catch((err: unknown) => console.warn('save: not removed', old, err));
@@ -147,14 +148,31 @@ export async function keepPreviousCity(slot: SaveSlot): Promise<string | null> {
 
 /**
  * Quarantine (Roadcraft: an unreadable map is never deleted): every file of the slot is copied untouched into
- * `saves/quarentena-<date>-<slot>`, so it can be sent for repair. Returns the folder name, or null when the slot is
- * empty or the copy failed.
+ * `saves/quarentena-<date>-<slot>`, so it can be sent for repair. The same files are quarantined once: opening the same
+ * damaged save again returns the folder it already went to. Only the last QUARANTINES_KEPT are kept. Returns the
+ * folder name, or null when the slot is empty or the copy failed.
  */
-export async function quarantineSlot(slot: SaveSlot): Promise<string | null> {
+export async function quarantineSlot(slot: SaveSlot, why: string): Promise<string | null> {
+  const { store, folder } = slot;
   try {
-    if (!(await slot.store.list(slot.folder)).length) return null;
-    const name = await freshFolder(slot.store, 'quarentena', slot.folder);
+    // what identifies these files: every name and size, and the contents of the small ones (commit record, manifests,
+    // map descriptions), which change with every save
+    const files: string[] = [];
+    for (const e of (await store.list(folder)).sort((x, y) => (x.name < y.name ? -1 : 1))) {
+      const small = /^(current|manifest|meta)/.test(e.name) ? await store.read(folder, e.name) : null;
+      files.push(`${e.name}:${e.size}:${small ? await sha256(small) : ''}`);
+    }
+    if (!files.length) return null;
+    const key = await sha256(new TextEncoder().encode(files.join('\n')));
+    const earlier = await foldersOf(store, 'quarentena', folder);
+    for (const q of earlier) {
+      const note = await store.read(q, 'quarantine.json').catch(() => null);
+      if (note && (JSON.parse(new TextDecoder().decode(note)) as { key?: string }).key === key) return q;
+    }
+    const name = await freshFolder(store, 'quarentena', folder);
     await slot.copyAll(name);
+    await store.write(name, 'quarantine.json', new TextEncoder().encode(JSON.stringify({ key, why, at: new Date().toISOString() })));
+    await prune(store, await foldersOf(store, 'quarentena', folder), QUARANTINES_KEPT);
     return name;
   } catch (err) {
     console.error('save: quarantine failed', err);

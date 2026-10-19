@@ -2183,7 +2183,7 @@ export class Game {
     }
     if (!gens.length) {
       this.busy = false;
-      const q = await quarantineSlot(slot);
+      const q = await quarantineSlot(slot, opened.problems.join('; '));
       this.hud.toast(t('save.damaged', { folder: q ?? '—' }));
       return false;
     }
@@ -2192,12 +2192,11 @@ export class Game {
     this.hud.showLoading(t('save.loading'));
     try {
       let report: { missing: number; damaged: number; repaired: number; cut: number } | null = null, used = order[0];
-      for (let k = 0; k < order.length && !report; k++) {
-        used = order[k];
-        report = await this.openGeneration(slot, used, k === order.length - 1);
-      }
+      // each generation in turn; when none opens whole, the newest opens with what of it can be read
+      if (order.length > 1) for (let k = 0; k < order.length && !report; k++) report = await this.openGeneration(slot, (used = order[k]), false);
+      if (!report) report = await this.openGeneration(slot, (used = order[0]), true);
       const fellBack = used.gen !== opened.newest;
-      const q = fellBack || report!.missing || report!.damaged ? await quarantineSlot(slot) : null;
+      const q = fellBack || report!.missing || report!.damaged ? await quarantineSlot(slot, opened.problems.join('; ') || 'tiles that cannot be read') : null;
       if (fellBack) this.hud.toast(t('save.fallback', { folder: q ?? '—' }));
       if (report!.damaged) this.hud.toast(plural('save.tilesUnreadable', report!.damaged, { folder: q ?? '—' }));
       if (report!.missing) this.hud.toast(plural('save.tilesMissing', report!.missing, { folder: q ?? '—' }));
@@ -2322,7 +2321,10 @@ export class Game {
     } catch { /* save without chosen junctions */ }
     // what was read is what the save holds; only the repair below and the tiles that lost a segment need writing
     w.saveDirty.fill(0);
-    for (const t of cutTiles) { w.saveDirty[t] = 1; w.saveVer[t]++; }
+    // a tile that could not be read now holds the seed's terrain: the next save writes it, so the damaged file stops
+    // coming back at every opening (it was kept in quarantine)
+    for (const t of [...cutTiles, ...unreadable]) { w.saveDirty[t] = 1; w.saveVer[t]++; }
+    if (unreadable.length) this.unsaved = true;
     if (cut) this.unsaved = true;
     // old maps: dead ends lying inside another road become junctions (marked to save)
     const repaired = repairDanglingEnds(w);

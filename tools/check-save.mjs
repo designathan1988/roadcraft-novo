@@ -282,6 +282,22 @@ const SCENARIOS = {
     check('the save opens', r === 'returned' && !g.busy, 'load() ' + r);
     check('no road ends on a node that was not read', deadEnds() === 0, deadEnds() + ' segments with a dead end; errors: ' + errors.slice(e0).join(' | '));
   `,
+  // A14: a damaged tile goes to quarantine once, not at every opening; the next save writes that tile again, and then
+  // the save opens clean
+  'quarantine-once': `
+    road(1500, 1500, 1700, 1500);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    const file = await tileFile(tileOf(1600, 1500)), data = await files.read(file);
+    await files.write(file, data.map((v, i) => (i > 8 ? v ^ 0xa5 : v)));
+    const quarantines = async () => (await files.folders()).filter((f) => f.startsWith('quarentena-')).length;
+    for (let k = 0; k < 3; k++) await g.load();
+    check('opening the same damaged save three times quarantines it once', await quarantines() === 1, (await quarantines()) + ' quarantine folders');
+    check('the damaged tile is marked to be written again', w.saveDirty[tileOf(1600, 1500)] === 1, 'not marked');
+    check('the next save completes', await g.save(false) === true, 'save() did not complete');
+    toasts.length = 0;
+    await g.load();
+    check('then the save opens clean', !toasts.some((m) => /ilegíve|pedaço/.test(m)) && await quarantines() === 1, 'toasts: ' + toasts.join(' | ') + '; quarantines ' + (await quarantines()));
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);
