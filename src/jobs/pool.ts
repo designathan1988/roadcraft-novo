@@ -1,6 +1,7 @@
 // Single job system with priority, running on a pool of workers.
 // The page never waits: it sends and receives by callback. A stale result
-// (same key resubmitted later) is discarded.
+// (same key resubmitted later) is discarded. Every job ends: with its result, or
+// with `fail` (the worker's error, or superseded by a newer job of the same key).
 
 import type { FromWorker, JobKind, JobPayloads, JobResults, SharedWorld, ToWorker } from './protocol.ts';
 import { MAP_TAG } from '../config.ts';
@@ -13,6 +14,7 @@ interface Pending {
   payload: unknown;
   transfer: Transferable[];
   done: (r: unknown) => void;
+  fail: ((message: string) => void) | null;
   cancelled: boolean;
 }
 
@@ -56,6 +58,8 @@ export interface SubmitOptions {
   key?: string;
   /** Lower = sooner. */
   priority?: number;
+  /** Called instead of `done` when the job does not complete: the worker's error, or a newer job of the same key. */
+  fail?: (message: string) => void;
   transfer?: Transferable[];
 }
 
@@ -91,15 +95,20 @@ export class JobPool {
     if (key) {
       this.latest.set(key, seq);
       const old = this.queuedByKey.get(key);
-      if (old) old.cancelled = true;
+      if (old) { old.cancelled = true; this.tell(old, 'superseded'); }
     }
     const p: Pending = {
       seq, kind, key, priority: opt.priority ?? 0, payload,
-      transfer: opt.transfer ?? [], done: done as (r: unknown) => void, cancelled: false,
+      transfer: opt.transfer ?? [], done: done as (r: unknown) => void, fail: opt.fail ?? null, cancelled: false,
     };
     if (key) this.queuedByKey.set(key, p);
     this.queue.push(p);
     this.pump();
+  }
+
+  /** A job as a promise: resolves with its result, rejects when it fails or is superseded. */
+  run<K extends JobKind>(kind: K, payload: JobPayloads[K], opt: Omit<SubmitOptions, 'fail'> = {}): Promise<JobResults[K]> {
+    return new Promise((resolve, reject) => this.submit(kind, payload, resolve, { ...opt, fail: (m) => reject(new Error(m)) }));
   }
 
   /** Promise for when nothing is queued or running (loading screen). */
@@ -132,11 +141,23 @@ export class JobPool {
     const p = this.busy[i];
     this.busy[i] = null;
     if (p && p.seq === msg.id) {
-      if (msg.type === 'error') console.error(`job ${p.kind} failed:`, msg.message);
-      else if (!p.key || this.latest.get(p.key) === p.seq) p.done(msg.result);
+      if (msg.type === 'error') {
+        console.error(`job ${p.kind} failed:`, msg.message);
+        this.tell(p, msg.message);
+      } else if (!p.key || this.latest.get(p.key) === p.seq) {
+        // a callback that throws is logged; the pool goes on with the next job
+        try { p.done(msg.result); } catch (err) { console.error(`job ${p.kind}: the result's callback threw`, err); }
+      } else this.tell(p, 'superseded');
     }
     this.pump();
   }
+
+  /** Tells a job's sender that it did not complete (never throws into the pool). */
+  private tell(p: Pending, message: string): void {
+    if (!p.fail) return;
+    try { p.fail(message); } catch (err) { console.error(`job ${p.kind}: the failure's callback threw`, err); }
+  }
+
 }
 
 function moduleWorker(i: number): Worker {
