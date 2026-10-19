@@ -109,7 +109,8 @@
   await check('opções abrem', async () => { H.options(); await wait(200); const ok = [...document.querySelectorAll('div,section')].some((e) => e.offsetParent !== null && /Gráficos|Qualidade|Opções/.test(e.textContent || '') && e.children.length > 3); document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true })); return ok || 'painel não apareceu'; });
   await check('ajuda e sobre', async () => { H.help(); await wait(200); const ok = /Sobre|versão|Ajuda/i.test(document.body.innerText); H.help(); return ok || 'ajuda não apareceu'; });
   await check('grade, norte e vistas da câmera', () => { H.grid(); H.grid(); H.north(); H.view('top'); H.view('iso'); H.view('persp'); return true; });
-  await check('saúde do jogo (F9)', async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); await wait(300); const ok = /quadro|ms|memória/i.test(document.body.innerText); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); return ok || 'painel F9 não apareceu'; });
+  // the health panel is a developer's tool (?dev): for the player F9 opens nothing (tools/check-interface.mjs B30 checks it with ?dev)
+  await check('saúde do jogo (F9) fora da interface do jogador', async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); await wait(300); const p = document.querySelector('.health'); const ok = !p || p.classList.contains('hidden'); if (!ok) p.classList.add('hidden'); return ok || 'o painel de saúde abriu para o jogador'; });
   await check('salvamento automático', async () => { g.unsaved = true; g.autosaveAt = 0; await wait(2500); return g.unsaved === false || 'não salvou sozinho'; });
 
   console.log('VERIFICAÇÃO2 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
