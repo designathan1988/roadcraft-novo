@@ -9,6 +9,12 @@ import type { World } from '../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 
+/** Roads that have lots: not rails, roundabout rings, highways, expressways or ramps (priority 4 and up). */
+export function zonable(profile: number): boolean {
+  const info = PROFILE_INFO[profile];
+  return !!info && !info.ring && !info.rail && (info.priority ?? 0) < 4;
+}
+
 export class ZoneTool {
   zone = 1;
   radius = 40;
@@ -37,7 +43,7 @@ export class ZoneTool {
     const hits: Array<[number, number]> = [];
     net.forSegsNear(x - r - 60, z - r - 60, x + r + 60, z + r + 60, (s) => {
       const info = PROFILE_INFO[sc.profile[s]];
-      if (info.ring || sc.profile[s] === 5) return; // roundabouts and the expressway have no lots
+      if (!zonable(sc.profile[s])) return;
       const q = net.quad(s);
       const len = sc.len[s];
       const n = Math.max(2, Math.ceil(len / 8));
@@ -82,8 +88,7 @@ export class ZoneTool {
       const key = s * 2 + side;
       if (done.has(key)) break;
       done.add(key);
-      const info = PROFILE_INFO[sc.profile[s]];
-      if (!info.ring && !info.rail && sc.profile[s] !== 5) {
+      if (zonable(sc.profile[s])) {
         const cur = side === 0 ? sc.zl[s] : sc.zr[s];
         if (cur !== this.zone) { if (cur !== 0) this.clearSide(j, s, side, this.zone); j.setZone(s, side, this.zone); }
       }

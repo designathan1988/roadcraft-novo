@@ -720,3 +720,24 @@ test('D22: repainting a street\'s zone leaves the corner buildings that front th
   assert.equal(w.buildings.alive[onMain], 0, 'the house facing the rezoned street stays (it should give way)');
   assert.equal(w.buildings.alive[onCross], 1, 'the corner house facing the cross street was demolished');
 });
+
+test('D23: the zone brush never zones rails, highways or ramps', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const names = ['Ferrovia dupla', 'Metrô (duplo)', 'Rodovia 6 faixas', 'Alça de acesso', 'Pista dupla, 2 faixas'];
+  for (const name of names) {
+    const w = flatWorld(1e9);
+    road(w, -100, 0, 100, 0, PROFILE_INFO.findIndex((p) => p.name === name));
+    const tool = new ZoneTool(w, new CommandStack());
+    tool.begin(); tool.dab(0, 20); tool.dab(0, -20); tool.end();
+    const sc = w.roads.segs.cols;
+    for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) assert.ok(sc.zl[s] === 0 && sc.zr[s] === 0, `the brush zoned a ${name}`);
+  }
+  const street = flatWorld(1e9);
+  road(street, -100, 0, 100, 0, 0);
+  const tool = new ZoneTool(street, new CommandStack());
+  tool.begin(); tool.dab(0, 20); tool.end();
+  const sc = street.roads.segs.cols;
+  let zoned = 0;
+  for (let s = 0; s < street.roads.segs.end; s++) if (street.roads.segs.alive[s] && (sc.zl[s] || sc.zr[s])) zoned++;
+  assert.ok(zoned > 0, 'a street is still zoned');
+});
