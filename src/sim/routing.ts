@@ -97,10 +97,11 @@ export class Router {
    * path). On foot (`walk`): `ban` is a segment not to leave `src` by (no turning back). A vehicle: `ban` is the
    * segment it reaches `src` by, and every movement, `src` included, must be one the node's connections make (banned
    * turns and hand-made lane connectors respected; turning back only where there is a U-turn connection); `ban2` is a
-   * segment not to leave `src` by (the full exit of a driver reconsidering the route); `bus`: bus-only lanes too.
+   * segment not to leave `src` by (the full exit of a driver reconsidering the route); `bus`: bus-only lanes too;
+   * `last`: the route must end driving this segment into `dst` (a bus stop's lane), −1 = any way into `dst`.
    */
-  route(src: number, dst: number, out: Int32Array, at: number, max: number, walk = false, ban = -1, rail = false, ban2 = -1, bus = false): number {
-    return walk ? this.walkRoute(src, dst, out, at, max, ban) : this.driveRoute(src, dst, out, at, max, ban, rail, ban2, bus);
+  route(src: number, dst: number, out: Int32Array, at: number, max: number, walk = false, ban = -1, rail = false, ban2 = -1, bus = false, last = -1): number {
+    return walk ? this.walkRoute(src, dst, out, at, max, ban) : this.driveRoute(src, dst, out, at, max, ban, rail, ban2, bus, last);
   }
 
   /** On foot: A* over the nodes (one-way streets do not matter, only segments with a sidewalk). */
@@ -171,10 +172,12 @@ export class Router {
    * lanes do not make is never planned and a path may pass the same node twice (round the block after a banned turn,
    * to a dead end and back).
    */
-  private driveRoute(src: number, dst: number, out: Int32Array, at: number, max: number, inSeg: number, rail: boolean, ban2: number, bus: boolean): number {
+  private driveRoute(src: number, dst: number, out: Int32Array, at: number, max: number, inSeg: number, rail: boolean, ban2: number, bus: boolean, last: number): number {
     const sim = this.sim, net = sim.net, nc = net.nodes.cols, sc = net.segs.cols;
     if (!net.nodes.alive[src] || !net.nodes.alive[dst]) return 0;
-    if (src === dst) { out[at] = src; return 1; }
+    // the state the route must end in (arriving at dst by `last`), −1 = any
+    const goal = last >= 0 && net.segs.alive[last] && (sc.a[last] === dst || sc.b[last] === dst) ? last * 2 + (sc.b[last] === dst ? 0 : 1) : -1;
+    if (src === dst && goal < 0) { out[at] = src; return 1; }
     this.ensureEdges(net.segs.capacity * 2);
     if (++this.ecur === 0xffffffff) { this.estamp.fill(0); this.eclosed.fill(0); this.ecur = 1; }
     const cur = this.ecur;
@@ -226,7 +229,7 @@ export class Router {
       if (this.eclosed[e] === cur) continue;
       this.eclosed[e] = cur;
       const n = head(e);
-      if (n === dst && e !== start) { found = e; break; }
+      if (n === dst && e !== start && (goal < 0 || e === goal)) { found = e; break; }
       if (++expanded > this.limit) break;
       const sIn = e >> 1, o = n * MAX_DEG, d = nc.deg[n];
       for (let k = 0; k < d; k++) {

@@ -2365,19 +2365,17 @@ export class Traffic {
     if (!ln) { c.line[v] = -1; c.dying[v] = 1; return; }  // (line gone: the set has already been replaced)
     const target = ln.stopLane[c.stopI[v]];
     if (!sim.net.segs.alive[laneSeg(target)]) { c.dying[v] = 1; return; }
-    const a = sim.laneFrom(target), b = sim.laneTo(target);
+    const b = sim.laneTo(target);
     const o = v * ROUTE_CAP;
-    let n: number;
-    if (from === a) { this.routes[o] = a; n = 1; }
-    else {
-      const inSeg = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
-      const rail = ln.mode > 0;
-      n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, inSeg, rail, -1, true);
-      if (n < 2) { c.dying[v] = 1; return; }
-      if (this.routes[o + n - 1] !== a) { c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = a; return; } // truncated route: go on and replan at the end
-    }
-    this.routes[o + n] = b;
-    c.rLen[v] = n + 1; c.rIdx[v] = 0; c.dest[v] = b;
+    // already on the stop's lane (not served yet): it stays on it; the stop comes before the lane's end
+    if (c.lane[v] === target && c.conn[v] < 0) { this.routes[o] = b; c.rLen[v] = 1; c.rIdx[v] = 0; c.dest[v] = b; return; }
+    // to the end of the stop's lane, driving that lane: the last movement into it must be one the junction makes
+    // (planning only to its start node could leave the bus unable to turn into it, circling for ever)
+    const inSeg = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
+    const n = this.router.route(from, b, this.routes, o, ROUTE_CAP, false, inSeg, ln.mode > 0, -1, true, laneSeg(target));
+    if (n < 2) { c.dying[v] = 1; return; }
+    // (a truncated route goes on and is planned again at its end)
+    c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = this.routes[o + n - 1];
   }
 
   /** Those waiting at stops near the camera (standing people, up to 14 per stop). */

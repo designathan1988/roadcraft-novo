@@ -952,3 +952,21 @@ test('C33: inside the camera window every vehicle is a drawn one (none stays inv
   assert.ok(all > 50, `vehicles ${all}`);
   assert.equal(hidden, 0, `${hidden} of ${all} vehicles inside the window are invisible (far model)`);
 });
+
+test('buses reach every stop of their line (the last turn into a stop\'s lane is one the junction makes)', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
+  const T = inner(tr), c = tr.veh.cols, served = new Map<number, number>(), last = new Map<number, number>();
+  for (let i = 0; i < 20 * 900; i++) {
+    tr.step(0.05); if (i % 20 === 0) tr.checkWindow();
+    for (const v of T.busSets[0] as Set<number>) {
+      const was = last.get(v);
+      if (was !== undefined && was !== c.stopI[v]) served.set(was, (served.get(was) ?? 0) + 1);
+      last.set(v, c.stopI[v]);
+    }
+  }
+  const n = tr.lines[0].stopLane.length;
+  for (let s = 0; s < n; s++) assert.ok((served.get(s) ?? 0) >= 2, `stop ${s} served ${served.get(s) ?? 0} times in 15 min (served: ${JSON.stringify([...served])})`);
+});
