@@ -615,16 +615,16 @@ export class Game {
 
     this.rig.update(dt);
     const cam = this.rig.camera;
-    if (this.skyMode === 'dia') this.hour = 12;
-    else if (this.skyMode === 'noite') this.hour = 22;
-    else if (!this.paused) this.hour = (this.hour + dt * this.clockSpeed / 60) % 24;
+    // always day (or night) fixes the light only: the clock, and the traffic demand that follows it, go on
+    if (!this.paused) this.hour = (this.hour + dt * this.clockSpeed / 60) % 24;
+    const light = this.skyMode === 'dia' ? 12 : this.skyMode === 'noite' ? 22 : this.hour;
     // city clock in minutes (building decay); the sky mode only fixes the light
     if (!this.paused) this.world.advanceClock(dt * this.clockSpeed);
     if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.busy && !this.saveBlocked) void this.save(true); }
     const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
     this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
-    setTimeOfDay(this.parts, this.hour, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
+    setTimeOfDay(this.parts, light, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
     this.particles.update(dt, this.rig.eye);
     this.textSigns.update(this.rig.eye);
     this.blast.update(dt);

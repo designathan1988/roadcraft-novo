@@ -214,6 +214,20 @@ export const SCENARIOS = {
     await wait(1200);
     check('the warning goes when the junction is fixed', !Q('.v2-warn') || Q('.v2-warn').hidden, 'count now ' + A.impossibleNodes());
   `,
+  // B51: always day (or night) fixes the light, while the clock and the traffic demand go on
+  'B51-always-day-clock': `
+    g.hour = 8; g.clockSpeed = 30; // ?hora stops the clock: half an hour per second here
+    click('[data-sky=dia]'); await frames(2);
+    const h0 = g.hour;
+    await wait(4000);
+    check('the clock goes on with always day', g.hour > h0 + 0.03, 'hour ' + h0.toFixed(3) + ' → ' + g.hour.toFixed(3));
+    const sent = [];
+    const post = g.sim.postMessage.bind(g.sim);
+    g.sim.postMessage = (m, t) => { if (m && m.type === 'demand') sent.push(m.hour); return post(m, t); };
+    await wait(2600);
+    g.sim.postMessage = post;
+    check('the demand follows the clock, not noon', sent.length > 0 && sent[sent.length - 1] !== 12 && Math.abs(sent[sent.length - 1] - g.hour) < 1.2, 'demand hour ' + sent + ', clock ' + g.hour.toFixed(2));
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
