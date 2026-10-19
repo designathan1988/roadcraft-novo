@@ -14,21 +14,23 @@ import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, Pattern, Win, chimneyOf
 import { cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { CELL_SIZE } from '../config.ts';
 import { SHAPE_SCALE, SHAPE_STRIDE, type BoxColumns, type PackedMesh } from './protocol.ts';
-import { CATALOG, CIVIC_CATALOG, CIVIC_DESIGNS, CatElem, CatFill, GEAR, catalogLevels, decodeDesign, footprint, hasDesign, type CatalogEntry, type Design } from '../world/design.ts';
+import { CIVIC_CATALOG, CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign, type Design } from '../world/design.ts';
+import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
+import { BAY, catalogFacade } from '../world/catalogFacade.ts';
 import { FIN } from './buildingFinishes.ts';
 
 export const GEN_VERSION = 15;
 /** Camada de detalhe: para onde vão as peças 3D das janelas enquanto o gerador roda num descarte. */
 let detailOut: MeshBuilder | null = null;
 /** Peças repetidas (pool de props): para onde vão enquanto o gerador roda no modo peças (lod −2). */
-export type PartEmit = (variant: number, x: number, y: number, z: number, yaw: number, scale: number) => void;
+export type PartEmit = (variant: number, x: number, y: number, z: number, yaw: number, scale: number, kind?: number) => void;
 let partsOut: PartEmit | null = null;
 /** Variantes de peça de fachada (mobiliário 8..15 no pool de props). */
 export const PART = { WallAc: 8, RoofAc: 9, Vase: 10, Clothesline: 11, Dish: 12, Vent: 13, Chair: 14, Tank: 15 } as const;
 /** Emite uma peça na posição local (lx, y, lz) com a frente para a normal local (nlx, nlz). */
-function part(f: Frame, variant: number, lx: number, y: number, lz: number, nlx: number, nlz: number, scale = 1): void {
+function part(f: Frame, variant: number, lx: number, y: number, lz: number, nlx: number, nlz: number, scale = 1, kind?: number): void {
   if (!partsOut) return;
-  partsOut(variant, wx(f, lx, lz), y, wz(f, lx, lz), Math.atan2(f.s, f.c) + Math.atan2(nlx, nlz), scale);
+  partsOut(variant, wx(f, lx, lz), y, wz(f, lx, lz), Math.atan2(f.s, f.c) + Math.atan2(nlx, nlz), scale, kind);
 }
 /**
  * The main mesh of a pass that does not want it (detail layer, parts): keeps the facade state the detail reads
@@ -97,8 +99,8 @@ CIVIC_TOP[Fn.SportsCourt] = 4; CIVIC_TOP[Fn.Cemetery] = 5; CIVIC_TOP[Fn.Playgrou
 export function wallsHeight(zone: number, floors: number, x: number, z: number, style: number, fn: number, color: number, h: number): number {
   const fl = Math.max(1, floors);
   if (hasDesign(color)) {
-    const ds = decodeDesign(color, h), e = ds.catalog ? CATALOG[ds.catalog - 1] : undefined;
-    if (e) return e.gh + (catalogLevels(e) - 1) * e.sh;
+    const ds = decodeDesign(color, h), e = ds.catalog ? catalogProjects()[ds.catalog - 1] : undefined;
+    if (e) return (e.groundHeight + (catalogLevels(e, fl)[1] - 1) * e.storeyHeight) * CAT_UNIT;
     return fl * (ds.finish === 2 ? 3.6 : 3.2);
   }
   if (CIVIC_DESIGNS[fn]) { const [ds, minF] = CIVIC_DESIGNS[fn]; return Math.max(minF, Math.min(fl, minF * 2)) * (ds.finish === 2 ? 3.6 : 3.2); }
@@ -152,7 +154,7 @@ function nz(f: Frame, x: number, z: number): number { return -x * f.s + z * f.c;
  * colunas, alinhadas a cada parede), topo opcional.
  */
 function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number,
-  wallCol: number, wallMat: number, colW: number, top: number, topMat: number, bottom = false): void {
+  wallCol: number, wallMat: number, colW: number, top: number, topMat: number, bottom = false, skip = 0): void {
   if (layoutOut) captureVolume(mb, f, x0, x1, z0, z1, y0, y1, wallMat);
   if (footOut) captureFoot(f, x0, x1, z0, z1, y0);
   if (detailOut && mb !== detailOut) {
@@ -165,6 +167,8 @@ function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
   const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]]; // frente, direita, fundo, esquerda
   const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
   for (let k = 0; k < 4; k++) {
+    // a side against a wall (skip bit k: 1 front, 2 right, 4 back, 8 left) is never seen
+    if (skip & (1 << k)) continue;
     const [ax, az] = corners[k], [bx, bz] = corners[(k + 1) & 3];
     const len = Math.hypot(bx - ax, bz - az);
     const cols = Math.max(1, Math.round(len / colW));
@@ -641,7 +645,8 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
   const v0 = mb.v;
   const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
   const cat = ds?.catalog ? ds.catalog : plan.landmark[i];
-  if (cat && CATALOG[cat - 1]) catalogBuilding(g, CATALOG[cat - 1], ds ? ds.wall : -1);
+  const proj = cat ? catalogProjects()[cat - 1] : undefined;
+  if (proj) catalogBuilding(g, proj, ds ? ds.wall : -1);
   else if (ds) design(g, ds);
   else if (b.fn[i] === Fn.Cemetery || b.fn[i] === Fn.Playground) openLot(g, b.fn[i]);
   else if (CIVIC_DESIGNS[b.fn[i]]) { const [ds, minF] = CIVIC_DESIGNS[b.fn[i]]; design({ ...g, floors: Math.max(minF, Math.min(floors, minF * 2)) }, ds); }
@@ -1121,6 +1126,14 @@ const WIN_TABLE = facadeWindowTable();
  */
 function windowDetail(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, wy0: number, wy1: number,
   base: number, shop: boolean, colW: number, fh: number, arch: number): void {
+  const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
+  const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+  for (let k = 0; k < 4; k++) windowDetailWall(mb, f, corners[k][0], corners[k][1], corners[(k + 1) & 3][0], corners[(k + 1) & 3][1], normals[k][0], normals[k][1], wy0, wy1, base, shop, colW, fh, arch);
+}
+
+/** The window pieces of one wall, from (ax, az) to (bx, bz) facing (nxl, nzl) (local), as windowDetail draws each side. */
+function windowDetailWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx: number, bz: number, nxl: number, nzl: number,
+  wy0: number, wy1: number, base: number, shop: boolean, colW: number, fh: number, arch: number): void {
   const [ww, wLow, wHigh] = WIN_TABLE[arch] ?? WIN_TABLE[0];
   const style = facadeArch(arch);
   const trim = (ARCHES[style] ?? ARCHES[0]).trim;
@@ -1135,14 +1148,11 @@ function windowDetail(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: num
   const sillCol = mixHex(0xe4dfd4, trim, 0.15), headCol = mixHex(0xd9d3c7, trim, 0.2);
   const frameCol = FRAME_COLORS[style] ?? 0xe6e6e2;
   const molded = (ARCHES[style] ?? ARCHES[0]).frame, moldCol = mixHex(0xeeeae2, trim, 0.4);
-  const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
-  const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
-  for (let k = 0; k < 4; k++) {
-    const [ax, az] = corners[k], [bx, bz] = corners[(k + 1) & 3];
+  {
     const len = Math.hypot(bx - ax, bz - az);
+    if (len < 1e-3) return;
     const cols = Math.max(1, Math.round(len / colW)), cw = len / cols;
     const dx = (bx - ax) / len, dz = (bz - az) / len;
-    const [nxl, nzl] = normals[k];
     for (let c = 0; c < cols; c++) {
       if ((bays & 4 && c % 3 === 1) || (bays & 8 && c % 3 !== 0)) continue; // the pattern's blank bays
       const u0 = (c + ww) * cw - 0.06, u1 = (c + 1 - ww) * cw + 0.06;
@@ -1954,8 +1964,9 @@ function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y
 
 // ------------------------------------------------------------ cell plan: facade patterns and landmarks
 
-/** Landmark towers: the catalog projects that are not civic (index into CATALOG). */
-const TOWER_CATALOG: number[] = CATALOG.map((_, k) => k).filter((k) => !CIVIC_CATALOG.has(CATALOG[k].name));
+/** Landmark towers: the catalog projects that are not civic (index into catalogProjects()). */
+let towerCatalog: number[] | null = null;
+const TOWER_CATALOG = (): number[] => towerCatalog ??= catalogProjects().map((_, k) => k).filter((k) => !CIVIC_CATALOG.has(catalogProjects()[k].name));
 /** Share of commercial towers drawn as a catalog landmark (%). */
 const LANDMARK_SHARE = 22;
 /** Radius in which a landmark is never repeated (m); the cell colouring keeps it across cell borders. */
@@ -1994,11 +2005,11 @@ export function planCells(b: BoxColumns): CellPlan {
       const tower = zone === Zone.Commercial && floors >= 8;
       if (tower && hash2(b.seed[i], 0x1a4d) % 100 < LANDMARK_SHARE) {
         const colour = (cellX(b.x[i]) & 1) | ((cellX(b.z[i]) & 1) << 1);
-        const cands = TOWER_CATALOG.filter((_, j) => j % 4 === colour);
+        const cands = TOWER_CATALOG().filter((_, j) => j % 4 === colour);
         const start = hash2(b.seed[i], 0x77) % cands.length;
         for (let t = 0; t < cands.length && !landmark[i]; t++) {
-          const k = cands[(start + t) % cands.length], e = CATALOG[k];
-          if (Math.min(b.w[i] / e.w, b.d[i] / e.d) < 0.6) continue;
+          const k = cands[(start + t) % cands.length], ext = catalogExtent(catalogProjects()[k]);
+          if (Math.min(b.w[i] / ((ext.x1 - ext.x0) * CAT_UNIT), b.d[i] / (ext.y1 * CAT_UNIT)) < 0.6) continue;
           const near = done.some((j) => landmark[j] === k + 1 && Math.hypot(b.x[j] - b.x[i], b.z[j] - b.z[i]) < LANDMARK_GAP);
           if (!near) landmark[i] = k + 1;
         }
@@ -2024,104 +2035,320 @@ export function planCells(b: BoxColumns): CellPlan {
   return { pattern, landmark, side };
 }
 
-/** Catalog finish and fill -> the engine's facade: [facade id, kind, column width]. */
-function catalogFacade(fin: number, fill: number, shopGround: boolean): [number, number, number] {
-  const style = fin === FIN.Glass ? ArchId.Glass : fin === FIN.Brick ? ArchId.Brick : fin === FIN.Stone ? ArchId.Civic
-    : fin === FIN.Ceramic ? ArchId.Modernist : fin === FIN.Stucco ? ArchId.ArtDeco : fin === FIN.Panel || fin === FIN.Metal ? ArchId.Contemporary : ArchId.Colonial;
-  const shop = shopGround ? Facade.ShopBit : 0;
-  if (fin === FIN.Glass) return [style, Facade.Curtain | shop, 1.6];
-  if (fill === CatFill.Wide) return [style + ARCH_COUNT * Pattern.Office, Facade.Punched | shop, 3.2];
-  if (fill === CatFill.Ribbon) return [style + ARCH_COUNT * Pattern.Office, Facade.Industrial | shop, 3];
-  return [style, Facade.Punched | shop, ARCHES[style].module];
+// ------------------------------------------------------------ catalog projects (the 38 Roadcraft 4.0 lots, whole)
+
+/** Catalog finish (CAT_FINISHES index) → finish id. */
+const CAT_FIN = CAT_FINISHES.map((n) => FIN[(n[0].toUpperCase() + n.slice(1)) as keyof typeof FIN] ?? FIN.Plaster);
+/** Prop kinds and furniture variants the catalog elements go to (jobs/props.ts PROP, FURN). */
+const P_TREE = 0, P_BUSH = 2, P_LAMP = 3, P_BENCH = 6, P_BIN = 7, P_FURN = 11;
+const F_DRAIN = 3, F_BOLLARD = 4, F_PLANTER = 5;
+
+/** The plan of a project: x from x0 to x1 and y from 0 (the front) to y1, project units, over volumes and elements. */
+export function catalogExtent(p: CatProject): { x0: number; x1: number; y1: number } {
+  let x0 = Infinity, x1 = -Infinity, y1 = 0;
+  for (const v of p.volumes) { x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x + v.w); y1 = Math.max(y1, v.y + v.d); }
+  return { x0, x1, y1 };
 }
 
 /**
- * A building drawn from a catalog project (a Roadcraft 4.0 lot): its volumes in levels (ground storey `gh`, the rest
- * `sh`), each with its finish, colour and facade, flat or terrace roofs with parapets, balconies, doors; open
- * ground (paving, asphalt, grass), trees, planters, lot walls and gates. Scaled in plan to the lot (heights kept).
+ * Levels of a project drawn for a record of `floors` storeys: [the project's top level, the drawn top level]. The
+ * volumes that reach the top grow (or shrink) by the difference; never below the podiums (the other volumes' tops).
  */
-function catalogBuilding(g: Gen, e: CatalogEntry, wallOverride: number): void {
+export function catalogLevels(p: CatProject, floors: number): [number, number] {
+  let top = 0, podium = 1;
+  for (const v of p.volumes) if (v.open < 0) top = Math.max(top, v.base + v.storeys.length);
+  for (const v of p.volumes) if (v.open < 0 && v.base + v.storeys.length < top) podium = Math.max(podium, v.base + v.storeys.length + 1);
+  return [top, Math.max(podium, floors > 0 ? floors : top)];
+}
+
+/** A volume's storeys at the drawn height: the typical upper storey repeated (or removed) under the top one. */
+function catalogStoreys(v: CatVolume, top: number, drawn: number): CatStorey[] {
+  const n = v.storeys.length, d = drawn - top;
+  if (v.base + n !== top || d === 0) return v.storeys;
+  // fewer: the top storey stays, the ones under it go (at least the top one is left)
+  if (d < 0) { const keep = Math.max(1, n + d); return [...v.storeys.slice(0, keep - 1), v.storeys[n - 1]]; }
+  const typical = v.storeys[Math.max(0, n - 2)];
+  return [...v.storeys.slice(0, n - 1), ...Array.from({ length: d }, () => typical), v.storeys[n - 1]];
+}
+
+/** One wall of a volume, from (ax, az) to (bx, bz) facing (nxl, nzl), y0 to y1, with the current facade. */
+function facadeWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx: number, bz: number, nxl: number, nzl: number,
+  y0: number, y1: number, col: number, mat: number, colW: number): void {
+  if (detailOut && mb !== detailOut) {
+    const fc = mb.curFac, kind = fc[2] & 3;
+    if (fc[3] > 0 && kind !== Facade.Curtain && ((mat & 15) === BMAT.Wall || (mat & 15) === BMAT.Metal))
+      windowDetailWall(detailOut, f, ax, az, bx, bz, nxl, nzl, y0, y1, mb.curBase, (fc[2] & 4) !== 0, colW, (fc[2] >> 3) / 10 + 2.5, fc[0]);
+    return;
+  }
+  const len = Math.hypot(bx - ax, bz - az);
+  if (len < 1e-3) return;
+  const NX = nx(f, nxl, nzl), NZ = nz(f, nxl, nzl);
+  mb.curU = 0;
+  const a = mb.vert(wx(f, ax, az), y0, wz(f, ax, az), NX, 0, NZ, col, mat), d = mb.vert(wx(f, ax, az), y1, wz(f, ax, az), NX, 0, NZ, col, mat);
+  mb.curU = Math.max(1, Math.round(len / colW));
+  const b = mb.vert(wx(f, bx, bz), y0, wz(f, bx, bz), NX, 0, NZ, col, mat), c = mb.vert(wx(f, bx, bz), y1, wz(f, bx, bz), NX, 0, NZ, col, mat);
+  mb.quad(a, b, c, d, NX, 0, NZ);
+  mb.curU = 0;
+}
+
+/**
+ * A building drawn from a catalog project, whole (world/catalog.ts): its volumes in levels (ground storey `gh`, the
+ * rest `sh`), each face drawn in bands of storeys with the same fill (the storey's or the face's), with the project's
+ * window width, sill and head for that face (world/catalogFacade.ts) and its bay width; balconies per bay, doors at
+ * their bays, piers from the face geometry, flat or terrace roofs with parapets where nothing stands against the edge;
+ * open ground; every element (trees, shrubs, benches, lamps, bins, bollards and drains to the props pool; walls,
+ * fences, railings, gates, slabs, pavements, parking, planters, pillars, canopies in the mesh) with its height,
+ * elevation and facing. Scaled in plan to the lot (heights kept); the storeys follow the record's floors.
+ */
+function catalogBuilding(g: Gen, p: CatProject, wallOverride: number): void {
   const { mb, heights, f, W, D, hi, lod, seed } = g;
-  const s = Math.min(1.15, W / e.w, D / e.d);
-  const y0 = hi + 0.2;
-  const levelY = (k: number) => y0 + (k <= 0 ? 0 : e.gh + (k - 1) * e.sh);
-  const X = (x: number) => x * s, Z = (z: number) => D / 2 - z * s;
+  const U = CAT_UNIT, ext = catalogExtent(p);
+  const s = Math.min(1.15, W / ((ext.x1 - ext.x0) * U), D / (ext.y1 * U));
+  const cx = (ext.x0 + ext.x1) / 2;
+  const X = (x: number) => (x - cx) * U * s, Z = (y: number) => D / 2 - y * U * s;
+  const y0 = hi + 0.2, gh = p.groundHeight * U, sh = p.storeyHeight * U;
+  const levelY = (k: number) => y0 + (k <= 0 ? 0 : gh + (k - 1) * sh);
+  const [top, drawn] = catalogLevels(p, g.floors);
+  const trim = p.trim.colour;
   mb.curBase = y0;
-  const tops: Array<[number, number, number, number, number]> = [];
-  // ground: the lot paved, then its open volumes over it
+  // ground: the lot paved, then its open blocks over it
   if (lod < 2) { blank(mb); yard(mb, heights, f, W, D, 0xa9a398, BMAT.Paving); }
-  for (const v of e.vols) {
-    const [vx, vz, vw, vd, base, storeys, roof, fill, fin, col] = v as number[];
-    const x0 = X(vx), x1 = X(vx + vw), z1 = Z(vz), z0 = Z(vz + vd);
-    if (!storeys) {
-      if (lod > 1) continue;
-      groundPatch(mb, heights, f, W, D, x0, x1, z0, z1, fin === 2 ? 0x55585b : fin === 3 ? 0x587a3c : 0xb9b2a6, fin === 3 ? BMAT.Grass : BMAT.Paving, fin === 2 ? 0.05 : 0.04);
-      continue;
+  const vols = p.volumes.map((v) => ({ v, storeys: v.open >= 0 ? [] : catalogStoreys(v, top, drawn) }));
+  // the plan rectangle and the drawn levels of every building volume (for the parapets' covered edges)
+  const boxes = vols.filter((q) => q.v.open < 0).map((q) => ({ x0: X(q.v.x), x1: X(q.v.x + q.v.w), z0: Z(q.v.y + q.v.d), z1: Z(q.v.y), lo: q.v.base, hiL: q.v.base + q.storeys.length }));
+  vols.forEach(({ v, storeys }, vi) => {
+    const x0 = X(v.x), x1 = X(v.x + v.w), z1 = Z(v.y), z0 = Z(v.y + v.d);
+    if (v.open >= 0) {
+      if (lod > 1) return;
+      const surf = CAT_SURFACES[v.open];
+      const grass = surf === 'grass', dark = surf === 'asphalt';
+      groundPatch(mb, heights, f, W, D, x0, x1, z0, z1, grass ? 0x587a3c : dark ? 0x55585b : surf === 'water' ? 0x52c0e0 : 0xb9b2a6, grass ? BMAT.Grass : surf === 'water' ? BMAT.Plain : BMAT.Paving, dark ? 0.05 : 0.04);
+      return;
     }
-    const ya = base === 0 ? f.base : levelY(base), yb = levelY(base + storeys);
-    const wallCol = wallOverride >= 0 ? wallOverride : col;
-    const upper = fill & 7, ground = (fill >> 3) & 7;
-    const shopGround = base === 0 && ground === CatFill.Shop;
-    const [style, kind, colW] = catalogFacade(fin, upper, shopGround);
-    const wallMat = (fin === FIN.Glass ? BMAT.Curtain : BMAT.Wall) | (fin << 4);
-    mb.curBase = base === 0 ? y0 : levelY(base);
-    const fh = Math.max(2.5, Math.min(5.6, e.sh));
-    setFac(mb, style, seed, kind, colW, fh);
-    if (upper === CatFill.Wall && ground === CatFill.Wall) blank(mb);
-    const outline = v[10] as number[] | undefined;
-    if (outline && outline.length >= 6) {
-      const pts: Array<[number, number]> = [];
-      for (let k = 0; k + 1 < outline.length; k += 2) pts.push([x0 + outline[k] * (x1 - x0), z1 - outline[k + 1] * (z1 - z0)]);
-      polyPrism(mb, f, pts, ya, yb, wallCol, colW, 0x8f8b84, BMAT.RoofFlat, wallMat);
-      if (lod < 2) for (let k = 0; k < pts.length; k++) wallSeg(mb, f, pts[k][0], pts[k][1], pts[(k + 1) % pts.length][0], pts[(k + 1) % pts.length][1], yb, 0.9, wallCol);
-    } else {
-      prism(mb, f, x0, x1, z0, z1, ya, yb, wallCol, wallMat, colW, roof ? 0x6f8a55 : e.roof[1] & 0xffffff, roof ? BMAT.Grass : BMAT.RoofFlat | (e.roof[0] << 4));
-      if (lod < 2) { blank(mb); parapet(mb, f, x0, x1, z0, z1, yb, roof ? 1.1 : 0.9, 0.22, wallCol); }
-      tops.push([x0, x1, z0, z1, yb]);
-    }
-    if (lod > 0) continue;
-    // balconies on the front, every other bay, on every storey above the ground
-    if (fill & 64) {
-      const cols = Math.max(1, Math.round((x1 - x0) / colW)), cw = (x1 - x0) / cols;
-      for (let k = Math.max(1, base); k < base + storeys; k++) {
-        const y = levelY(k);
-        for (let c = (k & 1); c < cols; c += 2) {
-          const cx0 = x0 + c * cw + 0.2, cx1 = x0 + (c + 1) * cw - 0.2;
-          blank(mb);
-          prism(mb, f, cx0, cx1, z1, z1 + 1.1, y - 0.15, y, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true);
-          railing(mb, f, cx0, cx1, z1 + 1.1, y, 0x2c3034);
-          balconyLife(f, seed, c, k, cx0, cx1, z1, 1.1, y);
+    const n = storeys.length, volIndex = boxes.findIndex((o) => o.lo === v.base && Math.abs(o.x0 - x0) < 1e-6 && Math.abs(o.z1 - z1) < 1e-6 && Math.abs(o.x1 - x1) < 1e-6 && Math.abs(o.z0 - z0) < 1e-6);
+    if (!n || v.base >= drawn) return;
+    const m = v.material ?? p.wall, fin = CAT_FIN[m.finish];
+    const wallCol = wallOverride >= 0 ? wallOverride : m.colour;
+    const wallMat = (CAT_FINISHES[m.finish] === 'glass' ? BMAT.Curtain : BMAT.Wall) | (fin << 4);
+    const ya = v.base === 0 ? f.base : levelY(v.base), yb = levelY(v.base + n);
+    // the volume's storeys for the inside view and the camera, and its footprint for the yard props
+    if (layoutOut) layoutOut.push({ cx: wx(f, (x0 + x1) / 2, (z0 + z1) / 2), cz: wz(f, (x0 + x1) / 2, (z0 + z1) / 2), hw: (x1 - x0) / 2, hd: (z1 - z0) / 2, rot: Math.atan2(f.s, f.c), y0: ya, y1: yb, base: v.base === 0 ? y0 : levelY(v.base), ground: v.base === 0 ? gh : sh, fh: sh });
+    if (footOut) captureFoot(f, x0, x1, z0, z1, ya);
+    // the faces: 0 front (+z, the street), 1 right (+x), 2 back, 3 left; corners as prism()
+    const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
+    const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+    const outline = v.outline && v.outline.length >= 6 ? v.outline : null;
+    for (let face = 0; face < (outline ? 1 : 4); face++) {
+      const [ax, az] = corners[face], [bx, bz] = corners[(face + 1) & 3];
+      const len = outline ? 0 : Math.hypot(bx - ax, bz - az);
+      const geo = v.geometry[face];
+      const bays = Math.max(1, geo?.bays ?? Math.round((face & 1 ? v.d : v.w) / p.module));
+      const colW = outline ? p.module * U * s : len / bays;
+      // bands of storeys with the same fill (the ground storey is a band of its own: it has its own height)
+      for (let k0 = 0; k0 < n;) {
+        const fillOf = (k: number) => (outline || storeys[k].sides[face] < 0 ? storeys[k].fill : storeys[k].sides[face]);
+        const fill = fillOf(k0);
+        let k1 = k0 + 1;
+        if (v.base + k0 > 0) while (k1 < n && fillOf(k1) === fill) k1++;
+        const ground = v.base + k0 === 0, fh = ground ? gh : sh;
+        const look = catalogFacade(p, fill, geo, fh, ground);
+        if (look) setFac(mb, look.id, seed, look.kind, colW, fh); else blank(mb);
+        mb.curBase = ground ? y0 : levelY(v.base + k0);
+        const ba = k0 === 0 ? ya : levelY(v.base + k0), bb = levelY(v.base + k1);
+        if (outline) {
+          const pts: Array<[number, number]> = [];
+          for (let q = 0; q + 1 < outline.length; q += 2) pts.push([x0 + outline[q] * (x1 - x0), z1 - outline[q + 1] * (z1 - z0)]);
+          polyPrism(mb, f, pts, ba, bb, wallCol, colW, k1 === n ? p.roof.colour : -1, BMAT.RoofFlat | (CAT_FIN[p.roof.finish] << 4), wallMat);
+        } else facadeWall(mb, f, ax, az, bx, bz, normals[face][0], normals[face][1], ba, bb, wallCol, wallMat, colW);
+        // balconies: a slab and a railing at every bay of every storey of a balcony band (the ground storey has none)
+        if (lod === 0 && !outline && (fill === BAY.balcony || fill === BAY.gourmet)) {
+          for (let k = Math.max(k0, v.base === 0 ? 1 : 0); k < k1; k++) {
+            // where another block's roof is the floor in front of this storey, that roof is the balcony
+            const [mx, mz] = [(ax + bx) / 2 + normals[face][0] * 0.6, (az + bz) / 2 + normals[face][1] * 0.6];
+            if (boxes.some((o) => o.hiL === v.base + k && mx > o.x0 && mx < o.x1 && mz > o.z0 && mz < o.z1)) continue;
+            for (let c = 0; c < bays; c++) {
+              // not into a block standing against this face at that storey
+              const t = (c + 0.5) / bays, px = ax + (bx - ax) * t + normals[face][0] * 0.6, pz = az + (bz - az) * t + normals[face][1] * 0.6;
+              if (boxes.some((o) => o.lo <= v.base + k && o.hiL > v.base + k && px > o.x0 && px < o.x1 && pz > o.z0 && pz < o.z1)) continue;
+              catalogBalcony(g, face, corners, colW, c, levelY(v.base + k), c + k);
+            }
+          }
+        }
+        k0 = k1;
+      }
+      if (outline) continue;
+      // doors at their bays (4.0: "side:index"), on the storey they are on
+      if (lod === 0) storeys.forEach((st, k) => {
+        for (const [bf, bi, comp] of st.bays) {
+          if (bf !== face || (comp !== BAY.door && comp !== BAY.doubleDoor && comp !== BAY.garageDoor && comp !== BAY.loadingDoor)) continue;
+          const u = (Math.min(bi, bays - 1) + 0.5) * colW;
+          if (face === 0) door(mb, f, x0 + u, z1, levelY(v.base + k), trim, true);
+        }
+      });
+      // piers standing out of the face (4.0 pierWidth, pierDepth, pierEvery)
+      if (lod < 2 && geo?.pierDepth && geo.pierWidth) {
+        blank(mb);
+        // 2 cm shallower: the data sets some piers right against another block's wall
+        const pw = geo.pierWidth * U * s, pd = geo.pierDepth * U - 0.02, every = Math.max(1, geo.pierEvery ?? 1), pc = shadeHex(wallCol, 1.06);
+        const dx = (bx - ax) / len, dz = (bz - az) / len, [nxl, nzl] = normals[face];
+        for (let c = 0; c <= bays; c += every) {
+          const u = Math.max(pw / 2, Math.min(len - pw / 2, c * colW)), px = ax + dx * u, pz = az + dz * u;
+          const ox = nxl * pd, oz = nzl * pd, hx = Math.abs(dx) * pw / 2, hz = Math.abs(dz) * pw / 2;
+          if (boxes.some((o, oi) => oi !== volIndex && o.hiL > v.base && o.lo < v.base + n && px + nxl * 0.1 > o.x0 && px + nxl * 0.1 < o.x1 && pz + nzl * 0.1 > o.z0 && pz + nzl * 0.1 < o.z1)) continue;
+          prism(mb, f, Math.min(px - hx, px - hx + ox), Math.max(px + hx, px + hx + ox), Math.min(pz - hz, pz - hz + oz), Math.max(pz + hz, pz + hz + oz), ya, yb, pc, BMAT.Plain, 50, pc, BMAT.Plain, false, 1 << ((face + 2) & 3));
         }
       }
     }
-    if (fill & 128 && base === 0) door(mb, f, (x0 + x1) / 2, z1, y0, e.trim[1], true);
-  }
+    if (outline) {
+      if (lod < 2) {
+        blank(mb);
+        const pts: Array<[number, number]> = [];
+        for (let q = 0; q + 1 < outline.length; q += 2) pts.push([x0 + outline[q] * (x1 - x0), z1 - outline[q + 1] * (z1 - z0)]);
+        for (let k = 0; k < pts.length; k++) wallSeg(mb, f, pts[k][0], pts[k][1], pts[(k + 1) % pts.length][0], pts[(k + 1) % pts.length][1], yb, 0.9, wallCol);
+      }
+      return;
+    }
+    // roof: the cap (2 cm higher per volume: two volumes overlapping at the same top never share a plane), parapets
+    // on the edges nothing stands against, a terrace's paving and railing
+    blank(mb);
+    const terrace = CAT_ROOFS[v.roof] === 'terrace', capY = yb + (vi % 4) * 0.02;
+    const cap = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]].map(([x, z]) => mb.vert(wx(f, x, z), capY, wz(f, x, z), 0, 1, 0, terrace ? 0xc9c3b8 : p.roof.colour, terrace ? BMAT.Paving : BMAT.RoofFlat | (CAT_FIN[p.roof.finish] << 4)));
+    mb.quad(cap[0], cap[1], cap[2], cap[3], 0, 1, 0);
+    if (lod < 2) catalogParapets(g, boxes, vi, x0, x1, z0, z1, v.base + n, capY, terrace ? 1.1 : 0.9, wallCol, terrace && lod === 0);
+  });
   // the highest roof gets the machine room and the units
-  if (tops.length && lod < 2) {
-    let t = tops[0];
-    for (const q of tops) if (q[4] > t[4]) t = q;
-    const [x0, x1, z0, z1, y] = t;
-    if (x1 - x0 > 8 && z1 - z0 > 8) {
+  if (lod < 2) {
+    let t = -1, ty = -Infinity;
+    boxes.forEach((b, k) => { if (levelY(b.hiL) > ty && b.x1 - b.x0 > 8 && b.z1 - b.z0 > 8) { ty = levelY(b.hiL); t = k; } });
+    if (t >= 0) {
+      const b = boxes[t], y = ty + 0.06;
       blank(mb);
-      const mx = (x0 + x1) / 2 - 2;
-      prism(mb, f, mx, mx + 4, z0 + 2, z0 + 6, y, y + 3, 0xb8b4ab, BMAT.Plain, 50, 0x8f8b84, BMAT.RoofFlat);
-      for (let k = 0; k < 4; k++) part(f, PART.RoofAc, x0 + 1.5 + k * 1.6, y, z1 - 1.5, 0, 1);
+      // 3.874 m wide: no project coordinate (multiples of 1/320 m) can put another block's edge in its sides' planes
+      const mx = (b.x0 + b.x1) / 2 - 1.937;
+      prism(mb, f, mx, mx + 3.874, b.z0 + 2.013, b.z0 + 5.987, y, y + 3, 0xb8b4ab, BMAT.Plain, 50, 0x8f8b84, BMAT.RoofFlat);
+      for (let k = 0; k < 4; k++) part(f, PART.RoofAc, b.x0 + 1.5 + k * 1.6, y, b.z1 - 1.5, 0, 1);
     }
   }
   if (lod > 0) return;
-  for (const el of e.elems) {
-    const [kind, ex, ez, ew, ed, eh] = el;
-    const x = X(ex), z = Z(ez), gy = heightAt(heights, wx(f, x, z), wz(f, x, z)) + 0.2;
-    if (Math.abs(x) > W / 2 || Math.abs(z) > D / 2) continue;
-    if (kind === CatElem.Tree) treeGeo(mb, f, x, z, gy, Math.max(4, eh), Math.max(1.2, ew * 0.4));
-    else if (kind === CatElem.Planter || kind === CatElem.Shrub || kind === CatElem.Flowers) {
-      blank(mb);
-      prism(mb, f, x - ew * s / 2, x + ew * s / 2, z - ed * s / 2, z + ed * s / 2, gy, gy + Math.min(0.6, eh), 0x9d8f7c, BMAT.Plain, 50, 0x4f7a34, BMAT.Grass);
-    } else if (kind === CatElem.Wall || kind === CatElem.Fence) {
-      const hl = Math.max(ew, ed) * s / 2, h = Math.min(2.2, Math.max(0.8, eh)), col = kind === CatElem.Wall ? 0xd8d0c2 : 0x6c7276;
-      if (ew >= ed) wall(mb, heights, f, x - hl, z, x + hl, z, h, 0.2, col);
-      else wall(mb, heights, f, x, z - hl, x, z + hl, h, 0.2, col);
-    } else if (kind === CatElem.Gate) gate(mb, heights, f, x - Math.max(ew, ed) * s / 2, z, x + Math.max(ew, ed) * s / 2, z, 1.8);
+  p.elements.forEach((e, k) => catalogElement(g, p, e, k, X, Z, s));
+}
+
+/** A balcony at bay c of a face, on the floor at y: a slab 1.1 m out and a railing (balusters on the front, near). */
+function catalogBalcony(g: Gen, face: number, corners: Array<[number, number]>, colW: number, c: number, y: number, key: number): void {
+  const { mb, f, seed } = g;
+  const [ax, az] = corners[face], [bx, bz] = corners[(face + 1) & 3];
+  const len = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / len, dz = (bz - az) / len;
+  const nrm: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+  const [nxl, nzl] = nrm[face], depth = 1.1;
+  const u0 = c * colW + 0.2, u1 = (c + 1) * colW - 0.2;
+  if (u1 - u0 < 0.8) return;
+  const pa: [number, number] = [ax + dx * u0, az + dz * u0], pb: [number, number] = [ax + dx * u1, az + dz * u1];
+  const rx0 = Math.min(pa[0], pb[0], pa[0] + nxl * depth, pb[0] + nxl * depth), rx1 = Math.max(pa[0], pb[0], pa[0] + nxl * depth, pb[0] + nxl * depth);
+  const rz0 = Math.min(pa[1], pb[1], pa[1] + nzl * depth, pb[1] + nzl * depth), rz1 = Math.max(pa[1], pb[1], pa[1] + nzl * depth, pb[1] + nzl * depth);
+  blank(mb);
+  prism(mb, f, rx0, rx1, rz0, rz1, y - 0.15, y, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true, 1 << ((face + 2) & 3));
+  if (face === 0) { railing(mb, f, rx0, rx1, rz1, y, 0x2c3034); balconyLife(f, seed, c, key, rx0, rx1, rz0, depth, y); return; }
+  // the other faces: the handrail and two posts (the balusters are a front-face detail)
+  const t = 0.06, col = 0x2c3034;
+  const ox = nxl * depth, oz = nzl * depth;
+  const ex0 = Math.min(pa[0] + ox, pb[0] + ox) - (nxl ? t / 2 : 0), ex1 = Math.max(pa[0] + ox, pb[0] + ox) + (nxl ? t / 2 : 0);
+  const ez0 = Math.min(pa[1] + oz, pb[1] + oz) - (nzl ? t / 2 : 0), ez1 = Math.max(pa[1] + oz, pb[1] + oz) + (nzl ? t / 2 : 0);
+  prism(mb, f, ex0, ex1, ez0, ez1, y + 0.98, y + 1.05, col, BMAT.Metal, 50, col, BMAT.Metal);
+  for (const [px, pz] of [pa, pb]) prism(mb, f, px + ox - 0.03, px + ox + 0.03, pz + oz - 0.03, pz + oz + 0.03, y, y + 0.98, col, BMAT.Metal, 50, -1, 0);
+}
+
+/**
+ * Parapets of a volume's roof: on each edge, the stretches no other volume stands against (a taller block on the
+ * roof, a neighbour block of the same height): a parapet there would sit inside its wall, both faces in one plane.
+ */
+function catalogParapets(g: Gen, boxes: Array<{ x0: number; x1: number; z0: number; z1: number; lo: number; hiL: number }>, self: number,
+  x0: number, x1: number, z0: number, z1: number, level: number, y: number, h: number, col: number, rail: boolean): void {
+  const { mb, f } = g;
+  const t = 0.22, eps = 0.06;
+  // edges: [fixed coordinate, along x?, from, to, inward sign]
+  // (the side edges stop at the front and back parapets' inner faces: corners are the front and back's, never shared)
+  const edges: Array<[number, boolean, number, number, number]> = [[z1, true, x0, x1, -1], [x1, false, z0 + t, z1 - t, -1], [z0, true, x0, x1, 1], [x0, false, z0 + t, z1 - t, 1]];
+  for (const [fix, alongX, a0, a1, inward] of edges) {
+    // covered stretches: other volumes that span this edge's line at the parapet's height
+    const cov: Array<[number, number]> = [];
+    boxes.forEach((b, k) => {
+      if (k === self || b.hiL <= level || b.lo > level) return;
+      const onLine = alongX ? b.z0 - eps <= fix && fix <= b.z1 + eps : b.x0 - eps <= fix && fix <= b.x1 + eps;
+      if (!onLine) return;
+      const lo = Math.max(a0, alongX ? b.x0 : b.z0), hi2 = Math.min(a1, alongX ? b.x1 : b.z1);
+      if (hi2 > lo) cov.push([lo, hi2]);
+    });
+    cov.sort((p, q) => p[0] - q[0]);
+    const free: Array<[number, number]> = [];
+    let at = a0;
+    for (const [lo, hi2] of cov) { if (lo > at) free.push([at, lo]); at = Math.max(at, hi2); }
+    if (at < a1) free.push([at, a1]);
+    for (const [lo, hi2] of free) {
+      if (hi2 - lo < 0.3) continue;
+      // the edge's wall, t thick, inside the volume's plan; its top is the coping (a thin wall is no lid)
+      const i0 = fix + inward * t;
+      if (alongX) prism(mb, f, lo, hi2, Math.min(fix, i0), Math.max(fix, i0), y, y + h, col, BMAT.Plain, 50, 0xd6d3cc, BMAT.Plain);
+      else prism(mb, f, Math.min(fix, i0), Math.max(fix, i0), lo, hi2, y, y + h, col, BMAT.Plain, 50, 0xd6d3cc, BMAT.Plain);
+      if (rail && alongX && inward < 0) railing(mb, f, lo, hi2, fix - t, y + h - 0.02, 0x8fb0c0);
+    }
+  }
+}
+
+/** One element of a catalog project: its kind, size, height, elevation and facing (facing 1 and 3 turn it). */
+function catalogElement(g: Gen, p: CatProject, e: CatElement, index: number, X: (x: number) => number, Z: (y: number) => number, s: number): void {
+  const { mb, heights, f, W, D } = g;
+  const U = CAT_UNIT, x = X(e.x), z = Z(e.y);
+  if (Math.abs(x) > W / 2 + 0.5 || Math.abs(z) > D / 2 + 0.5) return;
+  const turned = e.facing === 1 || e.facing === 3;
+  // its size on the lot: w along x for facing 0/2, along z for 1/3 (4.0 elementRect)
+  const sx = (turned ? e.d : e.w) * U * s, sz = (turned ? e.w : e.d) * U * s, h = e.h * U;
+  // on the lot floor (its relief grid, as the ground pieces), at the element's elevation
+  const gy = yardGrid(heights, f, W, D).at(x, z) + e.z * U;
+  const yaw = [0, Math.PI / 2, Math.PI, -Math.PI / 2][e.facing & 3];
+  const kind = CAT_ELEMENTS[e.kind];
+  const col = e.material ? e.material.colour : kind === 'wall' ? 0xd8d0c2 : 0x9d9a94;
+  const fin = e.material ? CAT_FIN[e.material.finish] << 4 : 0;
+  // each element a little apart from the others (1.2 cm up by index mod 5, 1 cm in by index mod 3): pieces the data
+  // lays flush (stacked slabs, a slab on a parking floor, two paths) never share a plane
+  const lift = (index % 5) * 0.012, inset = (index % 3) * 0.01;
+  const box = (ya: number, yb: number, c: number, mat: number, topC = c) => { blank(mb); prism(mb, f, x - sx / 2 + inset, x + sx / 2 - inset, z - sz / 2 + inset, z + sz / 2 - inset, ya + lift, yb + lift, c, mat | fin, 50, topC, mat | fin); };
+  const decal = 0.04 + Math.min(0.12, (e.z + e.h) * U) + lift;
+  // a run along its long side, from end to end at the middle of its thickness
+  const run = (): [number, number, number, number, number] => sx >= sz ? [x - sx / 2, z, x + sx / 2, z, sz] : [x, z - sz / 2, x, z + sz / 2, sx];
+  switch (kind) {
+    case 'tree': part(f, 0, x, gy, z, Math.sin(yaw), Math.cos(yaw), Math.max(0.5, Math.min(2, h / 7)), P_TREE); break;
+    case 'shrub': case 'hedge': case 'flowers': part(f, 0, x, gy, z, 0, 1, Math.max(0.4, Math.min(1.6, Math.max(sx, sz) / 1.6)), P_BUSH); break;
+    case 'bench': part(f, 0, x, gy, z, Math.sin(yaw), Math.cos(yaw), 1, P_BENCH); break;
+    case 'lamp': part(f, 0, x, gy, z, Math.sin(yaw), Math.cos(yaw), 1, P_LAMP); break;
+    case 'bin': part(f, 0, x, gy, z, Math.sin(yaw), Math.cos(yaw), 1, P_BIN); break;
+    case 'bollard': part(f, F_BOLLARD, x, gy, z, 0, 1, 1, P_FURN); break;
+    case 'drain': part(f, F_DRAIN, x, gy, z, 0, 1, 1, P_FURN); break;
+    case 'planter': part(f, F_PLANTER, x, gy, z, Math.sin(yaw), Math.cos(yaw), Math.max(0.6, Math.min(1.6, Math.max(sx, sz) / 1.2)), P_FURN); break;
+    case 'ac': part(f, PART.WallAc, x, gy, z, Math.sin(yaw), Math.cos(yaw)); break;
+    case 'wall': case 'fence': case 'railing': {
+      const [ax, az, bx, bz, t] = run();
+      if (kind === 'railing') { blank(mb); prism(mb, f, Math.min(ax, bx) - (az === bz ? 0 : 0.03), Math.max(ax, bx) + (az === bz ? 0 : 0.03), Math.min(az, bz) - (az === bz ? 0.03 : 0), Math.max(az, bz) + (az === bz ? 0.03 : 0), gy + h - 0.06, gy + h, 0x5c6064, BMAT.Metal, 50, 0x5c6064, BMAT.Metal); }
+      // the runs along z 2.5 cm higher: two walls meeting at a corner never share their top's plane
+      if (kind !== 'railing') wall(mb, heights, f, ax, az, bx, bz, h + e.z * U + (ax === bx ? 0.025 : 0), Math.max(0.1, t), kind === 'fence' ? 0x6c7276 : col);
+      break;
+    }
+    case 'gate': { const [ax, az, bx, bz] = run(); gate(mb, heights, f, ax, az, bx, bz, Math.max(1.2, h)); break; }
+    case 'slab': case 'pillar': case 'stair': case 'ramp': case 'rocks': case 'clock': box(gy, gy + Math.max(0.1, h), col, BMAT.Plain); break;
+    case 'canopy': case 'awning': box(gy + Math.max(0, h - 0.15), gy + Math.max(0.15, h), col, BMAT.Plain); break;
+    // ground pieces at their own heights (4.0 lays a path's two layers 1 cm apart: one plane each)
+    case 'pavement': if (sx > 0.5 && sz > 0.5) groundPatch(mb, heights, f, W, D, x - sx / 2, x + sx / 2, z - sz / 2, z + sz / 2, col, BMAT.Paving | fin, decal); break;
+    case 'parking': {
+      const lift = decal;
+      groundPatch(mb, heights, f, W, D, x - sx / 2, x + sx / 2, z - sz / 2, z + sz / 2, 0x55585b, BMAT.Paving, lift);
+      // bay lines 2.5 m apart across its long side
+      const long = Math.max(sx, sz), nb = Math.floor(long / 2.5);
+      for (let k = 0; k <= nb; k++) {
+        const u = -long / 2 + (long - nb * 2.5) / 2 + k * 2.5;
+        const [lx0, lx1, lz0, lz1] = sx >= sz ? [x + u - 0.06, x + u + 0.06, z - sz / 2 + 0.3, z + sz / 2 - 0.3] : [x - sx / 2 + 0.3, x + sx / 2 - 0.3, z + u - 0.06, z + u + 0.06];
+        groundPatch(mb, heights, f, W, D, lx0, lx1, lz0, lz1, 0xe8e6df, BMAT.Plain, lift + 0.02);
+      }
+      break;
+    }
   }
 }
 
@@ -2132,7 +2359,7 @@ function groundPatchTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, W: 
   const grid = yardGrid(heights, f, W, D);
   const cx = (a: number) => Math.max(-W / 2, Math.min(W / 2, a)), cz = (a: number) => Math.max(-D / 2, Math.min(D / 2, a));
   x0 = cx(x0); x1 = cx(x1); z0 = cz(z0); z1 = cz(z1);
-  if (x1 - x0 < 0.5 || z1 - z0 < 0.5) return;
+  if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return;
   blank(mb);
   const nx2 = Math.max(1, Math.ceil((x1 - x0) / 6)), nz2 = Math.max(1, Math.ceil((z1 - z0) / 6));
   const first = mb.v;

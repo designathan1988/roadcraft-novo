@@ -626,3 +626,135 @@ test('F8, F31: the catalog keeps every field of the 38 Roadcraft 4.0 projects', 
   // the whole: 2,008 elements, 914 storeys, 1,564 side fills, 38 doors, 380 face geometries
   assert.deepEqual({ elements, storeys, sides, bays, geometry }, { elements: 2008, storeys: 914, sides: 1564, bays: 38, geometry: 380 });
 });
+
+/** One building drawn from catalog project k on a lot of the project's own size (scale 1), with `floors` storeys (0: its own). */
+async function catalogBox(k: number, floors: number) {
+  const { catalogProjects, CAT_UNIT } = await import('../src/world/catalog.ts');
+  const p = catalogProjects()[k];
+  let x0 = Infinity, x1 = -Infinity, y1 = 0;
+  for (const v of p.volumes) { x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x + v.w); y1 = Math.max(y1, v.y + v.d); }
+  // floors 0: the project's own number of levels
+  let top = 0;
+  for (const v of p.volumes) if (v.open < 0) top = Math.max(top, v.base + v.storeys.length);
+  const b = oneBuilding(Zone.Commercial, floors > 0 ? floors : top, (x1 - x0) * CAT_UNIT, y1 * CAT_UNIT, 4242 + k, 0);
+  const e = encodeDesign({ shape: 0, roof: 0, finish: 0, gear: 0, setback: 0, wall: 0xd9c7a6, catalog: k + 1 });
+  b.color[0] = e.color; b.h[0] = e.h;
+  return { p, b, cx: (x0 + x1) / 2 };
+}
+
+test('F16: a catalog building has the storeys of its record', async () => {
+  const { buildingVolumes } = await import('../src/jobs/buildingGen.ts');
+  const { storeyLevels } = await import('../src/render/inside.ts');
+  const heights = flatHeights(10);
+  const failures: string[] = [];
+  for (const k of [10, 20, 25, 30]) for (const floors of [8, 24, 40]) {
+    const { p, b } = await catalogBox(k, floors);
+    let top = 0;
+    for (const v of p.volumes) if (v.open < 0) top = Math.max(top, v.base + v.storeys.length);
+    const got = storeyLevels(buildingVolumes(heights, b, 0)).length;
+    // the record's floors (asked only where the project is not taller: it is never cut under its podiums)
+    if (floors >= top && got !== floors) failures.push(`${p.name} (${top} levels) with ${floors} floors: ${got} storeys drawn`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('F17: in the catalog buildings the window rows start at every floor (where the balconies are)', async () => {
+  const { catalogProjects, CAT_UNIT } = await import('../src/world/catalog.ts');
+  const heights = flatHeights(10);
+  let checked = 0;
+  const failures: string[] = [];
+  for (let k = 0; k < catalogProjects().length; k++) {
+    const { p, b } = await catalogBox(k, 0);
+    const m = buildBuildings(heights, b, 0, 0, 256, 0)!, pos = positions(m);
+    const gh = p.groundHeight * CAT_UNIT, sh = p.storeyHeight * CAT_UNIT, y0 = 10.2;
+    // every wall vertex with windows: the floor its rows start from must be a floor of the building, and above the
+    // ground storey the rows must be a storey high
+    for (let i = 0; i < m.vertexCount; i++) {
+      if (!m.fac![i * 4 + 3] || ![0, 3, 5].includes(m.color[i * 4 + 3] & 15)) continue;
+      const fh = (m.fac![i * 4 + 2] >> 3) / 10 + 2.5, h = m.fuv![i * 2 + 1] / 32767 * 512, base = pos[i][1] - h;
+      const lv = (base - y0 - gh) / sh, atGround = Math.abs(base - y0) < 0.05;
+      const onFloor = atGround || (lv > -0.01 && Math.abs(lv - Math.round(lv)) < 0.02);
+      checked++;
+      // a band from the ground floor may only hold the ground storey (unless both storeys are as high)
+      const pastGround = atGround && pos[i][1] > y0 + gh + 0.05 && Math.abs(gh - sh) > 0.06;
+      if (!onFloor || pastGround || (!atGround && Math.abs(fh - sh) > 0.06)) { failures.push(`${p.name}: rows from ${base.toFixed(2)} m every ${fh.toFixed(1)} m (floors at ${y0} + ${gh.toFixed(2)} + k × ${sh.toFixed(2)})`); break; }
+    }
+  }
+  assert.deepEqual(failures, []);
+  assert.ok(checked > 1000, `${checked} vertices`);
+});
+
+test('F15: no two faces of a catalog building lie in one plane over each other', async () => {
+  const { catalogProjects } = await import('../src/world/catalog.ts');
+  const heights = flatHeights(10);
+  const failures: string[] = [];
+  for (let k = 0; k < catalogProjects().length; k++) {
+    const { p, b } = await catalogBox(k, 0);
+    const m = buildBuildings(heights, b, 0, 0, 256, 0)!, pos = positions(m);
+    // triangles by plane (normal and offset to 1 cm), facing the same way
+    const planes = new Map<string, number[]>();
+    for (let t = 0; t < m.index.length; t += 3) {
+      const A = pos[m.index[t]], B = pos[m.index[t + 1]], C = pos[m.index[t + 2]];
+      const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const l = Math.hypot(nx, ny, nz);
+      if (l < 1e-4) continue;
+      nx /= l; ny /= l; nz /= l;
+      const key = `${nx.toFixed(2)},${ny.toFixed(2)},${nz.toFixed(2)},${(nx * A[0] + ny * A[1] + nz * A[2]).toFixed(2)}`;
+      let list = planes.get(key);
+      if (!list) planes.set(key, list = []);
+      list.push(t);
+    }
+    let found = '';
+    for (const [key, list] of planes) {
+      if (list.length < 2 || list.length > 600 || found) continue;
+      const [nx, ny, nz] = key.split(',').map(Number);
+      const ax = Math.abs(ny) > 0.9 ? [1, 0, 0] : [-nz, 0, nx], bx = [ny * ax[2] - nz * ax[1], nz * ax[0] - nx * ax[2], nx * ax[1] - ny * ax[0]];
+      const tri2 = (t: number) => [0, 1, 2].map((q) => { const P = pos[m.index[t + q]]; return [P[0] * ax[0] + P[1] * ax[1] + P[2] * ax[2], P[0] * bx[0] + P[1] * bx[1] + P[2] * bx[2]]; });
+      // two triangles overlap when no edge of either separates them (sharing an edge is not overlapping)
+      const sep = (P: number[][], Q: number[][]) => {
+        for (const T of [P, Q]) for (let e = 0; e < 3; e++) {
+          const ex = T[(e + 1) % 3][0] - T[e][0], ey = T[(e + 1) % 3][1] - T[e][1], px = -ey, py = ex;
+          const pa = P.map(([x, y]) => x * px + y * py), qa = Q.map(([x, y]) => x * px + y * py);
+          if (Math.max(...pa) <= Math.min(...qa) + 1e-3 || Math.max(...qa) <= Math.min(...pa) + 1e-3) return true;
+        }
+        return false;
+      };
+      for (let i = 0; i < list.length && !found; i++) for (let j = i + 1; j < list.length && !found; j++) if (!sep(tri2(list[i]), tri2(list[j]))) found = key;
+    }
+    if (found) failures.push(`${p.name}: faces over each other in plane ${found}`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('F14, F8: catalog walls run along their facing, and every kind of element is drawn', async () => {
+  const { catalogProjects, CAT_ELEMENTS, CAT_UNIT } = await import('../src/world/catalog.ts');
+  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const heights = flatHeights(10);
+  const failures: string[] = [];
+  const kindsDrawn = new Set<string>();
+  for (let k = 0; k < catalogProjects().length; k++) {
+    const { p, b, cx } = await catalogBox(k, 0);
+    const m = buildBuildings(heights, b, 0, 0, 256, 0)!, pos = positions(m);
+    const parts: Array<[number, number]> = [];
+    buildBuildingParts(heights, b, (_v, x, _y, z) => parts.push([x, z]));
+    const D = b.d[0];
+    for (const e of p.elements) {
+      const kind = CAT_ELEMENTS[e.kind];
+      const ex = 128 + (e.x - cx) * CAT_UNIT, ez = 128 + D / 2 - e.y * CAT_UNIT;
+      // walls: both ends of the run along the facing (4.0: w along x for facing 0/2, along y for 1/3) have wall vertices
+      if (kind === 'wall' && e.w * CAT_UNIT > 1.5) {
+        const along = e.facing === 1 || e.facing === 3, half = e.w * CAT_UNIT / 2;
+        const ends = along ? [[ex, ez - half], [ex, ez + half]] : [[ex - half, ez], [ex + half, ez]];
+        for (const [px, pz] of ends) if (!pos.some(([x, , z], i) => (m.color[i * 4 + 3] & 15) === 8 && Math.hypot(x - px, z - pz) < 0.6)) { failures.push(`${p.name} wall facing ${e.facing}: nothing at its end (${(px - 128).toFixed(1)}, ${(pz - 128).toFixed(1)})`); break; }
+      }
+      // every element leaves something where it stands: mesh vertices or a prop
+      const r = Math.max(0.8, Math.max(e.w, e.d) * CAT_UNIT / 2);
+      // (the paved lot floor, at most 10.24 m, is not evidence)
+      if (pos.some(([x, y, z]) => y > 10.26 && Math.abs(x - ex) < r && Math.abs(z - ez) < r) || parts.some(([x, z]) => Math.hypot(x - ex, z - ez) < 0.5)) kindsDrawn.add(kind);
+    }
+  }
+  const present = new Set(catalogProjects().flatMap((p) => p.elements.map((e) => CAT_ELEMENTS[e.kind])));
+  assert.deepEqual([...present].filter((k) => !kindsDrawn.has(k)), [], 'element kinds never drawn');
+  assert.deepEqual(failures.slice(0, 10), [], `${failures.length} walls off their facing`);
+});

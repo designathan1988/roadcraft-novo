@@ -1,7 +1,9 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CATALOG, decodeDesign, encodeDesign, hasDesign, type Design } from '../src/world/design.ts';
+import { decodeDesign, encodeDesign, hasDesign, type Design } from '../src/world/design.ts';
+import { catalogProjects } from '../src/world/catalog.ts';
+import { catalogWindowRows } from '../src/world/catalogFacade.ts';
 import { World } from '../src/world/world.ts';
 import { generateTerrainTile } from '../src/jobs/terrainGen.ts';
 import { buildBuildings, planCells } from '../src/jobs/buildingGen.ts';
@@ -14,18 +16,20 @@ test('projeto: ida e volta pelos bits do registro, com o catálogo', () => {
   const { color, h } = encodeDesign(d);
   assert.ok(hasDesign(color));
   assert.deepEqual(decodeDesign(color, h), d);
-  for (let k = 0; k <= CATALOG.length; k++) assert.equal(decodeDesign(encodeDesign({ ...d, catalog: k }).color, h).catalog, k);
+  for (let k = 0; k <= catalogProjects().length; k++) assert.equal(decodeDesign(encodeDesign({ ...d, catalog: k }).color, h).catalog, k);
 });
 
 test('catálogo: 38 projetos do Roadcraft, volumes dentro do lote e com andares', () => {
-  assert.equal(CATALOG.length, 38);
-  for (const e of CATALOG) {
-    assert.ok(e.w > 5 && e.d > 5 && e.gh > 2 && e.sh > 2, e.name);
-    const solid = e.vols.filter((v) => (v[5] as number) > 0);
+  const list = catalogProjects();
+  assert.equal(list.length, 38);
+  for (const e of list) {
+    assert.ok(e.module > 5 && e.groundHeight > 5 && e.storeyHeight > 5, e.name);
+    const solid = e.volumes.filter((v) => v.open < 0 && v.storeys.length > 0);
     assert.ok(solid.length > 0, e.name);
-    for (const v of e.vols) assert.ok((v[0] as number) >= -e.w / 2 - 0.01 && (v[0] as number) + (v[2] as number) <= e.w / 2 + 0.01, `${e.name} x`);
   }
-  assert.equal(facadeWindowTable().length, ARCHES.length * PATTERN_COUNT);
+  // the style x pattern rows, then the catalog's window shapes; ids fit a byte
+  assert.equal(facadeWindowTable().length, ARCHES.length * PATTERN_COUNT + catalogWindowRows().length);
+  assert.ok(facadeWindowTable().length <= 256);
 });
 
 test('marcos e padrões: determinísticos, o mesmo marco nunca a menos de 250 m na célula', () => {

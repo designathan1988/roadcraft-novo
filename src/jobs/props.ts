@@ -453,7 +453,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   // the buildings' parts (one generator pass), with the footprints of what they put on their lot floors, then the
   // yards: trees at the back of the houses, shrubs along the fronts, never inside those footprints
   const foot: number[][] = Array.from({ length: b.count }, () => []);
-  buildBuildingParts(heights, b, (v, x, y, z, yaw, s) => out.addOwn(PROP.Furniture, x, y, z, yaw, v, s, 0), foot);
+  buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot);
   lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot);
 
   // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio

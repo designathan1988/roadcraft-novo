@@ -4,6 +4,7 @@
 
 import { fbm } from '../core/rng.ts';
 import { Zone } from '../roads/zones.ts';
+import { catalogWindowRows } from './catalogFacade.ts';
 
 export const ArchId = {
   Colonial: 0, ArtDeco: 1, Modernist: 2, Contemporary: 3, Brick: 4, Tropical: 5, Glass: 6, Industrial: 7,
@@ -206,5 +207,7 @@ export function facadeWindowTable(): Array<[number, number, number, number]> {
     const high = curtain ? a.winHigh : Math.max(low + 0.12, Math.min(0.97, a.winHigh + P.high));
     out.push([side, low, high, (a.shutters && !P.bays ? 1 : 0) + (a.frame ? 2 : 0) + (curtain ? 0 : P.bays)]);
   }
+  // the catalog projects' window shapes (world/catalogFacade.ts), ids 117 and up
+  out.push(...catalogWindowRows());
   return out;
 }
