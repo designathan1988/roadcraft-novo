@@ -400,3 +400,19 @@ test('C3: far from the camera a car whose turn was banned on the way finds anoth
   assert.ok(c.lane[v] !== from, 'the car never moved on');
   assert.ok(sim.turnOk(node, inSeg, c.lane[v] >> 4, false), 'the movement it made exists');
 });
+
+test('C20: pedestrians look as many ways as their appearance ids, not 16, and are not all in step', async () => {
+  const { pickLook } = await import('../src/render/people/looks.ts');
+  // 32 cooked variations (as the real file), all adults
+  const meta = { variations: Array.from({ length: 32 }, () => ({ band: 'adult', height: 1.75 })) } as unknown as import('../src/render/people/format.ts').CookedPeople;
+  const variations = new Set<number>(), phases = new Set<number>();
+  const out = { variation: 0, clip: 0, rate: 1, phase: 0, hash: 0 };
+  // the same kind and colour (what the old pose field carried), different appearance ids (pose index 10)
+  for (let look = 0; look < 400; look++) {
+    const l = (pickLook as (...a: unknown[]) => typeof out)(3 * 256 + 5, 1.3, false, 0, meta, out, look * 163);
+    variations.add(l.variation); phases.add(Math.round(l.phase * 64));
+  }
+  assert.ok(variations.size >= 24, `${variations.size} different bodies for 400 appearance ids`);
+  assert.ok(phases.size >= 32, `${phases.size} different walking phases for 400 people`);
+});
+

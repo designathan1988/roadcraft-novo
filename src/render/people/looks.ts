@@ -29,11 +29,12 @@ const WALK_SPEED = 1.4;
 const PEDAL_SPEED = 5;
 
 /**
- * The look of a pedestrian: the pose's identity bits (`kind*256 + colour`, plus anything the simulation sets above
- * bit 16) hashed; the clip from the speed, the rain and the hash.
+ * The look of a pedestrian: its 16-bit appearance id (pose index 10, drawn when the person is born) with the pose's
+ * kind and colour (`kind*256 + colour`; light bits above bit 16 left out), hashed; the clip from the speed, the rain
+ * and the hash.
  */
-export function pickLook(info: number, speed: number, bike: boolean, rain: number, meta: CookedPeople, out: LookChoice): LookChoice {
-  const id = Math.floor(info) >>> 0;
+export function pickLook(info: number, speed: number, bike: boolean, rain: number, meta: CookedPeople, out: LookChoice, look = 0): LookChoice {
+  const id = ((Math.floor(info) % 65536) + (look & 0xffff) * 65536) >>> 0;
   const h = hash32(id * 2654435761 + 0x9e3779b9);
   const n = meta.variations.length;
   // cyclists are not children or the elderly too often

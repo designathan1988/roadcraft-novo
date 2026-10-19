@@ -241,7 +241,7 @@ export class PeopleRenderer {
     if (px1 < MIN_PX) return false;
     const speed = Math.hypot(d[o + 4] - d[o], d[o + 6] - d[o + 2]) / Math.max(1e-3, dtMs / 1000);
     const info = d[o + 8];
-    const l = pickLook(info, speed, bike, rainU.value as number, m, this.look);
+    const l = pickLook(info, speed, bike, rainU.value as number, m, this.look, d[o + 10]);
     const alpha = d[o + 9];
     // rise of the ground along the walk (the simulation's heights), for the feet
     const run = Math.hypot(d[o + 4] - d[o], d[o + 6] - d[o + 2]);
