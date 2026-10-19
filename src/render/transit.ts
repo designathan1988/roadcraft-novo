@@ -51,14 +51,10 @@ export class TransitRenderer {
       coloredBox(2.4, 0.08, 0.42, 0, 0.45, -0.4, 0x8a8e92),
     ])!;
     const shelterMat = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.6 });
-    this.shelters = new THREE.InstancedMesh(shelter, shelterMat, CAP);
-    this.shelters.count = 0;
-    this.shelters.frustumCulled = false;
+    this.shelters = this.instanced(shelter, shelterMat, CAP);
     // the line's sign on a post beside it
     const marker = mergeGeometries([coloredBox(0.06, 2.9, 0.06, 1.9, 0, 0.4, 0xffffff), coloredBox(0.5, 0.5, 0.06, 1.9, 2.6, 0.4, 0xffffff)])!;
-    this.markers = new THREE.InstancedMesh(marker, new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.5 }), CAP);
-    this.markers.count = 0;
-    this.markers.frustumCulled = false;
+    this.markers = this.instanced(marker, new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.5 }), CAP);
     // instances and a dummy path so the shaders compile at load
     this.markers.setColorAt(0, new THREE.Color(1, 1, 1));
     this.m.makeTranslation(0, -5000, 0);
@@ -77,8 +73,7 @@ export class TransitRenderer {
       ...[-15, -5, 5, 15].map((z) => coloredBox(0.15, 3.4, 0.15, 1.2, 1.05, z, 0x5a5f64)),
       coloredBox(0.6, 0.6, 1.6, 1.0, 3.6, 0, 0x1f4f9a),
     ])!;
-    this.platforms = new THREE.InstancedMesh(platform, shelterMat, 512);
-    this.platforms.count = 0; this.platforms.frustumCulled = false;
+    this.platforms = this.instanced(platform, shelterMat, 512);
     // metro entrance: covered stairs with a sign
     const entrance = mergeGeometries([
       coloredBox(3.2, 0.9, 6, 0, 0, 0, 0x8a8e92),
@@ -86,8 +81,7 @@ export class TransitRenderer {
       coloredBox(0.1, 2.6, 0.1, 1.6, 0, 3.1, 0x5a5f64), coloredBox(0.1, 2.6, 0.1, -1.6, 0, 3.1, 0x5a5f64),
       coloredBox(0.08, 3.4, 0.08, 2.2, 0, 3.4, 0xffffff), coloredBox(0.7, 0.7, 0.08, 2.2, 3.2, 3.4, 0xc8241c),
     ])!;
-    this.entrances = new THREE.InstancedMesh(entrance, shelterMat, 512);
-    this.entrances.count = 0; this.entrances.frustumCulled = false;
+    this.entrances = this.instanced(entrance, shelterMat, 512);
     this.m.makeTranslation(0, -5000, 0);
     this.platforms.setMatrixAt(0, this.m); this.entrances.setMatrixAt(0, this.m);
     this.platforms.count = 1; this.entrances.count = 1;
@@ -95,6 +89,26 @@ export class TransitRenderer {
   }
 
   set showPaths(v: boolean) { this.paths.visible = v; }
+
+  private instanced(g: THREE.BufferGeometry, m: THREE.Material, cap: number): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(g, m, cap);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    return mesh;
+  }
+
+  /** The same mesh with room for `need` instances (a capacity past which stops used to be cut without a word). */
+  private grown(mesh: THREE.InstancedMesh, need: number): THREE.InstancedMesh {
+    if (need <= mesh.instanceMatrix.count) return mesh;
+    let cap = mesh.instanceMatrix.count;
+    while (cap < need) cap *= 2;
+    const bigger = this.instanced(mesh.geometry, mesh.material as THREE.Material, cap);
+    bigger.renderOrder = mesh.renderOrder;
+    this.group.remove(mesh);
+    mesh.dispose();
+    this.group.add(bigger);
+    return bigger;
+  }
 
   /**
    * Rebuilds the stops when the lines change (`version`) or a road is edited within reach of a stop. (A version the
@@ -107,6 +121,12 @@ export class TransitRenderer {
     if (version === this.built && !near) return;
     this.built = version;
     this.stopCells.clear();
+    let stops = 0;
+    for (const l of transit.lines) stops += l.stops.length / 2;
+    this.shelters = this.grown(this.shelters, stops);
+    this.markers = this.grown(this.markers, stops);
+    this.platforms = this.grown(this.platforms, stops * 2);
+    this.entrances = this.grown(this.entrances, stops);
     for (const l of transit.lines) {
       for (let k = 0; k * 2 < l.stops.length; k++) {
         const x = l.stops[k * 2], z = l.stops[k * 2 + 1], r = 48;
@@ -123,7 +143,7 @@ export class TransitRenderer {
       col.set(PAINTS[l.color & 15]);
       const rail = (l.mode ?? 0) > 0;
       const pts: number[] = [], cols: number[] = [];
-      for (let k = 0; k * 2 < l.stops.length && n < CAP; k++) {
+      for (let k = 0; k * 2 < l.stops.length; k++) {
         const x = l.stops[k * 2], z = l.stops[k * 2 + 1];
         let y = heightAt(heights, x, z) + 0.15;
         // facing the nearest road (station: aligned with the track)
@@ -141,13 +161,12 @@ export class TransitRenderer {
             this.q.setFromAxisAngle(this.up, yaw);
             if (l.mode === 1 || ty > heightAt(heights, x, z) - 3) {
               for (const side of [-1, 1]) {
-                if (np >= 512) break;
                 const u = side * (half + 1.7);
                 const r = new THREE.Quaternion().setFromAxisAngle(this.up, yaw + (side > 0 ? Math.PI : 0));
                 this.m.compose(new THREE.Vector3(x + lx * u, ty, z + lz * u), r, new THREE.Vector3(1, 1, 1));
                 this.platforms.setMatrixAt(np++, this.m);
               }
-            } else if (ne < 512) {
+            } else {
               // underground metro: entrance on the surface, beside the path
               const u = half + 4;
               const gx = x + lx * u, gz = z + lz * u;

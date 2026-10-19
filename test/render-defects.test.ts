@@ -526,3 +526,18 @@ test('E8: a sign whose text changed, or that left the area, frees its texture', 
   assert.equal(cache.size, 1, `${cache.size} sign textures kept for 1 sign`);
   assert.equal(freed, 1, 'the old text\'s texture was freed');
 });
+
+test('E41: every bus stop gets its shelter, past 2,048', async () => {
+  const { TransitRenderer } = await import('../src/render/transit.ts');
+  const { Transit } = await import('../src/world/transit.ts');
+  const w = new World();
+  const transit = new Transit();
+  const { id, cmd } = transit.addLine();
+  cmd.apply();
+  for (let k = 0; k < 2500; k++) transit.addStop(id, -4000 + (k % 100) * 80, -4000 + Math.floor(k / 100) * 80)!.apply();
+  const view = new TransitRenderer();
+  view.update(transit, w.roads, w.heights, transit.version, w.dirty);
+  const shelters = (view as unknown as { shelters: THREE.InstancedMesh }).shelters;
+  assert.equal(shelters.count, 2500, `${shelters.count} shelters for 2,500 stops`);
+});
+
