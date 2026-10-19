@@ -425,6 +425,21 @@ export class Hud {
     window.addEventListener('resize', () => this.fitDrawer());
     // the tool options panel follows the side panel: the drawer gives way to both
     new ResizeObserver(() => this.fitDrawer()).observe(this.side);
+    // the inspector scrolls inside the side panel and fades at the end with more past it (Roadcraft 4.0,
+    // v2/shell.ts:891-903; the look is in shell.css .v2-side .inspector[data-more-y])
+    const fadeEnds = (): void => {
+      for (const panel of this.side.querySelectorAll<HTMLElement>(':scope > .inspector')) {
+        const more = panel.scrollHeight - panel.clientHeight;
+        const top = more > 1 && panel.scrollTop > 1, bottom = more > 1 && panel.scrollTop < more - 1;
+        const v = top && bottom ? 'both' : top ? 'top' : bottom ? 'bottom' : '';
+        if ((panel.dataset.moreY ?? '') !== v) { if (v) panel.dataset.moreY = v; else delete panel.dataset.moreY; }
+      }
+    };
+    this.side.addEventListener('scroll', fadeEnds, { passive: true, capture: true });
+    let fading = 0;
+    const later = (): void => { if (!fading) fading = requestAnimationFrame(() => { fading = 0; fadeEnds(); }); };
+    new MutationObserver(later).observe(this.side, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'style'] });
+    new ResizeObserver(later).observe(this.side);
 
     const self = this;
     this.host = {

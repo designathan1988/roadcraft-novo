@@ -803,6 +803,19 @@ export const SCENARIOS = {
     key('Escape'); await frames(2);
     check('Esc closes it and the tool stays', !Q('.rp-keys') && g.tool === 'road', 'panel ' + !!Q('.rp-keys') + ', tool ' + g.tool);
   `,
+  // The 4.0 selection panel (v2/shell.ts:891-903, shell.css:283-285): the inspector scrolls inside it and fades at
+  // the end with more past it
+  'inspector-fade-4.0': `
+    road(-150, 400, 150, 400); road(0, 250, 0, 550);
+    A.tool('inspect'); await frames(2);
+    Q('.v2-side').style.maxHeight = '260px';
+    g.inspector.pick(0, 400); await frames(4); await wait(300);
+    const ins = Q('.v2-side .inspector');
+    check('a long inspector scrolls inside the panel', ins && ins.scrollHeight > ins.clientHeight + 20, 'scroll ' + (ins && ins.scrollHeight + ' / ' + ins.clientHeight));
+    check('it fades at the bottom, with more below', ins.dataset.moreY === 'bottom', 'moreY ' + ins.dataset.moreY);
+    ins.scrollTop = ins.scrollHeight; ins.dispatchEvent(new Event('scroll')); await frames(2);
+    check('scrolled to the end it fades at the top', ins.dataset.moreY === 'top', 'moreY ' + ins.dataset.moreY);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
