@@ -91,26 +91,45 @@ function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
   }
 }
 
-/** Platibanda: mureta em volta da laje, com face de dentro e topo (vista de cima não fura). */
-function parapet(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, t: number, col: number): void {
-  prism(mb, f, x0, x1, z0, z1, y, y + h, col, BMAT.Plain, 50, -1, 0);
-  const o: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
-  const i: Array<[number, number]> = [[x0 + t, z1 - t], [x1 - t, z1 - t], [x1 - t, z0 + t], [x0 + t, z0 + t]];
+/** Parts of a frame: the top, the underside of the overhang, the inside walls. */
+const FR_TOP = 1, FR_BOTTOM = 2, FR_INNER = 4;
+/** Level of the building being generated (0 near; 1 far cell: a frame keeps only what reads at a pixel). */
+let genLod = 0;
+
+/**
+ * A rectangular frame from y0 to y1: the band between the outer rectangle (`out` past x0..x1 × z0..z1) and the inner
+ * one (`inset` inside it). The outer walls always; the top, the underside of the overhang and the inner walls (a band
+ * that rises above a roof) by `parts`. Never a lid: whatever lies inside the inner rectangle stays in view.
+ */
+function frame(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number,
+  out: number, inset: number, col: number, mat: number, parts: number, innerCol = col): void {
+  prism(mb, f, x0 - out, x1 + out, z0 - out, z1 + out, y0, y1, col, mat, 50, -1, 0);
+  if ((detailOut && mb !== detailOut) || !parts) return;
+  const ix = Math.min(inset, (x1 - x0) / 2 - 0.01), iz = Math.min(inset, (z1 - z0) / 2 - 0.01);
+  const o: Array<[number, number]> = [[x0 - out, z1 + out], [x1 + out, z1 + out], [x1 + out, z0 - out], [x0 - out, z0 - out]];
+  const i: Array<[number, number]> = [[x0 + ix, z1 - iz], [x1 - ix, z1 - iz], [x1 - ix, z0 + iz], [x0 + ix, z0 + iz]];
   const inN: Array<[number, number]> = [[0, -1], [-1, 0], [0, 1], [1, 0]];
-  const inner = shadeHex(col, 0.85);
-  // rufo: capa de concreto 5 cm para fora, por cima da mureta
-  prism(mb, f, x0 - 0.05, x1 + 0.05, z0 - 0.05, z1 + 0.05, y + h, y + h + 0.08, 0xd6d3cc, BMAT.Plain, 50, 0xd6d3cc, BMAT.Plain, true);
+  const V = (q: [number, number], y: number, n0: number, n1: number, n2: number, c: number) => mb.vert(wx(f, q[0], q[1]), y, wz(f, q[0], q[1]), n0, n1, n2, c, mat);
   for (let k = 0; k < 4; k++) {
-    const [ax, az] = i[k], [bx, bz] = i[(k + 1) & 3];
+    const k1 = (k + 1) & 3;
+    if (parts & FR_TOP) mb.quad(V(o[k], y1, 0, 1, 0, col), V(o[k1], y1, 0, 1, 0, col), V(i[k1], y1, 0, 1, 0, col), V(i[k], y1, 0, 1, 0, col), 0, 1, 0);
+    if (parts & FR_BOTTOM) mb.quad(V(o[k], y0, 0, -1, 0, col), V(o[k1], y0, 0, -1, 0, col), V(i[k1], y0, 0, -1, 0, col), V(i[k], y0, 0, -1, 0, col), 0, -1, 0);
+    if (!(parts & FR_INNER)) continue;
     const NX = nx(f, inN[k][0], inN[k][1]), NZ = nz(f, inN[k][0], inN[k][1]);
-    const a = mb.vert(wx(f, ax, az), y, wz(f, ax, az), NX, 0, NZ, inner, BMAT.Plain), b = mb.vert(wx(f, bx, bz), y, wz(f, bx, bz), NX, 0, NZ, inner, BMAT.Plain);
-    const c = mb.vert(wx(f, bx, bz), y + h, wz(f, bx, bz), NX, 0, NZ, inner, BMAT.Plain), d = mb.vert(wx(f, ax, az), y + h, wz(f, ax, az), NX, 0, NZ, inner, BMAT.Plain);
-    mb.quad(a, b, c, d, NX, 0, NZ);
-    const [ox, oz] = o[k], [px, pz] = o[(k + 1) & 3];
-    const e = mb.vert(wx(f, ox, oz), y + h, wz(f, ox, oz), 0, 1, 0, col, BMAT.Plain), g = mb.vert(wx(f, px, pz), y + h, wz(f, px, pz), 0, 1, 0, col, BMAT.Plain);
-    const c2 = mb.vert(wx(f, bx, bz), y + h, wz(f, bx, bz), 0, 1, 0, col, BMAT.Plain), d2 = mb.vert(wx(f, ax, az), y + h, wz(f, ax, az), 0, 1, 0, col, BMAT.Plain);
-    mb.quad(e, g, c2, d2, 0, 1, 0);
+    mb.quad(V(i[k], y0, NX, 0, NZ, innerCol), V(i[k1], y0, NX, 0, NZ, innerCol), V(i[k1], y1, NX, 0, NZ, innerCol), V(i[k], y1, NX, 0, NZ, innerCol), NX, 0, NZ);
   }
+}
+
+/**
+ * Parapet: a low wall round the slab, its inside face and a concrete coping on top (frames: the roof stays in view).
+ * Far (level 1) the 8 cm coping is under a pixel: the wall gets a plain top instead.
+ */
+function parapet(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, t: number, col: number): void {
+  const inner = shadeHex(col, 0.85);
+  if (genLod > 0) { frame(mb, f, x0, x1, z0, z1, y, y + h, 0, t, col, BMAT.Plain, FR_TOP | FR_INNER, inner); return; }
+  // the wall (its top hidden under the coping), then the coping: 8 cm of concrete, 5 cm proud on both sides
+  frame(mb, f, x0, x1, z0, z1, y, y + h, 0, t, col, BMAT.Plain, FR_INNER, inner);
+  frame(mb, f, x0, x1, z0, z1, y + h, y + h + 0.08, 0.05, t + 0.05, 0xd6d3cc, BMAT.Plain, FR_TOP | FR_BOTTOM | FR_INNER);
 }
 
 /** Telhado de duas águas com cumeeira ao longo de x (ou z), beiral e oitões. */
@@ -303,6 +322,7 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
       detailOut = mb;
       g.mb = sink; g.lod = 0;
     }
+    genLod = g.lod;
     const v0 = mb.v;
     const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
     const cat = ds?.catalog ? ds.catalog : plan.landmark[i];
@@ -435,10 +455,15 @@ function emptyLot(mb: MeshBuilder, heights: Float32Array, W: number, D: number, 
   prism(mb, f, W / 2 - t, W / 2, -D / 2, D / 2, f.base, y1, col, BMAT.Plain, 50, col, BMAT.Plain);
 }
 
-/** Faixa saliente em volta do volume (cornija, faixa de andar, laje do coroamento). */
-function ring(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, out: number, col: number): void {
+/**
+ * A band standing `out` proud round the volume (cornice, storey band, crown slab): only its outside, the top and the
+ * underside of the overhang, and the inside face where it rises above a roof (`overRoof`). Never a lid over the roof.
+ * Far (level 1) a band on the wall is just its outside, and a crown loses the underside.
+ */
+function ring(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, out: number, col: number, overRoof = true): void {
   blank(mb);
-  prism(mb, f, x0 - out, x1 + out, z0 - out, z1 + out, y0, y1, col, BMAT.Plain, 50, col, BMAT.Plain, true);
+  const parts = overRoof ? FR_TOP | FR_INNER | (genLod > 0 ? 0 : FR_BOTTOM) : genLod > 0 ? 0 : FR_TOP | FR_BOTTOM;
+  frame(mb, f, x0, x1, z0, z1, y0, y1, out, 0, col, BMAT.Plain, parts);
 }
 
 /** Pilares salientes na frente e no fundo, nas divisas das colunas. */
@@ -642,7 +667,7 @@ function block(g: Gen): void {
     const crown = g.pattern === Pattern.ArtDecoCrown ? Crown.Stepped : a.crown;
     if (crown === Crown.Cornice) { ring(mb, f, tx0, tx1, tz0, tz1, roofY - 0.1, roofY + 0.45, 0.35, trim); parapet(mb, f, tx0, tx1, tz0, tz1, roofY + 0.45, 0.6, 0.25, wallCol); }
     else if (crown === Crown.Slab) ring(mb, f, tx0, tx1, tz0, tz1, roofY, roofY + 0.4, 0.9, shadeHex(wallCol, 0.92));
-    else if (crown === Crown.Stepped) { parapet(mb, f, tx0, tx1, tz0, tz1, roofY, 1.6, 0.3, trim); ring(mb, f, (tx0 + tx1) / 2 - 2, (tx0 + tx1) / 2 + 2, tz1 - 1, tz1, roofY, roofY + 3.2, 0.1, trim); }
+    else if (crown === Crown.Stepped) { parapet(mb, f, tx0, tx1, tz0, tz1, roofY, 1.6, 0.3, trim); blank(mb); prism(mb, f, (tx0 + tx1) / 2 - 2.1, (tx0 + tx1) / 2 + 2.1, tz1 - 1.1, tz1 + 0.1, roofY, roofY + 3.2, trim, BMAT.Plain, 50, trim, BMAT.Plain); }
     else { blank(mb); parapet(mb, f, tx0, tx1, tz0, tz1, roofY, 1.0, 0.25, wallCol); }
   }
   if (lod > 1) return;
@@ -651,7 +676,7 @@ function block(g: Gen): void {
   else if (g.pattern === Pattern.Gallery) piers(mb, f, x0, x1, z0, z1, y0 + groundH, top, colW, 1, shadeHex(wallCol, 1.08));
   if (a.bands) for (let fl = 1; fl < lower; fl += a.bands) {
     const y = y0 + groundH + (fl - 1) * fh;
-    ring(mb, f, x0, x1, z0, z1, y - 0.12, y + 0.08, 0.14, trim);
+    ring(mb, f, x0, x1, z0, z1, y - 0.12, y + 0.08, 0.14, trim, false);
   }
   if (lod === 0) facadeRelief(g, x0, x1, z0, z1, y0, groundH, fh, lower, colW, wallCol, shop);
   // lojas: toldo de lona por vão (ruas antigas, como no roadcraft) ou marquise de concreto (prédios modernos)
@@ -924,7 +949,7 @@ function civic(g: Gen, fn: number): void {
       const bw = Math.min(W - 4, 40), bd = Math.min(12, D * 0.35);
       box(-bw / 2, bw / 2, zf - 3 - bd, zf - 3, fl * 3.6, 0xf2e6c8, Facade.Punched, 3.4, 3.6);
       box(-bw / 2, -bw / 2 + 10, zf - 3 - bd - 16, zf - 3 - bd, fl * 3.6, 0xf2e6c8, Facade.Punched, 3.4, 3.6);
-      if (lod < 2) solid(-bw / 2 - 0.3, bw / 2 + 0.3, zf - 3 - bd - 0.3, zf - 2.7, y0 + fl * 3.6, y0 + fl * 3.6 + 0.6, 0x3d6aa0);
+      if (lod < 2) ring(mb, f, -bw / 2, bw / 2, zf - 3 - bd, zf - 3, y0 + fl * 3.6, y0 + fl * 3.6 + 0.6, 0.3, 0x3d6aa0);
       if (lod > 0) break;
       ground(0x8a8478, BMAT.Paving);
       // quadra: piso verde com linhas, alambrado
@@ -959,7 +984,7 @@ function civic(g: Gen, fn: number): void {
       const z1 = zf - 6;
       box(-bw / 2, bw / 2, z1 - bd, z1, fl * 3.6, 0xf4f4f0, Facade.Industrial, 3.2, 3.6, 0x9aa0a4);
       if (lod < 2) {
-        solid(-bw / 2 - 0.2, bw / 2 + 0.2, z1 - bd - 0.2, z1 + 0.2, y0 + fl * 3.6, y0 + fl * 3.6 + 0.8, 0x2f7ab0);
+        ring(mb, f, -bw / 2, bw / 2, z1 - bd, z1, y0 + fl * 3.6, y0 + fl * 3.6 + 0.8, 0.2, 0x2f7ab0);
         // cruz vermelha na fachada
         solid(-0.5, 0.5, z1, z1 + 0.15, y0 + fl * 3.6 - 3.2, y0 + fl * 3.6 - 0.4, 0xc8241c);
         solid(-1.4, 1.4, z1, z1 + 0.15, y0 + fl * 3.6 - 2.3, y0 + fl * 3.6 - 1.3, 0xc8241c);
@@ -968,8 +993,8 @@ function civic(g: Gen, fn: number): void {
       // marquise da emergência
       solid(-6, 6, z1, z1 + 5, y0 + 3.4, y0 + 3.7, 0xd8d6d0);
       for (const x of [-5.5, 5.5]) solid(x - 0.15, x + 0.15, z1 + 4.6, z1 + 4.9, y0, y0 + 3.4, 0xd8d6d0);
-      // heliponto sobre a laje de 0,8 m (antes ficava escondido dentro dela)
-      if (big) { const yh = y0 + fl * 3.6 + 0.8; solid(-6, 6, z1 - bd + 3, z1 - bd + 15, yh, yh + 0.2, 0x4a4d50); solid(-2, 2, z1 - bd + 8.7, z1 - bd + 9.3, yh + 0.2, yh + 0.25, 0xf2f2ee); }
+      // helipad on the roof, inside the 0.8 m band
+      if (big) { const yh = y0 + fl * 3.6; solid(-6, 6, z1 - bd + 3, z1 - bd + 15, yh, yh + 0.2, 0x4a4d50); solid(-2, 2, z1 - bd + 8.7, z1 - bd + 9.3, yh + 0.2, yh + 0.25, 0xf2f2ee); }
       ground(0xa29c92, BMAT.Paving);
       break;
     }
@@ -1503,7 +1528,7 @@ function facadeRelief(g: Gen, x0: number, x1: number, z0: number, z1: number, y0
     const fc = shadeHex(wallCol, 0.9);
     for (let fl = 1; fl < lower; fl++) {
       const y = y0 + groundH + (fl - 1) * fh;
-      ring(dm, f, x0, x1, z0, z1, y - 0.07, y + 0.07, 0.06, fc);
+      ring(dm, f, x0, x1, z0, z1, y - 0.07, y + 0.07, 0.06, fc, false);
     }
   }
   // brise vertical (lâminas de concreto) na frente dos contemporâneos, metade deles
