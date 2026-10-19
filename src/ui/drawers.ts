@@ -239,11 +239,8 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
     p.strip.append(h.catalog.el);
   } else h.catalog.visible = false;
   if (cur === 'roundabout') {
-    p.options.append(orow(t('v2.roundabout.radius'), stepper(t('v2.roundabout.radius'), `${s.ring} m`, (d) => {
-      a.ring(d > 0 ? 1.2 : 1 / 1.2);
-      s.ring = Math.round(Math.max(14, Math.min(60, s.ring * (d > 0 ? 1.2 : 1 / 1.2))));
-      return `${s.ring} m`;
-    })));
+    // the game answers with the radius (Hud.setRing writes s.ring)
+    p.options.append(orow(t('v2.roundabout.radius'), stepper(t('v2.roundabout.radius'), `${s.ring} m`, (d) => { a.ring(d > 0 ? 1.2 : 1 / 1.2); return `${s.ring} m`; })));
   }
 }
 

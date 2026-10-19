@@ -708,7 +708,10 @@ export class Hud {
     this.picked = b;
     if (this.open && this.cat === 'build') this.render();
   }
-  setElevation(e: number): void { this.s.elevation = e; }
+  /** The road height (the stepper, PageUp and PageDown): the open panel shows it. */
+  setElevation(e: number): void { this.s.elevation = e; if (this.open && (this.cat === 'roads' || this.cat === 'transit')) this.render(); }
+  /** The roundabout radius ([ and ]). */
+  setRing(r: number): void { this.s.ring = r; if (this.open && this.cat === 'roads') this.render(); }
   /** The zone brush radius ([ and ] with the zone tool). */
   setZoneRadius(r: number): void { this.s.zoneRadius = Math.round(r); if (this.cat === 'zones' && this.open) this.render(); }
   /** See inside: the floor shown (−1: off). */

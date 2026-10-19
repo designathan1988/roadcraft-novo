@@ -25,8 +25,9 @@ const Q = (s) => document.querySelector(s), QA = (s) => [...document.querySelect
 const label = (e) => [e.textContent, e.title, e.dataset.tip, e.getAttribute('aria-label')].filter(Boolean).join(' | ');
 const byText = (sel, re) => QA(sel).find((e) => new RegExp(re).test(label(e)));
 const click = (s) => { const e = typeof s === 'string' ? Q(s) : s; if (!e) throw new Error('nothing to click: ' + s); e.click(); };
-const key = (code, o = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { code, key: o.key ?? code, bubbles: true, cancelable: true, ...o }));
-const keyUp = (code, o = {}) => window.dispatchEvent(new KeyboardEvent('keyup', { code, key: o.key ?? code, bubbles: true, ...o }));
+// keys go to the focused element (the page when nothing is), as the browser sends them
+const key = (code, o = {}) => (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { code, key: o.key ?? code, bubbles: true, cancelable: true, ...o }));
+const keyUp = (code, o = {}) => (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keyup', { code, key: o.key ?? code, bubbles: true, ...o }));
 /** A left click on the map at (x, z): the camera looks straight at the point and the canvas centre is clicked. */
 const mapClick = async (x, z, o = {}) => {
   await g.view(x, z, 0, 70, o.dist ?? 140);
@@ -268,6 +269,144 @@ export const SCENARIOS = {
     const toasts = QA('.v2-toast').map((e) => e.textContent).join(' / ');
     check('the toast is in English', toasts.length > 0 && !/[ãõçéêáíóúâô]|Nenhuma/.test(toasts), 'toasts: ' + toasts);
   ` },
+  // B17: the height and radius selectors follow PageUp/PageDown and [ ]
+  'B17-selectors-follow-keys': `
+    click('[data-cat=roads]'); await frames(2);
+    key('PageUp'); keyUp('PageUp'); await frames(2);
+    const h = Q('.v2-toolopts .v2-stepper-value').textContent;
+    check('PageUp shows in the height selector', /4/.test(h), 'elevation ' + g.roadTool.elevation + ', shows ' + h);
+    click(byText('.v2-tab', 'Rotatória|Roundabout')); await frames(2);
+    key('BracketRight'); await frames(2);
+    const r = Q('.v2-toolopts .v2-stepper-value').textContent;
+    check('] shows in the roundabout radius', r !== '22 m', 'shows ' + r);
+  `,
+  // B22: the next drawn lot shows the style and function that will be used
+  'B22-next-lot-choice': `
+    click('[data-cat=build]'); await frames(2);
+    const sel = QA('.v2-toolopts select');
+    sel[0].value = '2'; sel[0].dispatchEvent(new Event('change')); await frames(1);
+    sel[1].value = '3'; sel[1].dispatchEvent(new Event('change')); await frames(1);
+    click('[data-cat=roads]'); await frames(2); click('[data-cat=build]'); await frames(2);
+    const again = QA('.v2-toolopts select');
+    check('the style shown is the one chosen', again[0].value === '2' && g.newArch === 2, 'shows ' + again[0].value + ', next ' + g.newArch);
+    check('the function shown is the one chosen', again[1].value === '3' && g.newFn === 3, 'shows ' + again[1].value + ', next ' + g.newFn);
+  `,
+  // B23: the water panel shows the values of the map that was opened
+  'B23-panels-show-map': `
+    A.water({ waves: 0.9, foam: 0.1, current: 2 });
+    await g.save(false); A.water({ waves: 0.3, foam: 0.4, current: 0.5 }); await g.load();
+    click('[data-cat=landscape]'); await frames(2);
+    const waves = QA('.v2-range').find((e) => /Ondas|Waves/.test(e.getAttribute('aria-label')));
+    check('the waves slider shows the map', waves && waves.value === '90', 'slider ' + (waves && waves.value) + ', map ' + g.waterCtl.waves);
+  `,
+  // B24: the decay figure follows the city clock while the panel is open
+  'B24-decay-follows-clock': `
+    click('[data-cat=build]'); await frames(2);
+    const id = a.lot(100, 100, 130, 100, 115, 130, 1, 3); g.select(id); await frames(2);
+    const row = () => { const r = QA('.v2-toolopts .v2-orow').find((e) => /Desgaste|Decay/.test(e.getAttribute('aria-label'))); return r ? r.querySelector('.v2-stepper-value').textContent : 'none'; };
+    const before = row();
+    a.passTime(60 * 24 * 365 * 30); await wait(1200);
+    check('the decay row changes with the clock', row() !== before, 'shows ' + before + ' → ' + row() + ', building ' + w.buildings.cols.decay[id] / 10);
+  `,
+  // B25: the floors selector stops at 60, and "−" on an empty lot builds nothing
+  'B25-floors-limits': `
+    click('[data-cat=build]'); await frames(2);
+    const id = a.lot(100, 100, 130, 100, 115, 130, 1, 60); g.select(id); await frames(2);
+    click(byText('.v2-stepper .v2-icon', '\\\\+$')); await frames(2);
+    check('+ at 60 floors stays at 60', Q('.v2-toolopts .v2-stepper-value').textContent === '60', 'shows ' + Q('.v2-toolopts .v2-stepper-value').textContent);
+    w.editBuilding(id, 0, w.buildings.cols.style[id], 0); g.select(id); await frames(2);
+    click(byText('.v2-stepper .v2-icon', '−$|-$')); await frames(2);
+    check('− on an empty lot builds nothing', w.buildings.cols.floors[id] === 0, 'floors ' + w.buildings.cols.floors[id]);
+  `,
+  // B26: dragging a weather slider in automatic mode keeps the slider (the drag goes on)
+  'B26-weather-drag': `
+    click('[data-cat=landscape]'); await frames(2);
+    click(byText('.v2-tab', 'Céu|Sky')); await frames(2);
+    click(byText('.v2-card', '^Clima|^Weather')); await frames(2);
+    const rain = QA('.v2-range').find((e) => /Chuva|Rain/.test(e.getAttribute('aria-label')));
+    rain.value = '30'; rain.dispatchEvent(new Event('input', { bubbles: true })); await frames(2);
+    check('the slider being dragged stays on the page', rain.isConnected, 'the panel was rebuilt under the drag');
+  `,
+  // B28: F1 with another menu open lights only the help button
+  'B28-help-button-lit': `
+    click('[data-pop=menu]'); await frames(2);
+    key('F1'); await frames(2);
+    check('the menu button goes out', !Q('[data-pop=menu]').classList.contains('on'), 'menu still lit');
+    check('the help button is lit', Q('[data-pop=help]').classList.contains('on'), 'help not lit');
+  `,
+  // B29: a change in passengers per hour does not rebuild the transit panel (a click on it is not lost)
+  'B29-transit-panel-steady': `
+    road(0, 100, 400, 100); a.line(0, [100, 108, 300, 108], 1);
+    click('[data-cat=transit]'); await frames(4);
+    const row = Q('.v2-transit-line');
+    const l = g.transit.lines[0], real = g.simStats;
+    // the simulation reports 480 passengers an hour on the line
+    Object.defineProperty(g, 'simStats', { configurable: true, get: () => ({ ...(real || {}), type: 'stats', lines: [{ id: l.id, perHour: 480, waiting: 3 }] }), set: () => undefined });
+    await frames(4);
+    check('the row stays', row && row.isConnected, 'the panel was rebuilt');
+    check('and shows the new figure', Q('.v2-transit-line') && /480/.test(Q('.v2-transit-line').textContent), 'row: ' + (Q('.v2-transit-line') && Q('.v2-transit-line').textContent));
+  `,
+  // B33: Esc ends the wall being traced and keeps the tool; Esc drops the first click of a lot line
+  'B33-esc-steps-back': `
+    click('[data-cat=landscape]'); await frames(2);
+    click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
+    click(byText('.v2-card', '^Muro|^Wall')); await frames(2);
+    await mapClick(100, 60);
+    key('Escape'); await frames(2);
+    check('Esc ends the wall and keeps the wall tool', g.tool === 'barrier', 'tool ' + g.tool);
+    key('Escape'); await frames(2);
+    check('a second Esc puts the tool down', g.tool === 'camera', 'tool ' + g.tool);
+    A.lotLine(); await frames(2);
+    await mapClick(100, 100);
+    key('Escape'); await frames(2);
+    check('Esc drops the first click of the lot line', g.lotExtraPts.length === 0 && g.tool === 'building', 'points ' + g.lotExtraPts.length + ', tool ' + g.tool);
+  `,
+  // B36: closing the options while a road key is being captured leaves the next key to the game
+  'B36-options-capture': `
+    click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
+    const before = g.settings.roadUp ?? 'PageUp';
+    click(QA('.v2-dialog .v2-btn').find((b) => /Page|Up/.test(b.textContent))); await frames(1);
+    click(byText('.v2-dialog button', '^Fechar$|^Close$')); await frames(2);
+    const mode = g.rig.mode;
+    key('KeyV'); await frames(2);
+    check('the next key goes to the game (V changes the view)', g.rig.mode !== mode, 'view stayed ' + mode);
+    click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
+    const shown = QA('.v2-dialog .v2-btn').find((b) => /Page|Up|Numpad/.test(b.textContent));
+    check('the dialog shows the road key unchanged', shown && /Page Up/.test(shown.textContent), 'shows ' + (shown && shown.textContent));
+  `,
+  // B37: the game's keys do nothing while the options, About or the start screen are open
+  'B37-keys-blocked-by-dialogs': `
+    click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
+    const mode = g.rig.mode;
+    key('KeyV'); key('KeyT'); await frames(2);
+    check('V does not change the view under the options', g.rig.mode === mode, 'view ' + mode + ' → ' + g.rig.mode);
+    check('T does not open a drawer under the options', g.tool === 'camera', 'tool ' + g.tool);
+    key('Escape'); await frames(2);
+    check('Esc closes the options', !g.optionsPanel.isOpen, 'still open');
+  `,
+  // B44: the rail track tabs show height, snapping and cut sides like the roads do
+  'B44-rail-tabs-options': `
+    click('[data-cat=transit]'); await frames(2);
+    click(byText('.v2-tab', 'Trilho de trem|Train track')); await frames(2);
+    const rows = QA('.v2-toolopts .v2-orow').map((e) => e.getAttribute('aria-label')).join(', ');
+    check('the train track shows height, snapping and cut', /Altura|Height/.test(rows) && /Encaixe|Snap/.test(rows) && /Corte|Cut/.test(rows), 'rows: ' + rows);
+  `,
+  // B47: a building put on an empty lot uses the style and function chosen for the next one
+  'B47-empty-lot-choice': `
+    road(1400, 1500, 1800, 1500); a.zone(1600, 1520, 60, 1); // the map centre is a river
+    g.growth.rate = 0; // nothing grows by itself during the check
+    for (let k = 0; k < 40 && g.growth.lots.size === 0; k++) { g.growth.processDirty(); await g.pool.whenIdle(); await wait(250); }
+    let free = null;
+    for (const l of g.growth.lots.values()) for (let i = 0; i < l.count && !free; i++) if (g.growth.lotAt(l.x[i], l.z[i])) free = [l.x[i], l.z[i]];
+    check('there is an empty lot', !!free, 'no free lot; lots in ' + g.growth.lots.size + ' cells, growth cells ' + g.growth.cells.length + ', seg zones ' + w.roads.segs.cols.zl[0] + '/' + w.roads.segs.cols.zr[0] + ', buildings ' + w.buildings.size);
+    if (free) {
+      click('[data-cat=build]'); await frames(2);
+      A.style(4); A.buildingFn(2);
+      await mapClick(free[0], free[1]);
+      const id = g.selected, c = w.buildings.cols;
+      check('the building uses the chosen style and function', id >= 0 && c.style[id] === 128 + 4 && c.fn[id] === 2, 'id ' + id + ', style ' + c.style[id] + ', fn ' + c.fn[id]);
+    }
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

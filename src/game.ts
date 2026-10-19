@@ -368,7 +368,7 @@ export class Game {
       },
       paint: (style) => { this.settings.paint = style; saveSettings(this.settings); setPaintStyle(style); },
       furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
-      ring: (f) => this.roadTool.ringBy(f),
+      ring: (f) => { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); },
       terminal: (on) => { this.transitTerminal = on; },
       itemRemove: (on) => { this.itemRemove = on; },
       cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
@@ -1048,7 +1048,7 @@ export class Game {
     if (road && c === (this.settings.roadDown ?? 'PageDown')) { this.setElevation(this.roadTool.elevation - 4); return true; }
     if (c === 'BracketLeft' || c === 'BracketRight') {
       const f = c === 'BracketLeft' ? 1 / 1.2 : 1.2;
-      if (t === 'roundabout') { this.roadTool.ringBy(f); return true; }
+      if (t === 'roundabout') { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); return true; }
       if (t === 'zone') { this.zoneTool.radius = Math.max(10, Math.min(200, Math.round(this.zoneTool.radius * f / 5) * 5)); this.hud.setZoneRadius(this.zoneTool.radius); return true; }
       if (TERRAIN_TOOLS.includes(t) || GROUND_TOOLS.includes(t) || t === 'sky') { this.setRadius(this.brush.radius * f); return true; }
     }
