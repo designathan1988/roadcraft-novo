@@ -36,7 +36,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { fmtDec, fmtInt, followLanguage, loose, money, onLanguageReload, plural, setLang, t } from './ui/i18n.ts';
+import { fmtDec, fmtInt, followLanguage, loose, money, onLanguageChange, plural, setLang, t } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -453,12 +453,8 @@ export class Game {
       // the building panel shows the building as it is now (or none, once undo took it away)
       if (this.selected >= 0) this.select(this.selected);
     };
-    // changing the language reloads the page: the city is saved first; if that fails, the player decides
-    onLanguageReload(async () => {
-      if (!this.unsaved && !this.world.saveDirty.includes(1)) return true;
-      if (await this.save()) return true;
-      return window.confirm(t('save.languageDiscard'));
-    });
+    // the language changes without reloading (Roadcraft 4.0, main.ts:3832): the panels the game fills write again
+    onLanguageChange(() => { this.inspector.refresh(); if (this.selected >= 0) this.select(this.selected); });
     // closing: in the desktop game the window waits for the save; in the browser the page asks before leaving
     const app = (window as { roadcraftApp?: { onClosing(fn: () => void): void; canClose(): void } }).roadcraftApp;
     if (app) app.onClosing(() => void this.saveBeforeClose().finally(() => app.canClose()));

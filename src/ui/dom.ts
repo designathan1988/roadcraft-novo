@@ -21,6 +21,13 @@ export function button(className: string, label: string, run: () => void, icon?:
   return b;
 }
 
+/** A button's name written again (another language): the name inside it and its tooltip. */
+export function rename(b: HTMLElement, label: string): void {
+  const name = [...b.children].reverse().find((c) => c.tagName === 'SPAN');
+  if (name) name.textContent = label;
+  b.title = label;
+}
+
 /** A button that exists but does nothing yet: the tooltip says the feature is being built. */
 export function soon(b: HTMLButtonElement, note: string): HTMLButtonElement {
   b.disabled = true;

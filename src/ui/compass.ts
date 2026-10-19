@@ -9,7 +9,7 @@ export interface CompassHandlers {
   drag(dx: number, dy: number): void;
 }
 
-export interface Compass { point(yaw: number): void }
+export interface Compass { point(yaw: number): void; relabel(): void }
 
 /** A press that moves less than this is a click. */
 const CLICK_SLOP = 4;
@@ -59,6 +59,7 @@ export function mountCompass(host: HTMLElement, h: CompassHandlers): Compass {
   b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); h.north(); } });
   let shown = NaN;
   return {
+    relabel() { b.title = t('compass.label'); b.setAttribute('aria-label', t('compass.label')); },
     point(yaw) {
       const deg = Math.round(yaw * 180 / Math.PI);
       if (deg === shown) return;

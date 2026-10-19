@@ -282,7 +282,6 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.people.outfit.elegant': "Social",
   'ui.people.outfit.work': "Trabalho",
   'save.discardConfirm': 'Esta cidade tem alterações que ainda não foram salvas. Descartar e continuar?',
-  'save.languageDiscard': 'Não foi possível salvar a cidade antes de trocar o idioma. Trocar mesmo assim e perder o que não foi salvo?',
   // game.ts: toasts, hints and loading lines
   'game.hint.forest.one': 'Clique para plantar uma árvore da espécie escolhida.',
   'game.hint.forest': 'Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.',

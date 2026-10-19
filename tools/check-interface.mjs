@@ -748,6 +748,25 @@ export const SCENARIOS = {
     window.confirm = confirm0;
     check('saying yes makes a city with a new seed', made.length === 1 && made[0] !== seed, 'made ' + made.join(',') + ' (seed was ' + seed + ')');
   `,
+  // The 4.0 language switch (i18n/index.ts:95-111, v2/shell.ts:2032-2046): at once, no reload, the city as it is,
+  // the bar, the dock, the open menu and drawer written in the new language
+  'language-live-4.0': `
+    window.__samePage = 1;
+    road(-200, 300, 200, 300);
+    const segs = w.roads.segs.size;
+    click('[data-cat=roads]'); await frames(2);
+    click('[data-pop=menu]'); await frames(2);
+    click(byText('.v2-pop .v2-choice', '^English')); await frames(4);
+    check('no reload: the same page, the city as it was', window.__samePage === 1 && w.roads.segs.size === segs && g.unsaved, 'same ' + window.__samePage + ', segments ' + w.roads.segs.size + ' of ' + segs);
+    check('the page says English', document.documentElement.lang === 'en', 'lang ' + document.documentElement.lang);
+    check('the dock in English', Q('[data-cat=roads] .v2-cat-name').textContent === 'Roads' && /Roads/.test(Q('[data-cat=roads]').title), 'dock: ' + Q('[data-cat=roads] .v2-cat-name').textContent + ' / ' + Q('[data-cat=roads]').title);
+    check('the bar in English', QA('.v2-actions .v2-icon').some((b) => /^Undo/.test(b.title)) && Q('[data-pop=menu]').textContent.trim() === 'Menu', 'undo ' + QA('.v2-actions .v2-icon').map((b) => b.title).join(', ') + ' / menu ' + Q('[data-pop=menu]').textContent);
+    check('the open menu written again, English lit', !!byText('.v2-pop .v2-row', '^New map') && byText('.v2-pop .v2-choice', '^English').classList.contains('on'), 'rows: ' + QA('.v2-pop .v2-row').map((r) => r.textContent).join(' / '));
+    check('the open drawer written again', QA('.v2-drawer .v2-tab').some((b) => /^Straight|^Curve|^Roundabout/.test(b.textContent)), 'tabs: ' + QA('.v2-drawer .v2-tab').map((b) => b.textContent).join(', '));
+    check('the compass in English', /north|North/.test(Q('.v2-compass').title), 'compass ' + Q('.v2-compass').title);
+    click(byText('.v2-pop .v2-choice', '^Português')); await frames(4);
+    check('and back to Portuguese', Q('[data-cat=roads] .v2-cat-name').textContent === 'Vias' && document.documentElement.lang === 'pt-BR' && !!byText('.v2-pop .v2-row', '^Novo mapa'), 'dock ' + Q('[data-cat=roads] .v2-cat-name').textContent + ', lang ' + document.documentElement.lang);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

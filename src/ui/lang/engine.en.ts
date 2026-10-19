@@ -282,7 +282,6 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.people.outfit.elegant': "Formal",
   'ui.people.outfit.work': "Work",
   'save.discardConfirm': 'This city has changes that are not saved yet. Discard them and go on?',
-  'save.languageDiscard': 'The city could not be saved before changing the language. Change anyway and lose what is not saved?',
   // game.ts: toasts, hints and loading lines
   'game.hint.forest.one': 'Click to plant a tree of the chosen species.',
   'game.hint.forest': 'Drag to plant a wood, or choose Cut to open a clearing.',

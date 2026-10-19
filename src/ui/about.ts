@@ -3,7 +3,7 @@
 // this build is simply not listed; their legal texts are shown as written, in a fold.
 
 import { el } from './dom.ts';
-import { fmtInt, t } from './i18n.ts';
+import { fmtInt, t, onLanguageChange } from './i18n.ts';
 import { steamName } from '../steam.ts';
 
 declare const __BUILD__: string;
@@ -49,8 +49,16 @@ export class AboutBox {
   constructor() {
     this.root = el('div', 'v2-dialog-back');
     this.root.hidden = true;
-    const d = el('div', 'v2-dialog about');
     this.packs = el('div', 'about-packs');
+    this.build();
+    // another language: written again; the licences are read again when it is next opened (or now, if it is open)
+    onLanguageChange(() => { this.build(); this.loaded = false; if (this.isOpen) this.open(); });
+    this.root.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === this.root) this.close(); });
+    this.root.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+  }
+
+  private build(): void {
+    const d = el('div', 'v2-dialog about');
     const close = el('button', 'v2-btn primary', t('about.close'));
     close.type = 'button';
     close.addEventListener('click', () => this.close());
@@ -65,9 +73,7 @@ export class AboutBox {
       this.packs,
       foot,
     );
-    this.root.append(d);
-    this.root.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === this.root) this.close(); });
-    this.root.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+    this.root.replaceChildren(d);
   }
 
   get isOpen(): boolean { return !this.root.hidden; }

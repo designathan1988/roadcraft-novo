@@ -1,6 +1,7 @@
 // The interface's language: one dictionary per language, keyed like Roadcraft's (data/textos-roadcraft) plus the
 // keys of what the engine has and Roadcraft did not (lang/engine.ts). Every string the interface shows comes from
-// here through `t(key)`. Changing the language reloads the page (the panels are built once, in one language).
+// here through `t(key)`. Changing the language rewrites what is on screen at once, without reloading (Roadcraft 4.0,
+// i18n/index.ts:95-111): each panel that keeps text listens with `onLanguageChange`.
 // Text that other engine areas still write in Portuguese (toasts, tool hints) goes through `loose()`.
 
 import { PT_BR as RC_PT } from '../../data/textos-roadcraft/pt-BR.ts';
@@ -41,15 +42,16 @@ export function initLang(l: Lang): void {
 
 export function lang(): Lang { return current; }
 
-/** Called before the page reloads for another language (the game saves the city); false keeps the current language. */
-let beforeReload: (() => Promise<boolean>) | null = null;
-export function onLanguageReload(fn: () => Promise<boolean>): void { beforeReload = fn; }
+const listeners: Array<() => void> = [];
+/** Called after the language changed: the panel writes its text again. */
+export function onLanguageChange(fn: () => void): void { listeners.push(fn); }
 
-/** Keeps the choice and reloads, once the game has saved: the panels are built again in the new language. */
-export async function setLang(l: Lang): Promise<void> {
-  if (l !== current && beforeReload && !(await beforeReload())) return;
+/** Keeps the choice and switches at once: every panel listening writes its text in the new language. */
+export function setLang(l: Lang): void {
   try { localStorage.setItem(KEY, l); localStorage.setItem(OLD_KEY, l === 'en' ? 'en' : 'pt'); } catch { /* no storage */ }
-  if (l !== current) location.reload();
+  if (l === current) return;
+  initLang(l);
+  for (const fn of listeners) fn();
 }
 
 /** The text of a key, with `{name}` placeholders filled from `params`. A missing key shows itself (easy to spot). */
@@ -96,18 +98,38 @@ export const translate = legacyTranslate;
 
 /**
  * Keeps an element written by another area in Portuguese (the buildings session's creator) in the player's
- * language: its text is translated now and whenever it changes. Nothing to do in Portuguese.
+ * language: its text is translated now, whenever it changes, and again (or back) when the language changes.
  */
 export function followLanguage(el: HTMLElement): void {
-  if (current !== 'en') return;
+  // each text and attribute as its author wrote it, and what was last written over it
+  const texts = new WeakMap<Node, { own: string; shown: string }>();
+  const attrs = new WeakMap<Element, Map<string, { own: string; shown: string }>>();
+  const show = (own: string): string => (current === 'en' ? legacyTranslate(own) : own);
   const walk = (n: Node): void => {
-    if (n.nodeType === Node.TEXT_NODE) { const v = n.nodeValue ?? ''; const x = legacyTranslate(v); if (x !== v) n.nodeValue = x; return; }
+    if (n.nodeType === Node.TEXT_NODE) {
+      const v = n.nodeValue ?? '';
+      let k = texts.get(n);
+      if (!k || v !== k.shown) texts.set(n, k = { own: v, shown: v });
+      const x = show(k.own);
+      if (x !== v) { k.shown = x; n.nodeValue = x; }
+      return;
+    }
     if (n.nodeType !== Node.ELEMENT_NODE) return;
     const e = n as Element;
-    for (const a of ['title', 'placeholder', 'aria-label']) { const v = e.getAttribute(a); if (v) { const x = legacyTranslate(v); if (x !== v) e.setAttribute(a, x); } }
+    for (const a of ['title', 'placeholder', 'aria-label']) {
+      const v = e.getAttribute(a);
+      if (!v) continue;
+      let m = attrs.get(e);
+      if (!m) attrs.set(e, m = new Map());
+      let k = m.get(a);
+      if (!k || v !== k.shown) m.set(a, k = { own: v, shown: v });
+      const x = show(k.own);
+      if (x !== v) { k.shown = x; e.setAttribute(a, x); }
+    }
     for (let c = e.firstChild; c; c = c.nextSibling) walk(c);
   };
   walk(el);
+  onLanguageChange(() => walk(el));
   new MutationObserver((list) => {
     for (const m of list) {
       if (m.type === 'childList') m.addedNodes.forEach(walk);

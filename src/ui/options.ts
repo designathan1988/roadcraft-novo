@@ -1,7 +1,7 @@
 // The game's options (quality, resolution, weather, simulation, road markings, sound, language) with presets,
 // in Roadcraft's dialog look. Kept in the browser/Electron (localStorage when it works); without it, the defaults.
 
-import { LANGUAGES, lang, loose, setLang, t, type Lang } from './i18n.ts';
+import { LANGUAGES, lang, loose, onLanguageChange, setLang, t, type Lang } from './i18n.ts';
 import { keyName, reservedKeys } from './keys.ts';
 
 export type Preset = 'baixo' | 'medio' | 'alto' | 'ultra';
@@ -96,7 +96,12 @@ export class OptionsPanel {
     this.root.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === this.root) this.close(); });
     this.root.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
     parent.append(this.root);
+    // another language (this dialog's own row among them): written again at once, the choices not yet applied kept
+    onLanguageChange(() => { if (this.isOpen) this.render(this.shown); });
   }
+
+  /** The choices the dialog shows now (not applied yet). */
+  private shown: Settings = {} as Settings;
 
   /** The game's options when the dialog opened. */
   private opened: Settings = {} as Settings;
@@ -108,6 +113,7 @@ export class OptionsPanel {
 
   /** `s`: a copy of the game's options, taken when the dialog opens (Close leaves the game's options untouched). */
   private render(s: Settings): void {
+    this.shown = s;
     const box = document.createElement('div');
     box.className = 'v2-dialog';
     const h = document.createElement('h2');

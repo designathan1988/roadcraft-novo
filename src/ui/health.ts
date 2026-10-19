@@ -4,7 +4,7 @@
 // nothing runs per frame beyond one comparison.
 
 import { el } from './dom.ts';
-import { t } from './i18n.ts';
+import { onLanguageChange, t } from './i18n.ts';
 
 interface Entry { t: number; kind: 'error' | 'slow'; text: string }
 export type HealthTab = 'health' | 'world' | 'state';
@@ -70,6 +70,14 @@ export class HealthPanel {
     r.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
     parent.append(r);
     this.root = r;
+    // another language: the names written again (developer's panel; what was recorded stays as it was written)
+    const title = r.querySelector('h3')!;
+    onLanguageChange(() => {
+      r.setAttribute('aria-label', t('health.title')); title.textContent = t('health.title');
+      for (const [id, b] of this.tabs) b.textContent = t(`health.tab.${id}`);
+      copy.textContent = t('health.copy'); close.textContent = t('v2.close');
+      if (this.open) this.render();
+    });
     window.addEventListener('error', (e) => this.add('error', e.message || t('health.msg.noMessage')));
     window.addEventListener('unhandledrejection', (e) => this.add('error', t('health.msg.rejected', { reason: String((e.reason as Error)?.message ?? e.reason) })));
   }

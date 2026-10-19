@@ -7,9 +7,9 @@
 import './shell.css';
 import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
-import { button, closeDropdown, el, orow, range, choices } from './dom.ts';
+import { button, rename, closeDropdown, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
-import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
+import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, onLanguageChange, plural, setLang, t } from './i18n.ts';
 import { MAP_SIZE } from '../config.ts';
 import { mountCompass, type Compass } from './compass.ts';
 import { keyHelp, keyName } from './keys.ts';
@@ -280,6 +280,8 @@ export class Hud {
   private builderTabs = new Map<BuilderTab, BuilderTabRender>();
   private host: DrawerHost;
   private fileIn: HTMLInputElement;
+  /** What writes the bar's and the dock's names again when the language changes. */
+  private relabels: Array<() => void> = [];
 
   constructor(a: HudActions) {
     this.a = a;
@@ -432,9 +434,37 @@ export class Hud {
       // short names, so the three fit in the pill (Roadcraft 4.0: PgUp · PgDn · V)
       roadKeys: () => { const k = a.settings(); const n = (c: string): string => keyName(c).replace('Page Up', 'PgUp').replace('Page Down', 'PgDn'); return `${n(k.roadUp)} · ${n(k.roadDown)} · ${n(k.roadAlign)}`; },
     };
+    // the names written once, written again in the new language (Roadcraft 4.0, v2/shell.ts:2032-2046)
+    const name = (b: HTMLElement, f: () => string): void => { this.relabels.push(() => rename(b, f())); };
+    this.skyButtons.forEach((b, i) => name(b, () => t((['sky.day', 'sky.night', 'sky.cycle'] as const)[i])));
+    this.speedButtons.forEach((b, i) => this.relabels.push(() => { const n = [0, 1, 2, 4][i]; b.title = n === 0 ? `${t('sim.pause')} (${t('v2.key.space')})` : `${t('sim.speed')} ${n}×`; }));
+    this.relabels.push(() => { sky.title = t('sky.title'); moneyEl.title = t('ui.money.tip', { refund: Math.round(ROAD_TUNING.economy.demolitionRefund * 100) }); });
+    const [inside, down, , up] = [...this.insideBar.children] as HTMLElement[];
+    name(inside, () => t('inside.toggle')); name(down, () => t('inside.down')); name(up, () => t('inside.up'));
+    name(layersB, () => t('v2.layers')); name(simB, () => t('builder.menu.simulation')); name(camB, () => t('camera.label'));
+    name(this.undoB, () => t('action.undo')); name(this.redoB, () => t('action.redo')); name(healthB, () => t('health.button'));
+    name(helpB, () => `${t('builder.help')} (F1)`); name(menuB, () => t('builder.menu.app')); name(close, () => t('v2.close'));
+    for (const c of CATS) {
+      const b = this.catButtons.get(c.id)!;
+      this.relabels.push(() => { b.querySelector('.v2-cat-name')!.textContent = t(`v2.dock.${c.id}`); b.title = `${t(`ui.cat.${c.id}`)}  ${c.key}`; });
+    }
+    onLanguageChange(() => this.relabel());
     this.setSky('ciclo');
     this.syncSpeed();
     this.render();
+  }
+
+  /** The language changed: every name on screen written again, the open panels made again, nothing reloaded. */
+  private relabel(): void {
+    for (const f of this.relabels) f();
+    this.compass.relabel();
+    this.moneyShown = NaN; this.clockShown = ''; this.impossibleShown = -1;
+    if (this.status) this.setStatus(this.status);
+    this.setInside(this.insideFloor);
+    const hint = `hint.tool.${this.current}`;
+    if (t(hint) !== hint) this.setHint(t(hint));
+    this.render();
+    if (this.popId) this.fillPop(this.popId);
   }
 
   // ================================================================ categories
