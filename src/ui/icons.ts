@@ -206,6 +206,7 @@ export const ICON: Record<string, string> = {
   planter: '<path d="M6 13h12l-1.5 7h-9Z"/><path d="M9 13c0-3 1-5 3-6 2 1 3 3 3 6"/>',
   conifer: '<path d="M12 3 6 13h3l-3 5h12l-3-5h3Z"/><path d="M12 18v3"/>',
   generate: '<path d="M4 20V10l4-3 4 3v10"/><path d="M12 20V6l4-3 4 3v14"/><path d="M2 20h20"/>',
+  resetView: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/>',
   mixed: '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><path d="M13 3h8v8M3 13v8h8"/>',
 };
 

@@ -31,7 +31,7 @@ import { PropRenderer } from './render/props.ts';
 import { TransitRenderer } from './render/transit.ts';
 import { Post } from './render/post.ts';
 import { achieve } from './steam.ts';
-import { OptionsPanel, keepOverAddress, loadSettings, saveSettings, type Settings } from './ui/options.ts';
+import { OptionsPanel, PRESETS, keepOverAddress, loadSettings, saveSettings, type Preset, type Settings } from './ui/options.ts';
 import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
@@ -378,7 +378,7 @@ export class Game {
       simulation: (sim) => { Object.assign(this.settings, sim); saveSettings(this.settings); this.demandSent = 0; },
       settings: () => {
         const st = this.settings;
-        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown' };
+        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', preset: st?.preset ?? 'alto', webgpu: !!this.parts?.isWebGPU };
       },
       paint: (style) => { this.settings.paint = style; saveSettings(this.settings); setPaintStyle(style); },
       furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
@@ -388,6 +388,14 @@ export class Game {
       cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
       health: () => { if (this.developer) this.health.toggle(); },
       developer: () => this.developer,
+      healthLevel: () => this.health?.level() ?? 'ok',
+      quality: (p) => {
+        if (!this.parts.isWebGPU || !(p in PRESETS)) return;
+        const s = { ...this.settings, ...PRESETS[p as Preset], preset: p as Preset };
+        saveSettings(s);
+        void this.applySettings(s);
+      },
+      resetView: () => { if (this.homeView) this.rig.restore(this.homeView); },
       environment: () => ({ water: { ...this.waterCtl }, weather: this.weatherCtl ? { ...this.weatherCtl } : null, fog: fogLevel.value }),
       showImpossible: () => {
         // the next one after the last visited (the set is small: only the nodes under 25°)

@@ -71,6 +71,8 @@ export interface OptionalActions {
   lineLoop?(loop: boolean): void;
   /** Points the camera at the next impossible junction and inspects it (the top bar's warning). */
   showImpossible?(): void;
+  /** The health panel's state for the dot on its button: ok, slow, broken. */
+  healthLevel?(): string;
   /** The people creator's choices (people front, src/render/people/creator.ts). */
   personOptions?(o: Partial<PersonOptions>): void;
   /** What the people creator offers; null until the cooked people load. */
@@ -167,7 +169,11 @@ export interface HudActions extends OptionalActions {
   zoneLayer(on: boolean): void;
   /** Traffic %, people % and demand. */
   simulation(s: Partial<SimSettings>): void;
-  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string };
+  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string; preset: string; webgpu: boolean };
+  /** A quality preset (baixo, medio, alto, ultra), applied and kept. */
+  quality(preset: string): void;
+  /** The view the city opened with (Home). */
+  resetView(): void;
   /** Regional road markings: br, us, eu, classic. */
   paint(style: string): void;
   /** Furniture of new roads: 0 complete, 1 basic, 2 none. */
@@ -227,6 +233,7 @@ export class Hud {
   private impossibleB: HTMLButtonElement;
   private impossibleText = document.createTextNode('');
   private impossibleShown = 0;
+  private healthB!: HTMLButtonElement;
   private stats: HTMLElement;
   private skyButtons: HTMLButtonElement[] = [];
   private speedButtons: HTMLButtonElement[] = [];
@@ -328,8 +335,10 @@ export class Hud {
     this.undoB = button('v2-icon', t('action.undo'), () => a.undo(), svg('undo', 18));
     this.redoB = button('v2-icon', t('action.redo'), () => a.redo(), svg('redo', 18));
     // the health panel is a developer's tool: its button only when the developer panels are on
-    const healthB = button('v2-icon', t('health.button'), () => a.health(), svg('health', 18));
+    const healthB = button('v2-icon health-btn', t('health.button'), () => a.health(), svg('health', 18));
+    healthB.append(el('i', 'health-dot'));
     healthB.hidden = !a.developer();
+    this.healthB = healthB;
     const helpB = button('v2-icon', `${t('builder.help')} (F1)`, () => this.toggle('help', helpB), svg('help', 18));
     helpB.dataset.pop = 'help';
     const menuB = button('v2-pill', t('builder.menu.app'), () => this.toggle('menu', menuB), svg('menu', 18));
@@ -479,6 +488,7 @@ export class Hud {
     p.strip.classList.toggle('two-rows', p.strip.querySelectorAll('.v2-card').length > 10);
     this.root.dataset.tool = this.current;
     this.fitDrawer();
+    this.tipCheck();
     if (this.popId === 'help') this.fillPop('help');
   }
 
@@ -533,7 +543,8 @@ export class Hud {
 
   /** Esc: closes the open menu, then the About box. False: nothing was open here. */
   escape(): boolean {
-    if (this.popId) { this.closePop(); return true; }
+    // the menu closes and its button takes the focus back (as in Roadcraft 4.0)
+    if (this.popId) { const anchor = this.popAnchor; this.closePop(); anchor?.focus({ preventScroll: true }); return true; }
     if (this.about.isOpen) { this.about.close(); return true; }
     return false;
   }
@@ -563,6 +574,8 @@ export class Hud {
         this.row(t('ui.menu.save'), () => a.save(), 'm_save'),
         this.row(t('action.saveMap'), () => a.exportMap(), 'm_save'),
         el('hr'),
+        // the four quality presets in the menu, as in Roadcraft 4.0 (Graphics options has the rest)
+        this.seg(t('menu.quality'), (['baixo', 'medio', 'alto', 'ultra'] as const).map((q) => [q, t(`quality.${q === 'baixo' ? 'low' : q === 'medio' ? 'medium' : q === 'alto' ? 'high' : 'ultra'}`)] as const), st.preset, (v) => a.quality(v)),
         this.row(t('menu.graphicsOptions'), () => a.options(), 'm_quality'),
         this.seg(t('menu.language'), LANGUAGES, lang(), (v) => setLang(v as 'pt-BR' | 'en')),
         this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => { a.paint(v); a.mapPaint?.(v); }),
@@ -587,8 +600,8 @@ export class Hud {
     } else if (id === 'sim') {
       const st = a.settings();
       body.append(
-        range(t('sim.traffic'), 10, 200, 10, Math.round(st.traffic * 100), (v) => `${v}%`, (v) => a.simulation({ traffic: v / 100 })),
-        range(t('sim.people'), 10, 200, 10, Math.round(st.people * 100), (v) => `${v}%`, (v) => a.simulation({ people: v / 100 })),
+        range(t('sim.traffic'), 0, 300, 10, Math.round(st.traffic * 100), (v) => `${v}%`, (v) => a.simulation({ traffic: v / 100 })),
+        range(t('sim.people'), 0, 300, 10, Math.round(st.people * 100), (v) => `${v}%`, (v) => a.simulation({ people: v / 100 })),
         this.seg(t('sim.demand'), [['baixa', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['pico', t('sim.demand.peak')]], st.demand, (v) => a.simulation({ demand: v as SimSettings['demand'] })),
       );
       this.metrics = el('dl', 'v2-metrics');
@@ -606,6 +619,7 @@ export class Hud {
         cam('camera.perspective', 'mass', () => { a.view(this.view === 'iso' ? 'persp' : 'iso'); this.fillPop('camera'); }, this.view === 'persp'),
         cam('ui.camera.top', 'top', () => a.view('top')),
         cam('ui.camera.follow', 'follow', () => a.follow()),
+        cam('action.resetView', 'resetView', () => a.resetView()),
       );
       const dl = el('dl', 'v2-metrics');
       const zoom = el('dd', '', ''), centre = el('dd', '', '');
@@ -668,14 +682,25 @@ export class Hud {
   }
 
   // ================================================================ tooltip
+  /** A control rebuilt or removed under the pointer takes its tooltip with it. */
+  private tipCheck(): void {
+    if (this.tipFor && (!this.tipFor.isConnected || this.tipFor.getBoundingClientRect().width === 0)) { this.tipFor = null; this.tip.hidden = true; }
+  }
+
   private bindTips(): void {
     const tip = this.tip;
+    /** Whether a control's name is on screen: an icon button keeps its name in a span clipped to nothing. */
+    const nameShown = (c: HTMLElement): boolean => [...c.querySelectorAll('span')].every((s) => { const r = s.getBoundingClientRect(); return r.width > 2 && r.height > 2; });
+    /** Whether a control's own text is cut short (an ellipsis): its tip then says it whole. */
+    const cutShort = (c: HTMLElement): boolean => c.scrollWidth > c.clientWidth + 1 || [...c.querySelectorAll('span')].some((s) => s.scrollWidth > s.clientWidth + 1);
     this.root.addEventListener('pointerover', (e) => {
       const target = (e.target as HTMLElement).closest<HTMLElement>('[title], [data-tip]');
       if (!target || !this.root.contains(target)) return;
       if (target.title) { target.dataset.tip = target.title; target.removeAttribute('title'); }
       const text = target.dataset.tip ?? '';
       if (!text) return;
+      // a control that already shows its whole name: the tip would only say it again (Roadcraft 4.0)
+      if (nameShown(target) && target.innerText.trim() === text && !cutShort(target)) return;
       this.tipFor = target;
       tip.textContent = text;
       tip.hidden = false;
@@ -788,6 +813,8 @@ export class Hud {
     const tip = t('ui.stats.tip', { residents: fmtCount(s.residents), jobs: fmtCount(s.jobs), buildings: fmtCount(s.buildings), speed: fmtInt(s.speedKmh) });
     if (this.stats.title !== tip && !this.stats.dataset.tip) this.stats.title = tip; else if (this.stats.dataset.tip) this.stats.dataset.tip = tip;
     this.syncMetrics();
+    // the health button's dot: green, amber (a slow frame in 30 s) or red (an error)
+    if (!this.healthB.hidden) { const lv = this.a.healthLevel?.() ?? 'ok'; if (this.healthB.dataset.status !== lv) this.healthB.dataset.status = lv; }
     // the decay of the building in the Build panel follows the city clock
     const decayEl = this.open && this.cat === 'build' ? this.toolOptions.querySelector('.v2-decay') : null;
     if (decayEl) { const d = `${Math.round(Math.max(0, this.a.decayOf?.() ?? 0) * 100)}%`; if (decayEl.textContent !== d) decayEl.textContent = d; }

@@ -109,6 +109,14 @@ export class HealthPanel {
     return true;
   }
 
+  /** The last 30 s: broken (an error), slow (a slow frame) or ok — the dot on the panel's button. */
+  level(): 'ok' | 'slow' | 'broken' {
+    const now = Date.now();
+    let slow = false;
+    for (let i = this.entries.length - 1; i >= 0 && now - this.entries[i].t < WINDOW_MS; i--) { if (this.entries[i].kind === 'error') return 'broken'; slow = true; }
+    return slow ? 'slow' : 'ok';
+  }
+
   private render(): void {
     if (!this.open) return;
     const now = Date.now();

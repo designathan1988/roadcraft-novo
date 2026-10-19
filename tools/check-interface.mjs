@@ -581,6 +581,31 @@ export const SCENARIOS = {
     const h0 = g.hour; await wait(3000);
     check('the clock runs', g.hour !== h0, 'hour ' + h0 + ' → ' + g.hour);
   ` },
+  // The 4.0 top bar and its menus (ui/v2/shell.ts): Quality in the menu, Reset view in Camera, Esc gives the focus back
+  // to the menu's button, the tooltip does not repeat a name already on screen, simulation 0-300 %
+  'top-bar-4.0': `
+    click('[data-pop=menu]'); await frames(2);
+    const q = QA('.v2-pop .v2-orow').find((r) => /Gráficos|Graphics/.test(r.getAttribute('aria-label')));
+    check('the menu has the quality row', !!q && q.querySelectorAll('button').length === 4, 'rows: ' + QA('.v2-pop .v2-orow').map((r) => r.getAttribute('aria-label')).join(', '));
+    if (q) { click([...q.querySelectorAll('button')].find((b) => /Baixa|Low/.test(b.textContent))); await wait(2500); }
+    check('a quality click applies the preset', g.settings.preset === 'baixo' && g.settings.shadows === false, 'preset ' + g.settings.preset + ', shadows ' + g.settings.shadows);
+    if (!Q('.v2-pop:not([hidden])')) { click('[data-pop=menu]'); await frames(2); }
+    const row = byText('.v2-pop .v2-row', 'Sobre|About');
+    row.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); await frames(1);
+    check('no tooltip repeating a name already shown', Q('.v2-tip').hidden, 'tip: ' + Q('.v2-tip').textContent);
+    key('Escape'); await frames(2);
+    check('Esc closes the menu and gives the focus back to its button', Q('.v2-pop').hidden && document.activeElement === Q('[data-pop=menu]'), 'open ' + !Q('.v2-pop').hidden + ', focus ' + (document.activeElement && (document.activeElement.dataset.pop || document.activeElement.tagName)));
+    const home = [g.rig.target.x, g.rig.target.z];
+    await g.view(2500, 2500, 20, 40, 300);
+    click('[data-pop=camera]'); await frames(2);
+    const reset = byText('.v2-pop .v2-icon', 'Enquadrar|Reset');
+    check('Camera has the reset view button', !!reset, 'buttons: ' + QA('.v2-pop .v2-icon').map((b) => b.title || b.dataset.tip).join(', '));
+    if (reset) { click(reset); await wait(800); }
+    check('reset view goes back to the opening view', Math.hypot(g.rig.target.x - home[0], g.rig.target.z - home[1]) < 5, 'target ' + g.rig.target.x.toFixed(0) + ', ' + g.rig.target.z.toFixed(0));
+    click('[data-pop=sim]'); await frames(2);
+    const tr = QA('.v2-pop .v2-range').find((e) => /Tráfego|Traffic/.test(e.getAttribute('aria-label')));
+    check('simulation sliders run 0-300 %', tr && tr.min === '0' && tr.max === '300', 'range ' + (tr && tr.min + '-' + tr.max));
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

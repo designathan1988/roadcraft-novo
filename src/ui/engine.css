@@ -75,6 +75,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .health-status.ok { color: var(--v-accent); } .health-status.warn { color: #ffc864; } .health-status.bad { color: var(--v-danger); }
 .health-list { font-size: 12px; color: var(--v-muted); display: grid; gap: 3px; margin-bottom: 10px; }
 .health .row { display: flex; gap: 6px; }
+.health-btn { position: relative; }
+.health-dot { position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--v-accent); box-shadow: 0 0 0 2px var(--v-bg-solid); pointer-events: none; }
+.health-btn[data-status="slow"] .health-dot { background: #ffc864; }
+.health-btn[data-status="broken"] .health-dot { background: var(--v-danger); }
 .health-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .health-list > div { overflow-wrap: anywhere; }
 
