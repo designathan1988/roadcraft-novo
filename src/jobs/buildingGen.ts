@@ -41,6 +41,49 @@ class NoMesh extends MeshBuilder {
   override box(): void {}
 }
 const NO_MESH = new NoMesh(false, true);
+/**
+ * A volume of a building with storeys (walls with windows), as the generator laid it: centre in the world, half width
+ * and depth along the lot's turn, from y0 to y1; storeys start at `base` (the ground storey `ground` high, then
+ * `fh` each). What the inside view and the camera need, without guessing 3.2 m storeys.
+ */
+export interface Volume { cx: number; cz: number; hw: number; hd: number; rot: number; y0: number; y1: number; base: number; ground: number; fh: number }
+/** Where the volumes go while a building's layout is taken (buildingVolumes). */
+let layoutOut: Volume[] | null = null;
+
+function captureVolume(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, wallMat: number): void {
+  const fc = mb.curFac, m = wallMat & 15;
+  if (!layoutOut || fc[3] === 0 || (m !== BMAT.Wall && m !== BMAT.Curtain && m !== BMAT.Metal) || y1 - y0 < 2) return;
+  const fh = (fc[2] >> 3) / 10 + 2.5, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+  layoutOut.push({ cx: wx(f, mx, mz), cz: wz(f, mx, mz), hw: (x1 - x0) / 2, hd: (z1 - z0) / 2, rot: Math.atan2(f.s, f.c), y0, y1, base: mb.curBase, ground: fc[2] & Facade.ShopBit ? 4.4 : fh, fh });
+}
+
+/**
+ * The volumes of building i of the boxes (the boxes of its cell: the cell plan picks facades and landmarks), from the
+ * same generator, sorted from the largest footprint. Empty for an empty lot. A few milliseconds: for one building.
+ */
+export function buildingVolumes(heights: Float32Array, b: BoxColumns, i: number): Volume[] {
+  const out: Volume[] = [];
+  layoutOut = out;
+  try { genOne(NO_MESH, heights, b, i, planCells(b), -3); } finally { layoutOut = null; lotPoly = null; detailOut = null; }
+  return out.sort((p, q) => q.hw * q.hd - p.hw * p.hd);
+}
+
+/**
+ * The tag of a building's own vertices (15 bits, never 0), in position.w of the mesh: the inside view cuts only the
+ * chosen building's vertices, never a neighbour's. The same sum on the page (inside.ts) from the record.
+ */
+export function buildingTag(seed: number, x: number, z: number): number {
+  return (hash2(seed, Math.round(x * 8), Math.round(z * 8)) & 0x7ffe) | 1;
+}
+
+/** Runs draw() with no building tag on mb and on the detail layer (lot ground, walls, gates, trees). */
+function untagged(mb: MeshBuilder, draw: () => void): void {
+  const t = mb.curTag, d = detailOut, td = d ? d.curTag : 0;
+  mb.curTag = 0;
+  if (d) d.curTag = 0;
+  try { draw(); } finally { mb.curTag = t; if (d) d.curTag = td; }
+}
+
 /** Lajes: manta clara, cimento, piche, cinza escuro, telhado verde. */
 const ROOF_FLATS = [0x8f8b84, 0xa8a49b, 0x5d5f61, 0x77736c, 0x6f8a55, 0xb9b2a6];
 
@@ -68,6 +111,7 @@ function nz(f: Frame, x: number, z: number): number { return -x * f.s + z * f.c;
  */
 function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number,
   wallCol: number, wallMat: number, colW: number, top: number, topMat: number, bottom = false): void {
+  if (layoutOut) captureVolume(mb, f, x0, x1, z0, z1, y0, y1, wallMat);
   if (detailOut && mb !== detailOut) {
     const fc = mb.curFac, kind = fc[2] & 3;
     if (fc[3] > 0 && kind !== Facade.Curtain && ((wallMat & 15) === BMAT.Wall || (wallMat & 15) === BMAT.Metal)) {
@@ -208,7 +252,9 @@ function awning(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y:
 }
 
 /** Muro reto entre dois pontos locais, acompanhando o chão. */
-function wall(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number, t: number, col: number, mat: number = BMAT.Fence): void {
+/** wall, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
+function wall(...a: Parameters<typeof wallTagged>): void { untagged(a[0], () => wallTagged(...a)); }
+function wallTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number, t: number, col: number, mat: number = BMAT.Fence): void {
   const len = Math.hypot(bx - ax, bz - az);
   const n = Math.max(1, Math.ceil(len / 6));
   const dx = (bx - ax) / len, dz = (bz - az) / len;
@@ -272,7 +318,9 @@ function yardGrid(heights: Float32Array, f: Frame, w: number, d: number): YardGr
 }
 
 /** Chão do lote (grama ou piso) acompanhando o relevo. */
-function yard(mb: MeshBuilder, heights: Float32Array, f: Frame, w: number, d: number, col: number, mat: number): void {
+/** yard, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
+function yard(...a: Parameters<typeof yardTagged>): void { untagged(a[0], () => yardTagged(...a)); }
+function yardTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, w: number, d: number, col: number, mat: number): void {
   if (lotPoly) { polyYard(mb, heights, f, lotPoly, col, mat); return; }
   const { NX, NZ, lxOf, lzOf, hAt } = yardGrid(heights, f, w, d);
   const first = mb.v;
@@ -290,7 +338,9 @@ function yard(mb: MeshBuilder, heights: Float32Array, f: Frame, w: number, d: nu
  * Caminho de entrada (roadcraft `lotDoors`): piso do portão na frente do lote até a porta, 6 cm acima do chão do lote
  * (pela grade do chão: em declive o caminho não cruza a grama).
  */
-function walkway(mb: MeshBuilder, heights: Float32Array, f: Frame, W: number, D: number, xa: number, za: number, xb: number, zb: number, width: number): void {
+/** walkway, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
+function walkway(...a: Parameters<typeof walkwayTagged>): void { untagged(a[0], () => walkwayTagged(...a)); }
+function walkwayTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, W: number, D: number, xa: number, za: number, xb: number, zb: number, width: number): void {
   const grid = yardGrid(heights, f, W, D);
   const len = Math.hypot(xb - xa, zb - za);
   if (len < 0.8) return;
@@ -508,55 +558,62 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
   const mb = new MeshBuilder(false, true);
   const plan = planCells(b);
   for (let i = 0; i < b.count; i++) {
-    const rot = b.rot[i];
-    const zone = b.zone[i];
-    if (lod < 0 && (b.floors[i] === 0 || zone === 0)) continue;
-    if (zone === 0) { legacyBox(mb, heights, b, i, { cx: b.x[i], cz: b.z[i], c: Math.cos(rot), s: Math.sin(rot), base: 0 }); continue; }
-    // the building goes in the lot's rectangle, or in the largest one inside a polygon lot (yard and walls follow it)
-    const fit = lotFit(b, i);
-    const f: Frame = { cx: fit.cx, cz: fit.cz, c: Math.cos(rot), s: Math.sin(rot), base: 0 };
-    lotPoly = fit.poly; polyGrid = null; fenceFront = fenceBack = null; gateAt = null;
-    if (b.floors[i] === 0) { emptyLot(mb, heights, fit.W, fit.D, f); lotPoly = null; continue; }
-    const r = new Rng((b.seed[i] ^ (b.style[i] * 2654435761)) >>> 0);
-    const W = fit.W, D = fit.D;
-    const rows = lod <= 1 ? lotParking(b, i) : [];
-    for (let k = 0; k < rows.length; k += 2) { rows[k] -= fit.ox; rows[k + 1] -= fit.oz; }
-    const [lo, hi] = groundRange(heights, f, W, D);
-    f.base = lo - 0.4;
-    mb.curBase = f.base;
-    const floors = Math.max(1, b.floors[i]);
-    const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
-    const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows, pattern: plan.pattern[i], side: plan.side[i] };
-    if (lod < 0) {
-      // one pass, the outputs this job asks for: the parts (lod -2, part -> partsOut) or the detail layer (lod -1,
-      // prism -> windowDetail into the real mesh); the main geometry goes to a builder that keeps nothing
-      NO_MESH.curBase = f.base;
-      if (lod === -1) detailOut = mb;
-      g.mb = NO_MESH; g.lod = 0;
-    }
-    genLod = g.lod;
-    const v0 = mb.v;
-    const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
-    const cat = ds?.catalog ? ds.catalog : plan.landmark[i];
-    if (cat && CATALOG[cat - 1]) catalogBuilding(g, CATALOG[cat - 1], ds ? ds.wall : -1);
-    else if (ds) design(g, ds);
-    else if (b.fn[i] === Fn.Cemetery || b.fn[i] === Fn.Playground) openLot(g, b.fn[i]);
-    else if (CIVIC_DESIGNS[b.fn[i]]) { const [ds, minF] = CIVIC_DESIGNS[b.fn[i]]; design({ ...g, floors: Math.max(minF, Math.min(floors, minF * 2)) }, ds); }
-    else if (b.fn[i]) civic(g, b.fn[i]);
-    else if (zone === Zone.Industrial) {
-      warehouse(g.mb, heights, f, W, D, floors, arch, r, hi, g.lod);
-      const ch = chimneyOf(b.seed[i], W, D, floors);
-      if (ch) chimney(g.mb, f, ch[0], ch[1], f.base, hi + ch[2], g.lod);
-    }
-    else if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g);
-    else if (zone === Zone.Commercial && floors >= 8) tower(g);
-    else block(g);
-    polyWalls(g.mb, heights, f);
-    lotPoly = null;
-    detailOut = null;
-    applyFinishes(mb, v0, finishTable(arch, b.seed[i], b.fn[i], zone, ds));
+    mb.curTag = buildingTag(b.seed[i], b.x[i], b.z[i]);
+    genOne(mb, heights, b, i, plan, lod);
+    mb.curTag = 0;
   }
   return mb.pack(originX, originZ, extent);
+}
+
+/** One building of the boxes (the cell plan already made) into mb, at level lod. */
+function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number, plan: CellPlan, lod: number): void {
+  const rot = b.rot[i];
+  const zone = b.zone[i];
+  if (lod < 0 && (b.floors[i] === 0 || zone === 0)) return;
+  if (zone === 0) { legacyBox(mb, heights, b, i, { cx: b.x[i], cz: b.z[i], c: Math.cos(rot), s: Math.sin(rot), base: 0 }); return; }
+  // the building goes in the lot's rectangle, or in the largest one inside a polygon lot (yard and walls follow it)
+  const fit = lotFit(b, i);
+  const f: Frame = { cx: fit.cx, cz: fit.cz, c: Math.cos(rot), s: Math.sin(rot), base: 0 };
+  lotPoly = fit.poly; polyGrid = null; fenceFront = fenceBack = null; gateAt = null;
+  if (b.floors[i] === 0) { emptyLot(mb, heights, fit.W, fit.D, f); lotPoly = null; return; }
+  const r = new Rng((b.seed[i] ^ (b.style[i] * 2654435761)) >>> 0);
+  const W = fit.W, D = fit.D;
+  const rows = lod <= 1 ? lotParking(b, i) : [];
+  for (let k = 0; k < rows.length; k += 2) { rows[k] -= fit.ox; rows[k + 1] -= fit.oz; }
+  const [lo, hi] = groundRange(heights, f, W, D);
+  f.base = lo - 0.4;
+  mb.curBase = f.base;
+  const floors = Math.max(1, b.floors[i]);
+  const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
+  const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows, pattern: plan.pattern[i], side: plan.side[i] };
+  if (lod < 0) {
+    // one pass, the outputs this job asks for: the parts (lod -2, part -> partsOut) or the detail layer (lod -1,
+    // prism -> windowDetail into the real mesh); the main geometry goes to a builder that keeps nothing
+    NO_MESH.curBase = f.base;
+    if (lod === -1) detailOut = mb;
+    g.mb = NO_MESH; g.lod = 0;
+  }
+  genLod = g.lod;
+  const v0 = mb.v;
+  const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
+  const cat = ds?.catalog ? ds.catalog : plan.landmark[i];
+  if (cat && CATALOG[cat - 1]) catalogBuilding(g, CATALOG[cat - 1], ds ? ds.wall : -1);
+  else if (ds) design(g, ds);
+  else if (b.fn[i] === Fn.Cemetery || b.fn[i] === Fn.Playground) openLot(g, b.fn[i]);
+  else if (CIVIC_DESIGNS[b.fn[i]]) { const [ds, minF] = CIVIC_DESIGNS[b.fn[i]]; design({ ...g, floors: Math.max(minF, Math.min(floors, minF * 2)) }, ds); }
+  else if (b.fn[i]) civic(g, b.fn[i]);
+  else if (zone === Zone.Industrial) {
+    warehouse(g.mb, heights, f, W, D, floors, arch, r, hi, g.lod);
+    const ch = chimneyOf(b.seed[i], W, D, floors);
+    if (ch) chimney(g.mb, f, ch[0], ch[1], f.base, hi + ch[2], g.lod);
+  }
+  else if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g);
+  else if (zone === Zone.Commercial && floors >= 8) tower(g);
+  else block(g);
+  polyWalls(g.mb, heights, f);
+  lotPoly = null;
+  detailOut = null;
+  applyFinishes(mb, v0, finishTable(arch, b.seed[i], b.fn[i], zone, ds));
 }
 
 /**
@@ -601,7 +658,9 @@ export function lotParking(b: BoxColumns, i: number): number[] {
 }
 
 /** Piso do estacionamento e as faixas das vagas, acompanhando o relevo. */
-function parkingLots(mb: MeshBuilder, heights: Float32Array, f: Frame, rows: number[]): void {
+/** parkingLots, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
+function parkingLots(...a: Parameters<typeof parkingLotsTagged>): void { untagged(a[0], () => parkingLotsTagged(...a)); }
+function parkingLotsTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, rows: number[]): void {
   blank(mb);
   for (let k = 0; k + 3 < rows.length; k += 4) {
     const ax = rows[k], az = rows[k + 1], bx = rows[k + 2], bz = rows[k + 3];
@@ -1146,7 +1205,9 @@ function roofClutter(mb: MeshBuilder, f: Frame, r: Rng, x0: number, x1: number, 
 }
 
 /** Bola grosseira (copa de árvore) feita de dois prismas cruzados: barata e legível de longe. */
-function treeGeo(mb: MeshBuilder, f: Frame, x: number, z: number, y: number, h: number, r: number): void {
+/** treeGeo, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
+function treeGeo(...a: Parameters<typeof treeGeoTagged>): void { untagged(a[0], () => treeGeoTagged(...a)); }
+function treeGeoTagged(mb: MeshBuilder, f: Frame, x: number, z: number, y: number, h: number, r: number): void {
   blank(mb);
   prism(mb, f, x - 0.15, x + 0.15, z - 0.15, z + 0.15, y, y + h * 0.5, 0x6a5238, BMAT.Plain, 50, -1, 0);
   prism(mb, f, x - r, x + r, z - r * 0.7, z + r * 0.7, y + h * 0.45, y + h, 0x5a8a3a, BMAT.Grass, 50, 0x6a9a45, BMAT.Grass);
@@ -1438,6 +1499,7 @@ function chimney(mb: MeshBuilder, f: Frame, x: number, z: number, y0: number, y1
 
 /** Prisma de planta poligonal (convexa), paredes com coordenada de fachada; topo em leque opcional. */
 function polyPrism(mb: MeshBuilder, f: Frame, pts: Array<[number, number]>, y0: number, y1: number, wallCol: number, colW: number, top: number, topMat: number, wallMat: number = BMAT.Wall): void {
+  if (layoutOut) captureVolume(mb, f, Math.min(...pts.map((q) => q[0])), Math.max(...pts.map((q) => q[0])), Math.min(...pts.map((q) => q[1])), Math.max(...pts.map((q) => q[1])), y0, y1, wallMat);
   let cx = 0, cz = 0;
   for (const [x, z] of pts) { cx += x; cz += z; }
   cx /= pts.length; cz /= pts.length;
@@ -1984,7 +2046,9 @@ function catalogBuilding(g: Gen, e: CatalogEntry, wallOverride: number): void {
 }
 
 /** A patch of lot ground (paving, asphalt, grass) over the lot's ground grid, `lift` above it. */
-function groundPatch(mb: MeshBuilder, heights: Float32Array, f: Frame, W: number, D: number, x0: number, x1: number, z0: number, z1: number, col: number, mat: number, lift: number): void {
+/** groundPatch, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
+function groundPatch(...a: Parameters<typeof groundPatchTagged>): void { untagged(a[0], () => groundPatchTagged(...a)); }
+function groundPatchTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, W: number, D: number, x0: number, x1: number, z0: number, z1: number, col: number, mat: number, lift: number): void {
   const grid = yardGrid(heights, f, W, D);
   const cx = (a: number) => Math.max(-W / 2, Math.min(W / 2, a)), cz = (a: number) => Math.max(-D / 2, Math.min(D / 2, a));
   x0 = cx(x0); x1 = cx(x1); z0 = cz(z0); z1 = cz(z1);
@@ -2000,7 +2064,9 @@ function groundPatch(mb: MeshBuilder, heights: Float32Array, f: Frame, W: number
 }
 
 /** Gate of vertical bars between two local points along x (lot entrance). */
-function gate(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number): void {
+/** gate, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
+function gate(...a: Parameters<typeof gateTagged>): void { untagged(a[0], () => gateTagged(...a)); }
+function gateTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number): void {
   blank(mb);
   const len = Math.hypot(bx - ax, bz - az);
   if (len < 0.5) return;

@@ -474,7 +474,7 @@ export class Game {
     for (const o of this.blast.warmup()) warm.add(o);
     scene.add(warm);
     for (const m of [this.preview.mesh, this.preview.marker, this.preview.circle]) m.visible = true;
-    this.inside.show(0, 0, 20, 20, 0, -1000, 0, 3.2); // compiles the inside-view materials at load
+    this.inside.warm(); // compiles the inside-view materials at load
     this.transitView.showPaths = true;
     this.vehicles.warmup();
     this.rig.resize(window.innerWidth, window.innerHeight);
@@ -1862,11 +1862,9 @@ export class Game {
       this.insideFloor = 0;
     } else if (!this.inside.on) return;
     else this.insideFloor += c === 'up' ? 1 : -1;
-    const id = this.insideId;
-    if (!w.buildings.alive[id]) { this.inside.hide(); return; }
-    this.insideFloor = Math.max(0, Math.min(col.floors[id] - 1, this.insideFloor));
-    const base = heightAt(w.heights, col.x[id], col.z[id]) + 0.2;
-    this.inside.show(col.x[id], col.z[id], col.w[id], col.d[id], col.rot[id], base, this.insideFloor, 3.2);
+    // the storeys, the footprint and the floor height of that building as the generator lays it out
+    if (!this.inside.showBuilding(w, this.insideId, Math.max(0, this.insideFloor))) { this.insideId = -1; this.hud.setInside(-1); return; }
+    this.insideFloor = this.inside.plan!.floor;
     this.hud.setInside(this.insideFloor);
   }
 
