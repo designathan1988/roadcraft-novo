@@ -50,7 +50,9 @@ export class StartMenu {
       big(t('ui.options.title'), 'm_quality', () => a.options()),
     );
     // quitting only makes sense in the executable
-    if ((globalThis as { cidadeSteam?: unknown }).cidadeSteam) list.append(big(t('ui.start.quit'), 'close', () => window.close()));
+    // through the main process: closing the window that way saves first (window.close() from the page would skip it)
+    const app = (globalThis as { roadcraftApp?: { quit(): void } }).roadcraftApp;
+    if (app) list.append(big(t('ui.start.quit'), 'close', () => app.quit()));
     const langs = el('div', 'v2-start-langs');
     langs.append(choices(LANGUAGES.map(([code, name]) => ({ label: name, on: lang() === code, run: () => setLang(code) }))));
     box.append(brand, sub, orow(t('ui.start.seed'), seed), orow(t('ui.start.size'), size), list, langs);

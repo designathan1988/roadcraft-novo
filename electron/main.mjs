@@ -80,6 +80,20 @@ function createWindow() {
     webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, offscreen: false, preload: path.join(here, 'preload.cjs') },
   });
   win.loadURL(devUrl ?? `app://cidade/index.html${query}`);
+  // Closing saves first: the page is asked, saves what is not saved yet and answers; past the time limit the window
+  // closes anyway. Screenshot runs close without it unless CIDADE_CLOSE_SAVES is set (the save checks set it).
+  if (!shot || process.env.CIDADE_CLOSE_SAVES) {
+    let asked = false;
+    win.on('close', (e) => {
+      if (asked) return;
+      asked = true;
+      e.preventDefault();
+      const close = () => { if (!win.isDestroyed()) win.destroy(); };
+      const limit = setTimeout(close, 30000);
+      ipcMain.once('app:can-close', () => { clearTimeout(limit); close(); });
+      win.webContents.send('app:closing');
+    });
+  }
   // screenshot: show without taking focus (the keyboard stays with whoever is using the machine)
   if (shot) win.showInactive();
   if (shot) {
@@ -130,6 +144,8 @@ function createWindow() {
 const steamOn = initSteam(path.resolve(here, '..'));
 ipcMain.handle('steam:info', () => steamInfo());
 ipcMain.handle('steam:unlock', (_e, id) => unlock(id));
+// the game's own Quit: closes the window the normal way, so it saves first
+ipcMain.on('app:quit', (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 
 app.whenReady().then(() => {
   protocol.handle('app', async (request) => {

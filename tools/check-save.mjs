@@ -106,25 +106,54 @@ const SCENARIOS = {
     check('the player\\'s save files are untouched', same, 'files before ' + [...saved.keys()] + ', after ' + [...now.keys()] + (saved.size === now.size ? ' (contents changed)' : ''));
     void before;
   `,
+  // A28: closing the game saves what was not saved yet (two sessions over the same user data folder)
+  'close-saves': [`
+    road(1500, 1500, 1700, 1500);
+    check('there is something unsaved', g.unsaved === true, 'unsaved=' + g.unsaved);
+    console.log('CHECK END');
+    // the game's own Quit (the window's X and Alt+F4 go through the same close event)
+    window.roadcraftApp.quit();
+    await wait(30000);
+  `, `
+    const r = await within(g.load(), 30000);
+    check('the road built before closing is there', r === 'returned' && w.roads.segs.size > 0, 'load() ' + r + ', segments ' + w.roads.segs.size);
+  `],
+  // B1: changing the language (which reloads the page) saves the city first
+  'language-saves': [`
+    road(1500, 1500, 1700, 1500);
+    check('there is something unsaved', g.unsaved === true, 'unsaved=' + g.unsaved);
+    console.log('CHECK END');
+    // not awaited: the page reloads under the script (the session then quits; the next one opens the save)
+    void window.__cidade.setLang('en');
+    await wait(15000);
+  `, `
+    const r = await within(g.load(), 30000);
+    check('the road built before the language change is there', r === 'returned' && w.roads.segs.size > 0, 'load() ' + r + ', segments ' + w.roads.segs.size);
+  `],
 };
 
 const pick = process.argv.slice(2);
 const names = pick.length ? pick : Object.keys(SCENARIOS);
 let failed = 0;
 for (const name of names) {
-  const body = SCENARIOS[name];
-  if (!body) { console.log(`unknown scenario ${name}`); failed++; continue; }
+  const bodies = SCENARIOS[name];
+  if (!bodies) { console.log(`unknown scenario ${name}`); failed++; continue; }
+  // a scenario is one session, or several sessions one after the other over the same folder (closing and reopening)
   const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-save-'));
-  const script = `(async()=>{${PRELUDE}\ntry {${body}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
-  const lines = await new Promise((resolve) => {
-    const out = [];
-    const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), '?vazio&hora=11&workers=3', script],
-      { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '420' } });
-    p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
-    p.on('exit', () => resolve(out));
-  });
-  const checks = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
-  if (!checks.includes('END')) checks.push('FAILED the scenario did not finish (hung or crashed) after: ' + (checks[checks.length - 1] ?? 'nothing'));
+  const checks = [];
+  for (const body of Array.isArray(bodies) ? bodies : [bodies]) {
+    const script = `(async()=>{${PRELUDE}\ntry {${body}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
+    const lines = await new Promise((resolve) => {
+      const out = [];
+      const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), '?vazio&hora=11&workers=3', script],
+        { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '420', CIDADE_CLOSE_SAVES: '1' } });
+      p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
+      p.on('exit', () => resolve(out));
+    });
+    const got = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
+    if (!got.includes('END')) got.push('FAILED the session did not finish (hung or crashed) after: ' + (got[got.length - 1] ?? 'nothing'));
+    checks.push(...got.filter((c) => c !== 'END'));
+  }
   const bad = checks.filter((c) => c.startsWith('FAILED'));
   failed += bad.length;
   console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);

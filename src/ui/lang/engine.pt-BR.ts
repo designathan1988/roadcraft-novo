@@ -273,4 +273,6 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.people.outfit.sport': "Esporte",
   'ui.people.outfit.elegant': "Social",
   'ui.people.outfit.work': "Trabalho",
+  'save.discardConfirm': 'Esta cidade tem alterações que ainda não foram salvas. Descartar e continuar?',
+  'save.languageDiscard': 'Não foi possível salvar a cidade antes de trocar o idioma. Trocar mesmo assim e perder o que não foi salvo?',
 };

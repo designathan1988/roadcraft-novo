@@ -36,7 +36,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { followLanguage } from './ui/i18n.ts';
+import { followLanguage, onLanguageReload, setLang, t } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -81,9 +81,9 @@ const SLOT = 'cidade-1';
 /** Segments that fit in the occupancy map (2 directions per segment). */
 export const OCCUPANCY_SEGS = 1 << 17;
 
-/** State exposed to the shell (automated photos). */
 export const status = { value: 'carregando' };
-const debug: { status: string; game: unknown } = { get status() { return status.value; }, game: null };
+/** State exposed to the shell (automated photos and checks): `setLang` is the language menu's own action. */
+const debug: { status: string; game: unknown; setLang: typeof setLang } = { get status() { return status.value; }, game: null, setLang };
 (globalThis as { __cidade?: unknown }).__cidade = debug;
 
 function cellsOfTile(t: number): number[] {
@@ -317,12 +317,12 @@ export class Game {
       redo: () => this.history(true),
       view: (v) => this.setView(v),
       save: () => void this.save(),
-      load: () => void this.load(),
+      load: () => { if (this.discardOk()) void this.load(); },
       exportMap: () => void this.exportMap(),
-      importMap: (f) => void this.importMap(f),
-      newMap: () => void this.newMap(),
-      testCity: () => void this.testCity(),
-      generate: () => void this.generatedCity(),
+      importMap: (f) => { if (this.discardOk()) void this.importMap(f); },
+      newMap: () => { if (this.discardOk()) void this.newMap(); },
+      testCity: () => { if (this.discardOk()) void this.testCity(); },
+      generate: () => { if (this.discardOk()) void this.generatedCity(); },
       options: () => this.optionsPanel?.open(),
       help: () => this.hud.toggleHelp(),
       trafficView: () => this.toggleTrafficView(),
@@ -403,6 +403,16 @@ export class Game {
     };
     this.commands.onChange = () => {
       this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh(); };
+    // changing the language reloads the page: the city is saved first; if that fails, the player decides
+    onLanguageReload(async () => {
+      if (!this.unsaved && !this.world.saveDirty.includes(1)) return true;
+      if (await this.save()) return true;
+      return window.confirm(t('save.languageDiscard'));
+    });
+    // closing: in the desktop game the window waits for the save; in the browser the page asks before leaving
+    const app = (window as { roadcraftApp?: { onClosing(fn: () => void): void; canClose(): void } }).roadcraftApp;
+    if (app) app.onClosing(() => void this.saveBeforeClose().finally(() => app.canClose()));
+    else window.addEventListener('beforeunload', (e) => { if (this.unsaved || this.world.saveDirty.includes(1)) { e.preventDefault(); e.returnValue = ''; } });
     this.hud.setHistory(false, false);
     this.setTool('camera');
   }
@@ -493,7 +503,7 @@ export class Game {
     followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
     this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
-      [['Carregar o pior caso', 'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)', () => void this.testCity()],
+      [['Carregar o pior caso', 'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)', () => { if (this.discardOk()) void this.testCity(); }],
         ['Dinheiro ilimitado (liga/desliga)', 'Modo livre: nada é cobrado neste mapa', () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? 'Modo livre: dinheiro ilimitado.' : 'Dinheiro de volta ao caixa.'); }]]);
     await this.applySettings(this.settings, false);
     await renderer.compileAsync(scene, this.rig.persp);
@@ -528,7 +538,7 @@ export class Game {
           this.world.seed = seed; void this.generatedCity();
         },
         empty: (tiles) => { if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio'); },
-        load: () => void this.load(),
+        load: () => { if (this.discardOk()) void this.load(); },
         options: () => this.optionsPanel.open(),
       });
     }
@@ -1913,6 +1923,21 @@ export class Game {
    * another city is opened or made (an autosave would write the half-built world over the player's save).
    */
   private saveBlocked = false;
+
+  /** The window is closing: a save under way is waited for, then what is still unsaved is written. */
+  private async saveBeforeClose(): Promise<void> {
+    for (let k = 0; this.busy && k < 100; k++) await new Promise((r) => setTimeout(r, 200));
+    if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.saveBlocked) await this.save(true);
+  }
+
+  /**
+   * Before an action that replaces the city on screen: when it has work not yet saved (edits, growth, ageing), the
+   * player is asked. Synchronous, from the click (the buttons call it; the game's own flows do not ask).
+   */
+  private discardOk(): boolean {
+    if (!this.unsaved && !this.world.saveDirty.includes(1)) return true;
+    return window.confirm(t('save.discardConfirm'));
+  }
 
   /** Ends a flow that rebuilds the world: the loading screen goes, the game is free; on failure, says why. */
   private endRebuild(err: unknown, what: string): void {

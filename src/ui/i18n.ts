@@ -41,8 +41,13 @@ export function initLang(l: Lang): void {
 
 export function lang(): Lang { return current; }
 
-/** Keeps the choice and reloads: the panels are built again in the new language. */
-export function setLang(l: Lang): void {
+/** Called before the page reloads for another language (the game saves the city); false keeps the current language. */
+let beforeReload: (() => Promise<boolean>) | null = null;
+export function onLanguageReload(fn: () => Promise<boolean>): void { beforeReload = fn; }
+
+/** Keeps the choice and reloads, once the game has saved: the panels are built again in the new language. */
+export async function setLang(l: Lang): Promise<void> {
+  if (l !== current && beforeReload && !(await beforeReload())) return;
   try { localStorage.setItem(KEY, l); localStorage.setItem(OLD_KEY, l === 'en' ? 'en' : 'pt'); } catch { /* no storage */ }
   if (l !== current) location.reload();
 }
