@@ -18,6 +18,7 @@ import { CIVIC_CATALOG, CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign,
 import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
 import { BAY, catalogFacade } from '../world/catalogFacade.ts';
 import { FIN } from './buildingFinishes.ts';
+import { FLAT_ROOFS, ROOF_COLOURS, planRoofPlant, type RoofPlantItem } from '../world/roofPlant.ts';
 
 export const GEN_VERSION = 15;
 /** Camada de detalhe: para onde vão as peças 3D das janelas enquanto o gerador roda num descarte. */
@@ -129,7 +130,6 @@ function untagged(mb: MeshBuilder, draw: () => void): void {
 }
 
 /** Lajes: manta clara, cimento, piche, cinza escuro, telhado verde. */
-const ROOF_FLATS = [0x8f8b84, 0xa8a49b, 0x5d5f61, 0x77736c, 0x6f8a55, 0xb9b2a6];
 
 /** Materiais dos prédios (canal alfa da cor). */
 export const BMAT = { Wall: 0, RoofFlat: 1, RoofTile: 2, Curtain: 3, Plain: 4, Metal: 5, Paving: 6, Grass: 7, Fence: 8, Shop: 9, WinGlass: 10 } as const;
@@ -229,12 +229,92 @@ function frame(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
  * Parapet: a low wall round the slab, its inside face and a concrete coping on top (frames: the roof stays in view).
  * Far (level 1) the 8 cm coping is under a pixel: the wall gets a plain top instead.
  */
-function parapet(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, t: number, col: number): void {
-  const inner = shadeHex(col, 0.85);
+function parapet(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, t: number, col: number,
+  inner = shadeHex(col, 0.85), coping = 0xd6d3cc): void {
   if (genLod > 0) { frame(mb, f, x0, x1, z0, z1, y, y + h, 0, t, col, BMAT.Plain, FR_TOP | FR_INNER, inner); return; }
-  // the wall (its top hidden under the coping), then the coping: 8 cm of concrete, 5 cm proud on both sides
-  frame(mb, f, x0, x1, z0, z1, y, y + h, 0, t, col, BMAT.Plain, FR_INNER, inner);
-  frame(mb, f, x0, x1, z0, z1, y + h, y + h + 0.08, 0.05, t + 0.05, 0xd6d3cc, BMAT.Plain, FR_TOP | FR_BOTTOM | FR_INNER);
+  // the wall (its top hidden under the coping), then the coping: 6 cm, 5 cm proud on both sides so the rain drips clear
+  // (4.0 buildingMesh.ts:3458-3465)
+  frame(mb, f, x0, x1, z0, z1, y, y + h - 0.06, 0, t, col, BMAT.Plain, FR_INNER, inner);
+  frame(mb, f, x0, x1, z0, z1, y + h - 0.06, y + h, 0.05, t + 0.05, coping, BMAT.Plain, FR_TOP | FR_BOTTOM | FR_INNER);
+}
+/** 4.0 copingOf (buildingMesh.ts:1288-1296): the trim, or aluminium where the trim is a strong colour. */
+function copingOf(trim: number): number {
+  const r = (trim >> 16) & 255, g = (trim >> 8) & 255, b = trim & 255, hi = Math.max(r, g, b), lo = Math.min(r, g, b);
+  return hi > 0 && (hi - lo) / hi > 0.45 ? 0xb9bcbd : trim;
+}
+/** 4.0 PARAPET_H, PARAPET_T (buildingMesh.ts:185-186). */
+const PARAPET_H = 0.85, PARAPET_T = 0.25;
+
+/**
+ * The plant on a flat roof (4.0 emitRoofPlant, buildingMesh.ts:1903-1993, planned by world/roofPlant.ts): the big
+ * pieces in the mesh (lift room, water tank box, hatch, air handlers, solar arrays, skylights, chimney), the repeated
+ * ones from the props pool (condensers, fibreglass tanks, dishes, vents), the thin ones near only (doors, lids,
+ * ladders, fans, masts, drains).
+ */
+function roofPlant(g: Gen, items: readonly RoofPlantItem[], x0: number, x1: number, z0: number, z1: number, y: number, trim: number): void {
+  const { mb, f } = g;
+  const dm = detailOut;
+  const PLANT = BMAT.Plain | (FIN.Concrete << 4), METAL = BMAT.Metal | (FIN.Metal << 4), GLASS = BMAT.Plain | (FIN.Glass << 4);
+  const box = (m: MeshBuilder, a0: number, a1: number, b0: number, b1: number, ya: number, yb: number, col: number, mat: number, top = col, topMat = mat): void =>
+    prism(m, f, a0, a1, b0, b1, ya, yb, col, mat, 50, top, topMat);
+  blank(mb);
+  if (dm) {
+    blank(dm);
+    // drains in two opposite corners
+    for (const [dx, dz] of [[x0 + 0.7, z0 + 0.7], [x1 - 0.7, z1 - 0.7]]) box(dm, dx - 0.18, dx + 0.18, dz - 0.18, dz + 0.18, y, y + 0.02, ROOF_COLOURS.drain, METAL);
+  }
+  for (const it of items) {
+    const cx = (it.x0 + it.x1) / 2, cz = (it.z0 + it.z1) / 2, w = it.x1 - it.x0, d = it.z1 - it.z0;
+    switch (it.kind) {
+      case 'liftRoom':
+        box(mb, it.x0, it.x1, it.z0, it.z1, y, y + it.h, trim, BMAT.Plain, ROOF_COLOURS.plant, PLANT);
+        if (dm) box(dm, cx - 0.45, cx + 0.45, it.z1, it.z1 + 0.04, y + 0.05, y + 2.1, 0x5c6468, METAL);
+        break;
+      case 'tankBox':
+        box(mb, it.x0, it.x1, it.z0, it.z1, y, y + it.h, trim, BMAT.Plain, ROOF_COLOURS.plant, PLANT);
+        if (dm) {
+          box(dm, it.x0 + 0.3, it.x0 + 1.1, it.z0 + 0.3, it.z0 + 1.1, y + it.h, y + it.h + 0.12, ROOF_COLOURS.drain, METAL);
+          box(dm, it.x1, it.x1 + 0.05, cz - 0.25, cz + 0.25, y, y + it.h + 0.9, ROOF_COLOURS.drain, METAL);
+        }
+        break;
+      case 'tank':
+        box(mb, it.x0, it.x1, it.z0, it.z1, y, y + 0.3, ROOF_COLOURS.plant, PLANT);
+        part(f, PART.Tank, cx, y + 0.3, cz, 0, 1, Math.min(w, d) / 1.9);
+        break;
+      case 'hatch': box(mb, it.x0, it.x1, it.z0, it.z1, y, y + it.h, ROOF_COLOURS.plant, PLANT); break;
+      case 'condenser': part(f, PART.RoofAc, cx, y, cz, w > d ? 0 : 1, w > d ? 1 : 0); break;
+      case 'airHandler': {
+        box(mb, it.x0, it.x1, it.z0, it.z1, y + 0.2, y + it.h, ROOF_COLOURS.condenser, METAL);
+        if (dm) {
+          const along = w >= d, r = Math.min(w, d) * 0.32;
+          for (const k of [0.25, 0.75]) { const fx = along ? it.x0 + w * k : cx, fz = along ? cz : it.z0 + d * k; box(dm, fx - r, fx + r, fz - r, fz + r, y + it.h, y + it.h + 0.12, ROOF_COLOURS.drain, METAL); }
+        }
+        break;
+      }
+      case 'solar': {
+        const rows = Math.max(1, Math.floor(d / 1.7));
+        for (let q = 0; q < rows; q++) {
+          const pz = it.z0 + q * (d / rows);
+          for (let px = it.x0; px + 1.05 <= it.x1 + 1e-6; px += 1.15) {
+            box(mb, px, px + 1.05, pz, pz + Math.min(1.6, d / rows - 0.1), y + 0.25, y + 0.32, ROOF_COLOURS.solar, GLASS);
+            if (dm) box(dm, px + 0.45, px + 0.6, pz + 1.2, pz + 1.35, y, y + 0.25, ROOF_COLOURS.drain, METAL);
+          }
+        }
+        break;
+      }
+      case 'mast':
+        if (dm) {
+          box(dm, cx - 0.04, cx + 0.04, cz - 0.04, cz + 0.04, y, y + it.h, ROOF_COLOURS.drain, METAL);
+          box(dm, cx - 0.6, cx + 0.6, cz - 0.02, cz + 0.02, y + it.h - 0.4, y + it.h - 0.36, ROOF_COLOURS.drain, METAL);
+          if (it.variant % 2 === 1) box(dm, cx - 0.02, cx + 0.02, cz - 0.45, cz + 0.45, y + it.h - 0.9, y + it.h - 0.86, ROOF_COLOURS.drain, METAL);
+        }
+        break;
+      case 'dish': part(f, PART.Dish, cx, y, cz, 0, 1); break;
+      case 'skylight': box(mb, it.x0, it.x1, it.z0, it.z1, y, y + it.h, ROOF_COLOURS.plant, PLANT, ROOF_COLOURS.skylight, GLASS); break;
+      case 'vent': part(f, PART.Vent, cx, y, cz, 0, 1); break;
+      case 'chimney': box(mb, cx - 0.4, cx + 0.4, cz - 0.4, cz + 0.4, y, y + it.h, ROOF_COLOURS.chimney, BMAT.Plain | (FIN.Brick << 4), ROOF_COLOURS.drain, METAL); break;
+    }
+  }
 }
 
 /** Telhado de duas águas com cumeeira ao longo de x (ou z), beiral e oitões. */
@@ -982,19 +1062,21 @@ function block(g: Gen): void {
   mb.curBase = y0;
   facade(g, kind, colW, fh);
   // laje: manta clara, cimento, piche escuro ou telhado verde
-  const roofC = ROOF_FLATS[r.int(0, ROOF_FLATS.length)];
+  // the membrane: 4.0 FLAT_ROOFS (materials.ts:84-92), the concrete one in concrete
+  const roofC = FLAT_ROOFS[r.int(0, FLAT_ROOFS.length)];
+  const roofMat = roofC === 0x9d9a92 ? BMAT.RoofFlat | (FIN.Concrete << 4) : BMAT.RoofFlat;
   const arcade = g.pattern === Pattern.Arcade && shop;
   if (arcade) {
     // arcade: the shop front 1.8 m in, under the upper floors, with a column on every bay line
     prism(mb, f, x0, x1, z0, z1 - 1.8, f.base, y0 + groundH, wallCol, BMAT.Wall, colW, -1, 0);
-    prism(mb, f, x0, x1, z0, z1, y0 + groundH, top, wallCol, BMAT.Wall, colW, roofC, roofC === 0x6f8a55 ? BMAT.Grass : BMAT.RoofFlat, true);
+    prism(mb, f, x0, x1, z0, z1, y0 + groundH, top, wallCol, BMAT.Wall, colW, roofC, roofMat, true);
     if (lod < 2) {
       blank(mb);
       const bays = Math.max(1, Math.round(bw / colW)), bwid = bw / bays, pc = shadeHex(a.trim, 0.95);
       for (let k = 0; k <= bays; k++) { const x = Math.max(x0 + 0.25, Math.min(x1 - 0.25, x0 + k * bwid)); prism(mb, f, x - 0.25, x + 0.25, z1 - 0.5, z1, f.base, y0 + groundH, pc, BMAT.Plain, 50, -1, 0); }
       facade(g, kind, colW, fh);
     }
-  } else prism(mb, f, x0, x1, z0, z1, f.base, top, wallCol, BMAT.Wall, colW, roofC, roofC === 0x6f8a55 ? BMAT.Grass : BMAT.RoofFlat);
+  } else prism(mb, f, x0, x1, z0, z1, f.base, top, wallCol, BMAT.Wall, colW, roofC, roofMat);
   let roofY = top, tx0 = x0, tx1 = x1, tz0 = z0, tz1 = z1;
   for (let s = 0; s < steps; s++) {
     const n = Math.min(2, floors - lower - s * 2);
@@ -1003,8 +1085,8 @@ function block(g: Gen): void {
     tx0 += k; tx1 -= k; tz0 += k * 0.7; tz1 -= k;
     if (tx1 - tx0 < 6 || tz1 - tz0 < 6) break;
     facade(g, kind & 3, colW, fh);
-    prism(mb, f, tx0, tx1, tz0, tz1, roofY, roofY + n * fh, wallCol, BMAT.Wall, colW, roofC, roofC === 0x6f8a55 ? BMAT.Grass : BMAT.RoofFlat);
-    if (lod < 2) { blank(mb); parapet(mb, f, tx0 - k, tx1 + k, tz0 - k * 0.7, tz1 + k, roofY, 1.0, 0.2, wallCol); }
+    prism(mb, f, tx0, tx1, tz0, tz1, roofY, roofY + n * fh, wallCol, BMAT.Wall, colW, roofC, roofMat);
+    if (lod < 2) { blank(mb); parapet(mb, f, tx0 - k, tx1 + k, tz0 - k * 0.7, tz1 + k, roofY, PARAPET_H, PARAPET_T, wallCol, shadeHex(roofC, 0.9), copingOf(trim)); }
     roofY += n * fh;
   }
   // base em pedra (térreo) quando o estilo tem
@@ -1015,10 +1097,12 @@ function block(g: Gen): void {
   // coroamento
   if (lod < 2) {
     const crown = g.pattern === Pattern.ArtDecoCrown ? Crown.Stepped : a.crown;
-    if (crown === Crown.Cornice) { ring(mb, f, tx0, tx1, tz0, tz1, roofY - 0.1, roofY + 0.45, 0.35, trim); parapet(mb, f, tx0, tx1, tz0, tz1, roofY + 0.45, 0.6, 0.25, wallCol); }
-    else if (crown === Crown.Slab) ring(mb, f, tx0, tx1, tz0, tz1, roofY, roofY + 0.4, 0.9, shadeHex(wallCol, 0.92));
+    // every flat roof ends in the 4.0 parapet, 0.85 m over the roof (the cornice and the slab crown under it)
+    const pin = shadeHex(roofC, 0.9), pco = copingOf(trim);
+    if (crown === Crown.Cornice) { ring(mb, f, tx0, tx1, tz0, tz1, roofY - 0.1, roofY + 0.45, 0.35, trim); parapet(mb, f, tx0, tx1, tz0, tz1, roofY + 0.45, PARAPET_H - 0.45, PARAPET_T, wallCol, pin, pco); }
+    else if (crown === Crown.Slab) { ring(mb, f, tx0, tx1, tz0, tz1, roofY, roofY + 0.4, 0.9, shadeHex(wallCol, 0.92)); parapet(mb, f, tx0, tx1, tz0, tz1, roofY + 0.4, PARAPET_H - 0.4, PARAPET_T, wallCol, pin, pco); }
     else if (crown === Crown.Stepped) { parapet(mb, f, tx0, tx1, tz0, tz1, roofY, 1.6, 0.3, trim); blank(mb); prism(mb, f, (tx0 + tx1) / 2 - 2.1, (tx0 + tx1) / 2 + 2.1, tz1 - 1.1, tz1 + 0.1, roofY, roofY + 3.2, trim, BMAT.Plain, 50, trim, BMAT.Plain); }
-    else { blank(mb); parapet(mb, f, tx0, tx1, tz0, tz1, roofY, 1.0, 0.25, wallCol); }
+    else { blank(mb); parapet(mb, f, tx0, tx1, tz0, tz1, roofY, PARAPET_H, PARAPET_T, wallCol, shadeHex(roofC, 0.9), copingOf(trim)); }
   }
   if (lod > 1) return;
   // pilares e faixas de andar (relevo da fachada)
@@ -1094,19 +1178,12 @@ function block(g: Gen): void {
       part(f, PART.WallAc, x0 + (c + 0.5) * (bw / cols), y0 + groundH + (fl - 1) * fh + fh * 0.12, z0, 0, -1);
     }
   }
-  // telhado: casa de máquinas, caixa d'água, aparelhos, antena
-  blank(mb);
-  const mx = r.range(tx0 + 2, Math.max(tx0 + 2.1, tx1 - 6));
-  prism(mb, f, mx, mx + 4, tz0 + 2, tz0 + 6, roofY, roofY + 3.0, 0xb8b4ab, BMAT.Plain, 50, 0x8f8b84, BMAT.RoofFlat);
-  if (r.next() < 0.8) prism(mb, f, mx + 0.5, mx + 3.5, tz0 + 2.5, tz0 + 5.5, roofY + 3.0, roofY + 4.4, 0x6d7478, BMAT.Plain, 50, 0x6d7478, BMAT.RoofFlat);
-  for (let k = 0; k < r.int(1, 5); k++) {
-    const ax = r.range(tx0 + 1, tx1 - 2), az = r.range(tz0 + 1, tz1 - 2);
-    part(f, PART.RoofAc, ax + 0.6, roofY, az + 0.45, k & 1 ? 1 : 0, k & 1 ? 0 : 1);
+  // the roof's plant, as the 4.0 plans it (by use, storeys, area and age); far (level 1) only what stands 1.5 m up
+  if (lod < 2) {
+    const use = zone === Zone.Industrial ? 'industrial' : shop ? 'commercial' : 'residential';
+    const plant = planRoofPlant({ seed: g.seed, volume: 0, use, storeys: floors, x0: tx0, z0: tz0, x1: tx1, z1: tz1, age: (hash2(g.seed, 0xa9e) % 1000) / 1000 });
+    roofPlant(g, lod > 0 ? plant.filter((it) => it.h >= 1.5) : plant, tx0, tx1, tz0, tz1, roofY, trim);
   }
-  // antena parabólica nos prédios de moradia
-  if (zone !== Zone.Commercial && hash2(g.seed, 0xd1) % 10 < 5) part(f, PART.Dish, tx1 - 1.2, roofY, tz1 - 1.2, 0, 1);
-  if (r.next() < 0.3) prism(mb, f, mx + 1.9, mx + 2.1, tz0 + 3.9, tz0 + 4.1, roofY + 3, roofY + 8, 0x8a8e92, BMAT.Metal, 50, 0x8a8e92, BMAT.Metal);
-  roofClutter(mb, f, r, tx0, tx1, tz0, tz1, roofY, mx);
   // chão do lote e o estacionamento (vagas nos fundos e nas laterais; os carros são peças)
   yard(mb, heights, f, W, D, shop ? 0x9c968c : 0x5c7b42, shop ? BMAT.Paving : BMAT.Grass);
   if (g.rows.length) parkingLots(mb, heights, f, g.rows);
@@ -1265,41 +1342,6 @@ function ledge(mb: MeshBuilder, f: Frame, ax: number, az: number, dx: number, dz
   mb.quad(v[0], v[1], v[2], v[3], -TX, 0, -TZ);
   v = [mb.vert(b1x, y0, b1z, TX, 0, TZ, col, BMAT.Plain), mb.vert(b0x, y0, b0z, TX, 0, TZ, col, BMAT.Plain), mb.vert(b0x, y1, b0z, TX, 0, TZ, col, BMAT.Plain), mb.vert(b1x, y1, b1z, TX, 0, TZ, col, BMAT.Plain)];
   mb.quad(v[0], v[1], v[2], v[3], TX, 0, TZ);
-}
-
-/** Telhado com vida: respiros, claraboias, caixa d'água sobre pés, placas solares (só perto da câmera). */
-function roofClutter(mb: MeshBuilder, f: Frame, r: Rng, x0: number, x1: number, z0: number, z1: number, y: number, mx: number): void {
-  const w = x1 - x0, d = z1 - z0;
-  if (w < 8 || d < 8) return;
-  const free = (ax: number, az: number, s: number) => ax + s < mx - 0.3 || ax > mx + 4.3 || az > z0 + 6.3 || az + s < z0 + 1.7;
-  // respiros (canos curtos com chapéu)
-  for (let k = 0; k < r.int(2, 6); k++) {
-    const ax = r.range(x0 + 0.8, x1 - 1), az = r.range(z0 + 0.8, z1 - 1);
-    if (!free(ax, az, 0.4)) continue;
-    part(f, PART.Vent, ax + 0.12, y, az + 0.12, 0, 1);
-  }
-  // claraboias (vidro escuro numa moldura)
-  if (r.next() < 0.45) for (let k = 0; k < r.int(1, 4); k++) {
-    const ax = x0 + 1.5 + k * 2.6;
-    if (ax + 1.6 > x1 - 1 || !free(ax, z1 - 3.5, 1.6)) break;
-    prism(mb, f, ax, ax + 1.6, z1 - 3.5, z1 - 1.6, y, y + 0.35, 0xc9c6bf, BMAT.Plain, 50, 0x2a3540, BMAT.Curtain);
-  }
-  // caixa d'água sobre pés
-  if (r.next() < 0.35) {
-    const ax = r.range(x0 + 1, x1 - 3.2), az = r.range(z0 + 1, z1 - 3.2);
-    if (free(ax, az, 2.4)) {
-      for (const [lx, lz] of [[0, 0], [2.1, 0], [0, 2.1], [2.1, 2.1]]) prism(mb, f, ax + lx, ax + lx + 0.18, az + lz, az + lz + 0.18, y, y + 1.6, 0x5a5e62, BMAT.Metal, 50, -1, 0);
-      prism(mb, f, ax - 0.1, ax + 2.4, az - 0.1, az + 2.4, y + 1.6, y + 3.3, 0x8a6f52, BMAT.Plain, 50, 0x6e5a44, BMAT.Plain);
-    }
-  }
-  // placas solares em fileiras
-  if (r.next() < 0.25 && d > 12) {
-    const rows = Math.min(4, Math.floor((d - 8) / 2.4));
-    for (let q = 0; q < rows; q++) {
-      const z = z1 - 2 - q * 2.4 - 1.5;
-      prism(mb, f, x0 + 1.2, x0 + Math.min(w - 1.2, 9), z, z + 1.5, y + 0.3, y + 0.7, 0x1d2c44, BMAT.Metal, 50, 0x23395a, BMAT.Metal);
-    }
-  }
 }
 
 /** Bola grosseira (copa de árvore) feita de dois prismas cruzados: barata e legível de longe. */
