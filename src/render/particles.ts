@@ -173,15 +173,20 @@ export class Particles {
     this.rebuild(eye.x, eye.z);
   }
 
-  /** Recolhe os emissores no raio: itens de elemento e chaminés de galpões. */
+  /**
+   * Recolhe os emissores no raio: itens de elemento e chaminés de galpões. Explosions first, then the nearest ones up
+   * to MAX_EMIT (an explosion in an area full of emitters used to lose its smoke and fire past the 512th).
+   */
   rebuild(x: number, z: number): void {
     const w = this.world, d = this.data;
     let n = 0;
-    const push = (px: number, py: number, pz: number, kind: number, strength: number) => {
-      if (n >= MAX_EMIT) return;
+    const put = (px: number, py: number, pz: number, kind: number, strength: number) => {
       d[n * 4] = px; d[n * 4 + 1] = py; d[n * 4 + 2] = pz; d[n * 4 + 3] = kind + 16 * Math.max(0, Math.min(15, strength));
       n++;
     };
+    for (const [bx, by, bz, k, st] of this.bursts) if (n < MAX_EMIT) put(bx, by, bz, k, st);
+    const found: number[] = [];
+    const push = (px: number, py: number, pz: number, kind: number, strength: number) => { found.push(px, py, pz, kind, strength, (px - x) ** 2 + (pz - z) ** 2); };
     const ic = w.items.t.cols;
     w.items.index.query(x - RADIUS, z - RADIUS, x + RADIUS, z + RADIUS, (i) => {
       const k = ELEMENT_KIND[ic.type[i]];
@@ -199,7 +204,8 @@ export class Particles {
       const hi = groundRange(w.heights, f, bc.w[i], bc.d[i])[1];
       push(f.cx + ch[0] * c + ch[1] * s, hi + ch[2] + 0.3, f.cz - ch[0] * s + ch[1] * c, Puff.Smoke, 4);
     });
-    for (const [bx, by, bz, k, st] of this.bursts) push(bx, by, bz, k, st);
+    const order = Array.from({ length: found.length / 6 }, (_, i) => i).sort((a, b) => found[a * 6 + 5] - found[b * 6 + 5]);
+    for (const i of order) { if (n >= MAX_EMIT) break; put(found[i * 6], found[i * 6 + 1], found[i * 6 + 2], found[i * 6 + 3], found[i * 6 + 4]); }
     this.count = n;
     this.geo.instanceCount = n * PER;
     this.mesh.visible = n > 0;

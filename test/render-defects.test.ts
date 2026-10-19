@@ -485,3 +485,18 @@ test('E39: a factory turned into something else stops smoking', async () => {
   assert.equal(p.count, 0, 'the old chimney still smokes');
 });
 
+test('E40: an explosion keeps its smoke and fire when the area is full of emitters', async () => {
+  const { Particles, Puff } = await import('../src/render/particles.ts');
+  const { Item } = await import('../src/world/items.ts');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10);
+  for (let i = 0; i < 700; i++) w.items.add([(i % 30) * 10, Math.floor(i / 30) * 10, 0, 0, Item.Smoke, 1]);
+  const p = new Particles(w);
+  const eye = new THREE.Vector3(150, 50, 100);
+  p.burst(150, 12, 100, Puff.Fire, 3, 10);
+  p.update(1, eye);
+  const d = (p as unknown as { data: Float32Array }).data;
+  let fire = false;
+  for (let i = 0; i < p.count; i++) if (d[i * 4 + 3] % 16 === Puff.Fire && Math.abs(d[i * 4] - 150) < 0.01) fire = true;
+  assert.ok(fire, `the explosion's fire is one of the ${p.count} emitters`);
+});
