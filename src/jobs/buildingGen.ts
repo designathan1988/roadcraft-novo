@@ -1041,7 +1041,7 @@ function block(g: Gen): void {
       if (r.next() < 0.35) awning(mb, f, x0 + 0.2, x1 - 0.2, z1, yA, depth, depth * 0.62, col);
       else for (let k = 0; k < bays; k++) awning(mb, f, x0 + k * bwid + 0.18, x0 + (k + 1) * bwid - 0.18, z1, yA, depth, depth * 0.62, col);
     } else {
-      prism(mb, f, x0 - 0.1, x1 + 0.1, z1, z1 + 1.6, y0 + groundH - 0.35, y0 + groundH - 0.1, trim === 0xf7f4ec ? 0xe8e4dc : 0x5a5f63, BMAT.Plain, 50, 0x8f8b84, BMAT.Plain, true);
+      prism(mb, f, x0 - 0.1, x1 + 0.1, z1, z1 + 1.6, y0 + groundH - 0.35, y0 + groundH - 0.1, trim === 0xf7f4ec ? 0xe8e4dc : 0xaaa99d, BMAT.Plain, 50, 0x9d9a92, BMAT.Plain, true);
     }
   }
   if (lod > 0) return;
@@ -1224,6 +1224,8 @@ function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
 
 /** Faces de uma peça saliente: 1 frente, 2 topo, 4 base, 8 pontas. */
 const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4, LEDGE_JAMB = 1 | 8;
+/** Roadcraft 4.0 storey band and cornice (BAND_OUT, BAND_H, CORNICE_OUT) and plinth (PLINTH_GROW, PLINTH_MATERIAL). */
+const BAND_OUT = 0.07, BAND_H = 0.22, CORNICE_OUT = 0.16, PLINTH_GROW = 0.12, PLINTH_COL = 0x7f786d;
 /** Depth of a window's opening (Roadcraft 4.0 REVEAL) and how much light its reveals keep (REVEAL_SHADE). */
 export const WIN_REVEAL = 0.2, WIN_REVEAL_SHADE = 0.68;
 /** Cor do caixilho por estilo: alumínio branco, preto nos contemporâneos, madeira nas casas antigas. */
@@ -1547,8 +1549,9 @@ function tower(g: Gen): void {
     const ax = r.range(-pw / 2 + 2, pw / 2 - 3), az = r.range(z0 + 2, z1 - 3);
     part(f, PART.RoofAc, ax + 0.75, yP, az + 0.5, 0, 1, 1.2);
   }
-  // marquise na entrada e pilastras de pedra na frente do embasamento
-  prism(mb, f, -4, 4, z1, z1 + 3, hi + 0.2 + 3.6, hi + 0.2 + 3.85, 0x5a5f63, BMAT.Metal, 50, 0x5a5f63, BMAT.Metal, true);
+  // the entrance canopy (4.0 door canopy: a concrete slab, 0xaaa99d) and stone piers along the podium
+  blank(mb);
+  prism(mb, f, -4, 4, z1, z1 + 3, hi + 0.2 + 3.6, hi + 0.2 + 3.85, 0xaaa99d, BMAT.Plain | (FIN.Concrete << 4), 50, 0xaaa99d, BMAT.Plain | (FIN.Concrete << 4), true);
   {
     const n = Math.max(2, Math.round(pw / 6.4)), step = pw / n, pc = shadeHex(podiumCol, 0.92);
     for (let k = 0; k <= n; k++) { const x = -pw / 2 + k * step; if (Math.abs(x) < 4.4) continue; prism(mb, f, x - 0.35, x + 0.35, z1 - 0.05, z1 + 0.5, f.base, yP - 0.1, pc, BMAT.Plain, 50, pc, BMAT.Plain); }
@@ -1847,6 +1850,8 @@ function mixHex(a: number, b: number, t: number): number {
   return (ch(16) << 16) | (ch(8) << 8) | ch(0);
 }
 
+/** Luma of an sRGB hex colour, 0..1. */
+function lum(rgb: number): number { return (0.2126 * ((rgb >> 16) & 255) + 0.7152 * ((rgb >> 8) & 255) + 0.0722 * (rgb & 255)) / 255; }
 function shadeHex(rgb: number, k: number): number {
   const r = Math.round(((rgb >> 16) & 255) * k), g = Math.round(((rgb >> 8) & 255) * k), b = Math.round((rgb & 255) * k);
   return (r << 16) | (g << 8) | b;
@@ -1930,15 +1935,23 @@ function facadeRelief(g: Gen, x0: number, x1: number, z0: number, z1: number, y0
   const { mb, f, a, seed } = g;
   blank(mb);
   const h = hash2(seed, 0xfa);
-  // friso de laje (quem não tem faixas do estilo): 14 cm, 6 cm para fora
-  // (detail layer only: under a pixel past 220 m, where the shader's slab line takes over)
+  // Roadcraft 4.0 relief (detail layer only: under a pixel past 220 m, where the shader paints the bands and the
+  // plinth): a storey band at every floor line (band(): BAND_H 22 cm, BAND_OUT 7 cm, its lower tier 45 % out in the
+  // trim x 0.94) where the style has no bands of its own, the cornice under the parapet (emitCornice: 16 cm out,
+  // 36 cm, 20 cm under the roof line) and the stone plinth 12 cm proud up to the floor (emitPlinth)
   const dm = detailOut;
-  if (dm && !a.bands && a.win !== Win.Curtain) {
-    const fc = shadeHex(wallCol, 0.9);
-    for (let fl = 1; fl < lower; fl++) {
-      const y = y0 + groundH + (fl - 1) * fh;
-      ring(dm, f, x0, x1, z0, z1, y - 0.07, y + 0.07, 0.06, fc, false);
-    }
+  if (dm) {
+    // a dark trim (black frames) bands in the wall's own render, darker (4.0 flushBand)
+    const bandCol = lum(a.trim) < 0.3 ? shadeHex(wallCol, 0.86) : a.trim, t2 = shadeHex(bandCol, 0.94);
+    const band40 = (y: number, out: number, h: number): void => {
+      ring(dm, f, x0, x1, z0, z1, y - h / 2, y - h * 0.1, out * 0.45, t2, false);
+      ring(dm, f, x0, x1, z0, z1, y - h * 0.1, y + h / 2, out, bandCol, false);
+    };
+    if (!a.bands && a.win !== Win.Curtain) for (let fl = 1; fl < lower; fl++) band40(y0 + groundH + (fl - 1) * fh, BAND_OUT, BAND_H);
+    const top = y0 + groundH + (lower - 1) * fh;
+    if (a.crown === Crown.Parapet && g.pattern !== Pattern.ArtDecoCrown) band40(top - 0.2, CORNICE_OUT, 0.36);
+    blank(dm);
+    frame(dm, f, x0, x1, z0, z1, f.base, y0 + 0.012, PLINTH_GROW, 0, PLINTH_COL, BMAT.Plain | (FIN.Stone << 4), FR_TOP);
   }
   // brise vertical (lâminas de concreto) na frente dos contemporâneos, metade deles
   if (g.arch === ArchId.Contemporary && h % 2 === 0 && lower >= 3) {

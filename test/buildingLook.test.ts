@@ -116,3 +116,35 @@ test('janela 1: every window the wall opens has its pane 20 cm in, and every pan
   }
   assert.deepEqual(lost, []);
 });
+
+test('paredes 2: the wall paints are the muted 4.0 ones (no paint more saturated than 4.0 brick)', async () => {
+  const { ARCHES } = await import('../src/world/arch.ts');
+  const loud: string[] = [];
+  for (const a of ARCHES) for (const c of a.walls) {
+    const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+    if ((Math.max(r, g, b) - Math.min(r, g, b)) / 255 > 0.4) loud.push(`${a.name} ${c.toString(16)}`);
+  }
+  assert.deepEqual(loud, []);
+});
+
+test('paredes 2: near, every block has the 4.0 stone plinth, storey bands and cornice in the detail layer', async () => {
+  const { buildingVolumes } = await import('../src/jobs/buildingGen.ts');
+  const { heights, b } = block();
+  const md = buildBuildings(heights, b, 0, 0, 256, -1)!, pd = positions(md);
+  const rgb = (i: number) => (md.color[i * 4] << 16) | (md.color[i * 4 + 1] << 8) | md.color[i * 4 + 2];
+  // the plinth: stone (finish 4 in the high nibble), in the 4.0 plinth colour
+  let plinth = 0;
+  for (let i = 0; i < md.vertexCount; i++) if (rgb(i) === 0x7f786d && md.color[i * 4 + 3] >> 4 === 4) plinth++;
+  assert.ok(plinth > 8 * 10, `${plinth} plinth vertices`);
+  // the bands: on a mid-rise without style bands, faces 7 cm out of the wall at a floor line, 22 cm high in all
+  let banded = 0;
+  for (let k = 0; k < b.count; k++) {
+    const vols = buildingVolumes(heights, b, k);
+    const v = vols.find((x) => x.y1 - x.y0 > 12);
+    if (!v) continue;
+    const lineYs = new Set<number>();
+    for (let y = v.base + v.ground; y < v.y1 - 1; y += v.fh) lineYs.add(Math.round(y * 100));
+    for (const [, y] of pd) if (lineYs.has(Math.round((y + 0.11) * 100)) || lineYs.has(Math.round((y - 0.11) * 100))) { banded++; break; }
+  }
+  assert.ok(banded >= 6, `${banded} buildings with storey bands`);
+});

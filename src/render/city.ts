@@ -23,35 +23,38 @@ const {
 } = T;
 
 /**
- * The 13 building finishes as two texture arrays (layer = finish id − 1): albedo tone + roughness, normal + metalness.
- * Neutral until the bake worker answers (mean tone, flat normal): the same image as without textures.
+ * The 13 building finishes as two texture arrays (layer = finish id − 1), Roadcraft 4.0's cooked maps: colour (sRGB) +
+ * roughness, normal + metal mask. Neutral until the worker answers (a plaster-like grey, flat normal).
  */
-function finishArray(fill: [number, number, number, number]): THREE.DataArrayTexture {
+function finishArray(fill: [number, number, number, number], srgb: boolean): THREE.DataArrayTexture {
   const n = FINISH_SIZE * FINISH_SIZE * FINISH_COUNT, data = new Uint8Array(n * 4);
   for (let i = 0; i < n; i++) data.set(fill, i * 4);
   const t = new THREE.DataArrayTexture(data, FINISH_SIZE, FINISH_SIZE, FINISH_COUNT);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
   t.anisotropy = 8;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   t.needsUpdate = true;
   return t;
 }
-export const FINISH_ALBEDO = finishArray([128, 128, 128, 230]);
-export const FINISH_NORMAL = finishArray([128, 128, 255, 0]);
+export const FINISH_ALBEDO = finishArray([230, 230, 230, 235], true);
+export const FINISH_NORMAL = finishArray([128, 128, 255, 255], false);
 let finishBaked = false;
-/** Starts the bake (once): a worker fills both arrays and they go up to the GPU again, with mipmaps. */
+/** Starts the load (once): a worker reads the cooked files and fills both arrays, which go up to the GPU again. */
 function bakeFinishesOnce(): void {
-  if (finishBaked || typeof Worker === 'undefined') return;
+  if (finishBaked || typeof Worker === 'undefined' || typeof document === 'undefined') return;
   finishBaked = true;
   const w = new Worker(new URL('../jobs/buildingFinishWorker.ts', import.meta.url), { type: 'module', name: 'finishes' });
-  w.onmessage = (e: MessageEvent<{ albedo: Uint8Array; normal: Uint8Array }>) => {
+  w.onmessage = (e: MessageEvent<{ albedo: Uint8Array; normal: Uint8Array } | { error: string }>) => {
+    w.terminate();
+    if ('error' in e.data) { console.warn('building finishes not loaded:', e.data.error); return; }
     (FINISH_ALBEDO.image.data as Uint8Array).set(e.data.albedo); FINISH_ALBEDO.needsUpdate = true;
     (FINISH_NORMAL.image.data as Uint8Array).set(e.data.normal); FINISH_NORMAL.needsUpdate = true;
-    w.terminate();
   };
+  w.postMessage({ base: new URL('cooked/surfaces/', document.baseURI).href });
 }
-/** Per finish: (1 / tile size in m, normal strength, 0, 0). Index = finish id (0 unused). */
-const FINISH_LOOK = T.uniformArray(Array.from({ length: FINISH_COUNT + 1 }, (_, k) => new THREE.Vector4(k ? 1 / FINISH_LOOKS[k].worldSize : 0, k ? FINISH_LOOKS[k].normalScale : 0, 0, 0)), 'vec4');
+/** Per finish (4.0 LOOKS): (1 / metres a repeat / repeats in its layer, normal strength, metalness, metal by the map). */
+const FINISH_LOOK = T.uniformArray(FINISH_LOOKS.map((l, k) => new THREE.Vector4(k ? 1 / l.worldSize / l.tiles : 0, l.normalScale, l.metalness, l.metallic ? 1 : 0)), 'vec4');
 const FINISH_AUTO = T.uniformArray(FINISH_BY_MAT.map((f) => new THREE.Vector4(f, 0, 0, 0)), 'vec4');
 
 /** Render noise made once (128², tiles seamlessly): R fine grain + blotches, G streaks (stretched in y). */
@@ -153,6 +156,8 @@ function band(lo: Node, hi: Node, x: Node, w: Node): Node {
 
 /** Window and trim per style, for the shader. */
 const ARCH_WIN = T.uniformArray(facadeWindowTable().map(([a, b, c, d]) => new THREE.Vector4(a, b, c, d)), 'vec4');
+/** The 4.0 plinth's stone (PLINTH_MATERIAL 0x7f786d), linear. */
+const PLINTH_RGB = new THREE.Color(0x7f786d).convertSRGBToLinear().toArray();
 const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a.trim).convertSRGBToLinear(); return new THREE.Vector4(c.r, c.g, c.b, 1); }), 'vec4');
 
 /** The one building material. Materials by the colour's alpha channel (BMAT in the generator). */
@@ -333,18 +338,34 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const frameAmt = clamp(frameOuter.sub(win), 0, 1).mul(hasFrame).mul(archMask);
   const shutterAmt = shutter.mul(archMask);
   let wallFinal: Node = mix(mix(wallC, trimC, frameAmt), shutterC, shutterAmt);
+  // the 4.0 plinth (emitPlinth): under the floor a wall is the stone plinth (0x7f786d, stone finish)
+  const plinthAmt = max(isWall, isMetal).mul(vertical).mul(step(fuv.y, float(-0.03))).mul(step(float(-40), fuv.y));
+  wallFinal = mix(wallFinal, vec3(PLINTH_RGB[0], PLINTH_RGB[1], PLINTH_RGB[2]), plinthAmt);
+  // 4.0 storey bands (band(): BAND_OUT 7 cm, BAND_H 22 cm, a lower tier in the trim x 0.94) at every floor line above
+  // the ground storey, painted for the middle distance (the detail layer stands them out near)
+  const lineD = min(fy, float(1).sub(fy)).mul(fh);
+  const bandOn = step(lineD, float(0.11)).mul(select(fy.lessThan(0.5), step(float(0.5), fl).max(shop), float(1))).mul(hasWin).mul(float(1).sub(isCurtain))
+    .mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(float(1).sub(win)).mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(float(1).sub(isGlass));
+  const lowerTier = step(float(0.5), fy).mul(step(float(0.022), float(1).sub(fy).mul(fh)));
+  const bandC = select(dot(trimC, vec3(0.2126, 0.7152, 0.0722)).lessThan(0.08), wallC.mul(0.86), trimC);
+  wallFinal = mix(wallFinal, bandC.mul(mix(float(1), float(0.94), lowerTier)), bandOn.mul(clamp(float(1.4).sub(wy.mul(fh).mul(4)), 0, 1)));
+  const finE = select(plinthAmt.greaterThan(0.5), float(4), fin);
+  const hasFinE = max(hasFin, plinthAmt);
   const P = positionWorld;
   // finish: UV in metres in the face's plane (u along the face, v up; on a slab, x and z)
-  const look = FINISH_LOOK.element(int(floor(fin.add(0.5))));
+  const look = FINISH_LOOK.element(int(floor(finE.add(0.5))));
   const faceH = vec2(n.z, n.x.negate());
   const flatFace = step(dot(faceH, faceH), float(0.0025));
   const tAx = normalize(mix(vec3(faceH.x, 0, faceH.y), vec3(1, 0, 0), flatFace));
   const bAx = cross(n, tAx);
   const fuvM = vec2(dot(P, tAx), dot(P, bAx)).mul(look.x);
-  const layer = int(max(fin.sub(1), float(0)));
+  const layer = int(max(finE.sub(1), float(0)));
   const finA = texture(FINISH_ALBEDO, fuvM).depth(layer);
   const finN = texture(FINISH_NORMAL, fuvM).depth(layer);
-  const finTone = mix(vec3(1, 1, 1), finA.xyz.mul(2), hasFin);
+  // paint x map as in 4.0; glass and slate (maps of mean 0.08 and 0.23, drawn dark by their own shading here: the
+  // curtain wall's glass, the roof's) keep their paint as the mean
+  const darkMean = select(abs(finE.sub(8)).lessThan(0.5), float(0.081), select(abs(finE.sub(13)).lessThan(0.5), float(0.226), float(1)));
+  const finTone = mix(vec3(1, 1, 1), finA.xyz.div(darkMean).min(2), hasFinE);
   const wn = texture(WALL_NOISE, vec2(P.x.add(P.z), P.y).mul(0.11));
   const grain = wn.r.mul(2).sub(1);
   const isFacade = hasWin.max(vertical.mul(isWall));
@@ -359,15 +380,21 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
     .mul(step(float(0), below)).mul(step(below, reach)).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy));
   const streak = streakOn.mul(float(1).sub(below.div(reach.max(0.1)))).mul(wn.g.mul(0.5).add(0.75)).mul(0.1)
     .mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(float(1).sub(isMetal));
-  // slab: a dark line at each floor (only on facades of punched windows)
-  const slab = band(float(-0.012), float(0.03), fy, wy).mul(step(kind, float(0.5))).mul(hasWin).mul(float(1).sub(inShop)).mul(step(float(0.5), yy));
   // a light sill (it takes the sun from above) and its shadow just below
   const sillW = band(ww.sub(0.04), float(1).sub(ww).add(0.04), fx, wu).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(step(kind, float(0.5)).max(step(float(1.5), kind)));
   const sill = sillW.mul(band(wLow.sub(float(0.06)), wLow, fy, wy));
   const sillShadow = sillW.mul(band(wLow.sub(float(0.12)), wLow.sub(float(0.06)), fy, wy));
-  const wallK = float(1).add(grain.mul(0.11).mul(plain)).sub(streak).sub(slab.mul(0.22)).sub(sillShadow.mul(0.3));
+  const pm = vec2(dot(P, tAx), dot(P, bAx));
+  const nr = (k: number) => texture(WALL_NOISE, pm.mul(k)).r;
+  const macro = nr(0.0056).mul(0.55).add(nr(0.021).mul(0.3)).add(nr(0.075).mul(0.15));
+  const glassy = max(max(isCurtain, isGlass), step(abs(fin.sub(7)), float(0.5)).max(step(abs(fin.sub(8)), float(0.5))));
+  const stainStreak = smoothstep(float(0.55), float(0.85), texture(WALL_NOISE, vec2(pm.x.mul(0.1375), P.y.mul(0.02))).g);
+  const grimeN = nr(0.0275).mul(0.5).add(0.5);
+  const stain = float(0.3).mul(float(0.18).add(grimeN.mul(0.12)).add(select(vertical.greaterThan(0.5), stainStreak.mul(0.28), float(0.1)))).mul(float(1).sub(glassy));
+  const weather = macro.mul(0.2).add(0.9).mul(float(1).sub(stain));
+  const wallK = float(1).add(grain.mul(0.11).mul(plain)).sub(streak).sub(sillShadow.mul(0.3));
   const sillAmt = sill.mul(isFacade).mul(detail).mul(float(1).sub(isCurtain));
-  wallFinal = mix(wallFinal.mul(wallK).mul(finTone), mix(trimC, vec3(0.86, 0.84, 0.8), 0.5), sillAmt);
+  wallFinal = mix(wallFinal.mul(wallK).mul(finTone).mul(weather), mix(trimC, vec3(0.86, 0.84, 0.8), 0.5), sillAmt);
   // the recess by the view angle: the glass sits ~22 cm in; where the opening (in the wall) does not show the
   // glass, the opening's side shows (in shade), opposite the eye
   const inward = max(dot(V, n.negate()), float(0.15));
@@ -394,12 +421,12 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
 
   const rough0 = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
-  const rough = mix(rough0, finA.w, hasFin);
+  const rough = mix(rough0, finA.w, hasFinE);
   m.roughnessNode = mix(mix(rough, float(0.12), winAmt.mul(float(1).sub(reveal))), float(0.6), rollAmt);
-  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), finN.w.mul(hasFin)).mul(float(1).sub(winAmt)).mul(float(1).sub(rollAmt));
+  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), look.z.mul(mix(float(1), finN.w, look.w)).mul(hasFinE)).mul(float(1).sub(winAmt)).mul(float(1).sub(rollAmt));
   // the finish's relief (off the glass), in the face's frame
   const nm = finN.xyz.mul(2).sub(1);
-  const nk = look.y.mul(hasFin).mul(float(1).sub(winAmt)).mul(float(1).sub(sillAmt));
+  const nk = look.y.mul(hasFinE).mul(float(1).sub(winAmt)).mul(float(1).sub(sillAmt));
   const nW = normalize(tAx.mul(nm.x.mul(nk)).add(bAx.mul(nm.y.mul(nk))).add(n.mul(nm.z)));
   m.normalNode = transformNormalToView(nW);
   return m;
