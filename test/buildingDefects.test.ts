@@ -418,3 +418,41 @@ test('F10: the parts, parked cars and yard plants of a building near the cell ed
   assert.ok(total > 0);
   assert.equal(lost, 0, `${lost} of ${total} building parts dropped at the cell edge`);
 });
+
+test('F11: yard trees and shrubs stand on the yard, not inside buildings, pools or courts', async () => {
+  const { buildProps, PROP } = await import('../src/jobs/props.ts');
+  const { cellId, cellX } = await import('../src/core/grid.ts');
+  const w = new World();
+  w.heights.fill(10);
+  const failures: string[] = [];
+  let checked = 0;
+  const cases: Array<[string, number, number, number, number, number]> = [['mixed shops', Zone.Mixed, 4, 20, 30, 50], ['sobrado', Zone.Residential, 2, 12, 30, 139],
+    ['house', Zone.Residential, 1, 16, 34, 10], ['flats', Zone.Residential, 6, 24, 36, 40]];
+  for (const [name, zone, floors, W, D, style] of cases) for (let seed = 1; seed <= 12; seed++) {
+    const b = oneBuilding(zone, floors, W, D, seed * 7919, style);
+    if (seed > 9) { const e = encodeDesign({ shape: 0, roof: 0, finish: 0, gear: 0, setback: 0, wall: 0xd9c7a6 }); b.color[0] = e.color; b.h[0] = e.h; }
+    const m = buildBuildings(w.heights, b, 0, 0, 256, 0)!, p = positions(m);
+    const r = buildProps(w.heights, w.roads.gather([], []), b, cellId(cellX(128), cellX(128)));
+    for (let k = 0; k < r.count; k++) {
+      const kind = r.extra[k] & 31;
+      if (kind !== PROP.Bush && kind !== PROP.Tree && kind !== PROP.Oak && kind !== PROP.Conifer) continue;
+      const x = r.data[k * 4], z = r.data[k * 4 + 2];
+      if (Math.abs(x - 128) > W / 2 || Math.abs(z - 128) > D / 2) continue; // not this lot's (the open ground around it)
+      checked++;
+      // the highest upward face over the plant
+      let top = -Infinity, mat = -1;
+      for (let t = 0; t < m.index.length; t += 3) {
+        const A = p[m.index[t]], B = p[m.index[t + 1]], C = p[m.index[t + 2]];
+        const ny = (B[2] - A[2]) * (C[0] - A[0]) - (B[0] - A[0]) * (C[2] - A[2]);
+        if (ny <= 1e-6) continue;
+        const d1 = (x - B[0]) * (A[2] - B[2]) - (A[0] - B[0]) * (z - B[2]), d2 = (x - C[0]) * (B[2] - C[2]) - (B[0] - C[0]) * (z - C[2]), d3 = (x - A[0]) * (C[2] - A[2]) - (C[0] - A[0]) * (z - A[2]);
+        if ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)) continue;
+        const y = (A[1] + B[1] + C[1]) / 3;
+        if (y > top) { top = y; mat = m.color[m.index[t] * 4 + 3] & 15; }
+      }
+      if (top > 10.45 || (mat !== 6 && mat !== 7)) failures.push(`${name} seed ${seed}: a plant at (${(x - 128).toFixed(1)}, ${(z - 128).toFixed(1)}) under a surface at ${top.toFixed(2)} m, material ${mat}`);
+    }
+  }
+  assert.ok(checked > 50, `${checked} plants checked`);
+  assert.deepEqual(failures.slice(0, 10), [], `${failures.length} of ${checked} plants inside something`);
+});

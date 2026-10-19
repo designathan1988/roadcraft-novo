@@ -47,6 +47,20 @@ const NO_MESH = new NoMesh(false, true);
  * `fh` each). What the inside view and the camera need, without guessing 3.2 m storeys.
  */
 export interface Volume { cx: number; cz: number; hw: number; hd: number; rot: number; y0: number; y1: number; base: number; ground: number; fh: number }
+/**
+ * Footprints of what stands on each building's lot floor (walls, pools, courts, porches, garages, tree trunks), per
+ * building of the boxes: [centre x, centre z, half width, half depth, turn] × n, in the world. Filled by the parts pass
+ * when asked (buildBuildingParts): the yard props keep out of them.
+ */
+let footOut: number[][] | null = null;
+let footI = -1, footGround = 0;
+
+function captureFoot(f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number): void {
+  if (!footOut || footI < 0 || y0 > footGround + 0.6) return;
+  const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+  footOut[footI].push(wx(f, mx, mz), wz(f, mx, mz), (x1 - x0) / 2, (z1 - z0) / 2, Math.atan2(f.s, f.c));
+}
+
 /** Where the volumes go while a building's layout is taken (buildingVolumes). */
 let layoutOut: Volume[] | null = null;
 
@@ -140,6 +154,7 @@ function nz(f: Frame, x: number, z: number): number { return -x * f.s + z * f.c;
 function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number,
   wallCol: number, wallMat: number, colW: number, top: number, topMat: number, bottom = false): void {
   if (layoutOut) captureVolume(mb, f, x0, x1, z0, z1, y0, y1, wallMat);
+  if (footOut) captureFoot(f, x0, x1, z0, z1, y0);
   if (detailOut && mb !== detailOut) {
     const fc = mb.curFac, kind = fc[2] & 3;
     if (fc[3] > 0 && kind !== Facade.Curtain && ((wallMat & 15) === BMAT.Wall || (wallMat & 15) === BMAT.Metal)) {
@@ -611,6 +626,7 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
   const [lo, hi] = groundRange(heights, f, W, D);
   f.base = lo - 0.4;
   mb.curBase = f.base;
+  footI = i; footGround = hi;
   const floors = Math.max(1, b.floors[i]);
   const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
   const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows, pattern: plan.pattern[i], side: plan.side[i] };
@@ -648,9 +664,19 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
  * Peças repetidas dos prédios (ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água) para o pool de
  * props: o mesmo gerador, no modo peças, com o mesmo sorteio da malha. Roda no job de peças da célula.
  */
-export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit): void {
+export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][]): void {
   partsOut = emit;
-  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; }
+  footOut = foot ?? null;
+  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; footOut = null; footI = -1; }
+}
+
+/** Whether (x, z) is within `margin` of one of the footprints (captureFoot) of a building. */
+export function inFootprints(rects: number[], x: number, z: number, margin: number): boolean {
+  for (let k = 0; k + 4 < rects.length; k += 5) {
+    const c = Math.cos(rects[k + 4]), s = Math.sin(rects[k + 4]), dx = x - rects[k], dz = z - rects[k + 1];
+    if (Math.abs(dx * c - dz * s) <= rects[k + 2] + margin && Math.abs(dx * s + dz * c) <= rects[k + 3] + margin) return true;
+  }
+  return false;
 }
 
 /**
@@ -1538,6 +1564,7 @@ function chimney(mb: MeshBuilder, f: Frame, x: number, z: number, y0: number, y1
 
 /** Prisma de planta poligonal (convexa), paredes com coordenada de fachada; topo em leque opcional. */
 function polyPrism(mb: MeshBuilder, f: Frame, pts: Array<[number, number]>, y0: number, y1: number, wallCol: number, colW: number, top: number, topMat: number, wallMat: number = BMAT.Wall): void {
+  if (footOut) captureFoot(f, Math.min(...pts.map((q) => q[0])), Math.max(...pts.map((q) => q[0])), Math.min(...pts.map((q) => q[1])), Math.max(...pts.map((q) => q[1])), y0);
   if (layoutOut) captureVolume(mb, f, Math.min(...pts.map((q) => q[0])), Math.max(...pts.map((q) => q[0])), Math.min(...pts.map((q) => q[1])), Math.max(...pts.map((q) => q[1])), y0, y1, wallMat);
   let cx = 0, cz = 0;
   for (const [x, z] of pts) { cx += x; cz += z; }

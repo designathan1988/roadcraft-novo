@@ -15,7 +15,7 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from './protocol.ts';
-import { inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts } from './buildingGen.ts';
+import { inFootprints, inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts } from './buildingGen.ts';
 
 /** Tipos de peça (4 bits; 15 = vaga livre). */
 export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17 } as const;
@@ -450,8 +450,11 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     }
   }
 
-  // yards: trees at the back of the houses, shrubs along the fronts
-  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key));
+  // the buildings' parts (one generator pass), with the footprints of what they put on their lot floors, then the
+  // yards: trees at the back of the houses, shrubs along the fronts, never inside those footprints
+  const foot: number[][] = Array.from({ length: b.count }, () => []);
+  buildBuildingParts(heights, b, (v, x, y, z, yaw, s) => out.addOwn(PROP.Furniture, x, y, z, yaw, v, s, 0), foot);
+  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot);
 
   // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio
   {
@@ -520,8 +523,6 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     }
   }
 
-  // peças de fachada dos prédios (sessão prédios): ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água
-  buildBuildingParts(heights, b, (v, x, y, z, yaw, s) => out.addOwn(PROP.Furniture, x, y, z, yaw, v, s, 0));
 
   const count = out.extra.length;
   return { count, data: new Float32Array(out.data), extra: new Uint32Array(out.extra) };
@@ -536,7 +537,7 @@ function yAt(g: RoadGraph, s: number, len: number, v: number): number {
  * Yard props of each lot: trees at the back of the houses, shrubs along the residential and mixed fronts. Laid in the
  * building's rectangle (`lotFit`: on a polygon lot, the one inside the outline the player drew).
  */
-export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => void): void {
+export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => void, foot?: number[][]): void {
   for (let i = 0; i < b.count; i++) {
     const zone = b.zone[i];
     if (zone !== Zone.Residential && zone !== Zone.Mixed) continue;
@@ -552,6 +553,8 @@ export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: n
         const y = heightAt(heights, x, z);
         if (y < SEA_LEVEL + 0.3) continue;
         const pick = r.next();
+        // a tree's crown keeps 1.5 m off what the generator built (pool, garage, house)
+        if (foot && inFootprints(foot[i], x, z, 1.5)) { r.next(); r.int(0, 4); r.range(0.6, 1.0); r.nextU32(); continue; }
         add(pick < 0.3 ? PROP.Conifer : pick < 0.65 ? PROP.Oak : PROP.Tree, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.6, 1.0), r.nextU32());
       }
     }
@@ -561,6 +564,8 @@ export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: n
       const [x, z] = at(r.range(-W / 2 + 1, W / 2 - 1), D / 2 - r.range(0.7, 1.4));
       const y = heightAt(heights, x, z);
       if (y < SEA_LEVEL + 0.3) continue;
+      // a shrub keeps 0.8 m off the building (shopfronts, a sobrado's front, a design's walls)
+      if (foot && inFootprints(foot[i], x, z, 0.8)) { r.next(); r.int(0, 4); r.range(0.7, 1.3); r.nextU32(); continue; }
       add(PROP.Bush, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.7, 1.3), r.nextU32());
     }
   }
