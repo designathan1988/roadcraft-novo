@@ -289,3 +289,47 @@ test('C15: trips that end without reaching their destination are counted as lost
   assert.equal(tr.arrived, arrived, 'removed cars were counted as arrivals');
   assert.ok(tr.lost - lost >= cars, `${cars} cars removed with the road, lost went from ${lost} to ${tr.lost}`);
 });
+
+/** Vehicles whose lane is on segment `seg`, and those of them in the far model. */
+function onSeg(tr: Traffic, seg: number): { all: number[]; far: number[] } {
+  const c = tr.veh.cols, all: number[] = [], far: number[] = [];
+  for (let v = 0; v < tr.veh.end; v++) if (tr.veh.alive[v] && c.conn[v] < 0 && c.lane[v] >= 0 && (c.lane[v] >> 4) === seg) { all.push(v); if (!c.micro[v]) far.push(v); }
+  return { all, far };
+}
+
+/** The segment with the most vehicles on it. */
+function busiest(tr: Traffic): number {
+  const c = tr.veh.cols, n = new Map<number, number>();
+  for (let v = 0; v < tr.veh.end; v++) if (tr.veh.alive[v] && c.lane[v] >= 0 && c.conn[v] < 0 && c.line[v] < 0) n.set(c.lane[v] >> 4, (n.get(c.lane[v] >> 4) ?? 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+test('C16: a new road that reuses a demolished one\'s id does not inherit its far vehicles nor lose its count', async () => {
+  const { recordOps, mirror, syncNet } = await import('./simCity.ts');
+  const { w, sim } = gridCity(4, 120);
+  const ops = recordOps(w);
+  const tr = traffic(sim, 8000, 8000); // all in the far model
+  tr.density = 1 / 15;
+  for (let i = 0; i < 20 * 90; i++) tr.step(0.05);
+  const seg = busiest(tr), before = onSeg(tr, seg).far.length;
+  assert.ok(before >= 2, `far vehicles on the busiest segment: ${before}`);
+  const rec = w.roads.segRec(seg), lost = tr.lost;
+  // demolished and rebuilt in the same frame: the new segment takes the freed id
+  w.roads.removeSeg(seg);
+  const again = w.roads.addSeg({ a: rec.a, b: rec.b, cx: rec.cx, cz: rec.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
+  assert.equal(again, seg, 'the id is reused');
+  mirror(sim, ops.splice(0));
+  syncNet(sim, tr);
+  assert.equal(onSeg(tr, seg).all.length, 0, 'vehicles of the demolished road are on the new one');
+  for (let k = 0; k < 16; k++) assert.equal(tr.laneCount[seg * 16 + k], 0, `lane ${k} of the new road starts with a count`);
+  assert.ok(tr.lost - lost >= before, `lost went from ${lost} to ${tr.lost} with ${before} vehicles demolished`);
+  // and the new road's count is right after traffic uses it a while (nobody leaving it subtracts what they never added)
+  for (let i = 0; i < 20 * 60; i++) tr.step(0.05);
+  for (let k = 0; k < 16; k++) {
+    const l = seg * 16 + k, c = tr.veh.cols;
+    let n = 0;
+    for (let v = 0; v < tr.veh.end; v++) if (tr.veh.alive[v] && c.lane[v] === l && c.dying[v] !== 2) n++;
+    assert.equal(tr.laneCount[l], n, `lane ${k}: count ${tr.laneCount[l]}, vehicles ${n}`);
+  }
+});
+

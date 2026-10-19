@@ -99,6 +99,8 @@ const vehSchema = {
   mv: Int32Array, ms: Float32Array,
   // how the trip ends once it leaves (End)
   why: Uint8Array,
+  // far model: the lane whose list it is in (−1 = none) and its neighbours in that list (in order of entry)
+  ml: Int32Array, mnext: Int32Array, mprev: Int32Array,
 };
 
 /** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
@@ -173,6 +175,9 @@ export class Traffic {
   /** Ordered list of micro vehicles per lane and per connection (head = the frontmost). */
   laneHead = new Int32Array((1 << 14) * 16).fill(-1);
   laneTail = new Int32Array((1 << 14) * 16).fill(-1);
+  /** Far-model vehicles per lane, in order of entry: an edit to a road finds the vehicles on it without a fleet pass. */
+  mesoHead = new Int32Array((1 << 14) * 16).fill(-1);
+  mesoTail = new Int32Array((1 << 14) * 16).fill(-1);
   connHead = new Int32Array(1 << 14).fill(-1);
   /** Whoever waits too long at a yield claims the turn (tenths of a second of the simulation clock). */
   private connClaim = new Int32Array(1 << 14).fill(-100);
@@ -241,6 +246,7 @@ export class Traffic {
   clearAll(): void {
     this.veh.clear();
     this.laneHead.fill(-1); this.laneTail.fill(-1); this.connHead.fill(-1); this.connTail.fill(-1); this.connClaim.fill(-100);
+    this.mesoHead.fill(-1); this.mesoTail.fill(-1);
     this.laneCount.fill(0); this.laneLastExit.fill(0); this.segLoad.fill(0);
     this.lastAdmit.fill(this.time); this.releaseAt.fill(0); this.jamAt.fill(0); this.exitClaim.fill(-1);
     this.microN = 0; this.evN = 0;
@@ -336,6 +342,8 @@ export class Traffic {
     sim.net.segs.onGrow((cap) => {
       this.laneHead = grow(this.laneHead, cap * 16, -1);
       this.laneTail = grow(this.laneTail, cap * 16, -1);
+      this.mesoHead = grow(this.mesoHead, cap * 16, -1);
+      this.mesoTail = grow(this.mesoTail, cap * 16, -1);
       this.laneCount = grow(this.laneCount, cap * 16, 0);
       this.laneLastExit = grow(this.laneLastExit, cap * 16, 0);
       this.exitClaim = grow(this.exitClaim, cap * 16, -1);
@@ -950,7 +958,7 @@ export class Traffic {
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
     c.v[v] = 0;
     c.line[v] = -1; c.stopI[v] = 0; c.dwell[v] = 0; c.load[v] = 0; c.served[v] = 0; c.wait[v] = 0;
-    c.held[v] = 0; c.why[v] = End.Arrived;
+    c.held[v] = 0; c.why[v] = End.Arrived; c.ml[v] = -1; c.mnext[v] = -1; c.mprev[v] = -1;
   }
 
   /** The trip will not reach its destination: the vehicle fades out and is counted as lost. */
@@ -967,8 +975,27 @@ export class Traffic {
     this.despawn(v);
   }
 
+  /** Puts a far-model vehicle at the end of its lane's list. */
+  private mesoLink(v: number, lane: number): void {
+    const c = this.veh.cols;
+    if (c.ml[v] === lane) return;
+    this.mesoUnlink(v);
+    c.ml[v] = lane; c.mnext[v] = -1; c.mprev[v] = this.mesoTail[lane];
+    if (this.mesoTail[lane] >= 0) c.mnext[this.mesoTail[lane]] = v; else this.mesoHead[lane] = v;
+    this.mesoTail[lane] = v;
+  }
+
+  private mesoUnlink(v: number): void {
+    const c = this.veh.cols, lane = c.ml[v];
+    if (lane < 0) return;
+    if (c.mprev[v] >= 0) c.mnext[c.mprev[v]] = c.mnext[v]; else this.mesoHead[lane] = c.mnext[v];
+    if (c.mnext[v] >= 0) c.mprev[c.mnext[v]] = c.mprev[v]; else this.mesoTail[lane] = c.mprev[v];
+    c.ml[v] = -1; c.mnext[v] = c.mprev[v] = -1;
+  }
+
   private despawn(v: number): void {
     const c = this.veh.cols;
+    this.mesoUnlink(v);
     if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); }
     this.wagonPrev.delete(v);
     if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
@@ -991,6 +1018,7 @@ export class Traffic {
   /** Vehicle switches to meso mode on the lane (schedules its exit). */
   private mesoEnter(v: number, lane: number, spawned = false): void {
     const c = this.veh.cols;
+    this.mesoLink(v, lane);
     const L = this.sim.laneLen(lane);
     const p = this.sim.net.segs.cols.profile[laneSeg(lane)];
     const lanes = Math.max(1, laneCount(p, laneDir(lane)));
@@ -1081,6 +1109,7 @@ export class Traffic {
     c.rIdx[v]++;
     if (enterMicro) {
       // entered the window: becomes micro at the start of the lane
+      this.mesoUnlink(v);
       c.s[v] = 0;
       c.held[v] = 0;
       c.v[v] = Math.min(laneSpeed(sim.net.segs.cols.profile[ns]) * c.vf[v], tail >= 0 ? Math.max(2, (c.s[tail] - c.len[tail]) / T_HEAD) : 99);
@@ -1386,7 +1415,11 @@ export class Traffic {
     if (!segs.length) return;
     const dead = new Set(segs);
     const c = this.veh.cols;
-    // only micro vehicles are in lists; meso ones find out at their next event
+    // far vehicles on them leave now (from the lanes' lists), before a new segment can take the freed id
+    for (const s of segs) for (let k = 0; k < 16; k++) {
+      for (let v = this.mesoHead[s * 16 + k]; v >= 0;) { const next = c.mnext[v]; c.why[v] = End.Lost; this.finish(v); v = next; }
+    }
+    // near ones: on the lanes, or on a connection into them
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
       const lane = c.conn[v] >= 0 ? this.sim.conns.cols.to[c.conn[v]] : c.lane[v];
