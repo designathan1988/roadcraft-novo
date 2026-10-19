@@ -103,6 +103,8 @@ export class Peds {
   walkOk: (n: number, arm: number) => boolean = () => true;
   /** A pedestrian waits at the kerb of the crossing over arm `arm` of node `n` (presses the button). */
   onWait: (n: number, arm: number) => void = () => {};
+  /** Events refused for an invalid time (should stay 0; each such person faded out). */
+  invalid = 0;
   /** People per metre of car lane (simple demand). */
   density = 1 / 30;
   /** Share of people chosen by the player. */
@@ -168,6 +170,9 @@ export class Peds {
   // ------------------------------------------------------------ event queue
 
   private schedule(p: number, at: number): void {
+    // an invalid time would sit on top of the queue and stop every pedestrian's events for good: whoever got one
+    // leaves (fading out from where it stands) instead
+    if (!Number.isFinite(at)) { this.invalid++; this.fadeOut(p, true); return; }
     this.t.cols.at[p] = at;
     if (this.heapN >= this.heapT.length) {
       const a = new Float64Array(this.heapT.length * 2); a.set(this.heapT); this.heapT = a;
@@ -628,7 +633,9 @@ export class Peds {
     const fromA = end === 0 ? d : L - d;
     // arm's left in segment coordinates (u+ = left of a→b)
     const segLeft = end === 0 ? armLeft : !armLeft;
-    const [u] = this.sideU(sc.profile[s], segLeft ? 1 : -1);
+    let [u] = this.sideU(sc.profile[s], segLeft ? 1 : -1);
+    // an arm with no sidewalk on either side (an expressway, a railway): the crossing ends at its kerb
+    if (Number.isNaN(u)) { const info = PROFILE_INFO[sc.profile[s]]; u = segLeft ? info.left : -info.right; }
     const t = sim.tAt(s, Math.max(0, Math.min(L, fromA)));
     bez(net.quad(s), t, p2); bezD(net.quad(s), t, d2);
     const l = Math.hypot(d2[0], d2[1]) || 1;
@@ -733,8 +740,11 @@ export class Peds {
   }
 
   /** Nowhere left to walk: stands where it is and fades out over FADE_OUT s, then leaves. */
-  private fadeOut(p: number): boolean {
-    const c = this.t.cols, q = this.posNow(p);
+  private fadeOut(p: number, lost = false): boolean {
+    const c = this.t.cols;
+    // lost: where it was going is not a place (an invalid point); it fades out at the start of that line
+    const q = lost ? [this.lineFrom[p * 3], this.lineFrom[p * 3 + 1], this.lineFrom[p * 3 + 2], c.pyaw[p]] : this.posNow(p);
+    if (!Number.isFinite(q[0]) || !Number.isFinite(q[2])) { this.kill(p); return false; }
     this.lineFrom[p * 3] = q[0]; this.lineFrom[p * 3 + 1] = q[1]; this.lineFrom[p * 3 + 2] = q[2];
     c.pyaw[p] = q[3];
     c.mode[p] = 4; c.t0[p] = this.time; c.dur[p] = FADE_OUT;

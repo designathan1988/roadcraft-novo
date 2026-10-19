@@ -11,7 +11,8 @@ import type { NetOp } from '../src/roads/network.ts';
 export interface SimCity { w: World; sim: SimNet; ops: NetOp[] }
 
 /** n × n grid of roads `step` metres apart, centred on the origin; the second row and column are avenues (profile 3). */
-export function gridCity(n = 4, step = 120, avenue = 1): SimCity {
+/** `profile`: the profile of street i (horizontal or not), instead of an avenue at `avenue` and local streets. */
+export function gridCity(n = 4, step = 120, avenue = 1, profile?: (i: number, horiz: boolean) => number): SimCity {
   const w = new World();
   w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.unlimited = true;
   const ops: NetOp[] = [];
@@ -22,7 +23,7 @@ export function gridCity(n = 4, step = 120, avenue = 1): SimCity {
       const c = -half + i * step;
       const a = horiz ? snap(w.roads, -half, c, 8) : snap(w.roads, c, -half, 8);
       const b = horiz ? snap(w.roads, half, c, 8) : snap(w.roads, c, half, 8);
-      const prof = i === avenue ? 3 : 0;
+      const prof = profile ? profile(i, horiz) : i === avenue ? 3 : 0;
       const p = planRoad(w, a, null, b, prof, 0);
       assert.ok(p.ok, p.reason);
       buildRoad(w, p, a, b, prof);
