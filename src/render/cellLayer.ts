@@ -415,6 +415,11 @@ export class CellLayer {
     // what is drawn changed this frame (a mesh came, left, was swapped or is fading): the shadow maps must follow
     this.changed = this.fading.length > 0 || this.next.size !== this.shown.size;
     if (!this.changed) for (const m of this.next) if (!this.shown.has(m)) { this.changed = true; break; }
+    // an outgoing mesh thrown away mid-fade (evicted, rebuilt): what fades in where it was shows whole at once (its
+    // dither left holes where the outgoing one no longer covered)
+    let lostOutgoing = false;
+    for (const f of this.fading) if ((f.mesh.userData as FadeData).dead) lostOutgoing = true;
+    for (const m of this.shown) if (!this.next.has(m) && (m.userData as FadeData).dead) lostOutgoing = true;
     for (const mesh of this.next) {
       const u = mesh.userData as FadeData;
       // already drawn in an earlier frame: the data is on the GPU
@@ -425,6 +430,7 @@ export class CellLayer {
         const i = this.fading.findIndex((f) => f.mesh === mesh);
         if (i >= 0) { this.fading[i] = this.fading[this.fading.length - 1]; this.fading.pop(); }
       }
+      if (lostOutgoing) u.since = -1e9;
       u.fade = Math.min(1, (now - (u.since ?? -1e9)) / FADE);
       out.push(mesh);
     }

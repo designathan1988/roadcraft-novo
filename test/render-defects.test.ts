@@ -558,3 +558,32 @@ test('E43: stop shelters cast shadows and are culled by camera', async () => {
   const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
   assert.equal(!shelters.frustumCulled || shelters.intersectsFrustum(frustum), false, 'shelters 5 km behind the camera are drawn');
 });
+
+/** Drives a layer's fades by hand: `show(meshes)` is one frame drawing exactly those meshes at time `t` (s). */
+function fadeRig() {
+  const w = new World();
+  const layer = new CellLayer(recordingSource(), w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40 });
+  const inner = layer as unknown as { next: Set<THREE.Mesh>; applyFades(): void };
+  let now = 1000;
+  const realNow = performance.now.bind(performance);
+  const show = (meshes: THREE.Mesh[], t: number) => {
+    now = t * 1000;
+    performance.now = () => now;
+    try { inner.next.clear(); for (const m of meshes) inner.next.add(m); inner.applyFades(); } finally { performance.now = realNow; }
+  };
+  const L = inside(layer);
+  const mesh = (c: number) => { L.setMesh(L.cells[0][c], triangle(), 1); return L.cells[0][c].mesh!; };
+  const fade = (m: THREE.Mesh) => (m.userData as { fade: number }).fade;
+  return { layer, L, show, mesh, fade };
+}
+
+test('E44: when the outgoing mesh is thrown away mid-fade, the incoming one shows whole at once', () => {
+  const { L, show, mesh, fade } = fadeRig();
+  const a = mesh(1), b = mesh(2);
+  show([a], 10);
+  show([b], 10.05); // b fades in, a fades out
+  L.setMesh(L.cells[0][1], null, 0); // a is evicted mid-fade
+  show([b], 10.1);
+  assert.equal(fade(b), 1, `the incoming mesh is at ${fade(b).toFixed(2)}: dithered holes where the outgoing one was`);
+});
+
