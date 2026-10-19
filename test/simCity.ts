@@ -31,6 +31,8 @@ export function gridCity(n = 4, step = 120, avenue = 1): SimCity {
   const sim = new SimNet();
   mirror(sim, ops);
   sim.rebuild();
+  // a freshly opened map: nothing was on the segments the building replaced
+  sim.removedSegs.length = 0; sim.reprofiledSegs.length = 0;
   return { w, sim, ops: [] };
 }
 
