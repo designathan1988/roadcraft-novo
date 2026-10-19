@@ -9,7 +9,7 @@
 import { SEA_LEVEL } from '../config.ts';
 import { arcTable, bez, bezD, tAtLength, type Arm, type Quad } from '../roads/geometry.ts';
 import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, cornerFillet, junctionRetreats } from '../roads/junction.ts';
-import { PROFILE_INFO, Paving, Surface, type ProfileInfo, type Strip } from '../roads/profiles.ts';
+import { PROFILE_INFO, Paving, Surface, packRoadTag, type ProfileInfo, type Strip } from '../roads/profiles.ts';
 import { SegFlag } from '../roads/flags.ts';
 import { heightAt } from '../world/heights.ts';
 import { ZONE_COLORS } from '../roads/zones.ts';
@@ -183,7 +183,7 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
   const ring = (g.sflags[s] & SegFlag.Ring) !== 0;
   const crossA = degA >= 3 && !ring, crossB = degB >= 3 && !ring;
   // code: segment id * 16 + bits (exact in float32 up to 1 million segments); the profile goes in position.w
-  mb.curTag = info.id | (g.srule[s] & 7) << 8 | ((g.srule[s] >> 3) & 7) << 11;
+  mb.curTag = packRoadTag(info.id, g.srule[s] & 7, (g.srule[s] >> 3) & 7);
   const code = g.sid[s] * 16 + (crossA ? RoadCode.CrossA : 0) + (crossB ? RoadCode.CrossB : 0) + (info.oneWay ? RoadCode.OneWay : 0) + (ring ? RoadCode.Ring : 0);
 
   // sample positions: a regular step + the dropped kerb's points

@@ -188,8 +188,17 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
 ];
 
 export const RING_PROFILE = 6;
-/** A segment stores its profile in one byte. */
-export const MAX_PROFILES = 256;
+/** Profiles a map holds (a segment stores its profile in 16 bits; the road mesh's tag has room for 512). */
+export const MAX_PROFILES = 512;
+/** The road mesh's tag (position.w, an int16): profile + TAG_RULE · rule at a + TAG_RULE · 8 · rule at b (rules 0..7). */
+export const TAG_RULE = MAX_PROFILES;
+export function packRoadTag(profile: number, ruleA: number, ruleB: number): number {
+  return profile + TAG_RULE * (ruleA & 7) + TAG_RULE * 8 * (ruleB & 7);
+}
+/** The tag read back as the shader reads it (render/roads.ts): [profile, rule at a, rule at b]. */
+export function unpackRoadTag(tag: number): [number, number, number] {
+  return [tag % TAG_RULE, Math.floor(tag / TAG_RULE) % 8, Math.floor(tag / (TAG_RULE * 8)) % 8];
+}
 /** Painted lines and lanes per profile in the shader table. */
 export const MAX_LINES = 8;
 export const BUILTIN_COUNT = BUILTIN.length;

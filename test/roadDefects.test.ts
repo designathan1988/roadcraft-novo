@@ -820,7 +820,7 @@ test('D27: growth follows the game speed: nothing while paused, twice as fast at
   const { Growth } = await import('../src/world/growth.ts');
   const lots = (n: number): LotColumns => ({ count: n, x: Float32Array.from({ length: n }, (_, i) => (i % 40) * 30 - 600), z: Float32Array.from({ length: n }, (_, i) => Math.floor(i / 40) * 40 + 40),
     w: new Float32Array(n).fill(14), d: new Float32Array(n).fill(26), rot: new Float32Array(n), zone: new Uint8Array(n).fill(Zone.Residential),
-    seed: Uint32Array.from({ length: n }, (_, i) => i * 31 + 7), profile: new Uint8Array(n) });
+    seed: Uint32Array.from({ length: n }, (_, i) => i * 31 + 7), profile: new Uint16Array(n) });
   const grown = (speed: number): number => {
     const w = flatWorld(0);
     const g = new Growth(w, null as unknown as JobPool);
@@ -907,7 +907,7 @@ test('D33: a landmark that grows over time keeps to 3 floors above its tallest n
     const x = (i % 20) * 120 - 1200, z = Math.floor(i / 20) * 120 - 1200;
     w.addBuilding({ x: x + 30, z, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Commercial, floors: 6, style: 1 });
     const l: LotColumns = { count: 1, x: new Float32Array([x]), z: new Float32Array([z]), w: new Float32Array([30]), d: new Float32Array([30]), rot: new Float32Array([0]),
-      zone: new Uint8Array([Zone.ComHigh]), seed: new Uint32Array([i * 7919 + 3]), profile: new Uint8Array([PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]) };
+      zone: new Uint8Array([Zone.ComHigh]), seed: new Uint32Array([i * 7919 + 3]), profile: new Uint16Array([PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]) };
     const rec = g.recordFor(l, 0, true);
     if (rec.color) landmarks++;
     worst = Math.max(worst, rec.floors);
@@ -923,7 +923,7 @@ test('D32: one square per neighbourhood, even after the lots are cut again', asy
   const set = g as unknown as { setLots(c: number, l: LotColumns): void };
   const lotsAt = (xs: number[], big: number): LotColumns => ({ count: xs.length, x: Float32Array.from(xs), z: new Float32Array(xs.length).fill(100),
     w: Float32Array.from(xs.map((_, i) => (i === big ? 40 : 14))), d: Float32Array.from(xs.map((_, i) => (i === big ? 40 : 26))), rot: new Float32Array(xs.length),
-    zone: new Uint8Array(xs.length).fill(Zone.Residential), seed: Uint32Array.from(xs.map((_, i) => i + 11)), profile: new Uint8Array(xs.length) });
+    zone: new Uint8Array(xs.length).fill(Zone.Residential), seed: Uint32Array.from(xs.map((_, i) => i + 11)), profile: new Uint16Array(xs.length) });
   // every cell of one neighbourhood (2 × 2 cells) gets lots with a big one; grow the big lot of each, twice over
   // (the second time the lots were cut again and another lot is the biggest)
   let squares = 0;

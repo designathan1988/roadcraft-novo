@@ -107,7 +107,7 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.editor.withCurb': 'Com meio-fio',
   'ui.editor.raised': 'Elevado',
   'ui.catalog.saved': 'Modelo "{name}" salvo.',
-  'ui.catalog.tooMany': 'Perfis demais neste mapa (máximo 256).',
+  'ui.catalog.tooMany': 'Perfis demais neste mapa (máximo 512).',
   'ui.problem.maxLanes': 'No máximo 8 faixas.',
   'ui.problem.order': 'As faixas de cada sentido ficam juntas, com a mão à direita.',
   'ui.problem.footways': 'Calçada só nas bordas.',

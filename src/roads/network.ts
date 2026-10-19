@@ -22,7 +22,7 @@ import { kindOfFlags } from './economy.ts';
 export const nodeSchema = { x: Float32Array, z: Float32Array, y: Float32Array, deg: Uint8Array, cell: Int32Array };
 export const segSchema = {
   a: Int32Array, b: Int32Array, cx: Float32Array, cz: Float32Array,
-  profile: Uint8Array, flags: Uint8Array, len: Float32Array, cell: Int32Array,
+  profile: Uint16Array, flags: Uint8Array, len: Float32Array, cell: Int32Array,
   mx: Float32Array, mz: Float32Array,
   /** Zone on each side (left/right in the a → b direction). */
   zl: Uint8Array, zr: Uint8Array,
@@ -350,7 +350,7 @@ export class RoadNetwork {
     const g: RoadGraph = {
       nodeCount: nn, nx: new Float32Array(nn), nz: new Float32Array(nn), ny: new Float32Array(nn), nodeOwn: new Uint8Array(nn),
       segCount: ns, sa: new Int32Array(ns), sb: new Int32Array(ns), scx: new Float32Array(ns), scz: new Float32Array(ns),
-      sprofile: new Uint8Array(ns), sflags: new Uint8Array(ns), segOwn: new Uint8Array(ns), sid: new Int32Array(ns),
+      sprofile: new Uint16Array(ns), sflags: new Uint8Array(ns), segOwn: new Uint8Array(ns), sid: new Int32Array(ns),
       szl: new Uint8Array(ns), szr: new Uint8Array(ns), nid: new Int32Array(nn),
       nctl: new Uint8Array(nn), srule: new Uint8Array(ns),
     };

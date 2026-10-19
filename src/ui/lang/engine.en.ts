@@ -107,7 +107,7 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.editor.withCurb': 'With curb',
   'ui.editor.raised': 'Raised',
   'ui.catalog.saved': 'Template "{name}" saved.',
-  'ui.catalog.tooMany': 'Too many profiles on this map (256 at most).',
+  'ui.catalog.tooMany': 'Too many profiles on this map (512 at most).',
   'ui.problem.maxLanes': 'At most 8 lanes.',
   'ui.problem.order': 'Lanes of each direction stay together, driving on the right.',
   'ui.problem.footways': 'Sidewalks only at the edges.',

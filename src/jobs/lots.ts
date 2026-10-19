@@ -157,7 +157,7 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
   return {
     count: n,
     x: new Float32Array(out.x), z: new Float32Array(out.z), w: new Float32Array(out.w), d: new Float32Array(out.d),
-    rot: new Float32Array(out.rot), zone: new Uint8Array(out.zone), seed: new Uint32Array(out.seed), profile: new Uint8Array(out.profile),
+    rot: new Float32Array(out.rot), zone: new Uint8Array(out.zone), seed: new Uint32Array(out.seed), profile: new Uint16Array(out.profile),
   };
 }
 

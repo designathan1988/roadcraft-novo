@@ -154,7 +154,7 @@ export interface LotColumns {
   x: Float32Array; z: Float32Array; w: Float32Array; d: Float32Array; rot: Float32Array;
   zone: Uint8Array; seed: Uint32Array;
   /** Profile of the road in front (an avenue gives a taller building). */
-  profile: Uint8Array;
+  profile: Uint16Array;
 }
 
 export function lotTransfer(l: LotColumns): ArrayBuffer[] {
@@ -193,7 +193,7 @@ export interface RoadGraph {
   segCount: number;
   sa: Int32Array; sb: Int32Array; // indices into the node arrays
   scx: Float32Array; scz: Float32Array;
-  sprofile: Uint8Array; sflags: Uint8Array;
+  sprofile: Uint16Array; sflags: Uint8Array;
   /** 1 = build this segment here. */
   segOwn: Uint8Array;
   /** The segment's real id (for the traffic occupancy in the shader). */
