@@ -52,7 +52,8 @@ export class TextSigns {
   update(eye: THREE.Vector3): void {
     if (this.version === this.lastVer && Math.hypot(eye.x - this.lastX, eye.z - this.lastZ) < 60) return;
     this.lastVer = this.version; this.lastX = eye.x; this.lastZ = eye.z;
-    for (const c of [...this.group.children]) this.group.remove(c);
+    // the plane and the materials are shared; the meshes are made again, so each old one is disposed
+    for (const c of [...this.group.children]) { this.group.remove(c); (c as THREE.Mesh).dispose(); }
     const it = this.world.items, c = it.t.cols;
     it.index.query(eye.x - RADIUS, eye.z - RADIUS, eye.x + RADIUS, eye.z + RADIUS, (i) => {
       if (c.type[i] !== Item.Sign) return;

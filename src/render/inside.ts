@@ -42,7 +42,7 @@ export class InsideView {
 
   /** Mostra o andar `k` do prédio (centro, w × d, giro, base do térreo, pé-direito). */
   show(x: number, z: number, w: number, d: number, rot: number, base: number, k: number, fh: number): void {
-    for (const c of [...this.group.children]) this.group.remove(c);
+    for (const c of [...this.group.children]) { this.group.remove(c); (c as THREE.Mesh).dispose(); }
     const y = base + k * fh;
     // até onde o prédio aparece: o teto deste andar some
     cutBoxU.value.set(x, z, w / 2, d / 2);

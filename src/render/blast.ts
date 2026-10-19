@@ -56,7 +56,7 @@ export class Blast {
       const k = Math.min(1, (f.t / 2.4) ** 2);
       f.mesh.scale.y = Math.max(0.01, f.h * (1 - k));
       f.mesh.rotation.z = 0.06 * k;
-      if (k >= 1) { this.group.remove(f.mesh); this.falling.splice(i, 1); }
+      if (k >= 1) { this.group.remove(f.mesh); f.mesh.dispose(); this.falling.splice(i, 1); }
     }
   }
 

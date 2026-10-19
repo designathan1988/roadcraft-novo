@@ -12,6 +12,9 @@ import { CommandStack } from '../src/core/commands.ts';
 import { Growth } from '../src/world/growth.ts';
 import type { JobPool } from '../src/jobs/pool.ts';
 import type { LotColumns } from '../src/jobs/protocol.ts';
+import * as THREE from 'three/webgpu';
+import { CellLayer } from '../src/render/cellLayer.ts';
+import { Dirty } from '../src/core/grid.ts';
 
 /** World positions of a packed mesh's vertices. */
 function positions(m: PackedMesh): Array<[number, number, number]> {
@@ -95,4 +98,31 @@ test('A20: undoing a demolition works after growth took the lot (and its freed i
   assert.equal(w.buildings.alive[neighbour], 1, 'the neighbour sharing the lot edge stays');
   assert.doesNotThrow(() => commands.redo(), 'redo of the demolition');
   assert.equal(w.buildings.alive[id], 0);
+});
+
+/** A one-triangle packed mesh. */
+function triangle(): PackedMesh {
+  return { originX: 0, originY: 0, originZ: 0, scale: 256, vertexCount: 3, minY: 0, maxY: 1,
+    position: new Int16Array([0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 100, 0]), normal: new Int8Array(12), color: new Uint8Array(12),
+    index: new Uint16Array([0, 1, 2]) };
+}
+
+test('E6: a cell mesh that is replaced or reset is disposed (three releases its render objects only then)', () => {
+  const w = new World();
+  const source = { buildCell() {}, buildTile() {}, hasContent: () => true };
+  const layer = new CellLayer(source, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40 });
+  type Slot = { mesh: THREE.Mesh | null };
+  const inner = layer as unknown as { cells: Slot[][]; setMesh(s: Slot, m: PackedMesh | null, v: number): void };
+  const slot = inner.cells[0][0];
+  inner.setMesh(slot, triangle(), 1);
+  const first = slot.mesh!;
+  let disposed = 0;
+  first.addEventListener('dispose', () => { disposed++; });
+  inner.setMesh(slot, triangle(), 2);
+  assert.equal(disposed, 1, 'the replaced mesh fired dispose');
+  const second = slot.mesh!;
+  let reset = 0;
+  second.addEventListener('dispose', () => { reset++; });
+  layer.reset();
+  assert.equal(reset, 1, 'reset disposed the mesh it held');
 });

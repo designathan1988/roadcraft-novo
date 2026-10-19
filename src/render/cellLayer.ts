@@ -188,6 +188,9 @@ export class CellLayer {
     if (s.mesh) {
       (s.mesh.userData as FadeData).dead = true;
       s.mesh.geometry.dispose();
+      // three keeps a mesh's render objects (bindings, uniform buffers, one per pass and shadow cascade) until the
+      // mesh itself or its material is disposed; the material is shared, so the mesh must be
+      s.mesh.dispose();
       this.gpuBytes -= s.bytes;
       s.mesh = null;
       s.bytes = 0;

@@ -98,7 +98,7 @@ export class TransitRenderer {
     let n = 0;
     const p2 = new Float64Array(2), d2 = new Float64Array(2);
     const col = new THREE.Color();
-    for (const old of [...this.paths.children]) { (old as THREE.Line).geometry.dispose(); this.paths.remove(old); }
+    for (const old of [...this.paths.children]) { (old as THREE.Line).geometry.dispose(); (old as THREE.Line).dispose(); this.paths.remove(old); }
     let np = 0, ne = 0;
     const sc = net.segs.cols, nc = net.nodes.cols;
     for (const l of transit.lines) {
