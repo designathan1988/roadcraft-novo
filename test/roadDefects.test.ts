@@ -401,3 +401,23 @@ test('D7: zoning or building a road near a cell edge refreshes the lots of the c
   road(w, 200, 230, 200, 250);
   assert.ok(w.dirty.drain(Dirty.Lots).includes(cellId(cellX(200), cellX(270))), 'a new road did not refresh the lots across the edge');
 });
+
+test('A19: restoring ids one by one (load, undo) takes time in proportion to the count, not its square', async () => {
+  const { Table } = await import('../src/core/table.ts');
+  const n = 100_000;
+  const t = new Table({ v: Float32Array }, 1024);
+  for (let i = 0; i < n; i++) t.alloc();
+  for (let i = 0; i < n; i++) t.release(i);
+  // an undo restores the ids it removed, oldest first: each one sits at the far end of the free list
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) t.allocAt(i);
+  const ms = performance.now() - t0;
+  assert.equal(t.size, n);
+  assert.ok(ms < 1000, `restoring ${n} ids took ${ms.toFixed(0)} ms`);
+  // the free list stays right: releasing and allocating again hands the ids back without repeats
+  for (let i = 0; i < 10; i++) t.release(i * 7);
+  const got = new Set<number>();
+  for (let i = 0; i < 10; i++) got.add(t.alloc());
+  assert.equal(got.size, 10);
+  for (const id of got) assert.equal(id % 7, 0);
+});
