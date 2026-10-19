@@ -226,7 +226,35 @@ export class Post {
     csm.updateFrustums();
   }
 
-  render(): void {
+  // what the cascades were last drawn for
+  private shadowView = new THREE.Matrix4();
+  private shadowProj = new THREE.Matrix4();
+  private shadowSun = new THREE.Vector3();
+  private shadowDirty = true;
+
+  /** Something that casts changed (a mesh came, left or was rebuilt): the cascades are redrawn next frame. */
+  invalidateShadows(): void { this.shadowDirty = true; }
+
+  /**
+   * The 3 cascades are drawn only when something in them can have changed: the camera or its projection (the cascades
+   * follow the view), the sun, the city (`invalidateShadows`), or casters that move (`moving`: traffic and people
+   * walking, trees in the wind). Still, the maps of the last frame are reused (they used to be redrawn every frame).
+   */
+  prepareShadows(moving: boolean): void {
+    const csm = this.csm as (CSMShadowNode & { lights: Array<{ shadow: THREE.LightShadow }> }) | null;
+    if (!csm || csm.lights.length === 0) return;
+    const cam = this.camera;
+    const still = !moving && !this.shadowDirty && this.shadowView.equals(cam.matrixWorld) && this.shadowProj.equals(cam.projectionMatrix) && this.shadowSun.equals(this.sun.position);
+    this.shadowView.copy(cam.matrixWorld);
+    this.shadowProj.copy(cam.projectionMatrix);
+    this.shadowSun.copy(this.sun.position);
+    this.shadowDirty = false;
+    for (const l of csm.lights) { l.shadow.autoUpdate = false; l.shadow.needsUpdate = !still; }
+  }
+
+  /** `moving`: casters that move this frame (see prepareShadows). */
+  render(moving = true): void {
+    this.prepareShadows(moving);
     // switch only when it changes (kept here: rebuilding the final image every frame zeroes the TRAA's history)
     const want = (this.bloomOverride ?? nightU.value > 0.04) ? this.nightOut : this.dayOut;
     if (this.active !== want) { this.active = want; this.pipeline.outputNode = want; this.pipeline.needsUpdate = true; }

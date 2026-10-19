@@ -679,7 +679,13 @@ export class Game {
     this.props.update(renderer, cam, this.rig.eye, now);
     const T5 = pf ? performance.now() : 0;
 
-    if (this.post) { this.post.setCamera(cam); this.post.render(); }
+    if (this.post) {
+      // the shadow cascades are redrawn only when something casting changed or moves (render/post.ts prepareShadows)
+      if (this.props.changed || this.layers.some((l) => l.changed)) this.post.invalidateShadows();
+      this.props.changed = false;
+      this.post.setCamera(cam);
+      this.post.render(!this.paused || windU.value > 0.001);
+    }
     else renderer.render(scene, cam);
     // measurement (?perf): frames over 30 ms say where the time went
     if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); }

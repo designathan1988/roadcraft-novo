@@ -102,6 +102,22 @@ const SCENARIOS = {
       check('the tree ' + spot.k + ' m outside the view (shadow ' + Math.round(15 / Math.tan(Math.asin(sun.y))) + ' m long) is drawn for the shadow maps', after > before, 'near trees ' + before + ' -> ' + after);
     }
   `,
+  // E19: paused, without wind and with the camera still, the shadow cascades are not redrawn every frame
+  'still-shadows': `
+    await g.view(0, 0, 35, 40, 300, 11);
+    await g.settle(10);
+    g.weather.windFixed = 0;
+    await frames(60);
+    const running = g.stats().draws;
+    if (!g.paused) g.togglePause();
+    await frames(30);
+    const still = [];
+    for (let i = 0; i < 5; i++) { await frames(1); still.push(g.stats().draws); }
+    check('paused and still, a frame draws less than running (' + running + ' draws running, still ' + still.join('/') + ')', Math.max(...still) < running * 0.8, 'still frames: ' + still.join(', '));
+    g.rig.yaw += 0.2;
+    await frames(2);
+    check('turning the camera redraws the cascades', g.stats().draws > Math.max(...still), 'after turning: ' + g.stats().draws);
+  `,
 };
 
 const pick = process.argv.slice(2);
@@ -125,7 +141,7 @@ for (const name of names) {
   const bad = checks.filter((c) => c.startsWith('FAILED'));
   failed += bad.length;
   console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
-  for (const c of bad) console.log('  ' + c);
+  for (const c of checks) console.log('  ' + c);
   fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 });
 }
 console.log(failed ? `render check: ${failed} FAILED` : 'render check: ok');

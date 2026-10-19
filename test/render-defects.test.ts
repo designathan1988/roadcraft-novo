@@ -393,3 +393,27 @@ test('E15: road cells with a bridge cast a sun shadow; flat road cells do not', 
   assert.equal(L.cells[0][bridgeCell].mesh!.castShadow, true, 'the bridge over the valley casts a shadow');
   assert.equal(L.cells[0][flatCell].mesh!.castShadow, false, 'a road on flat ground casts none (its shadow would be under it)');
 });
+
+test('E19: with nothing moving the shadow cascades are not redrawn', async () => {
+  const { Post } = await import('../src/render/post.ts');
+  const renderer = fakeRenderer();
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), sun = new THREE.DirectionalLight();
+  const scene = new THREE.Scene(); scene.add(sun);
+  const post = new Post(renderer, scene, camera, sun, { shadows: true, ao: false, bloom: false });
+  const csm = post.csm as unknown as { _init(b: unknown): void; lights: Array<{ shadow: THREE.LightShadow }> };
+  csm._init({ camera, renderer });
+  const prepare = (moving: boolean) => (post as unknown as { prepareShadows?(m: boolean): void }).prepareShadows?.(moving);
+  const redrawn = () => csm.lights.map((l) => l.shadow.autoUpdate || l.shadow.needsUpdate);
+  post.setCamera(camera); prepare(false);
+  assert.deepEqual(redrawn(), [true, true, true], 'the first frame draws the cascades');
+  post.setCamera(camera); prepare(false);
+  assert.deepEqual(redrawn(), [false, false, false], 'a still frame redraws none of the 3 cascades');
+  post.setCamera(camera); prepare(true);
+  assert.deepEqual(redrawn(), [true, true, true], 'moving casters (traffic, wind) redraw them');
+  camera.position.x += 1; camera.updateMatrixWorld();
+  post.setCamera(camera); prepare(false);
+  assert.deepEqual(redrawn(), [true, true, true], 'the camera moved: redrawn');
+  post.invalidateShadows?.();
+  post.setCamera(camera); prepare(false);
+  assert.deepEqual(redrawn(), [true, true, true], 'the city changed: redrawn');
+});

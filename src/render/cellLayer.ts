@@ -97,6 +97,8 @@ export class CellLayer {
   private next = new Set<THREE.Mesh>();
   private fading: Array<{ mesh: THREE.Mesh; t0: number }> = [];
   private frame = 0;
+  /** What the layer draws changed in the last `update` (the shadow cascades are redrawn). */
+  changed = true;
   /** Distance scale by resolution (1 = 1080p, 45°). */
   pixelScale = 1;
   gpuBytes = 0;
@@ -410,6 +412,9 @@ export class CellLayer {
     const out = this.group.children;
     out.length = 0;
     this.frame++;
+    // what is drawn changed this frame (a mesh came, left, was swapped or is fading): the shadow maps must follow
+    this.changed = this.fading.length > 0 || this.next.size !== this.shown.size;
+    if (!this.changed) for (const m of this.next) if (!this.shown.has(m)) { this.changed = true; break; }
     for (const mesh of this.next) {
       const u = mesh.userData as FadeData;
       // already drawn in an earlier frame: the data is on the GPU

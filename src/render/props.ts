@@ -98,6 +98,8 @@ export class PropRenderer {
   /** Traffic light state texture (node → 1 + arm * 4 + state). */
   readonly signalTex: THREE.DataTexture;
   pixelScale = 1;
+  /** Props were placed or dropped since the last `update` (the shadow cascades are redrawn). */
+  changed = true;
   /** Mesh of each type × level (null: no level): levels nothing can reach this frame are not drawn. */
   private slotMesh: Array<THREE.Mesh | null> = new Array(DRAWS).fill(null);
   private signalSent = 0;
@@ -542,6 +544,7 @@ export class PropRenderer {
   /** Counts a placed cell's instances per kind (kinds with none in the held cells are not drawn). */
   private countKinds(c: number, p: PropColumns): void {
     this.forgetKinds(c);
+    this.changed = true;
     const n = new Uint32Array(KINDS);
     let top = -Infinity;
     for (let i = 0; i < p.count; i++) {
@@ -574,6 +577,7 @@ export class PropRenderer {
     const n = this.cellKinds.get(c);
     if (!n) return;
     this.cellKinds.delete(c);
+    this.changed = true;
     this.cellTop[c] = -Infinity;
     this.kindNearDue = true;
   }
