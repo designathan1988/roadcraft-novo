@@ -419,10 +419,121 @@ const POST = {
   },
 };
 
+// Scenarios of the browser build: Chrome (WebGPU) with a profile of its own, the game served from dist/ by
+// tools/serve.mjs, driven through the DevTools protocol. Each step runs in one tab, in order.
+const BROWSER = {
+  // A37: one tab writes the save; a second tab of the same city does not write over it, and says so; once the first
+  // tab closes, the second one can save
+  'two-tabs': [
+    { tab: 0, body: `
+      road(1500, 1500, 1700, 1500);
+      check('the first tab saves', await g.save(false) === true, 'save() did not complete');
+      console.log('persisted storage: ' + await navigator.storage.persisted());
+    ` },
+    { tab: 1, body: `
+      const before = await files.snapshot();
+      road(-3000, -3000, -2800, -3000);
+      const r = await g.save(false);
+      const same = sameFiles(before, await files.snapshot());
+      check('a second tab does not write the same save', r === false && same, 'save() ' + r + ', files ' + (same ? 'same' : 'changed'));
+      check('it says why', toasts.some((m) => /outra aba|another tab/.test(m)), 'toasts: ' + toasts.join(' | '));
+    ` },
+    { tab: 0, body: `
+      road(1500, 1600, 1700, 1600);
+      check('the first tab still saves', await g.save(false) === true, 'save() did not complete');
+    ` },
+    { close: 0 },
+    { tab: 1, body: `
+      await wait(2000);
+      check('once the first tab closed, the second one saves', await g.save(false) === true, 'save() did not complete');
+    ` },
+  ],
+};
+
+function chromePath() {
+  const local = process.env.LOCALAPPDATA ?? '', pf = process.env.PROGRAMFILES ?? 'C:\\Program Files', pf86 = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
+  return [path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find((c) => fs.existsSync(c));
+}
+
+/** Runs a browser scenario's steps; returns its checks ("OK …" / "FAILED …"). */
+async function inChrome(steps) {
+  const chrome = chromePath();
+  if (!chrome) return ['FAILED Chrome is not installed'];
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-chrome-'));
+  const port = 5300 + Math.floor(Math.random() * 300), debug = port + 1000;
+  const server = spawn(process.execPath, [path.join(root, 'tools', 'serve.mjs')], { cwd: root, env: { ...process.env, PORT: String(port) }, stdio: ['ignore', 'pipe', 'ignore'] });
+  const checks = [];
+  let ch = null;
+  try {
+    const url = await new Promise((resolve, reject) => {
+      server.stdout.on('data', (d) => { const m = /(http:\/\/localhost:\d+\/)/.exec(String(d)); if (m) resolve(m[1]); });
+      setTimeout(() => reject(new Error('the server did not start')), 15000);
+    });
+    const page = `${url}?vazio&hora=11&workers=2`;
+    ch = spawn(chrome, [`--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, '--no-first-run', '--no-default-browser-check',
+      '--window-size=1280,720', '--window-position=-20000,-20000', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows', '--disable-features=CalculateNativeWinOcclusion', page], { stdio: 'ignore' });
+    const targets = async () => (await (await fetch(`http://127.0.0.1:${debug}/json/list`)).json()).filter((t) => t.type === 'page' && t.url.startsWith(url));
+    let first = null;
+    for (let i = 0; i < 100 && !first; i++) { await new Promise((r) => setTimeout(r, 300)); try { first = (await targets())[0]; } catch { /* not up yet */ } }
+    if (!first) throw new Error('no Chrome page');
+    const second = await (await fetch(`http://127.0.0.1:${debug}/json/new?${encodeURIComponent(page)}`, { method: 'PUT' })).json();
+    const tabs = [];
+    for (const t of [first, second]) {
+      const ws = new WebSocket(t.webSocketDebuggerUrl);
+      await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+      const tab = { id: t.id, ws, seq: 0, pending: new Map(), lines: [] };
+      ws.addEventListener('message', (e) => {
+        const m = JSON.parse(e.data);
+        if (m.id && tab.pending.has(m.id)) { tab.pending.get(m.id)(m); tab.pending.delete(m.id); }
+        if (m.method === 'Runtime.consoleAPICalled') tab.lines.push(m.params.args.map((x) => x.value ?? x.description ?? '').join(' '));
+      });
+      tab.send = (method, params = {}) => new Promise((r) => { const id = ++tab.seq; tab.pending.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+      tab.eval = async (expression) => (await tab.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result?.result?.value;
+      await tab.send('Runtime.enable');
+      tabs.push(tab);
+    }
+    for (const tab of tabs) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < 240000 && await tab.eval('window.__cidade?.status ?? "carregando"') !== 'pronto') await new Promise((r) => setTimeout(r, 500));
+    }
+    for (const step of steps) {
+      if (step.close !== undefined) { await fetch(`http://127.0.0.1:${debug}/json/close/${tabs[step.close].id}`); continue; }
+      const tab = tabs[step.tab];
+      tab.lines = [];
+      void tab.eval(`(async()=>{${PRELUDE}\ntry {${step.body}\n} catch (e) { check('step ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`);
+      const t0 = Date.now();
+      while (Date.now() - t0 < 240000 && !tab.lines.some((l) => l.includes('CHECK END'))) await new Promise((r) => setTimeout(r, 300));
+      for (const l of tab.lines) if (l.startsWith('persisted storage')) console.log(`  (${l})`);
+      const got = tab.lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
+      if (!got.includes('END')) got.push(`FAILED tab ${step.tab} did not finish its step after: ` + (got[got.length - 1] ?? 'nothing'));
+      checks.push(...got.filter((c) => c !== 'END'));
+    }
+    await tabs[1].send('Browser.close').catch(() => {});
+  } catch (err) {
+    checks.push(`FAILED the browser run: ${err.message}`);
+  } finally {
+    try { ch?.kill(); } catch { /* gone */ }
+    server.kill();
+    await new Promise((r) => setTimeout(r, 1500));
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  }
+  return checks;
+}
+
 const pick = process.argv.slice(2);
-const names = pick.length ? pick : Object.keys(SCENARIOS);
+const names = pick.length ? pick : [...Object.keys(SCENARIOS), ...Object.keys(BROWSER)];
 let failed = 0;
 for (const name of names) {
+  if (BROWSER[name]) {
+    const checks = await inChrome(BROWSER[name]);
+    const bad = checks.filter((c) => c.startsWith('FAILED'));
+    failed += bad.length;
+    console.log(`${name} (browser): ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
+    for (const c of bad) console.log('  ' + c);
+    continue;
+  }
   const bodies = SCENARIOS[name];
   if (!bodies) { console.log(`unknown scenario ${name}`); failed++; continue; }
   // a scenario is one session, or several sessions one after the other over the same folder (closing and reopening)

@@ -182,12 +182,44 @@ export async function migrateOnce(from: FileStore, to: FileStore): Promise<strin
 }
 
 /**
+ * Who writes a slot. In the browser every tab of the game shares the storage: the first tab holds a lock on the slot
+ * (navigator.locks, while the tab lives) and writes; another tab only reads, until the lock is free again (the first
+ * tab closed), when `onWriter` is called. The desktop game is one window (a single instance) and always writes.
+ */
+export class SlotLock {
+  writer = true;
+  readonly ready: Promise<void>;
+
+  constructor(slot: string, onWriter?: () => void) {
+    const locks = (globalThis.navigator as Navigator | undefined)?.locks;
+    const desktop = !!(globalThis as { roadcraftApp?: { files?: unknown } }).roadcraftApp?.files;
+    if (!locks || desktop) { this.ready = Promise.resolve(); return; }
+    this.writer = false;
+    const name = `roadcraft-save-${slot}`;
+    const hold = () => new Promise<void>(() => { /* held while the tab lives */ });
+    this.ready = new Promise<void>((resolve) => {
+      void locks.request(name, { ifAvailable: true }, (lock) => {
+        if (lock) { this.writer = true; resolve(); return hold(); }
+        resolve();
+        // another tab writes: wait for its lock
+        void locks.request(name, () => { this.writer = true; onWriter?.(); return hold(); });
+        return null;
+      }).catch((err: unknown) => { console.warn('save: no lock on the save', err); this.writer = true; resolve(); });
+    });
+  }
+}
+
+/**
  * The save storage of this game: real files in the desktop game (after copying, once, the saves it kept in the browser
  * storage before), the origin private file system in the browser. Never rejects.
  */
 export async function openSaveStore(): Promise<FileStore> {
   const bridge = (globalThis as { roadcraftApp?: { files?: FilesBridge } }).roadcraftApp?.files;
-  if (!bridge) return new OpfsStore();
+  if (!bridge) {
+    // the browser may clear storage it was not asked to keep (low disk): ask to keep the saves
+    void navigator.storage?.persist?.().then((kept) => { if (!kept) console.warn('save: the browser did not promise to keep the saves'); }, () => { /* not offered */ });
+    return new OpfsStore();
+  }
   const files = new AppStore(bridge);
   try {
     const copied = await migrateOnce(new OpfsStore(), files);

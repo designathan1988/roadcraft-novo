@@ -75,7 +75,7 @@ import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
 import { MapFileError, keepPreviousCity, packSlot, quarantineSlot, readPackage, savedIn } from './mapFile.ts';
-import { KeptFileMissing, SaveSlot, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation, type Opened } from './saveFiles.ts';
+import { KeptFileMissing, SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation, type Opened } from './saveFiles.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
 
 const SLOT = 'cidade-1';
@@ -2085,6 +2085,9 @@ export class Game {
 
   private async slot(): Promise<SaveSlot> { return new SaveSlot(await this.saveStore, SLOT); }
 
+  /** In the browser, only the tab holding the slot's lock writes it (another tab of the game only reads). */
+  private readonly slotLock = new SlotLock(SLOT, () => this.hud.toast(t('save.nowWriter')));
+
   /**
    * Writes a new generation of the save: the changed tiles, the map's description and the manifest, then the commit
    * (saveFiles.ts); until the commit the save before stays the one that opens. Everything is copied at the start, in
@@ -2098,6 +2101,9 @@ export class Game {
       if (!auto) this.hud.toast(t('save.blocked'));
       return false;
     }
+    await this.slotLock.ready;
+    if (!this.slotLock.writer) { this.hud.toast(t('save.otherTab')); return false; }
+    if (this.busy) return false;
     this.busy = true;
     let slot: SaveSlot;
     try { slot = await this.slot(); await this.keepSlotForThisCity(slot); } catch (err) {
