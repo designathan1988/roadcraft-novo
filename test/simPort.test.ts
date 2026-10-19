@@ -77,3 +77,38 @@ test('drivers differ: the pushy follow closer, accelerate and brake harder, acce
   const timid = gapBehind(0), pushy = gapBehind(0.9999);
   assert.ok(timid > pushy + 3, `following gap ${timid.toFixed(1)} m (timid) and ${pushy.toFixed(1)} m (pushy)`);
 });
+
+test('driving: improved IDM with the constant-acceleration heuristic, jerk-limited pedals, and never into what is ahead', async () => {
+  const { drawDriver, driveAccel, driverSchema, JERK_UP } = await import('../src/sim/drivers.ts');
+  const c = Object.fromEntries(Object.entries(driverSchema).map(([k, A]) => [k, new A(1)])) as unknown as Parameters<typeof drawDriver>[0];
+  drawDriver(c, 0, 'sedan', () => 0.5); // an ordinary driver
+  const dt = 0.05;
+  // pulling away from rest on a free road: the acceleration builds up at the driver's jerk, not at once
+  let v = 0, last = 0;
+  c.acc[0] = 0;
+  for (let i = 0; i < 20; i++) {
+    const a = driveAccel(c, 0, v, 14, 1e9, 99, 0, dt);
+    assert.ok(a - last <= JERK_UP * dt + 1e-9, `step ${i}: acceleration ${last.toFixed(2)} → ${a.toFixed(2)} m/s²`);
+    last = a; c.acc[0] = a; v += a * dt;
+  }
+  // a car cuts in 5 m ahead at the same 14 m/s: too close by the headway, but not closing; plain IDM would stamp on the
+  // brake, the heuristic eases off
+  c.acc[0] = 0;
+  const cut = driveAccel(c, 0, 14, 15, 5, 14, 0, dt);
+  const s0 = c.ds0[0], T = c.dT[0], a = c.da[0];
+  const sStar = s0 + 14 * T;
+  const idm = a * (1 - (14 / 15) ** 4 - (sStar / 5) ** 2);
+  assert.ok(cut > -c.db[0] - 0.5 && idm < -8, `cut-in: ${cut.toFixed(2)} m/s² (plain IDM ${idm.toFixed(2)})`);
+  // at 15 m/s towards a stopped car 40 m ahead: stops short of it, never braking harder than an emergency stop
+  v = 15; let s = 0; c.acc[0] = 0;
+  let hardest = 0;
+  for (let i = 0; i < 20 * 20; i++) {
+    const acc = driveAccel(c, 0, v, 14, 40 - s, 0, 0, dt);
+    const nv = Math.max(0, v + acc * dt);
+    const applied = (nv - v) / dt;
+    hardest = Math.min(hardest, applied);
+    s += (v + nv) / 2 * dt; v = nv; c.acc[0] = applied;
+  }
+  assert.ok(s < 40 && 40 - s < 6, `stopped ${(40 - s).toFixed(2)} m short of the car`);
+  assert.ok(hardest >= -c.dbe[0] - 1e-6, `braked at ${hardest.toFixed(2)} m/s² (emergency ${c.dbe[0].toFixed(2)})`);
+});

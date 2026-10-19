@@ -17,7 +17,7 @@ import { FlowAdvisor } from './advisor.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
-import { archOf, desiredSpeed, drawDriver, driverSchema } from './drivers.ts';
+import { archOf, desiredSpeed, driveAccel, drawDriver, driverSchema } from './drivers.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
@@ -391,6 +391,10 @@ export class Traffic {
   private rng = new Rng(12345);
   private tmp = new Float64Array(4);
   private tmp2 = new Float64Array(4);
+  /** Meso pace factor (MESO_ALPHA; a field so measurements can try others). */
+  mesoAlpha = MESO_ALPHA;
+  /** How much a full lane slows the far model (the BPR term: 1 + mesoCrowd × occupancy²). */
+  mesoCrowd = 3;
   /** Target density (vehicles per metre of lane). */
   density = 1 / 100;
 
@@ -1179,8 +1183,8 @@ export class Traffic {
     const headway = lit ? 2 : wait >= 6 ? 3.6 : wait >= 4 ? 2.6 : 1.8;
     // time: free driving, slowed by occupancy (BPR curve), plus the junction wait; all times MESO_ALPHA
     const occ = Math.min(1, this.laneCount[lane] * 7.5 / (L * lanes));
-    const run = rest / (laneSpeed(p) * c.vf[v]) * (1 + 3 * occ * occ) + wait;
-    const t = Math.max(this.time + run * MESO_ALPHA + extra, this.laneLastExit[lane] + headway / lanes);
+    const run = rest / (laneSpeed(p) * c.vf[v]) * (1 + this.mesoCrowd * occ * occ) + wait;
+    const t = Math.max(this.time + run * this.mesoAlpha + extra, this.laneLastExit[lane] + headway / lanes);
     this.laneLastExit[lane] = t;
     this.schedule(v, t);
   }
@@ -1729,6 +1733,8 @@ export class Traffic {
     const p = sim.net.segs.cols.profile[laneSeg(lane)];
     const v0 = desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time);
     let gap = 1e9, vl = 99;
+    /** Where it must have stopped by, whatever its comfort (a bus or train stop: no further than just past it). */
+    let stopRoom = 1e9;
     const lead = c.prev[v];
     if (lead >= 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
     // end of the lane: destination, signal or whatever comes after the node
@@ -1745,7 +1751,8 @@ export class Traffic {
             if (c.dwell[v] >= (ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL)) { c.dwell[v] = 0; this.serve(v); }
             else atStop = true;
           }
-          if (lead < 0 || sg + S0 < gap) { gap = Math.min(gap, Math.max(0, sg) + S0); vl = 0; }
+          if (lead < 0 || sg + c.ds0[v] < gap) { gap = Math.min(gap, Math.max(0, sg) + c.ds0[v]); vl = 0; } // (its own standstill gap: it halts at the stop)
+          stopRoom = Math.max(0, sg) + 0.5;
         }
       }
     }
@@ -1799,15 +1806,19 @@ export class Traffic {
         // bus and train: a stop just past the node already counts for braking (a fast train cannot stop in 20 m)
         const sg = this.stopAhead(v, conn);
         if (sg >= 0 && toEnd + sg < gap) { gap = toEnd + sg; vl = 0; }
+        if (sg >= 0) stopRoom = Math.min(stopRoom, toEnd + sg + 0.5);
       }
     }
-    let a = this.idm(v, c.v[v], v0, gap, vl);
+    // what the car ahead is doing, when it is the obstacle (the stop line, a stop or a red stand still)
+    const al = lead >= 0 && gap === c.s[lead] - c.len[lead] - c.s[v] ? c.acc[lead] : 0;
+    let a = driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, stopRoom);
     if (c.dying[v]) a = Math.min(a, 0); // an arrived vehicle disappears without braking in front of others
     if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // in the bay, waiting to pull out
     if (c.mv[v] >= 0) a = -9; // pulling out of the bay: held until the manoeuvre is back in the lane
     if (atStop) a = Math.min(a, -2);
     a = Math.max(-9, a);
     const nv = Math.max(0, c.v[v] + a * dt);
+    c.acc[v] = (nv - c.v[v]) / dt;
     c.exitC[v] = conn;
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;
     // pulling out of the bay: the drawing slides from the kerb to the lane (the simulation already has it in the lane)
@@ -1979,8 +1990,10 @@ export class Traffic {
     const sg = this.stopAhead(v, conn);
     if (sg >= 0 && sg - c.s[v] < gap) { gap = Math.max(0, sg - c.s[v]); vl = 0; }
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2); // a lane change finishing on the way through
-    const a = Math.max(-9, this.idm(v, c.v[v], v0, gap, vl));
+    const al = lead >= 0 && gap === c.s[lead] - c.len[lead] - c.s[v] ? c.acc[lead] : 0;
+    const a = Math.max(-9, driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, sg >= 0 ? Math.max(0, sg - c.s[v]) + 0.5 : 1e9));
     const nv = Math.max(0, c.v[v] + a * dt);
+    c.acc[v] = (nv - c.v[v]) / dt;
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
     c.v[v] = nv;
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;

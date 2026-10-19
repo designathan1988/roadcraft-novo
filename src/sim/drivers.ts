@@ -46,6 +46,8 @@ export const driverSchema = {
   driftA: Float32Array, driftR: Float32Array, driftP: Float32Array,
   /** Seconds held up before looking for another way round. */
   patience: Float32Array,
+  /** The acceleration of the last step (the foot on the pedal: the next one changes at a driver's jerk). */
+  acc: Float32Array,
 } as const;
 type Cols = { [K in keyof typeof driverSchema]: InstanceType<(typeof driverSchema)[K]> };
 
@@ -75,8 +77,56 @@ export function drawDriver(c: Cols, v: number, arch: ArchName, sample: () => num
   c.driftR[v] = 0.06 + sample() * 0.12;
   c.driftP[v] = sample() * Math.PI * 2;
   c.patience[v] = 6 + (1 - g) * 7;
+  c.acc[v] = 0;
   // the class's share of the limit, and each driver a little faster or slower (0.92-1.08)
   return speed * (0.92 + sample() * 0.16);
+}
+
+/** Share of the heuristic in the IIDM/CAH blend (Treiber & Kesting use 0.99). */
+const COOLNESS = 0.99;
+/** Fastest a driver's acceleration rises (easing on) and falls (braking harder), m/s³. */
+export const JERK_UP = 2.5, JERK_DOWN = 8;
+/** Below this speed (m/s) a driver lifts off at once. */
+const CRAWL = 1;
+
+/**
+ * The acceleration driver `u` (at speed `v`, aiming for `v0`) applies this step with an obstacle `gap` m ahead
+ * moving at `vl` and accelerating at `al` (gap ≥ 1e8: free road). Roadcraft 4.0's operational model
+ * (`drive/operational.ts`, `vehicles/idm.ts`): the improved IDM (no creeping drift below the desired speed, a
+ * comfortable slow-down above it), blended with the constant-acceleration heuristic (a car cutting in ahead but
+ * pulling away is not braked for as if it stood still); the pedal moves at the driver's jerk (easing on at
+ * JERK_UP, ordinary braking at JERK_DOWN; braking harder than comfortable is never held back), and the speed never
+ * exceeds the one from which an emergency stop still ends short of the obstacle. The queue-discharge relief of this
+ * engine stays (a queue moves off together, without an accordion). `stopRoom`: where it must have stopped by (a bus
+ * or train stop), checked like the obstacle.
+ */
+export function driveAccel(c: Cols, u: number, v: number, v0: number, gap: number, vl: number, al: number, dt: number, stopRoom = 1e9): number {
+  const a = c.da[u], b = c.db[u], bE = c.dbe[u];
+  const v0s = Math.max(v0, 0.01);
+  const free = v <= v0s ? a * (1 - (v / v0s) ** 4) : -b * (1 - Math.pow(v0s / v, (a * 4) / b));
+  let target = free;
+  if (gap < 1e8) {
+    const rel = vl > 0.3 && v < 4 ? 0.6 * (1 - v / 4) * Math.min(1, vl / 1.5) : 0;
+    const sStar = c.ds0[u] * (1 - rel) + Math.max(0, v * c.dT[u] * (1 - rel) + (v * (v - vl)) / (2 * Math.sqrt(a * b)));
+    const s = Math.max(gap, 0.02), z = sStar / s;
+    const iidm = v <= v0s ? (z >= 1 ? a * (1 - z * z) : free * (1 - Math.pow(z, (2 * a) / Math.max(free, 1e-6))))
+      : (z >= 1 ? free + a * (1 - z * z) : free);
+    const alc = Math.max(-bE, Math.min(a, al));
+    const cah = vl * (v - vl) <= -2 * s * alc ? (v * v * alc) / Math.max(vl * vl - 2 * s * alc, 1e-6)
+      : alc - (Math.max(0, v - vl) ** 2) / (2 * s);
+    target = iidm >= cah ? iidm : (1 - COOLNESS) * iidm + COOLNESS * (cah + b * Math.tanh((iidm - cah) / b));
+  }
+  target = Math.max(-bE, Math.min(a, target));
+  const foot = Math.max(-bE, Math.min(a, c.acc[u]));
+  let acc = target < -b || (v < CRAWL && target < foot) ? Math.min(target, foot + JERK_UP * dt)
+    : Math.max(foot - JERK_DOWN * dt, Math.min(foot + JERK_UP * dt, target));
+  if (gap < 1e8 || stopRoom < 1e8) {
+    // the emergency-stop cap: fast enough only to still stop short of it (what it needs to stop counts for one moving)
+    const room = Math.max(0, Math.min(stopRoom, gap - 0.3 + (vl > 0 ? (vl * vl) / (2 * bE) : 0)));
+    const safe = -bE * dt + Math.sqrt(bE * bE * dt * dt + 2 * bE * room);
+    if (v + acc * dt > safe) acc = (safe - v) / dt;
+  }
+  return acc;
 }
 
 /** The speed driver `v` aims for now, around `v0`. */
