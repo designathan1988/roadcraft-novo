@@ -34,6 +34,8 @@ export class Ambient {
     let ctx: AudioContext;
     try { ctx = new AudioContext(); } catch { return; }
     this.ctx = ctx;
+    // minimised or in another tab: silence (and the sound comes back with the game)
+    document.addEventListener('visibilitychange', () => { if (document.hidden) void ctx.suspend(); else void ctx.resume(); });
     this.master = ctx.createGain();
     this.master.gain.value = this.volume;
     this.master.connect(ctx.destination);

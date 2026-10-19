@@ -3,7 +3,8 @@
 // this build is simply not listed; their legal texts are shown as written, in a fold.
 
 import { el } from './dom.ts';
-import { fmtInt, t } from './i18n.ts';
+import { fmtInt, t, onLanguageChange } from './i18n.ts';
+import { steamName } from '../steam.ts';
 
 declare const __BUILD__: string;
 
@@ -42,12 +43,22 @@ export class AboutBox {
   readonly root: HTMLElement;
   private packs: HTMLElement;
   private loaded = false;
+  /** Who plays, when the game runs through Steam (empty otherwise). */
+  private steam = el('p', 'v2-muted');
 
   constructor() {
     this.root = el('div', 'v2-dialog-back');
     this.root.hidden = true;
-    const d = el('div', 'v2-dialog about');
     this.packs = el('div', 'about-packs');
+    this.build();
+    // another language: written again; the licences are read again when it is next opened (or now, if it is open)
+    onLanguageChange(() => { this.build(); this.loaded = false; if (this.isOpen) this.open(); });
+    this.root.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === this.root) this.close(); });
+    this.root.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+  }
+
+  private build(): void {
+    const d = el('div', 'v2-dialog about');
     const close = el('button', 'v2-btn primary', t('about.close'));
     close.type = 'button';
     close.addEventListener('click', () => this.close());
@@ -56,14 +67,13 @@ export class AboutBox {
     d.append(
       el('h2', '', t('ui.about.title')),
       el('p', 'v2-muted', `${t('about.build')}: ${typeof __BUILD__ === 'string' ? __BUILD__ : ''}`),
+      this.steam,
       el('p', '', t('ui.about.credits')),
       el('h3', '', t('ui.about.assets')),
       this.packs,
       foot,
     );
-    this.root.append(d);
-    this.root.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === this.root) this.close(); });
-    this.root.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+    this.root.replaceChildren(d);
   }
 
   get isOpen(): boolean { return !this.root.hidden; }
@@ -71,7 +81,11 @@ export class AboutBox {
 
   open(): void {
     this.root.hidden = false;
-    if (!this.loaded) { this.loaded = true; void this.fill(); }
+    if (!this.loaded) {
+      this.loaded = true;
+      void this.fill();
+      void steamName().then((name) => { this.steam.textContent = name ? t('ui.about.steam', { name }) : ''; this.steam.hidden = !name; });
+    }
   }
 
   /** Reads each pack's licence files once; packs without any file in this build are left out. */

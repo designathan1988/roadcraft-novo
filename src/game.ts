@@ -2,7 +2,7 @@
 // The page only does input, interface, choosing what to draw, and drawing.
 
 import * as THREE from 'three/webgpu';
-import { CELLS_PER_TILE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
+import { CELLS_PER_TILE, MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
 
 /** Changes the map size: the world arrays are sized to the map, so the page reloads. */
 const FLASH_COLOR = new THREE.Color(0xdde6ff);
@@ -32,12 +32,12 @@ import { PropRenderer } from './render/props.ts';
 import { TransitRenderer } from './render/transit.ts';
 import { Post } from './render/post.ts';
 import { achieve } from './steam.ts';
-import { OptionsPanel, loadSettings, saveSettings, type Settings } from './ui/options.ts';
+import { OptionsPanel, PRESETS, keepOverAddress, loadSettings, saveSettings, type Preset, type Settings } from './ui/options.ts';
 import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { followLanguage, loose, onLanguageReload, plural, setLang, t } from './ui/i18n.ts';
+import { fmtInt, followLanguage, loose, money, onLanguageChange, plural, setLang, t } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -51,6 +51,9 @@ import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
 import { installKeys } from './ui/keys.ts';
+import { attachPinch } from './ui/touch.ts';
+import { BOMB_START, bombRadius } from './ui/strike.ts';
+import { demandFactor, zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
@@ -63,7 +66,7 @@ import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
 import { CITY_STYLES, type CityStyle } from './jobs/cityField.ts';
-import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
+import { Ground, GroundStroke, RiverCommand, WATER_MAP_RES, WATER_TILE_RES, waterCoord, waterIndex } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
 import { ZoneTool } from './tools/zoneTool.ts';
@@ -135,7 +138,19 @@ export class Game {
   private transitTerminal = false;
   /** Clicks with the street item tools remove instead of placing (Remove poles; Shift+click does the same). */
   private itemRemove = false;
+  /** A wall is being traced with the barrier tool (its first point was clicked). */
+  private wallOpen = false;
   private health!: HealthPanel;
+  /** The developer panels (F8, F9, the worst case test): ?dev, roadcraft.dev = 1 in the browser's storage, or the dev server. */
+  private readonly developer = ((): boolean => {
+    let stored = false;
+    try { stored = localStorage.getItem('roadcraft.dev') === '1'; } catch { /* no storage */ }
+    return stored || new URLSearchParams(location.search).has('dev') || !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+  })();
+  /** The latest edits (the health panel's World tab): when, what. */
+  private changesLog: Array<[number, string]> = [];
+  /** The view the city opened with (Home goes back to it). */
+  private homeView: Float64Array | null = null;
   private creator!: Creator;
   private lineSel = 0;
   private linesSent = -1;
@@ -203,7 +218,7 @@ export class Game {
   private hour = 10;
   private clockSpeed = 1;
   /** Chosen sky and weather set by the player (both go into the save). */
-  private skyMode: SkyMode = 'ciclo';
+  private skyMode: SkyMode = 'dia'; // as Roadcraft 4.0: a game opens in "always day"
   private weatherCtl: WeatherCtl | null = null;
   private waterCtl = { waves: 0.3, foam: 0.4, current: 0.5 };
   /** Clouds placed by the player and the state of the Sky tool. */
@@ -217,7 +232,7 @@ export class Game {
   private blast = new Blast();
   /** People from the creator and the bomb strength. */
   private personSpec = { color: 3, height: 7, walk: false, count: 1 };
-  private bombForce = 3;
+  private bombForce = BOMB_START;
   private hitKind: 'pistol' | 'bomb' | null = null;
   private insideId = -1;
   private insideFloor = 0;
@@ -299,16 +314,16 @@ export class Game {
       groundKind: (k) => { this.groundKind = k; },
       forestMode: (cut) => { this.forestCut = cut; },
       forestSpecies: (s) => { this.forestSpecies = s; },
-      forestOne: (one) => { this.forestOne = one; this.hud.setHint(one ? 'Clique para plantar uma árvore da espécie escolhida.' : 'Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.'); },
+      forestOne: (one) => { this.forestOne = one; this.hud.setHint(one ? t('game.hint.forest.one') : t('game.hint.forest')); },
       poleLights: (m) => { this.itemTool.poleLights = m; },
       biome: (b) => this.setBiome(b),
       riverWidth: (w) => { this.riverWidth = w; },
       elements: (e) => { this.elem = e; },
       landform: (m) => { this.landformMode = m as BrushMode; if (this.tool === 'landform') this.brush.mode = this.landformMode; },
       flattenMap: () => {
-        if (!window.confirm('Aplainar todo o terreno? Dá para desfazer com Ctrl+Z.')) return;
+        if (!window.confirm(t('game.confirm.flattenMap'))) return;
         this.commands.run(new FlattenMap(this.world, heightAt(this.world.heights, this.rig.target.x, this.rig.target.z)));
-        this.hud.toast('Mapa aplainado.');
+        this.hud.toast(t('game.toast.flattened'));
       },
       weather: (w) => this.setWeather(w),
       sky: (m) => { this.skyMode = m; this.unsaved = true; },
@@ -316,6 +331,7 @@ export class Game {
       personOptions: (o) => { this.personOptions = o; },
       peopleCatalog: () => this.vehicles.people.catalog(),
       bombForce: (f) => { this.bombForce = f; },
+      roadKeys: (patch) => { Object.assign(this.settings, patch); saveSettings(this.settings); },
       water: (w) => this.setWater(w),
       skyTool: (s) => { this.skyTool = s; this.skyHint(); },
       scatterClouds: (n, v) => this.scatterClouds(n, v),
@@ -332,18 +348,27 @@ export class Game {
       importMap: (f) => { if (this.discardOk()) void this.importMap(f); },
       newMap: () => { if (this.discardOk()) void this.newMap(); },
       testCity: () => { if (this.discardOk()) void this.testCity(); },
-      generate: () => { if (this.discardOk()) void this.generatedCity(); },
+      // another city: a seed of its own (the title screen takes a chosen seed)
+      // Roadcraft 4.0's New world (main.ts:2123-2128): always asked, then a city over the whole map with a seed of its own
+      generate: () => {
+        const dirty = this.unsaved || this.world.saveDirty.includes(1);
+        if (!window.confirm(t('ui.confirm.newWorld', { km: fmtInt(MAP_SIZE / 1000) }) + (dirty ? ` ${t('save.discardConfirm')}` : ''))) return;
+        this.world.seed = (Math.random() * 2 ** 31) >>> 0 || 1; void this.generatedCity();
+      },
+      startScreen: () => this.showStart(),
       options: () => this.optionsPanel?.open(),
       help: () => this.hud.toggleHelp(),
       trafficView: () => this.toggleTrafficView(),
       follow: () => this.toggleFollow(),
       grid: () => { gridU.value = gridU.value > 0.5 ? 0 : 1; this.hud.setGrid(gridU.value > 0.5); },
       north: () => this.rig.turnTo(0),
-      timeSpeed: () => this.cycleClock(),
-      pause: () => this.togglePause(),
       line: (id) => { this.lineSel = id; },
       newLine: () => this.newLine(),
-      lineMode: (m) => { this.lineMode = m; },
+      // a station tab works on a line of its mode: the last one of that mode, or a new one at the first click
+      lineMode: (m) => {
+        this.lineMode = m;
+        if ((this.transit.line(this.lineSel)?.mode ?? 0) !== m) this.lineSel = [...this.transit.lines].reverse().find((l) => (l.mode ?? 0) === m)?.id ?? 0;
+      },
       buses: (d) => { const l = this.transit.line(this.lineSel); const c = l && this.transit.setBuses(l.id, l.buses + d); if (c) this.commands.run(c); },
       deleteLine: () => { const c = this.transit.removeLine(this.lineSel); if (c) { this.commands.run(c); this.lineSel = this.transit.lines[0]?.id ?? 0; } },
       profile: (p) => { this.roadTool.setProfile(p); },
@@ -357,12 +382,13 @@ export class Game {
       roadClasses: () => roadClasses(),
       zone: (z) => { this.zoneTool.zone = z; },
       zoneRadius: (r) => { this.zoneTool.radius = r; },
-      floors: (d) => this.editSelected(d),
+      // 1 to 60 floors; "−" on an empty lot (rubble) leaves it empty
+      floors: (d) => { if (d > 0 || (this.selected >= 0 && this.world.buildings.cols.floors[this.selected] > 0)) this.editSelected(d); },
       style: (a) => { if (this.selected >= 0) this.editSelected(0, a); else this.newArch = a; },
       buildingFn: (f) => { if (this.selected >= 0) this.editSelected(0, undefined, f); else this.newFn = f; },
       lotMode: (m) => this.setLotMode(m),
       lotSplit: (k, n) => { this.splitKind = k; this.splitParts = n; },
-      zoneFill: (b) => { this.zoneBlock = b; this.hud.setHint(b ? 'Clique dentro de uma quadra: todas as vias em volta dela recebem a zona.' : 'Arraste para pintar a zona dos lados das vias.'); },
+      zoneFill: (b) => { this.zoneBlock = b; this.hud.setHint(b ? t('game.hint.zone.block') : t('game.hint.zone')); },
       lotUse: (z) => { this.lotUse = z; },
       demolishBuilding: () => this.demolishSelected(),
       inside: (c) => this.insideCmd(c),
@@ -372,21 +398,41 @@ export class Game {
       blocks: (b) => { this.roadTool.blocks = b; },
       speed: (n) => this.setSpeed(n),
       orbit: (dx, dy) => this.rig.rotate(dx, dy),
-      turn: (d) => this.rig.turnTo(this.rig.yaw + d * Math.PI / 4),
+      turn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 4), // left (−1) turns as Q does
       tilt: (d) => this.rig.rotate(0, d * 60),
       zoneLayer: (on) => { this.zoneLayer = on; zoneOverlayU.value = on || this.tool === 'zone' ? 1 : 0; },
       simulation: (sim) => { Object.assign(this.settings, sim); saveSettings(this.settings); this.demandSent = 0; },
       settings: () => {
         const st = this.settings;
-        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown' };
+        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', roadAlign: st?.roadAlign ?? 'KeyV', preset: st?.preset ?? 'alto', webgpu: !!this.parts?.isWebGPU };
       },
       paint: (style) => { this.settings.paint = style; saveSettings(this.settings); setPaintStyle(style); },
       furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
-      ring: (f) => this.roadTool.ringBy(f),
+      ring: (f) => { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); },
       terminal: (on) => { this.transitTerminal = on; },
       itemRemove: (on) => { this.itemRemove = on; },
-      cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
-      health: () => this.health.toggle(),
+      cameraNumbers: () => ({ zoom: zoomPercent(this.canvas.clientHeight, this.rig.dist, this.rig.persp.fov), x: this.rig.target.x, z: this.rig.target.z }),
+      health: () => { if (this.developer) this.health.toggle(); },
+      developer: () => this.developer,
+      healthLevel: () => this.health?.level() ?? 'ok',
+      quality: (p) => {
+        if (!this.parts.isWebGPU || !(p in PRESETS)) return;
+        const s = { ...this.settings, ...PRESETS[p as Preset], preset: p as Preset };
+        saveSettings(s);
+        void this.applySettings(s);
+      },
+      resetView: () => { if (this.homeView) this.rig.restore(this.homeView); },
+      environment: () => ({ water: { ...this.waterCtl }, weather: this.weatherCtl ? { ...this.weatherCtl } : null, fog: fogLevel.value }),
+      showImpossible: () => {
+        // the next one after the last visited (the set is small: only the nodes under 25°)
+        const ids = [...this.world.impossible.nodes.keys()];
+        if (!ids.length) return;
+        const n = ids[(ids.indexOf(this.impossibleVisit) + 1) % ids.length], nc = this.world.roads.nodes.cols;
+        this.impossibleVisit = n;
+        this.setTool('inspect');
+        this.rig.restore(new Float64Array([nc.x[n], nc.z[n], this.rig.yaw, Math.max(0.5, this.rig.pitch), Math.min(this.rig.dist, 160), this.rig.mode === 'iso' ? 1 : 0]));
+        this.inspector.pick(nc.x[n], nc.z[n]);
+      },
     } satisfies HudActions));
     this.roadTool = new RoadTool(this.world, this.commands, this.preview, this.hud);
     this.itemTool = new ItemTool(this.world, this.commands, this.preview, this.hud);
@@ -410,21 +456,22 @@ export class Game {
     });
     this.commands.onPush = (c) => {
       const l = c.label;
+      this.changesLog.unshift([Date.now(), l]);
+      if (this.changesLog.length > 40) this.changesLog.pop();
       this.ambient.sfx(l.startsWith('demolir') || l.startsWith('remover') || l.startsWith('tirar') || l.startsWith('apagar') ? 'demolish'
-        : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place');
+        : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place'); // not for the player: undo labels pick the sound (B60)
     };
     this.commands.onChange = () => {
-      this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh(); };
+      this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh();
+      // the building panel shows the building as it is now (or none, once undo took it away)
+      if (this.selected >= 0) this.select(this.selected);
+    };
     this.commands.onError = (err, c, redo) => {
       console.error(err);
       this.hud.toast(t(redo ? 'history.redoFailed' : 'history.undoFailed', { label: loose(c.label), message: (err as Error)?.message ?? String(err) }));
     };
-    // changing the language reloads the page: the city is saved first; if that fails, the player decides
-    onLanguageReload(async () => {
-      if (!this.unsaved && !this.world.saveDirty.includes(1)) return true;
-      if (await this.save()) return true;
-      return window.confirm(t('save.languageDiscard'));
-    });
+    // the language changes without reloading (Roadcraft 4.0, main.ts:3832): the panels the game fills write again
+    onLanguageChange(() => { this.inspector.refresh(); if (this.selected >= 0) this.select(this.selected); });
     // closing: in the desktop game the window waits for the save; in the browser the page asks before leaving
     const app = (window as { roadcraftApp?: { onClosing(fn: () => void): void; canClose(): void } }).roadcraftApp;
     if (app) app.onClosing(() => void this.saveBeforeClose().finally(() => app.canClose()));
@@ -437,13 +484,15 @@ export class Game {
     const params = new URLSearchParams(location.search);
     this.world.seed = Number(params.get('seed') ?? 1) >>> 0;
     this.world.gameId = (Math.random() * 2 ** 32) >>> 0;
-    if (params.has('hora')) { this.hour = Number(params.get('hora')) % 24; this.clockSpeed = 0; }
+    // a photo at a set hour (?hora) shows that hour's light: the sky follows the clock
+    if (params.has('hora')) { this.hour = Number(params.get('hora')) % 24; this.clockSpeed = 0; this.skyMode = 'ciclo'; }
+    this.hud.setSky(this.skyMode);
     this.weather.onStrike = (d) => this.ambient.thunder(d);
     if (params.has('tempestade')) this.weather.fixed = { clouds: 1, rain: 1, storm: 1 };
     else if (params.has('chuva')) this.weather.fixed = { clouds: 0.95, rain: 0.9 };
     else if (params.has('limpo')) this.weather.fixed = { clouds: 0.15, rain: 0 };
 
-    this.hud.showLoading('Iniciando o vídeo…');
+    this.hud.showLoading(t('game.loading.video'));
     this.parts = await createScene(this.canvas);
     console.log(`camadas de textura: ${this.parts.maxLayers}, mapa ${MAP_TILES} (${location.search})`);
     if (MAP_TILES * MAP_TILES > this.parts.maxLayers) {
@@ -478,14 +527,14 @@ export class Game {
       const apply = () => { w.signTexts.set(key, text); for (const s of chain) w.streetNames.set(s, text); this.textSigns.version++; this.unsaved = true; };
       const invert = () => { w.signTexts.delete(key); chain.forEach((s, i) => { const b = before[i]; if (b === undefined) w.streetNames.delete(s); else w.streetNames.set(s, b); }); this.textSigns.version++; };
       this.commands.run({ label: 'texto da placa', apply, invert });
-      if (street && chain.length) this.hud.toast(`Rua ${text}.`);
+      if (street && chain.length) this.hud.toast(t('game.toast.streetNamed', { name: text }));
     };
 
-    this.hud.showLoading('Gerando o relevo…');
+    this.hud.showLoading(t('game.loading.terrain'));
     await this.generateTerrain();
 
     // all shaders compiled here, never during play
-    this.hud.showLoading('Preparando os shaders…');
+    this.hud.showLoading(t('game.loading.shaders'));
     const warm = new THREE.Group();
     for (const l of this.layers) warm.add(l.warmupMesh());
     warm.add(this.textSigns.warmup());
@@ -504,6 +553,7 @@ export class Game {
     if (this.props.enabled) this.props.update(renderer, this.rig.persp, this.rig.eye, performance.now());
     // options (quality): from last time, or by the GPU; ?simples etc. override them for photos
     this.settings = loadSettings(this.parts.isWebGPU);
+    const asStored = { ...this.settings };
     if (params.has('simples')) Object.assign(this.settings, { shadows: false, ao: false, bloom: false });
     if (params.has('semsombra')) this.settings.shadows = false;
     // measurements: turn parts of the rendering on and off
@@ -515,14 +565,16 @@ export class Game {
     if (params.has('chuva')) this.settings.weather = 'chuva';
     if (params.has('limpo')) this.settings.weather = 'limpo';
     if (params.has('tempestade')) this.settings.weather = 'tempestade';
-    this.health = new HealthPanel(document.getElementById('hud')!);
+    // the address's photo parameters hold for this run only: the player's options keep their own values
+    keepOverAddress(asStored, this.settings);
+    this.health = new HealthPanel(document.getElementById('hud')!, { world: () => this.healthWorld(), state: () => this.healthState() });
     this.creator = new Creator({ apply: (d, fl) => this.applyDesign(d, fl) });
     this.hud.buildingSlot.append(this.creator.el);
     followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
-    this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
-      [['Carregar o pior caso', 'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)', () => { if (this.discardOk()) void this.testCity(); }],
-        ['Dinheiro ilimitado (liga/desliga)', 'Modo livre: nada é cobrado neste mapa', () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? 'Modo livre: dinheiro ilimitado.' : 'Dinheiro de volta ao caixa.'); }]]);
+    this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
+      !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.testCity(); }],
+        [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]], () => this.gpuName());
     await this.applySettings(this.settings, false);
     await renderer.compileAsync(scene, this.rig.persp);
     await renderer.compileAsync(scene, this.rig.ortho);
@@ -536,8 +588,8 @@ export class Game {
     this.bindInput();
     this.bindResize();
     this.hud.hideLoading();
-    if (params.has('grande')) this.hud.toast('Sua placa de vídeo não comporta aquele tamanho de mapa: abri no maior que cabe.');
-    if (!this.parts.isWebGPU) this.hud.toast('WebGPU indisponível: rodando no modo de compatibilidade (WebGL 2).');
+    if (params.has('grande')) this.hud.toast(t('game.toast.mapTooBig'));
+    if (!this.parts.isWebGPU) this.hud.toast(t('game.toast.webgl'));
     const cam = params.get('cam');
     if (cam) {
       const [x, z, yaw, pitch, dist] = cam.split(',').map(Number);
@@ -551,17 +603,10 @@ export class Game {
     else if (params.has('carregar')) await this.load();
     else if (!params.has('cam') && !params.has('vazio')) {
       // start screen (automated photos skip it with ?cam, ?teste or ?cidade)
-      new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
-        newCity: (seed, tiles) => {
-          if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
-          this.world.seed = seed; void this.generatedCity();
-        },
-        empty: (tiles) => { if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio'); },
-        load: () => { if (this.discardOk()) void this.load(); },
-        options: () => this.optionsPanel.open(),
-      });
+      this.showStart();
     }
     await this.settle();
+    this.homeView ??= this.rig.state();
     status.value = 'pronto';
   }
 
@@ -638,9 +683,9 @@ export class Game {
       if (!this.inside.on) { this.insideId = -1; this.hud.setInside(-1); }
     }
     const cam = this.rig.camera;
-    if (this.skyMode === 'dia') this.hour = 12;
-    else if (this.skyMode === 'noite') this.hour = 22;
-    else if (!this.paused) this.hour = (this.hour + dt * this.clockSpeed / 60) % 24;
+    // always day (or night) fixes the light only: the clock, and the traffic demand that follows it, go on
+    if (!this.paused) this.hour = (this.hour + dt * this.clockSpeed / 60) % 24;
+    const light = this.skyMode === 'dia' ? 12 : this.skyMode === 'noite' ? 22 : this.hour;
     // city clock in minutes (building decay); the sky mode only fixes the light
     if (!this.paused) this.world.advanceClock(dt * this.clockSpeed);
     if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.busy && !this.saveBlocked) void this.save(true); }
@@ -648,7 +693,7 @@ export class Game {
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
     // the rain box round the eye; isometric: round what is looked at (round the perspective eye it was a block of rain)
     this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.mode === 'iso' ? this.rig.target : this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
-    setTimeOfDay(this.parts, this.hour, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
+    setTimeOfDay(this.parts, light, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
     this.particles.update(dt, this.rig.eye);
     this.textSigns.update(this.rig.eye);
     this.blast.update(dt);
@@ -657,7 +702,7 @@ export class Game {
       const st = this.simStats?.type === 'stats' ? this.simStats : null;
       this.ambient.update(dt, {
         rain: rainU.value, wind: windU.value, traffic: Math.min(1, (st?.micro ?? 0) / 120),
-        height: this.rig.eye.y - groundY, day: 1 - nightU.value, green: 0.7,
+        height: this.rig.eye.y - groundY, day: 1 - nightU.value, green: this.green,
       });
     }
     this.hud.setClock(this.hour, this.simSpeed, this.paused);
@@ -724,7 +769,7 @@ export class Game {
     this.updateInfo(now);
     this.vehicles.update(cam, this.rig.eye, now);
     if (this.vehicles.follow) { const p = this.vehicles.followPose; this.rig.followPose(p[0], p[1], p[2], p[3], dt); }
-    else if (this.rig.followY !== null) { this.rig.followY = null; this.hud.toast('A câmera soltou o veículo.'); }
+    else if (this.rig.followY !== null) { this.rig.followY = null; this.hud.toast(t('game.toast.followLost')); }
     const T4 = pf ? performance.now() : 0;
     this.props.processDirty();
     this.props.update(renderer, cam, this.rig.eye, now);
@@ -739,7 +784,7 @@ export class Game {
     }
     else renderer.render(scene, cam);
     // measurement (?perf): frames over 30 ms say where the time went
-    if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); }
+    if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); } // not for the player: ?perf measurement log
   }
 
   private toggleTrafficView(): void {
@@ -763,15 +808,41 @@ export class Game {
   }
 
   private infoTimer = 0;
+  /** Trees near the camera, 0..1 (the birds sing only with trees around). */
+  green = 0.7;
+
+  /**
+   * How green the place under the camera is: trees placed by the player and planted forest count; buildings and roads
+   * take room from the trees the map grows by itself. A query of 80 m around the camera (bounded, twice a second).
+   */
+  private greenAt(x: number, z: number): number {
+    const w = this.world, R = 80, ic = w.items.t.cols;
+    let trees = 0;
+    w.items.index.query(x - R, z - R, x + R, z + R, (i) => { if (ic.type[i] === Item.Tree || ic.type[i] === Item.Conifer || ic.type[i] === Item.Palm) trees++; });
+    let built = 0;
+    const bc = w.buildings.cols;
+    w.buildingIndex.query(x - R, z - R, x + R, z + R, (id) => { built += bc.w[id] * bc.d[id]; });
+    let road = 0;
+    w.roads.forSegsNear(x - R, z - R, x + R, z + R, () => { road++; });
+    // planted forest: the ground's blue channel at a few points
+    let forest = 0;
+    for (const [dx, dz] of [[0, 0], [40, 0], [-40, 0], [0, 40], [0, -40]]) {
+      const gx = Math.max(0, Math.min(WATER_MAP_RES - 1, Math.floor(waterCoord(x + dx)))), gz = Math.max(0, Math.min(WATER_MAP_RES - 1, Math.floor(waterCoord(z + dz))));
+      forest += ((w.ground32[waterIndex(gx, gz)] >> 16) & 255) / 255 / 5;
+    }
+    const open = Math.max(0, 1 - built / (Math.PI * R * R * 0.35) - road / 12);
+    return Math.min(1, trees / 8 + forest + 0.7 * open);
+  }
   /** City numbers in the corner (twice per second). */
   private updateInfo(now: number): void {
     if (now - this.infoTimer < 500) return;
     this.infoTimer = now;
+    this.green = this.greenAt(this.rig.target.x, this.rig.target.z);
     const w = this.world, st = this.simStats?.type === 'stats' ? this.simStats : null;
     this.hud.setStatus({
       cars: st?.cars ?? 0, peds: st?.peds ?? 0, residents: w.residents, jobs: w.jobs, buildings: w.buildings.size,
       speedKmh: st ? st.speed * 3.6 : 0, tripsPerMin: this.tripsPerMin, lostPerMin: this.lostPerMin, stopped: st?.stopped ?? 0,
-      roads: w.roads.segs.size, nodes: w.roads.nodes.size,
+      roads: w.roads.segs.size, nodes: w.roads.nodes.size, impossible: w.impossible.count,
     });
   }
 
@@ -779,7 +850,7 @@ export class Game {
   togglePause(): void {
     this.paused = !this.paused;
     this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
-    this.hud.toast(this.paused ? 'Pausado. Espaço continua.' : 'Continuando.');
+    this.hud.toast(this.paused ? t('game.toast.paused') : t('game.toast.resumed'));
   }
 
   /** Simulation speed from the top bar: 0 pauses, 1, 2 or 4 (the clock keeps pace, unless frozen for a photo). */
@@ -787,11 +858,6 @@ export class Game {
     this.paused = n === 0;
     if (n > 0) { this.simSpeed = n; if (this.clockSpeed > 0) this.clockSpeed = n; }
     this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
-  }
-
-  private cycleClock(): void {
-    const speeds = [0, 1, 4, 16];
-    this.clockSpeed = speeds[(speeds.indexOf(this.clockSpeed) + 1) % speeds.length];
   }
 
   /** Sends the network changes and the camera position to the simulation. */
@@ -808,7 +874,7 @@ export class Game {
     if (now - this.demandSent > 2000) {
       this.demandSent = now;
       const st = this.settings;
-      const demand = st?.demand === 'baixa' ? 0.6 : st?.demand === 'pico' ? 1.5 : 1;
+      const demand = demandFactor(st?.demand);
       this.sim.postMessage({ type: 'demand', hour: this.hour, demand, traffic: st?.traffic ?? 1, people: st?.people ?? 1 } satisfies ToSim);
     }
     if (now - this.camSent > 250) {
@@ -889,6 +955,8 @@ export class Game {
     const c = this.canvas;
     const down = { x: 0, y: 0, button: -1 };
     c.addEventListener('contextmenu', (e) => e.preventDefault());
+    // two fingers zoom (src/ui/touch.ts runs before the listeners below)
+    attachPinch(c, this.rig);
     c.addEventListener('pointerdown', (e) => {
       this.ambient.start();
       c.setPointerCapture(e.pointerId);
@@ -994,7 +1062,7 @@ export class Game {
         const b = this.rig.pick(this.ndcX(), this.ndcY());
         const r = b ? demolishBox(this.world, this.boxStart.x, this.boxStart.z, b.x, b.z) : null;
         this.preview.hideAll();
-        if (r) { this.commands.push(r.cmd); this.hud.toast(`Demolido: ${r.count} ${r.count === 1 ? 'coisa' : 'coisas'}${r.charge < 0 ? ` · devolvido R$ ${(-r.charge).toLocaleString('pt-BR')}` : ''}.`); }
+        if (r) { this.commands.push(r.cmd); this.hud.toast((plural('game.toast.demolished', r.count) + (r.charge < 0 ? t('game.toast.refunded', { money: money(-r.charge) }) : '') + '.')); }
         this.boxStart = null;
       }
       if (this.drag === 'node' && this.cloudGrab >= 0) { this.dropCloud(this.rig.pick(this.ndcX(), this.ndcY())); }
@@ -1004,7 +1072,8 @@ export class Game {
         const hit = this.rig.pick(this.ndcX(), this.ndcY());
         if (this.tool === 'inspect') { if (hit) this.inspector.pick(hit.x, hit.z); }
         else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
-        else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey || this.itemRemove);
+        else if (this.tool === 'barrier' && this.itemRemove) this.removePole(hit);
+        else if (this.tool === 'streetscape' || this.tool === 'barrier') { this.itemTool.click(hit, e.shiftKey); if (this.tool === 'barrier' && !e.shiftKey && hit) this.wallOpen = true; }
         else if (this.tool === 'building') this.clickBuilding(hit, e.shiftKey);
         else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey || this.transitTerminal);
         else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
@@ -1016,7 +1085,7 @@ export class Game {
         else if (this.tool === 'zone' && this.zoneBlock) { if (hit) { const r = this.zoneTool.fillBlock(hit.x, hit.z); if (r !== 'ok') this.hud.toast(r); } }
         else if (e.altKey && ROAD_TOOLS.includes(this.tool)) {
           const p = this.roadTool.pick(hit);
-          if (p >= 0) { this.hud.setProfile(p); this.hud.toast(`Via copiada: ${PROFILE_INFO[p].name}`); }
+          if (p >= 0) { this.hud.setProfile(p); this.hud.toast(t('game.toast.profileCopied', { name: loose(PROFILE_INFO[p].name) })); }
         } else this.roadTool.click(hit, e.shiftKey);
       }
       if (this.drag === 'rotate' && still && ROAD_TOOLS.includes(this.tool)) this.roadTool.cancel();
@@ -1031,7 +1100,14 @@ export class Game {
       } finally { this.drag = 'none'; if (this.commands.holding) this.zoneTool.end(); }
     };
     c.addEventListener('pointerup', end);
-    c.addEventListener('dblclick', () => { if (this.tool === 'river') this.finishRiver(); if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly(); });
+    c.addEventListener('dblclick', () => {
+      if (this.tool === 'river') this.finishRiver();
+      if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly();
+      // the building picked by the first click: see it inside (the hint of "See inside" says so)
+      else if (this.tool === 'building' && this.lotMode === 'edit' && !this.lotExtra && this.selected >= 0 && !(this.inside.on && this.insideId === this.selected)) this.insideCmd('toggle');
+      // a wall ends (the barrier hint: double click or Enter)
+      if (this.tool === 'barrier' && this.wallOpen) { this.itemTool.cancel(); this.wallOpen = false; }
+    });
     c.addEventListener('pointercancel', end);
     c.addEventListener('pointerleave', () => { this.pointer.inside = false; });
     c.addEventListener('wheel', (e) => {
@@ -1045,6 +1121,8 @@ export class Game {
       tool: () => this.tool,
       setTool: (t) => this.setTool(t),
       openCategory: (c) => this.hud.openCategory(c),
+      dialog: () => this.optionsPanel.isOpen || this.hud.aboutOpen || !!this.startMenu?.open,
+      closeDialog: () => { if (this.optionsPanel.isOpen) this.optionsPanel.close(); else if (this.hud.aboutOpen) this.hud.closeAbout(); else this.startMenu?.hide(); },
       closeMenu: () => this.hud.escape(),
       closePanel: () => {
         if (this.optionsPanel.isOpen) { this.optionsPanel.close(); return true; }
@@ -1055,7 +1133,9 @@ export class Game {
       },
       cancelStroke: () => {
         if (this.vehicles.follow) { this.vehicles.follow = null; return true; }
-        if (this.tool === 'barrier') this.itemTool.cancel(); // ItemTool does not say whether a line is being traced: Esc ends it and puts the tool down
+        // a wall being traced ends and the tool stays (the next Esc puts it down)
+        if (this.tool === 'barrier' && this.wallOpen) { this.itemTool.cancel(); this.wallOpen = false; return true; }
+        if (this.tool === 'building' && this.lotExtraPts.length) { this.lotExtraPts = []; this.preview.hideAll(); return true; }
         if (this.tool === 'building' && (this.lotPts?.length || this.polyPts.length || this.joinFirst >= 0)) { if (this.lotPts) this.lotPts.length = 0; this.polyPts.length = 0; this.joinFirst = -1; this.preview.hideAll(); return true; }
         if (this.tool === 'river' && this.riverPts.length) { this.riverPts.length = 0; this.preview.hideAll(); return true; }
         if (ROAD_TOOLS.includes(this.tool) && this.roadTool.busy) { this.roadTool.cancel(); return true; }
@@ -1067,6 +1147,19 @@ export class Game {
       save: () => void this.save(),
       help: () => this.hud.toggleHelp(),
       health: () => this.health.toggle(),
+      changes: () => this.health.show('world'),
+      developer: () => this.developer,
+      openMap: () => this.hud.openFile(),
+      duplicate: () => {
+        const s = this.inspector.isOpen ? this.inspector.seg : -1;
+        const j = s >= 0 ? duplicateRoad(this.world, s) : null;
+        if (!j) return;
+        if (typeof j === 'string') { this.hud.toast(loose(j)); return; }
+        if (!j.empty && j.settle()) this.commands.push(j);
+      },
+      home: () => { if (this.homeView) this.rig.restore(this.homeView); },
+      // as Q (−1) or E (+1), a quarter at once
+      quarterTurn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 2),
       pause: () => this.setSpeed(this.paused ? this.simSpeed : 0),
       nextSpeed: () => this.setSpeed(this.paused ? this.simSpeed : this.simSpeed === 1 ? 2 : this.simSpeed === 2 ? 4 : 1),
       toggleIso: () => this.setView(this.rig.mode === 'iso' ? 'persp' : 'iso'),
@@ -1075,6 +1168,15 @@ export class Game {
       wake: () => this.ambient.start(),
       camera: this.rig,
     });
+  }
+
+  /** Remove poles: the pole line under the click goes; walls, fences, hedges and guardrails stay. */
+  private removePole(hit: THREE.Vector3 | null): void {
+    const items = this.world.items, id = hit ? items.nearest(hit.x, hit.z, 3) : -1;
+    if (id < 0 || items.t.cols.type[id] !== Item.PoleLine) return;
+    const c = new ItemsCommand(items, 'remover item');
+    c.remove(id);
+    this.commands.push(c);
   }
 
   /** The keys the tool in hand reads itself; false: not one of its keys (the table goes on). */
@@ -1087,7 +1189,7 @@ export class Game {
     if (t === 'building' && this.lotMode === 'poly' && c === 'Enter') { this.finishPoly(); return true; }
     if (t === 'building' && this.lotMode === 'poly' && c === 'Backspace') { this.polyPts.pop(); return true; }
     if (t === 'barrier' && c === 'Backspace') { this.itemTool.back(); return true; }
-    if (t === 'barrier' && c === 'Enter') { this.itemTool.cancel(); return true; }
+    if (t === 'barrier' && c === 'Enter') { this.itemTool.cancel(); this.wallOpen = false; return true; }
     if (t === 'river' && c === 'Enter') { this.finishRiver(); return true; }
     if (t === 'river' && c === 'Backspace') { this.riverPts.pop(); return true; }
     if (t === 'inspect' && (c === 'Delete' || c === 'Backspace') && this.inspector.seg >= 0) {
@@ -1098,10 +1200,14 @@ export class Game {
     const road = ROAD_TOOLS.includes(t) && t !== 'bulldoze';
     if (road && c === (this.settings.roadUp ?? 'PageUp')) { this.setElevation(this.roadTool.elevation + 4); return true; }
     if (road && c === (this.settings.roadDown ?? 'PageDown')) { this.setElevation(this.roadTool.elevation - 4); return true; }
+    // the alignment key (V): straight, curve, free, straight again (Roadcraft 4.0)
+    const drawing: Tool[] = ['road', 'curve', 'free', 'blocks'];
+    if (drawing.includes(t) && c === (this.settings.roadAlign ?? 'KeyV') && !e.shiftKey) { this.setTool(t === 'road' ? 'curve' : t === 'curve' ? 'free' : 'road'); return true; }
     if (c === 'BracketLeft' || c === 'BracketRight') {
       const f = c === 'BracketLeft' ? 1 / 1.2 : 1.2;
-      if (t === 'roundabout') { this.roadTool.ringBy(f); return true; }
-      if (TERRAIN_TOOLS.includes(t) || GROUND_TOOLS.includes(t) || t === 'sky' || t === 'zone') { this.setRadius(this.brush.radius * f); return true; }
+      if (t === 'roundabout') { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); return true; }
+      if (t === 'zone') { this.zoneTool.radius = Math.max(10, Math.min(200, Math.round(this.zoneTool.radius * f / 5) * 5)); this.hud.setZoneRadius(this.zoneTool.radius); return true; }
+      if (TERRAIN_TOOLS.includes(t) || GROUND_TOOLS.includes(t) || t === 'sky') { this.setRadius(this.brush.radius * f); return true; }
     }
     return false;
   }
@@ -1121,7 +1227,9 @@ export class Game {
     renderer.setPixelRatio(window.devicePixelRatio * s.resolution);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.updatePixelScale();
-    this.weather.fixed = s.weather === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s.weather === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s.weather === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
+    // the option's weather; weather set by hand in the Sky panel (saved with the map) stays
+    if (this.weatherCtl) { const was = this.unsavedNow; this.setWeather(this.weatherCtl); this.unsavedNow = was; }
+    else this.weather.fixed = s.weather === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s.weather === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s.weather === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
     this.ambient.setVolume(s.volume ?? 0.6);
     setPaintStyle(s.paint ?? 'br');
     this.roadTool.furniture = s.furniture ?? 0;
@@ -1133,7 +1241,7 @@ export class Game {
     renderer.shadowMap.enabled = false;
     if (want) this.post = new Post(renderer, scene, this.rig.persp, this.parts.sun, { shadows: s.shadows, ao: s.ao, bloom: s.bloom });
     if (compile) {
-      this.hud.showLoading('Aplicando as opções…');
+      this.hud.showLoading(t('game.loading.options'));
       await renderer.compileAsync(scene, this.rig.persp);
       this.warmPost();
       this.hud.hideLoading();
@@ -1167,35 +1275,36 @@ export class Game {
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
 
-  private setTool(t: Tool): void {
-    if (t !== this.tool) this.ambient.sfx('click');
-    this.tool = t;
-    zoneOverlayU.value = t === 'zone' || this.zoneLayer ? 1 : 0;
-    if (TERRAIN_TOOLS.includes(t)) this.brush.mode = t === 'landform' ? this.landformMode : t as BrushParams['mode'];
-    if (ROAD_TOOLS.includes(t)) this.roadTool.setMode(t);
+  private setTool(tool: Tool): void {
+    if (tool !== this.tool) this.ambient.sfx('click');
+    this.wallOpen = false;
+    this.tool = tool;
+    zoneOverlayU.value = tool === 'zone' || this.zoneLayer ? 1 : 0;
+    if (TERRAIN_TOOLS.includes(tool)) this.brush.mode = tool === 'landform' ? this.landformMode : tool as BrushParams['mode'];
+    if (ROAD_TOOLS.includes(tool)) this.roadTool.setMode(tool);
     else { this.roadTool.cancel(); this.hud.setHint(''); }
-    if (t === 'zone') this.hud.setHint('Arraste para pintar a zona dos lados das vias.');
-    if (t === 'building') { this.select(-1); this.setLotMode(this.lotMode); }
-    if (t !== 'inspect') this.inspector?.close();
-    if (t === 'streetscape' || t === 'barrier') this.itemTool.setMode(t); else if (this.itemTool) this.itemTool.cancel(false);
-    if (t === 'inspect') this.hud.setHint('Clique num cruzamento para mudar o controle (semáforo, placas, movimentos) ou numa via para ver o perfil.');
-    if (t === 'paint') this.hud.setHint('Arraste para pintar o chão (Grama apaga a pintura).');
-    if (t === 'forest') this.hud.setHint('Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.');
-    if (t === 'elements') this.hud.setHint('Arraste para espalhar o elemento escolhido (ou apagar); Raio e [ ] mudam o tamanho do pincel.');
-    if (t === 'landform') this.hud.setHint('Escolha o relevo e arraste (chapada, cânion, escarpa, ravina) ou clique (pão de açúcar); Força muda a altura, [ e ] o tamanho.');
-    if (t === 'sky') this.skyHint();
-    if (t === 'person') this.hud.setHint('Escolha a roupa e a altura e clique: a pessoa fica ali parada ou sai andando pela calçada.');
-    if (t === 'pistol') this.hud.setHint('Clique numa pessoa: ela cai e some.');
-    if (t === 'bomb') this.hud.setHint('Clique onde a bomba cai: no chão ou num prédio. A força muda o tamanho da explosão.');
-    if (t === 'weather') this.hud.setHint('Ajuste chuva, vento e raios nas barras; clique no mapa para cair um raio ali.');
-    if (t === 'river') this.hud.setHint('Clique os pontos do rio, de cima para baixo; Enter ou duplo clique termina, Backspace volta, Esc descarta.');
-    if (t !== 'river') this.riverPts.length = 0;
-    if (t === 'transit') this.hud.setHint('Clique na calçada para pôr paradas na linha; clique numa parada para tirar; Shift+clique torna a parada terminal.');
-    this.transitView.showPaths = t === 'transit';
-    if (t !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); } }
-    this.hud.setTool(t);
-    if (this.health) this.health.context = `ferramenta ${t}`;
-    this.canvas.style.cursor = t === 'camera' ? 'grab' : 'crosshair';
+    if (tool === 'zone') this.hud.setHint(t('game.hint.zone'));
+    if (tool === 'building') { this.select(-1); this.setLotMode(this.lotMode); }
+    if (tool !== 'inspect') this.inspector?.close();
+    if (tool === 'streetscape' || tool === 'barrier') this.itemTool.setMode(tool); else if (this.itemTool) this.itemTool.cancel(false);
+    if (tool === 'inspect') this.hud.setHint(t('game.hint.inspect'));
+    if (tool === 'paint') this.hud.setHint(t('game.hint.paint'));
+    if (tool === 'forest') this.hud.setHint(t('game.hint.forest'));
+    if (tool === 'elements') this.hud.setHint(t('game.hint.elements'));
+    if (tool === 'landform') this.hud.setHint(t('game.hint.landform'));
+    if (tool === 'sky') this.skyHint();
+    if (tool === 'person') this.hud.setHint(t('game.hint.person'));
+    if (tool === 'pistol') this.hud.setHint(t('game.hint.pistol'));
+    if (tool === 'bomb') this.hud.setHint(t('game.hint.bomb'));
+    if (tool === 'weather') this.hud.setHint(t('game.hint.weather'));
+    if (tool === 'river') this.hud.setHint(t('game.hint.river'));
+    if (tool !== 'river') this.riverPts.length = 0;
+    if (tool === 'transit') this.hud.setHint(t('game.hint.transit'));
+    this.transitView.showPaths = tool === 'transit';
+    if (tool !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); } }
+    this.hud.setTool(tool);
+    if (this.health) this.health.context = `ferramenta ${tool}`;
+    this.canvas.style.cursor = tool === 'camera' ? 'grab' : 'crosshair';
   }
 
   /** For photo scripts and tests: the same actions as the tools. */
@@ -1348,7 +1457,7 @@ export class Game {
   private finishRiver(): void {
     if (this.riverPts.length >= 2) {
       const c = new RiverCommand(this.world, this.riverPts, this.riverWidth, Math.min(4, 1.2 + this.riverWidth / 12));
-      if (!c.empty) { this.commands.run(c); this.hud.toast('Rio feito: a água desce sempre pelo caminho desenhado.'); }
+      if (!c.empty) { this.commands.run(c); this.hud.toast(t('game.toast.river')); }
     }
     this.riverPts.length = 0;
     this.preview.hideAll();
@@ -1356,10 +1465,10 @@ export class Game {
 
   private skyHint(): void {
     const s = this.skyTool;
-    this.hud.setHint(s.fog === 'lay' ? 'Arraste para pôr neblina baixa (Raio muda o tamanho do pincel).' : s.fog === 'erase' ? 'Arraste para apagar a neblina.'
-      : s.cloud === 'add' ? 'Clique no mapa: uma nuvem nasce em cima do ponto, com o tamanho, a base e a densidade escolhidos.'
-        : s.cloud === 'move' ? 'Arraste uma nuvem (pela sombra no chão) para outro lugar.' : s.cloud === 'edit' ? 'Clique numa nuvem para aplicar os valores das barras.'
-          : s.cloud === 'remove' ? 'Clique numa nuvem para apagá-la.' : 'Espalhe nuvens ou ponha neblina.');
+    this.hud.setHint(s.fog === 'lay' ? t('game.hint.fog.lay') : s.fog === 'erase' ? t('game.hint.fog.erase')
+      : s.cloud === 'add' ? t('game.hint.cloud.add')
+        : s.cloud === 'move' ? t('game.hint.cloud.move') : s.cloud === 'edit' ? t('game.hint.cloud.edit')
+          : s.cloud === 'remove' ? t('game.hint.cloud.remove') : t('game.hint.sky'));
   }
 
   /** Replaces the cloud list as a command (undo brings back the previous one). */
@@ -1381,14 +1490,14 @@ export class Game {
     if (s.fog !== 'none') return;
     const i = this.cloudAt(x, z);
     if (s.cloud === 'add') {
-      if (this.clouds.length >= MAX_CLOUDS) { this.hud.toast(`O céu já tem o máximo de nuvens (${MAX_CLOUDS}).`); return; }
+      if (this.clouds.length >= MAX_CLOUDS) { this.hud.toast(t('game.toast.maxClouds', { n: MAX_CLOUDS })); return; }
       const y = heightAt(this.world.heights, x, z) + s.base;
       this.setClouds([...this.clouds, { x, z, y, size: s.size, density: s.density }], 'criar nuvem');
     } else if (s.cloud === 'remove' && i >= 0) this.setClouds(this.clouds.filter((_, k) => k !== i), 'apagar nuvem');
     else if (s.cloud === 'edit' && i >= 0) {
       const c = this.clouds[i];
       this.setClouds(this.clouds.map((d, k) => k === i ? { ...c, size: s.size, density: s.density, y: c.y - (c.y - heightAt(this.world.heights, c.x, c.z)) + s.base } : d), 'ajustar nuvem');
-    } else if (i < 0 && s.cloud !== 'none') this.hud.toast('Nenhuma nuvem aqui: clique embaixo de uma.');
+    } else if (i < 0 && s.cloud !== 'none') this.hud.toast(t('game.toast.noCloud'));
   }
 
   private grabCloud(hit: THREE.Vector3 | null): boolean {
@@ -1431,12 +1540,12 @@ export class Game {
     // the cooked people (people front): a group of 1 to 20 with the screen's clothes, height, mode and object
     if (this.vehicles.people.creator) {
       const n = this.personOptions.count ?? 1;
-      if (this.api.people(x, z, this.personOptions)) { this.hud.toast(n === 1 ? 'Pessoa criada.' : `${n} pessoas criadas.`); return; }
+      if (this.api.people(x, z, this.personOptions)) { this.hud.toast(n === 1 ? t('game.toast.personCreated') : t('game.toast.peopleCreated', { n })); return; }
     }
     const p = this.personSpec;
     if (p.walk) {
       this.sim.postMessage({ type: 'people', x, z, count: p.count, color: p.color } satisfies ToSim);
-      this.hud.toast(p.count === 1 ? 'A pessoa saiu andando pela calçada.' : `${p.count} pessoas saíram andando pela calçada.`);
+      this.hud.toast(p.count === 1 ? t('game.toast.personWalks') : t('game.toast.peopleWalk', { n: p.count }));
       return;
     }
     const c = new ItemsCommand(this.world.items, 'pôr pessoa');
@@ -1457,7 +1566,7 @@ export class Game {
   /** Bomb: flash, fire and smoke; buildings in the radius collapse into rubble (one command); the simulation removes whoever was near. */
   private bomb(x: number, z: number): void {
     const w = this.world, col = w.buildings.cols;
-    const r = 8 + this.bombForce * 6;
+    const r = bombRadius(this.bombForce);
     const y = heightAt(w.heights, x, z);
     this.blast.boom(x, y, z, r);
     this.ambient.sfx('boom');
@@ -1493,14 +1602,14 @@ export class Game {
     }
     this.hitKind = 'bomb';
     this.sim.postMessage({ type: 'hit', x, z, r, one: false } satisfies ToSim);
-    this.hud.toast(doomed.length ? `Desabou: ${doomed.length} ${doomed.length === 1 ? 'prédio' : 'prédios'}.` : 'Impacto no chão.');
+    this.hud.toast(doomed.length ? plural('game.toast.collapsed', doomed.length) : t('game.toast.bombGround'));
   }
 
   private onHit(people: number, vehicles: number): void {
     const k = this.hitKind;
     this.hitKind = null;
-    if (k === 'pistol') this.hud.toast(people ? 'Atingido.' : 'Ninguém aí: clique numa pessoa.');
-    else if (k === 'bomb' && people + vehicles > 0) this.hud.toast(`Houve vítimas: ${people} ${people === 1 ? 'pessoa' : 'pessoas'} e ${vehicles} ${vehicles === 1 ? 'veículo' : 'veículos'}.`);
+    if (k === 'pistol') this.hud.toast(people ? t('game.toast.hit') : t('game.toast.missed'));
+    else if (k === 'bomb' && people + vehicles > 0) this.hud.toast(t('game.toast.victims', { people: plural('status.people', people), vehicles: plural('status.vehicles', vehicles) }));
   }
 
   /** Weather from the panel: rain, wind, direction, lightning and thunder; null goes back to weather that changes by itself (or to the option). */
@@ -1574,16 +1683,83 @@ export class Game {
     this.preview.showCircle(col.x[id], y, col.z[id], Math.hypot(col.w[id], col.d[id]) / 2 + 2, true);
   }
 
+  /**
+   * The title screen: at start, and again from the menu. A new city from its seed and size (another size reloads the
+   * page with it), an empty map, the last game (with no save it comes back), the options. A city on screen with
+   * unsaved work is asked about first.
+   */
+  private showStart(): void {
+    if (this.startMenu) { this.startMenu.show(); return; }
+    this.startMenu = new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
+      newCity: (seed, tiles) => {
+        if (!this.discardOk()) { this.startMenu?.show(); return; }
+        if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
+        this.world.seed = seed; void this.generatedCity();
+      },
+      empty: (tiles) => {
+        if (!this.discardOk()) { this.startMenu?.show(); return; }
+        if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio');
+        else if (this.world.roads.segs.size || this.world.buildings.size) void this.newMap();
+      },
+      load: () => {
+        if (!this.discardOk()) { this.startMenu?.show(); return; }
+        void this.load().then((ok) => { if (!ok) this.startMenu?.show(); });
+      },
+      options: () => this.optionsPanel.open(),
+    });
+  }
+
+  /** The graphics card's name as the driver gives it ('' when the browser does not say). */
+  private gpuName(): string {
+    const backend = (this.parts.renderer as unknown as { backend?: { device?: { adapterInfo?: { description?: string; vendor?: string; architecture?: string } }; gl?: WebGL2RenderingContext } }).backend;
+    const info = backend?.device?.adapterInfo;
+    if (info) return info.description || [info.vendor, info.architecture].filter(Boolean).join(' ');
+    const gl = backend?.gl, ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    const raw = gl && ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    // "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x…) Direct3D11 …)" → "NVIDIA GeForce RTX 3060", as Roadcraft 4.0
+    return raw.replace(/^ANGLE \([^,]*,\s*/, '').replace(/\s*\(0x[0-9A-Fa-f]+\).*$/, '').replace(/\s*Direct3D.*$/, '');
+  }
+
+  /** The health panel's World tab: the latest edits and what the world holds now. */
+  private healthWorld(): Array<[string, string]> {
+    const w = this.world, now = Date.now();
+    let dirty = 0;
+    for (let i = 0; i < w.saveDirty.length; i++) dirty += w.saveDirty[i];
+    return [
+      ['buildings', String(w.buildings.size)], ['segments', String(w.roads.segs.size)], ['nodes', String(w.roads.nodes.size)],
+      ['items', String(w.items.size)], ['impossible nodes', String(w.impossible.count)], ['lines', String(this.transit.lines.length)],
+      ['unsaved tiles', String(dirty)], ['jobs idle', String(this.pool.isIdle())],
+      ...this.changesLog.slice(0, 20).map(([at, label]): [string, string] => [`${((now - at) / 1000).toFixed(0)} s`, label]),
+    ];
+  }
+
+  /** The health panel's State tab: the game's state now. */
+  private healthState(): Array<[string, string]> {
+    const r = this.rig, st = this.simStats?.type === 'stats' ? this.simStats : null;
+    return [
+      ['tool', this.tool], ['lot mode', this.lotMode], ['selected building', String(this.selected)], ['inspector', this.inspector.isOpen ? `segment ${this.inspector.seg}` : 'closed'],
+      ['paused', String(this.paused)], ['speed', String(this.simSpeed)], ['clock', `${this.hour.toFixed(2)} h ×${this.clockSpeed}`], ['sky', this.skyMode],
+      ['camera', `${r.mode} ${r.target.x.toFixed(0)}, ${r.target.z.toFixed(0)} · ${r.dist.toFixed(0)} m · yaw ${(r.yaw * 180 / Math.PI).toFixed(0)}°`],
+      ['undo / redo', `${this.commands.canUndo} / ${this.commands.canRedo}`], ['unsaved', String(this.unsaved)], ['save blocked', String(this.saveBlocked)],
+      ['money', this.world.unlimited ? '∞' : String(Math.round(this.world.money))],
+      ['simulation', st ? `${st.cars} cars · ${st.micro} near · ${st.peds} pedestrians` : '—'],
+    ];
+  }
+
   /** Follows the vehicle nearest the centre of the screen, or lets go. */
   private toggleFollow(): void {
     if (this.vehicles.follow) { this.vehicles.follow = null; return; }
-    const t = this.rig.target;
-    if (!this.vehicles.pick(t.x, t.z, Math.max(30, this.rig.dist * 0.4))) { this.hud.toast('Nenhum veículo perto do centro da tela: aproxime a câmera de uma via com trânsito.'); return; }
+    const c = this.rig.target;
+    if (!this.vehicles.pick(c.x, c.z, Math.max(30, this.rig.dist * 0.4))) { this.hud.toast(t('game.toast.followNone')); return; }
     this.rig.dist = 16; this.rig.pitch = THREE.MathUtils.degToRad(14);
-    this.hud.toast('Seguindo o veículo. Esc ou C solta; a roda aproxima.');
+    this.hud.toast(t('game.toast.following'));
   }
 
   private lineMode = 0;
+  /** The start screen (shown at start, and again from the menu). */
+  private startMenu: StartMenu | null = null;
+  /** The impossible junction the top bar's warning showed last. */
+  private impossibleVisit = -1;
 
   private newLine(): void {
     achieve('PRIMEIRA_LINHA');
@@ -1598,12 +1774,12 @@ export class Game {
     // Shift+click on a stop: turns the terminal on or off
     if (shift) {
       const s = this.transit.stopNear(hit.x, hit.z, 9);
-      if (!s) { this.hud.toast('Shift+clique numa parada para torná-la terminal.'); return; }
+      if (!s) { this.hud.toast(t('game.toast.terminalHow')); return; }
       const l = this.transit.line(s[0])!;
       const x = l.stops[s[1] * 2], z = l.stops[s[1] * 2 + 1];
       const was = this.transit.terminalNear(x, z, 9) >= 0;
       this.commands.run(this.transit.toggleTerminal(x, z));
-      this.hud.toast(was ? 'Não é mais terminal.' : 'Terminal: os ônibus esperam mais e dão a volta aqui.');
+      this.hud.toast(was ? t('game.toast.terminalOff') : t('game.toast.terminalOn'));
       return;
     }
     const near = this.transit.stopNear(hit.x, hit.z, 9);
@@ -1618,7 +1794,7 @@ export class Game {
     const line = this.transit.line(this.lineSel)!;
     const rail = (line.mode ?? 0) > 0;
     const seg = net.nearestSeg(hit.x, hit.z, 30, (s) => PROFILE_INFO[sc.profile[s]].rail === rail);
-    if (!seg) { this.hud.toast(rail ? 'Ponha a estação sobre um trilho (Via → Trilhos).' : 'Ponha a parada perto de uma via.'); return; }
+    if (!seg) { this.hud.toast(rail ? t('game.toast.stationOnTrack') : t('game.toast.stopNearRoad')); return; }
     const q = net.quad(seg[0]);
     const p2 = new Float64Array(2), d2 = new Float64Array(2);
     bez(q, seg[1], p2); bezD(q, seg[1], d2);
@@ -1629,7 +1805,7 @@ export class Game {
       return;
     }
     const info = PROFILE_INFO[sc.profile[seg[0]]];
-    if (!info.strips.some((s) => s.kind === 'sidewalk')) { this.hud.toast('Essa via não tem calçada.'); return; }
+    if (!info.strips.some((s) => s.kind === 'sidewalk')) { this.hud.toast(t('game.toast.noSidewalk')); return; }
     const l = Math.hypot(d2[0], d2[1]) || 1;
     const lx = d2[1] / l, lz = -d2[0] / l;
     const side = (hit.x - p2[0]) * lx + (hit.z - p2[1]) * lz > 0 ? 1 : -1;
@@ -1651,12 +1827,13 @@ export class Game {
       this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l), loop: !!l.loop })) } satisfies ToSim);
     }
     if (this.tool === 'transit') {
-      const ids = this.transit.lines.map((l) => l.id);
+      // no line chosen: the first of the tab's mode (none: the first click makes one)
+      const ids = this.transit.lines.filter((l) => (l.mode ?? 0) === this.lineMode).map((l) => l.id);
       if (!this.transit.line(this.lineSel) && ids.length) this.lineSel = ids[0];
       const stats = this.simStats?.type === 'stats' ? this.simStats.lines : [];
       this.hud.setLines(this.transit.lines.map((l) => {
         const q = stats.find((x) => x.id === l.id);
-        return { id: l.id, mode: l.mode ?? 0, color: l.color, buses: l.buses, stops: l.stops.length / 2, perHour: q ? q.perHour : 0, waiting: q ? q.waiting : 0 };
+        return { id: l.id, mode: l.mode ?? 0, color: l.color, loop: !!l.loop, buses: l.buses, stops: l.stops.length / 2, perHour: q ? q.perHour : 0, waiting: q ? q.waiting : 0 };
       }), this.lineSel);
     }
   }
@@ -1697,7 +1874,7 @@ export class Game {
     const pts = this.lotPts;
     if (pts.length < 2) { pts.push([hit.x, hit.z]); return; }
     const r = this.lotRect([hit.x, hit.z]);
-    if (!r) { this.hud.toast('Lote estreito demais.'); pts.length = 0; return; }
+    if (!r) { this.hud.toast(t('game.toast.lotNarrow')); pts.length = 0; return; }
     const fits = lotFits(this.world, [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => lotToWorld(r, u * r.w / 2, v * r.d / 2)));
     if (fits) { this.hud.toast(fits[0].toUpperCase() + fits.slice(1) + '.'); pts.length = 0; this.preview.hide(); return; }
     const seed = (Math.random() * 2 ** 31) >>> 0;
@@ -1724,14 +1901,14 @@ export class Game {
     if (m !== 'edit') this.select(-1);
     this.hud.setLotMode(m);
     const hints: Record<LotMode, string> = {
-      edit: 'Clique num prédio para editar, ou num lote vazio para construir.',
-      rect: 'Clique no começo e no fim da frente do lote; depois no fundo.',
-      poly: 'Clique os cantos do lote; Enter ou duplo clique fecha, Backspace volta um ponto.',
-      split: 'Clique num lote para dividi-lo (escolha lado a lado ou frente e fundos e em quantos).',
-      join: 'Clique num lote e depois no lote ao lado para juntá-los.',
-      delete: t('lot.hint.delete'),
-      front: 'Clique perto de um lado do lote: a construção vira de frente para ele.',
-      corner: 'Arraste um canto do lote para mudar o tamanho.',
+      edit: t('game.hint.lot.edit'),
+      rect: t('game.hint.lot.rect'),
+      poly: t('game.hint.lot.poly'),
+      split: t('game.hint.lot.split'),
+      join: t('game.hint.lot.join'),
+      delete: t('game.hint.lot.delete'),
+      front: t('game.hint.lot.front'),
+      corner: t('game.hint.lot.corner'),
     };
     this.hud.setHint(hints[m]);
   }
@@ -1746,6 +1923,15 @@ export class Game {
   }
 
   private hoverLotTool(hit: THREE.Vector3 | null): void {
+    // split by line, curve side: the line from the first click to the cursor (yellow), or the point to click
+    if (this.lotExtra) {
+      if (!hit) return;
+      const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.7;
+      const p = this.lotExtraPts[0];
+      if (p) this.preview.show({ x0: p[0], z0: p[1], cx: (p[0] + hit.x) / 2, cz: (p[1] + hit.z) / 2, x1: hit.x, z1: hit.z }, 0.4, [0, 1], [H(p[0], p[1]), H(hit.x, hit.z)], true, 0xffd36b);
+      else { this.preview.hide(); this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true); }
+      return;
+    }
     if (this.lotMode === 'edit') { this.showSelection(); return; }
     if (this.lotMode === 'rect') { if (this.lotPts) this.hoverLot(hit); return; }
     if (!hit) return;
@@ -1775,22 +1961,22 @@ export class Game {
   private clickLotTool(hit: THREE.Vector3): void {
     if (this.lotMode === 'poly') { this.polyPts.push([hit.x, hit.z]); return; }
     const id = lotAt(this.world, hit.x, hit.z);
-    if (id < 0) { this.hud.toast('Nenhum lote aqui: desenhe um ou zoneie a rua.'); return; }
+    if (id < 0) { this.hud.toast(t('game.toast.noLot')); return; }
     let r: RoadJournal | string | null = null;
     if (this.lotMode === 'split') r = splitLot(this.world, id, this.splitKind, this.splitParts);
     else if (this.lotMode === 'delete') r = deleteLot(this.world, id);
-    else if (this.lotMode === 'front') { r = setLotFront(this.world, id, hit.x, hit.z); if (!r) { this.hud.toast('Esse já é o lado da frente.'); return; } }
+    else if (this.lotMode === 'front') { r = setLotFront(this.world, id, hit.x, hit.z); if (!r) { this.hud.toast(t('game.toast.alreadyFront')); return; } }
     else if (this.lotMode === 'join') {
-      if (this.joinFirst < 0 || !this.world.buildings.alive[this.joinFirst]) { this.joinFirst = id; this.hud.setHint('Agora clique no lote ao lado.'); return; }
+      if (this.joinFirst < 0 || !this.world.buildings.alive[this.joinFirst]) { this.joinFirst = id; this.hud.setHint(t('game.hint.lot.joinSecond')); return; }
       r = joinLots(this.world, this.joinFirst, id);
       this.joinFirst = -1;
-      this.hud.setHint('Clique num lote e depois no lote ao lado para juntá-los.');
+      this.hud.setHint(t('game.hint.lot.join'));
     }
     if (!r) return;
     if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
     this.commands.push(r);
     this.preview.hide();
-    this.hud.toast(this.lotMode === 'split' ? 'Lote dividido.' : this.lotMode === 'join' ? 'Lotes juntados.' : this.lotMode === 'front' ? 'Frente definida: a construção olha para esse lado.' : 'Apagado.');
+    this.hud.toast(this.lotMode === 'split' ? t('game.toast.lotSplit') : this.lotMode === 'join' ? t('game.toast.lotsJoined') : this.lotMode === 'front' ? t('game.toast.frontSet') : t('game.toast.deleted'));
   }
 
   private finishPoly(): void {
@@ -1802,7 +1988,7 @@ export class Game {
     const j = new RoadJournal(this.world, 'lote desenhado');
     j.addBuilding({ ...r, h: 0, color: 0, seed, zone, fn: this.newFn, floors: floorsFor(zone, 0, new Rng(seed)), style: this.newArch >= 0 ? 128 + this.newArch : seed & 127 });
     this.commands.push(j);
-    this.hud.toast('Lote novo criado.');
+    this.hud.toast(t('game.toast.lotCreated'));
   }
 
   private grabCorner(hit: THREE.Vector3 | null): boolean {
@@ -1822,7 +2008,7 @@ export class Game {
     if (!c || !hit || !this.world.buildings.alive[c.id]) return;
     const [cx, cz] = lotOutlineWorld(this.world, c.id)[c.k];
     const r = moveSharedCorner(this.world, cx, cz, hit.x, hit.z);
-    if (typeof r === 'string') { this.hud.toast(`Não mudou: ${r}.`); return; }
+    if (typeof r === 'string') { this.hud.toast(t('game.toast.notChanged', { why: loose(r) })); return; }
     this.commands.push(r);
   }
 
@@ -1832,7 +2018,7 @@ export class Game {
   private lotExtraPts: Array<[number, number]> = [];
 
   private featureActions(): FeatureActions {
-    const hints = { line: 'Clique dois pontos de uma linha que atravesse o lote: ele vira dois.', curve: 'Clique perto de um lado do lote e depois onde esse lado deve passar: ele vira curva.' };
+    const hints = { line: t('game.hint.lot.line'), curve: t('game.hint.lot.curve') };
     const enter = (m: 'line' | 'curve') => { this.setTool('building'); this.lotExtra = m; this.lotExtraPts = []; this.hud.setHint(hints[m]); };
     return {
       lotLine: () => enter('line'),
@@ -1871,25 +2057,25 @@ export class Game {
       r = splitLotsByLine(this.world, ax, az, bx, bz);
     } else {
       const id = lotAt(this.world, ax, az);
-      r = id < 0 ? 'clique primeiro perto de um lado, dentro do lote' : curveLotSide(this.world, id, ax, az, bx, bz);
+      r = id < 0 ? t('game.refuse.curveFirst') : curveLotSide(this.world, id, ax, az, bx, bz);
     }
     if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
     this.commands.push(r);
-    this.hud.toast(this.lotExtra === 'line' ? 'Lote dividido pela linha.' : 'Lado curvado.');
+    this.hud.toast(this.lotExtra === 'line' ? t('game.toast.lotSplitLine') : t('game.toast.sideCurved'));
   }
 
   /** Renovation (Roadcraft Shift+click): the building is new again; undo brings the old age back. */
   private renovate(id: number): void {
     const w = this.world;
-    if (id < 0 || !w.buildings.alive[id] || w.buildings.cols.floors[id] === 0) { this.hud.toast('Escolha um prédio para reformar.'); return; }
+    if (id < 0 || !w.buildings.alive[id] || w.buildings.cols.floors[id] === 0) { this.hud.toast(t('game.toast.renovatePick')); return; }
     const before = w.buildings.cols.built[id], now = w.clock;
-    if (w.buildings.cols.decay[id] === 0 && now - before < 1) { this.hud.toast('Esse prédio já está novo.'); return; }
+    if (w.buildings.cols.decay[id] === 0 && now - before < 1) { this.hud.toast(t('game.toast.alreadyNew')); return; }
     this.commands.run({
       label: 'reformar prédio',
       apply: () => { if (w.buildings.alive[id]) w.setBuilt(id, now); },
       invert: () => { if (w.buildings.alive[id]) w.setBuilt(id, before); },
     });
-    this.hud.toast('Prédio reformado: novo de novo.');
+    this.hud.toast(t('game.toast.renovated'));
   }
 
   private clickBuilding(hit: THREE.Vector3 | null, shift = false): void {
@@ -1912,9 +2098,13 @@ export class Game {
     if (best >= 0) { if (shift) this.renovate(best); this.select(best); return; }
     // free lot: build
     const lot = this.growth.lotAt(hit.x, hit.z);
-    if (!lot) { this.hud.toast('Clique num prédio ou num lote vazio (zoneie as vias primeiro).'); return; }
+    if (!lot) { this.hud.toast(t('game.toast.buildWhere')); return; }
     const j = new RoadJournal(this.world, 'construir prédio');
-    const id = j.addBuilding(this.growth.recordFor(lot.lots, lot.i));
+    // the style and function chosen for the next building (the Build panel) win over the neighbourhood's
+    const rec = this.growth.recordFor(lot.lots, lot.i);
+    if (this.newArch >= 0) rec.style = 128 + this.newArch;
+    if (this.newFn > 0) rec.fn = this.newFn;
+    const id = j.addBuilding(rec);
     this.commands.push(j);
     this.select(id);
   }
@@ -1946,7 +2136,7 @@ export class Game {
       // selected one, and the camera goes to it
       const { id, go } = insideTarget(w, this.selected, this.rig.target.x, this.rig.target.z, this.rig.dist);
       if (go) { const s = this.rig.state(); s[0] = col.x[id]; s[1] = col.z[id]; this.rig.restore(s); }
-      if (id < 0 || col.floors[id] === 0) { this.hud.toast('Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.'); return; }
+      if (id < 0 || col.floors[id] === 0) { this.hud.toast(t('game.toast.insideNone')); return; }
       this.insideId = id;
       this.insideFloor = 0;
     } else if (!this.inside.on) return;
@@ -1960,7 +2150,7 @@ export class Game {
   /** Creator: puts (or removes) the design on the selected building; optional floors (ready-made model). */
   private applyDesign(d: Design | null, floors?: number): void {
     const id = this.selected;
-    if (id < 0 || !this.world.buildings.alive[id]) { this.hud.toast('Selecione um prédio primeiro.'); return; }
+    if (id < 0 || !this.world.buildings.alive[id]) { this.hud.toast(t('game.toast.selectFirst')); return; }
     const col = this.world.buildings.cols, w = this.world;
     const before = [col.color[id], col.h[id], col.floors[id]];
     const enc = d ? encodeDesign(d) : { color: 0, h: 0 };
@@ -2033,10 +2223,10 @@ export class Game {
     this.generating = false;
     this.hud.hideLoading();
     this.busy = false;
-    if (err === null) { this.saveBlocked = false; return; }
+    if (err === null) { this.saveBlocked = false; this.homeView = this.rig.state(); return; }
     console.error(`${what} failed:`, err);
     this.saveBlocked = true;
-    this.hud.toast(`${what} não terminou: ${(err as Error)?.message ?? String(err)}. A cidade na tela está incompleta e não será salva; o salvamento anterior não foi tocado.`);
+    this.hud.toast(t('game.toast.flowFailed', { what, message: (err as Error)?.message ?? String(err) }));
   }
 
   /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
@@ -2048,7 +2238,7 @@ export class Game {
     this.busy = true;
     const t0 = performance.now();
     const phase = (name: string) => console.log(`fase: ${name} ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-    this.hud.showLoading('Gerando a cidade…');
+    this.hud.showLoading(t('game.loading.city'));
     const w = this.world;
     try {
       this.resetCity();
@@ -2057,7 +2247,7 @@ export class Game {
       phase('relevo');
       const city = await this.pool.run('cityGen', { seed: w.seed, style }, { priority: 0 });
       phase('malha viária');
-      this.hud.showLoading('Assentando as vias…');
+      this.hud.showLoading(t('game.loading.roads'));
       const ids: number[] = [];
       for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
       const nc = w.roads.nodes.cols;
@@ -2095,7 +2285,7 @@ export class Game {
       }));
       this.generating = false;
       phase('relevo assentado');
-      this.hud.showLoading('Lotes e prédios…');
+      this.hud.showLoading(t('game.loading.lots'));
       this.growth.processDirty();
       await this.pool.whenIdle();
       phase('lotes');
@@ -2104,9 +2294,9 @@ export class Game {
       this.endRebuild(null, '');
       achieve('CIDADE_GERADA');
       const secs = ((performance.now() - t0) / 1000).toFixed(0);
-      this.hud.toast(`Cidade gerada em ${secs} s: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de via.`);
+      this.hud.toast(t('game.toast.generated', { secs, buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
     } catch (err) {
-      this.endRebuild(err, 'A geração da cidade');
+      this.endRebuild(err, t('game.flow.generate'));
     }
   }
 
@@ -2116,7 +2306,7 @@ export class Game {
   private async testCity(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
-    this.hud.toast('Gerando a cidade de teste…');
+    this.hud.toast(t('game.toast.testCity'));
     const w = this.world;
     try {
       this.resetCity();
@@ -2150,9 +2340,9 @@ export class Game {
       await this.pool.whenIdle();
       const n = this.growth.fillAll();
       this.endRebuild(null, '');
-      this.hud.toast(`Cidade de teste: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de rua.`);
+      this.hud.toast(t('game.toast.testCityDone', { buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
     } catch (err) {
-      this.endRebuild(err, 'A cidade de teste');
+      this.endRebuild(err, t('game.flow.testCity'));
     }
   }
 
@@ -2309,7 +2499,7 @@ export class Game {
       this.hud.toast(t('save.loaded'));
       return true;
     } catch (err) {
-      this.endRebuild(err, 'A abertura da cidade');
+      this.endRebuild(err, t('game.flow.load'));
       return false;
     }
   }
@@ -2547,7 +2737,7 @@ export class Game {
   private async newMap(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
-    this.hud.showLoading('Gerando o relevo…');
+    this.hud.showLoading(t('game.loading.terrain'));
     const w = this.world;
     try {
       this.resetCity();
@@ -2559,7 +2749,7 @@ export class Game {
       w.saveDirty.fill(0);
       this.endRebuild(null, '');
     } catch (err) {
-      this.endRebuild(err, 'O mapa novo');
+      this.endRebuild(err, t('game.flow.newMap'));
     }
   }
 }

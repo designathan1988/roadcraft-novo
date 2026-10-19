@@ -15,7 +15,7 @@ const H = `const W=(ms)=>new Promise(r=>setTimeout(r,ms));const Q=(s)=>document.
 const click=(s)=>{const e=typeof s==='string'?Q(s):s;if(!e)throw new Error('sem '+s);e.click();};
 const byText=(sel,re)=>QA(sel).find(e=>new RegExp(re).test(e.textContent||e.title||e.dataset.tip||''));
 const esc=()=>window.dispatchEvent(new KeyboardEvent('keydown',{code:'Escape',key:'Escape',bubbles:true}));
-const g=window.__cidade.game;const reset=async()=>{esc();esc();esc();const hp=Q('.health:not(.hidden)');if(hp)hp.classList.add('hidden');QA('.v2-dialog-back').forEach(e=>{e.classList.add('hidden');e.hidden=true;});g.hudActions.tool('camera');await W(200);};`;
+const g=window.__cidade.game;const reset=async()=>{esc();esc();esc();const hp=Q('.health:not(.hidden)');if(hp)hp.classList.add('hidden');g.hudActions.tool('camera');await W(200);};`;
 const scene = (body) => `(async()=>{${H}await reset();${body};await W(600);})().catch(e=>console.log('script: '+e.message))`;
 
 export const SCENES = {
@@ -51,16 +51,25 @@ export const SCENES = {
   'criador-pessoas': scene(`const net=g.world.roads,nc=net.nodes.cols;const sg=net.nearestSeg(300,300,800);const na=net.segs.cols.a[sg[0]];await g.view(nc.x[na],nc.z[na],35,30,34,11);await W(1500);click('[data-cat=landscape]');await W(200);click(byText('.v2-tab','Pessoas|People'));await W(400);console.log('catalogo pessoas: '+!!(g.hudActions.peopleCatalog&&g.hudActions.peopleCatalog()));click(byText('.v2-card','Em roda|In a ring'));await W(150);const c=g.canvas,r=c.getBoundingClientRect();const o={clientX:r.left+r.width*0.5,clientY:r.top+r.height*0.5,button:0,buttons:1,pointerId:1,pointerType:'mouse',bubbles:true,isPrimary:true};c.dispatchEvent(new PointerEvent('pointermove',{...o,buttons:0}));c.dispatchEvent(new PointerEvent('pointerdown',o));c.dispatchEvent(new PointerEvent('pointerup',{...o,buttons:0}));await W(400);console.log('grupos: '+g.commands.canUndo);esc();await W(1500)`),
   'remover-postes': scene(`click('[data-cat=landscape]');await W(200);click(byText('.v2-tab','^Rua|^Street'));await W(200);click(byText('.v2-card','Remover postes|Remove poles'));await W(300);click('[data-pop=camera]')`),
   'ingles': scene(`click('[data-cat=roads]')`),
+  'nos-impossiveis': scene(`g.world.unlimited=true;const x=g.rig.target.x+40,z=g.rig.target.z+40;g.api.road(x-200,z-400,x,z-400);g.api.road(x,z-400,x+200,z-400);g.api.road(x,z-400,x+200,z-345);await W(1200);click('.v2-warn');await W(1500)`),
+  'avisos': scene(`g.hud.toast('Mapa reparado: 1 ponta solta dentro de outra via virou cruzamento.');g.hud.toast('Cidade carregada.');await W(100)`),
+  'trilho': scene(`click('[data-cat=transit]');await W(200);click(byText('.v2-tab','Trilho de trem|Train track'));await W(300)`),
+  'dividir-linha': scene(`click('[data-cat=build]');await W(200);const b=g.world.buildings,c=b.cols;let best=-1,bd=1e9;for(let i=0;i<b.alive.length;i++){if(!b.alive[i]||c.floors[i]<1||c.floors[i]>2||c.w[i]<16)continue;const d=Math.hypot(c.x[i]-g.rig.target.x,c.z[i]-g.rig.target.z);if(d<bd){bd=d;best=i;}}const x=c.x[best],z=c.z[best],r0=c.rot[best],s=Math.sin(r0),co=Math.cos(r0),L=(lx,lz)=>[x+lx*co+lz*s,z-lx*s+lz*co];await g.view(x,z,35,55,70);g.hudActions.lotLine();const A=L(-c.w[best]*0.15,c.d[best]*0.7),B=L(c.w[best]*0.15,-c.d[best]*0.7);g.lotExtraPts=[A];const y=g.api.ground(B[0],B[1]);const v=g.rig.target.clone().set(B[0],y,B[1]).project(g.rig.camera);const cv=g.canvas,r=cv.getBoundingClientRect();cv.dispatchEvent(new PointerEvent('pointermove',{clientX:r.left+(v.x+1)/2*r.width,clientY:r.top+(1-v.y)/2*r.height,pointerId:1,bubbles:true}));await W(500)`),
+  'inicio-menu': scene(`click('[data-pop=menu]');await W(200);click(byText('.v2-row','Tela inicial|Title screen'));await W(300)`),
+  'lista-tema': scene(`click('[data-cat=build]');await W(300);click(QA('.v2-toolopts .v2-dd')[0]);await W(300)`),
+  'transporte-linha': scene(`const n=g.world.roads,sc=n.segs.cols,nc=n.nodes.cols;const s=n.nearestSeg(g.rig.target.x,g.rig.target.z,600)[0];const xa=nc.x[sc.a[s]],za=nc.z[sc.a[s]],xb=nc.x[sc.b[s]],zb=nc.z[sc.b[s]];g.api.line(0,[xa*0.7+xb*0.3,za*0.7+zb*0.3,xa*0.3+xb*0.7,za*0.3+zb*0.7],3);click('[data-cat=transit]');await W(400)`),
 };
 
 const names = process.argv.slice(3).length ? process.argv.slice(3) : Object.keys(SCENES);
 const [first, ...rest] = names;
 const lang = names.includes('ingles') && names.length === 1 ? '&lang=en' : '';
+// the health panel is a developer's tool: its photo opens the game with ?dev
+const dev = names.length === 1 && names[0] === 'saude' ? '&dev' : '';
 const env = {
   ...process.env, CIDADE_W: '1920', CIDADE_H: '1080', CIDADE_SETTLE: '2',
   CIDADE_SEQ: JSON.stringify(rest.map((n) => [path.join(out, `${n}.png`), SCENES[n]])),
 };
 delete env.ELECTRON_RUN_AS_NODE;
-const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first}.png`), first === 'inicio' ? '?mapa=10&limpo&hora=11' : `?cidade&mapa=10&limpo&hora=11&cam=0,0,35,32,260${lang}`, SCENES[first]],
+const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first}.png`), first === 'inicio' ? '?mapa=10&limpo&hora=11' : `?cidade&mapa=10&limpo&hora=11&cam=0,0,35,32,260${lang}${dev}`, SCENES[first]],
   { cwd: root, env, stdio: 'inherit' });
 p.on('exit', (code) => process.exit(code ?? 0));

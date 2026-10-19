@@ -1,8 +1,8 @@
 // The game's options (quality, resolution, weather, simulation, road markings, sound, language) with presets,
 // in Roadcraft's dialog look. Kept in the browser/Electron (localStorage when it works); without it, the defaults.
 
-import { LANGUAGES, lang, loose, setLang, t, type Lang } from './i18n.ts';
-import { keyName } from './hud.ts';
+import { LANGUAGES, lang, loose, onLanguageChange, setLang, t, type Lang } from './i18n.ts';
+import { keyName, reservedKeys } from './keys.ts';
 
 export type Preset = 'baixo' | 'medio' | 'alto' | 'ultra';
 
@@ -29,11 +29,14 @@ export interface Settings {
   /** Road tool keys (key codes): raise and lower the road. */
   roadUp?: string;
   roadDown?: string;
+  /** Road tool key that cycles the alignment: straight, curve, free (Roadcraft 4.0; default V). */
+  roadAlign?: string;
 }
 
-/** Keys the game already uses (they cannot be picked for the road). */
-const RESERVED = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyZ', 'KeyB', 'KeyL', 'KeyC', 'KeyV', 'KeyP', 'KeyK', 'KeyO', 'KeyT', 'KeyI', 'KeyJ', 'KeyM', 'KeyU', 'KeyG', 'KeyN', 'KeyH', 'KeyX', 'KeyY',
-  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Space', 'Escape', 'Enter', 'Backspace', 'Delete', 'F1', 'F9', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'BracketLeft', 'BracketRight']);
+/** Keys the game already uses (they cannot be picked for the road): read from the key table (keys.ts). */
+const RESERVED = reservedKeys();
+/** The road keys' defaults: Page Up, Page Down, V. */
+const ROAD_DEFAULTS = ['PageUp', 'PageDown', 'KeyV'];
 
 export const PRESETS: Record<Preset, Omit<Settings, 'preset' | 'weather'>> = {
   baixo: { resolution: 0.75, shadows: false, ao: false, bloom: false, detail: 0.7 },
@@ -58,20 +61,33 @@ export function loadSettings(webgpu: boolean): Settings {
   return base;
 }
 
-export function saveSettings(s: Settings): void {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignored */ }
+/** The player's own values of the options a photo parameter in the address replaced (they are what is kept). */
+let fromAddress: Partial<Settings> = {};
+
+/** After the address changed some options for this run (?simples, ?semsombra…): those are never stored. */
+export function keepOverAddress(before: Settings, after: Settings): void {
+  fromAddress = {};
+  for (const k of Object.keys(after) as Array<keyof Settings>) if (after[k] !== before[k]) (fromAddress as Record<string, unknown>)[k] = before[k];
 }
 
-/** The options dialog. `apply` receives the new options. */
+export function saveSettings(s: Settings): void {
+  try { localStorage.setItem(KEY, JSON.stringify({ ...s, ...fromAddress })); } catch { /* ignored */ }
+}
+
+/** The options dialog. `apply` receives the new options; `current` gives the game's options as they are now. */
 export class OptionsPanel {
   readonly root: HTMLElement;
-  private s: Settings;
+  private current: () => Settings;
   private apply: (s: Settings) => void;
   private webgpu: boolean;
   private extra: Array<[string, string, () => void]>;
 
-  constructor(parent: HTMLElement, s: Settings, webgpu: boolean, apply: (s: Settings) => void, extra: Array<[string, string, () => void]> = []) {
-    this.s = s;
+  /** The graphics card's name as the driver gives it (the dialog shows it, as Roadcraft 4.0). */
+  private gpu: () => string;
+
+  constructor(parent: HTMLElement, current: () => Settings, webgpu: boolean, apply: (s: Settings) => void, extra: Array<[string, string, () => void]> = [], gpu: () => string = () => '') {
+    this.gpu = gpu;
+    this.current = current;
     this.extra = extra;
     this.apply = apply;
     this.webgpu = webgpu;
@@ -80,15 +96,24 @@ export class OptionsPanel {
     this.root.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === this.root) this.close(); });
     this.root.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
     parent.append(this.root);
+    // another language (this dialog's own row among them): written again at once, the choices not yet applied kept
+    onLanguageChange(() => { if (this.isOpen) this.render(this.shown); });
   }
 
-  open(): void { this.root.classList.remove('hidden'); this.render(); }
-  close(): void { this.root.classList.add('hidden'); }
+  /** The choices the dialog shows now (not applied yet). */
+  private shown: Settings = {} as Settings;
+
+  /** The game's options when the dialog opened. */
+  private opened: Settings = {} as Settings;
+  open(): void { this.opened = { ...this.current() }; this.root.classList.remove('hidden'); this.render({ ...this.opened }); }
+  close(): void { this.root.classList.add('hidden'); this.stopCapture(); }
+  /** A road key being captured (click on the key, then the key): closing the dialog drops it. */
+  private stopCapture = (): void => undefined;
   get isOpen(): boolean { return !this.root.classList.contains('hidden'); }
 
-  private render(): void {
-    // a copy: Close leaves the game's options untouched
-    const s: Settings = { ...this.s };
+  /** `s`: a copy of the game's options, taken when the dialog opens (Close leaves the game's options untouched). */
+  private render(s: Settings): void {
+    this.shown = s;
     const box = document.createElement('div');
     box.className = 'v2-dialog';
     const h = document.createElement('h2');
@@ -124,7 +149,7 @@ export class OptionsPanel {
     const custom = (): void => { s.preset = 'personalizado'; presetSel.value = 'personalizado'; };
     const presetSel = select(s.preset, [['baixo', t('quality.low')], ['medio', t('quality.medium')], ['alto', t('quality.high')], ['ultra', t('quality.ultra')], ['personalizado', t('ui.options.custom')]], (v) => {
       if (v !== 'personalizado') Object.assign(s, PRESETS[v as Preset]);
-      s.preset = v; this.s = { ...this.s, ...s }; this.render();
+      s.preset = v; this.render(s);
     }, !this.webgpu);
     row(t('gfx.preset'), presetSel);
     row(t('ui.options.resolution'), range(s.resolution, 0.5, 1, 0.05, pct, (v) => { s.resolution = v; custom(); }));
@@ -145,26 +170,39 @@ export class OptionsPanel {
         b.textContent = keyName(get());
         b.addEventListener('click', () => {
           b.textContent = t('roadKeys.press');
+          this.stopCapture();
           const on = (ev: KeyboardEvent): void => {
             ev.preventDefault(); ev.stopPropagation();
-            window.removeEventListener('keydown', on, true);
+            this.stopCapture();
             if (ev.code === 'Escape') { b.textContent = keyName(get()); return; }
-            if (RESERVED.has(ev.code)) { b.textContent = t('roadKeys.reserved', { key: keyName(ev.code) }); setTimeout(() => { b.textContent = keyName(get()); }, 1600); return; }
+            // the game's keys are refused, except the road keys' own defaults (Page Up / Down tilt the camera, V the view)
+            if (RESERVED.has(ev.code) && !ROAD_DEFAULTS.includes(ev.code)) { b.textContent = t('roadKeys.reserved', { key: keyName(ev.code) }); setTimeout(() => { b.textContent = keyName(get()); }, 1600); return; }
             set(ev.code); b.textContent = keyName(ev.code);
           };
           window.addEventListener('keydown', on, true);
+          this.stopCapture = () => { window.removeEventListener('keydown', on, true); this.stopCapture = () => undefined; };
         });
         return b;
       };
       const wrap = document.createElement('span');
       const lu = document.createElement('span'); lu.textContent = t('roadKeys.heightUp');
       const ld = document.createElement('span'); ld.textContent = t('roadKeys.heightDown');
-      wrap.append(lu, keyBtn(() => s.roadUp ?? 'PageUp', (c) => { s.roadUp = c; }), ld, keyBtn(() => s.roadDown ?? 'PageDown', (c) => { s.roadDown = c; }));
+      const la = document.createElement('span'); la.textContent = t('roadKeys.alignment');
+      const reset = document.createElement('button'); reset.className = 'v2-btn'; reset.textContent = t('roadKeys.reset');
+      reset.addEventListener('click', () => { this.stopCapture(); s.roadUp = 'PageUp'; s.roadDown = 'PageDown'; s.roadAlign = 'KeyV'; this.render(s); });
+      wrap.append(lu, keyBtn(() => s.roadUp ?? 'PageUp', (c) => { s.roadUp = c; }), ld, keyBtn(() => s.roadDown ?? 'PageDown', (c) => { s.roadDown = c; }),
+        la, keyBtn(() => s.roadAlign ?? 'KeyV', (c) => { s.roadAlign = c; }), reset);
       row(t('roadKeys.title'), wrap);
     }
     row(t('ui.options.weather'), select(s.weather, [['auto', t('ui.weather.auto')], ['limpo', t('ui.options.clear')], ['chuva', t('weather.rain').replace(/\s*\(.*$/, '')], ['tempestade', t('weather.storm')]], (v) => { s.weather = v; }));
     row(t('menu.language'), select<Lang>(lang(), LANGUAGES.map(([c, name]) => [c, name] as [Lang, string]), (v) => setLang(v)));
     row(t('ui.options.volume'), range(s.volume ?? 0.6, 0, 1, 0.05, pct, (v) => { s.volume = v; }));
+    {
+      // full screen at once, as Roadcraft 4.0 (it is the window's state, not an option kept)
+      const fs = document.createElement('input'); fs.type = 'checkbox'; fs.checked = !!document.fullscreenElement;
+      fs.addEventListener('change', () => { if (fs.checked) void document.documentElement.requestFullscreen?.().catch(() => { fs.checked = false; }); else void document.exitFullscreen?.().catch(() => undefined); });
+      row(t('gfx.fullscreen'), fs);
+    }
     if (!this.webgpu) {
       const p = document.createElement('p'); p.className = 'opt-note';
       p.textContent = t('ui.options.compat');
@@ -175,9 +213,16 @@ export class OptionsPanel {
       b.addEventListener('click', () => { this.close(); fn(); });
       row(t('ui.options.game'), b);
     }
+    const name = this.gpu();
+    if (name) { const g = document.createElement('p'); g.className = 'opt-note opt-gpu'; g.textContent = `${t('gfx.gpu')}: ${name}`; box.append(g); }
     const buttons = document.createElement('div'); buttons.className = 'opt-buttons';
     const ok = document.createElement('button'); ok.className = 'v2-btn primary'; ok.textContent = t('ui.options.apply');
-    ok.addEventListener('click', () => { this.s = s; saveSettings(s); this.apply({ ...s }); this.close(); });
+    // what other panels changed while the dialog was open (simulation, road paint and furniture) is kept
+    ok.addEventListener('click', () => {
+      const now = this.current(), opened = this.opened;
+      for (const k of Object.keys(s) as Array<keyof Settings>) if (s[k] === opened[k] && now[k] !== opened[k]) (s as unknown as Record<string, unknown>)[k] = now[k];
+      saveSettings(s); this.apply({ ...s }); this.close();
+    });
     const cancel = document.createElement('button'); cancel.className = 'v2-btn'; cancel.textContent = t('gfx.close');
     cancel.addEventListener('click', () => this.close());
     buttons.append(cancel, ok);

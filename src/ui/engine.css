@@ -11,15 +11,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .v2-act.on { color: var(--v-accent); border-color: var(--v-accent); background: var(--v-accent-soft); }
 .v2-act > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* The tool's hint: one line over the dock; with the drawer open it goes under the top bar. */
-.v2-hintbar {
-  position: absolute; left: 50%; bottom: calc(12px + var(--v-dock-h) + 8px); transform: translateX(-50%); z-index: 4;
-  max-width: min(720px, calc(100vw - 24px)); padding: 5px 12px; border-radius: 999px; pointer-events: none;
-  background: rgba(14, 22, 24, 0.78); border: 1px solid var(--v-line); color: var(--v-text); font-size: 12.5px; text-align: center;
-}
-.v2-hintbar[hidden] { display: none; }
-.v2:has(> .v2-drawer:not([hidden])) > .v2-hintbar { bottom: auto; top: calc(12px + var(--v-hud-h) + 10px); }
-.v2:has(> .v2-toast:not([hidden])) > .v2-hintbar { opacity: 0; }
+/* The tool's hint is never on screen (Roadcraft 4.0, v2/shell.css:158): it describes the map for screen readers
+   (index.html, aria-describedby); what a tool does is the drawer's tooltip, and the game's answers are toasts. */
+.v2-hintbar { display: none !important; }
 
 /* The selection column holds the inspector and hides with it. */
 .v2-side:not(:has(> .inspector:not(.hidden))) { display: none; }
@@ -66,8 +60,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 #loading-text { color: #a3b4b0; max-width: 520px; text-align: center; }
 #loading.error #loading-text { color: #ffb3aa; }
 
-/* The F9 panel. */
-.health { position: absolute; top: calc(12px + var(--v-hud-h) + 10px); right: 12px; z-index: 8; width: 380px; max-height: 60vh; overflow: auto; padding: 12px 14px; pointer-events: auto;
+/* The developer's F9 panel: on the left, clear of the inspector on the right. */
+.health { position: absolute; top: calc(12px + var(--v-hud-h) + 10px); left: 12px; z-index: 8; width: 420px; max-height: 60vh; overflow: auto; padding: 12px 14px; pointer-events: auto;
   background: var(--v-bg); border: 1px solid var(--v-line); border-radius: 16px; box-shadow: var(--v-shadow); color: var(--v-text); }
 .health.hidden { display: none; }
 .health h3 { margin: 0 0 8px; font-size: 15px; }
@@ -75,6 +69,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .health-status.ok { color: var(--v-accent); } .health-status.warn { color: #ffc864; } .health-status.bad { color: var(--v-danger); }
 .health-list { font-size: 12px; color: var(--v-muted); display: grid; gap: 3px; margin-bottom: 10px; }
 .health .row { display: flex; gap: 6px; }
+.health-btn { position: relative; }
+.health-dot { position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--v-accent); box-shadow: 0 0 0 2px var(--v-bg-solid); pointer-events: none; }
+.health-btn[data-status="slow"] .health-dot { background: #ffc864; }
+.health-btn[data-status="broken"] .health-dot { background: var(--v-danger); }
+.health-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.health-list > div { overflow-wrap: anywhere; }
 
 /* The start screen (StartMenu). */
 .v2-start { position: fixed; inset: 0; z-index: 25; display: grid; place-items: center; pointer-events: auto;

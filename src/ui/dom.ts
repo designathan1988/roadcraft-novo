@@ -21,6 +21,13 @@ export function button(className: string, label: string, run: () => void, icon?:
   return b;
 }
 
+/** A button's name written again (another language): the name inside it and its tooltip. */
+export function rename(b: HTMLElement, label: string): void {
+  const name = [...b.children].reverse().find((c) => c.tagName === 'SPAN');
+  if (name) name.textContent = label;
+  b.title = label;
+}
+
 /** A button that exists but does nothing yet: the tooltip says the feature is being built. */
 export function soon(b: HTMLButtonElement, note: string): HTMLButtonElement {
   b.disabled = true;
@@ -118,6 +125,86 @@ export function select(label: string, items: ReadonlyArray<readonly [string | nu
   s.addEventListener('change', () => { pick(s.value); s.blur(); });
   s.addEventListener('keydown', (e) => e.stopPropagation());
   return s;
+}
+
+/** The open themed list, and its button. */
+let ddOpen: { list: HTMLElement; anchor: HTMLButtonElement } | null = null;
+
+/** Closes the open themed list (a click elsewhere, Esc, a pick, or the panel rebuilt). */
+export function closeDropdown(): void {
+  if (!ddOpen) return;
+  ddOpen.list.remove();
+  ddOpen.anchor.setAttribute('aria-expanded', 'false');
+  ddOpen = null;
+}
+
+/**
+ * A list of choices in the theme, in place of the browser's white select (Roadcraft 4.0 shell.ts:971-1040): a button
+ * naming the choice and, open, the list under it (above it in the lower half of the screen). Up, Down, Home and End
+ * move through the list and Enter picks (the list's own keys: no listener on the window); Esc closes it and gives the
+ * focus back to the button, and the game never sees that Esc.
+ */
+export function dropdown(label: string, items: ReadonlyArray<readonly [string | number, string]>, value: string | number, pick: (v: string) => void): HTMLButtonElement {
+  const b = el('button', 'v2-dd');
+  b.type = 'button';
+  b.title = label;
+  b.dataset.value = String(value);
+  b.setAttribute('aria-label', label);
+  b.setAttribute('aria-haspopup', 'listbox');
+  b.setAttribute('aria-expanded', 'false');
+  b.append(el('span', 'v2-dd-value', items.find(([v]) => String(v) === String(value))?.[1] ?? ''));
+  b.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>');
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (ddOpen?.anchor === b) { closeDropdown(); return; }
+    closeDropdown();
+    const list = el('div', 'v2-dd-list');
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', label);
+    for (const [v, name] of items) {
+      const on = String(v) === b.dataset.value;
+      const o = el('button', `v2-dd-opt${on ? ' on' : ''}`, name);
+      o.type = 'button';
+      o.dataset.value = String(v);
+      o.setAttribute('role', 'option');
+      o.setAttribute('aria-selected', String(on));
+      // the button names the new choice at once (as a select does), then the choice is passed on
+      o.addEventListener('click', (ev) => { ev.stopPropagation(); closeDropdown(); b.dataset.value = String(v); b.querySelector('.v2-dd-value')!.textContent = name; b.focus(); pick(String(v)); });
+      list.append(o);
+    }
+    list.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') { ev.preventDefault(); closeDropdown(); b.focus(); return; }
+      const opts = [...list.querySelectorAll<HTMLButtonElement>('.v2-dd-opt')];
+      const at = opts.indexOf(document.activeElement as HTMLButtonElement);
+      const to = ev.key === 'ArrowDown' ? Math.min(opts.length - 1, at + 1) : ev.key === 'ArrowUp' ? Math.max(0, at - 1)
+        : ev.key === 'Home' ? 0 : ev.key === 'End' ? opts.length - 1 : -1;
+      if (to >= 0) { ev.preventDefault(); opts[to].focus(); }
+    });
+    list.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    list.addEventListener('wheel', (ev) => ev.stopPropagation(), { passive: true });
+    (b.closest('.v2') ?? document.body).append(list);
+    const r = b.getBoundingClientRect();
+    list.style.minWidth = `${Math.round(r.width)}px`;
+    list.style.left = `${Math.round(Math.min(r.left, window.innerWidth - list.offsetWidth - 8))}px`;
+    if (r.top > window.innerHeight / 2) list.style.bottom = `${Math.round(window.innerHeight - r.top + 4)}px`;
+    else list.style.top = `${Math.round(r.bottom + 4)}px`;
+    ddOpen = { list, anchor: b };
+    b.setAttribute('aria-expanded', 'true');
+    const chosen = list.querySelector<HTMLElement>('.on') ?? list.querySelector<HTMLElement>('.v2-dd-opt');
+    chosen?.scrollIntoView({ block: 'nearest' });
+    chosen?.focus({ preventScroll: true });
+  });
+  // Down on the closed button opens the list, as a select does
+  b.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' && ddOpen?.anchor !== b) { e.preventDefault(); e.stopPropagation(); b.click(); } });
+  return b;
+}
+
+if (typeof document !== 'undefined') {
+  // a click anywhere else closes the open list
+  document.addEventListener('pointerdown', (e) => {
+    if (ddOpen && !ddOpen.list.contains(e.target as Node) && !ddOpen.anchor.contains(e.target as Node)) closeDropdown();
+  }, true);
 }
 
 /** A text box: the keys typed stay in it (the game's shortcuts do not see them). */

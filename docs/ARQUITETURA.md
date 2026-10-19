@@ -29,7 +29,8 @@ trava, `sim/poses.ts`), ocupação e desgaste por trecho, estado dos semáforos.
 
 ## Desenho
 - `render/cellLayer.ts`: L0 e L1 por célula, L2 por ladrilho, L3 por placa; escolha por distância × `pixelScale`
-  com histerese; cai no nível mais grosso **pronto** (nunca buraco); troca por pontilhado complementar
+  com histerese; cai no nível mais grosso **pronto** (a meta é nunca buraco; hoje faltam ladrilhos inteiros de prédios
+  entre 4,2 e 6 km, defeito E12 (lista de defeitos `DEFEITOS-roadcraft-novo.md`, 2026-10-19)); troca por pontilhado complementar
   (`lodFadeMask`), sem transparência; orçamento de VRAM por camada; cópia da CPU solta dois quadros após o upload.
 - Vértice compacto (`jobs/meshBuilder.ts`): posição snorm16 relativa à célula, normal octaédrica, cor + id de
   material em 4 bytes, atributos extras empacotados. **Um material por camada.**

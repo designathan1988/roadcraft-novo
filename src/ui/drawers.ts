@@ -6,14 +6,19 @@ import { Item } from '../world/items.ts';
 import { GROUND_COLORS, Ground } from '../world/ground.ts';
 import { ARCHES, FN_NAMES } from '../world/arch.ts';
 import { PROFILES } from '../roads/profiles.ts';
+import { LINE_COLORS } from '../world/transit.ts';
+import { PAINTS } from '../render/vehicles.ts';
 import { DEFAULT_PERSON_OPTIONS, type PersonOptions } from '../render/people/creator.ts';
 import { renderPeople } from './peoplePanel.ts';
 import type { HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hud.ts';
 import { topSwatch, type RoadCatalog } from './roadCatalog.ts';
 import { LANE_CHOICES, PARKING_PRESETS } from '../roads/roadVariant.ts';
-import { button, card, choices, el, orow, range, select, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
+import { button, card, choices, dropdown, el, orow, range, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, fmtInt, loose, plural, t } from './i18n.ts';
+import { BOMB_START, bombStep } from './strike.ts';
+import { lineName } from './transitNames.ts';
+import { openRoadKeys } from './roadKeysPanel.ts';
 
 export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
 
@@ -79,6 +84,11 @@ const SIGNS: Array<[number, string]> = [[4, 'sign.type.stop'], [1, 'sign.type.yi
   [7, 'sign.type.pedestrian'], [8, 'sign.type.school'], [9, 'sign.type.direction'], [2, 'sign.type.street'], [10, 'sign.type.info'], [3, 'sign.type.oneWay']];
 const CLOTHES = ['#c8ccd0', '#2f4f7a', '#b8382e', '#e8e4dc', '#3d3d3d', '#7a8f4f', '#d9a441', '#6a4c93', '#e07a5f', '#3d8f8f', '#f2cc8f', '#81b29a', '#9c6644', '#264653', '#e9c46a', '#f4a261'];
 
+/** The builder's tabs another area fills (the buildings session, through Hud.registerBuilderTab). */
+export type BuilderTab = 'models' | 'facade' | 'roof' | 'parts' | 'paint';
+/** What a builder tab draws: into `box` (the tool options), for the building picked (null: none). */
+export type BuilderTabRender = (box: HTMLElement, building: BuildingInfo | null) => void;
+
 export type LandTab = 'relief' | 'ground' | 'nature' | 'sky' | 'street' | 'people';
 export type TransitTab = 'stop' | 'terminal' | 'trainTrack' | 'trainStation' | 'metroTrack' | 'metroStation';
 
@@ -87,7 +97,6 @@ export class ShellState {
   snap = 0;
   elevation = 0;
   cutWalls = false;
-  furniture = 0;
   ring = 22;
   blocks = { cols: 3, rows: 3, size: 100, angle: 0 };
   zoneUse: ZoneUse = 'residential';
@@ -102,6 +111,9 @@ export class ShellState {
   splitKind: 'side' | 'depth' = 'side';
   splitParts = 2;
   lotUse = 1;
+  /** Style (−1: by neighbourhood) and function of the next lot drawn or built. */
+  nextArch = -1;
+  nextFn = 0;
   radius = 60;
   strength = 40;
   riverWidth = 14;
@@ -113,6 +125,7 @@ export class ShellState {
   skyTool: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
   fogAll = 100;
   cloudCount = 8;
+  cloudVariation = 50;
   weather: WeatherCtl & { manual: boolean } = { rain: 0, wind: 4, dir: 65, lightning: 0, thunder: 1, manual: false };
   water = { waves: 0.3, foam: 0.4, current: 0.5 };
   item: number = Item.Tree;
@@ -125,13 +138,16 @@ export class ShellState {
   person = { color: 3, height: 7, walk: false, count: 1 };
   /** The people creator's choices (DEFAULT_PERSON_OPTIONS, one person standing to start). */
   people: PersonOptions = { ...DEFAULT_PERSON_OPTIONS, count: 1, mode: 'stand' };
-  bomb = 3;
+  bomb = BOMB_START;
   landTab: LandTab = 'relief';
+  /** The builder tab open in the Build drawer (null: Edit or Draw). */
+  buildTab: BuilderTab | null = null;
   transitTab: TransitTab = 'stop';
 }
 
 /** A transit line as the panel lists it. */
-export interface LineRow { id: number; mode: number; color: number; buses: number; stops: number; perHour: number; waiting: number }
+/** A transit line as the panel lists it (`color`: index into the vehicle paints, `loop`: a ring instead of out and back). */
+export interface LineRow { id: number; mode: number; color: number; loop: boolean; buses: number; stops: number; perHour: number; waiting: number }
 
 /** The building picked with the Build tool. */
 export interface BuildingInfo { fn: number; zone: number; floors: number; arch: number; address?: string; decay?: number }
@@ -151,10 +167,19 @@ export interface DrawerHost {
   /** Inside view: on, and the floor shown (−1: off). */
   insideFloor(): number;
   roadKeys(): string;
+  /** Builder tabs mounted by the buildings session. */
+  builderTabs: ReadonlyMap<BuilderTab, BuilderTabRender>;
 }
 
 /** What a render fills. */
-export interface DrawerParts { tabs: HTMLElement; options: HTMLElement; strip: HTMLElement; tools: HTMLElement }
+export interface DrawerParts {
+  tabs: HTMLElement; options: HTMLElement; strip: HTMLElement; tools: HTMLElement;
+  /** What the tool does: the drawer's description, written in the strip only when it is empty (Roadcraft 4.0). */
+  note?: string;
+}
+
+/** What a tool does: in the drawer's tooltip, never as a paragraph beside cards (Roadcraft 4.0 v2/shell.ts:1115-1117). */
+function note(p: DrawerParts, text: string): void { p.note = text; }
 
 const SOON = (): string => t('ui.soon');
 
@@ -188,15 +213,11 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
           stepper(t('palette.blocks.cols'), `${b.cols}`, (d) => { b.cols = Math.max(1, Math.min(12, b.cols + d)); send(); return `${b.cols}`; }),
           stepper(t('palette.blocks.rows'), `${b.rows}`, (d) => { b.rows = Math.max(1, Math.min(12, b.rows + d)); send(); return `${b.rows}`; })),
         orow(t('v2.blocks.measure'),
-          stepper(t('palette.blocks.size'), `${b.size} m`, (d) => { b.size = Math.max(40, Math.min(300, b.size + d * 10)); send(); return `${b.size} m`; }),
-          stepper(t('palette.blocks.angle'), `${b.angle}°`, (d) => { b.angle = Math.max(-90, Math.min(90, b.angle + d * 15)); send(); return `${b.angle}°`; })));
+          stepper(t('palette.blocks.size'), `${b.size} m`, (d) => { b.size = Math.max(30, Math.min(300, b.size + d * 10)); send(); return `${b.size} m`; }),
+          // any heading in 15° steps (Roadcraft 4.0), kept within ±180°
+          stepper(t('palette.blocks.angle'), `${b.angle}°`, (d) => { b.angle = ((b.angle + d * 15 + 180) % 360 + 360) % 360 - 180; send(); return `${b.angle}°`; })));
     }
-    const snap = (mode: number): void => { s.snap = mode; a.roadSnap(mode); h.render(); };
-    p.options.append(orow(t('v2.snap.title'), choices([
-      { label: t('v2.snap.on'), on: s.snap > 0, run: () => snap(s.snap > 0 ? 0 : 1), icon: svg('magnet', 18) },
-      { label: t('v2.snap.angles'), on: s.snap >= 1, run: () => snap(s.snap >= 1 ? 0 : 1), icon: svg('angle', 18), disabled: s.snap === 0 },
-      { label: t('v2.snap.grid'), on: s.snap === 2, run: () => snap(s.snap === 2 ? 1 : 2), icon: svg('cells', 18), disabled: s.snap === 0 },
-    ])));
+    p.options.append(snapRow(h));
     // lanes, total width and parking of the next road (Roadcraft 4.0 ui/v2/shell.ts:1244-1258, :1293-1299; the vias session's)
     const ro = a.roadOptions?.();
     if (ro && a.roadLanes && a.roadWidth && a.roadParking) {
@@ -223,30 +244,15 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
     }
   }
   if (drawing || cur === 'upgrade') {
-    const heightText = (): string => (s.elevation === 0 ? t('ui.height.ground') : `${s.elevation > 0 ? '+' : ''}${s.elevation} m`);
-    const hr = orow(t('v2.row.height'), stepper(t('palette.height'), heightText(), (d) => {
-      a.elevation(d * 4);
-      s.elevation = Math.max(-12, Math.min(16, s.elevation + d * 4));
-      return heightText();
-    }));
-    hr.title = `${t('palette.height')} (${h.roadKeys()})`;
-    p.options.append(hr);
-    const seg = (items: Array<[string, boolean, () => void]>, data: string): HTMLElement => {
-      const r = el('div', 'v2-seg');
-      for (const [label, on, run] of items) {
-        const b = button(`v2-seg-b rp-seg-text${on ? ' on' : ''}`, label, () => { run(); h.render(); });
-        b.dataset[data] = label;
-        r.append(b);
-      }
-      return r;
-    };
-    p.options.append(orow(t('cutSides.row'), seg([[t('cutSides.batter'), !s.cutWalls, () => { s.cutWalls = false; a.cutWalls(false); }],
-      [t('cutSides.walls'), s.cutWalls, () => { s.cutWalls = true; a.cutWalls(true); }]], 'cut')));
-    const furn = orow(t('roadFurniture.row'), seg((['complete', 'basic', 'none'] as const).map((k, i) => [t(`roadFurniture.${k}`), s.furniture === i,
-      () => { s.furniture = i; a.furniture(i); }] as [string, boolean, () => void]), 'furniture'));
+    p.options.append(...heightRows(h));
+    // read from the game's options each time (they load after the interface is built)
+    const furnNow = a.settings().furniture;
+    const furn = orow(t('roadFurniture.row'), seg(h, (['complete', 'basic', 'none'] as const).map((k, i) => [t(`roadFurniture.${k}`), furnNow === i,
+      () => a.furniture(i)] as [string, boolean, () => void]), 'furniture'));
     furn.title = t('roadFurniture.tip');
     p.options.append(furn);
-    const keys = button('v2-pill rp-open', h.roadKeys(), () => a.options(), svg('keyboard', 16));
+    // the pill opens the keys' own small panel beside the options (Roadcraft 4.0 roads/keysPanel.ts, v2/shell.ts:1289)
+    const keys = button('v2-pill rp-open', h.roadKeys(), () => openRoadKeys(keys, () => a.settings(), (patch) => { a.roadKeys(patch); h.render(); }), svg('keyboard', 16));
     keys.title = t('roadKeys.title');
     p.options.append(orow(t('roadKeys.row'), keys));
     if (cur === 'upgrade' && a.roadClasses) {
@@ -263,12 +269,45 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
     }
   } else h.catalog.visible = false;
   if (cur === 'roundabout') {
-    p.options.append(orow(t('v2.roundabout.radius'), stepper(t('v2.roundabout.radius'), `${s.ring} m`, (d) => {
-      a.ring(d > 0 ? 1.2 : 1 / 1.2);
-      s.ring = Math.round(Math.max(14, Math.min(60, s.ring * (d > 0 ? 1.2 : 1 / 1.2))));
-      return `${s.ring} m`;
-    })));
+    // a slider, as Roadcraft 4.0 (the engine's roundabouts are 14 to 60 m); the game answers with the radius (Hud.setRing)
+    p.options.append(range(t('v2.roundabout.radius'), 14, 60, 2, s.ring, (v) => `${v} m`, (v) => a.ring(v / s.ring)));
   }
+  // a mode with nothing to pick says what to do (Roadcraft 4.0)
+  const help: Partial<Record<Tool, string>> = { move: 'hint.move', split: 'hint.split', inspect: 'hint.control', roundabout: 'hint.roundabout' };
+  if (help[cur]) note(p, t(help[cur]!));
+}
+
+/** Segmented buttons (cut sides, furniture). */
+function seg(h: DrawerHost, items: Array<[string, boolean, () => void]>, data: string): HTMLElement {
+  const r = el('div', 'v2-seg');
+  for (const [label, on, run] of items) {
+    const b = button(`v2-seg-b rp-seg-text${on ? ' on' : ''}`, label, () => { run(); h.render(); });
+    b.dataset[data] = label;
+    r.append(b);
+  }
+  return r;
+}
+
+/** Snapping of what is drawn like a road (roads, and rail tracks): off, angles, angles and grid. */
+function snapRow(h: DrawerHost): HTMLElement {
+  const s = h.s, a = h.a;
+  const snap = (mode: number): void => { s.snap = mode; a.roadSnap(mode); h.render(); };
+  return orow(t('v2.snap.title'), choices([
+    { label: t('v2.snap.on'), on: s.snap > 0, run: () => snap(s.snap > 0 ? 0 : 1), icon: svg('magnet', 18) },
+    { label: t('v2.snap.angles'), on: s.snap >= 1, run: () => snap(s.snap >= 1 ? 0 : 1), icon: svg('angle', 18), disabled: s.snap === 0 },
+    { label: t('v2.snap.grid'), on: s.snap === 2, run: () => snap(s.snap === 2 ? 1 : 2), icon: svg('cells', 18), disabled: s.snap === 0 },
+  ]));
+}
+
+/** Height and cut sides of what is drawn like a road. */
+function heightRows(h: DrawerHost): HTMLElement[] {
+  const s = h.s, a = h.a;
+  const heightText = (): string => (s.elevation === 0 ? t('ui.height.ground') : `${s.elevation > 0 ? '+' : ''}${s.elevation} m`);
+  // the game answers with the height the road is drawn at (Hud.setElevation writes s.elevation)
+  const hr = orow(t('v2.row.height'), stepper(t('palette.height'), heightText(), (d) => { a.elevation(d * 4); return heightText(); }));
+  hr.title = `${t('palette.height')} (${h.roadKeys()})`;
+  return [hr, orow(t('cutSides.row'), seg(h, [[t('cutSides.batter'), !s.cutWalls, () => { s.cutWalls = false; a.cutWalls(false); }],
+    [t('cutSides.walls'), s.cutWalls, () => { s.cutWalls = true; a.cutWalls(true); }]], 'cut'))];
 }
 
 // ------------------------------------------------------------------ zones
@@ -300,7 +339,8 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
   }
   const lots = section(p.strip, t('zone.lots'));
   const LOTS: Array<[LotMode | 'curve', string, string]> = [['rect', 'zone.lot.shape.rect', 'plus'], ['poly', 'zone.lot.shape.polygon', 'lotPolygon'], ['corner', 'zone.lot.edit', 'lotEdit'],
-    ['curve', 'zone.lot.curve', 'lotCurve'], ['front', 'zone.lot.front', 'lotFront'], ['split', 'zone.lot.split', 'split'], ['join', 'zone.lot.join', 'join'], ['delete', 'zone.lot.delete', 'lotDelete']];
+    ['curve', 'zone.lot.curve', 'lotCurve'], ['front', 'zone.lot.front', 'lotFront'], ['split', 'zone.lot.split', 'split'], ['join', 'zone.lot.join', 'join'], ['delete', 'zone.lot.delete.short', 'lotDelete']];
+  note(p, t('zone.lots.help'));
   for (const [mode, key, icon] of LOTS) {
     const on = mode === 'curve' ? s.lotExtra === 'curve' : s.lotExtra === null && s.lotMode === mode;
     const c = card(t(key), on, () => {
@@ -322,7 +362,7 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
     })))));
   }
   if (s.lotMode === 'rect' || s.lotMode === 'poly') {
-    p.options.append(orow(t('v2.zone.use'), select(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
+    p.options.append(orow(t('v2.zone.use'), dropdown(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
       (v) => { s.lotUse = Number(v); a.lotUse(s.lotUse); })));
   }
 }
@@ -330,24 +370,31 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
 // ------------------------------------------------------------------ build
 export function renderBuild(h: DrawerHost, p: DrawerParts): void {
   const s = h.s, a = h.a, b = h.building();
-  const editing = s.lotMode === 'edit';
+  const bt = h.builderTabs.has(s.buildTab as BuilderTab) ? s.buildTab : null;
+  const editing = s.lotMode === 'edit' && !bt;
+  // a builder tab: lit when the buildings session mounted it, "being built" otherwise
+  const builder = (id: BuilderTab): (() => void) | null => (h.builderTabs.has(id) ? () => { s.buildTab = id; if (s.lotMode !== 'edit') { s.lotMode = 'edit'; a.lotMode('edit'); } h.render(); } : null);
   const tabs: Array<[string, string, (() => void) | null, boolean]> = [
-    ['builder.category.models', 'models', null, false],
-    ['ui.build.edit', 'mass', () => { s.lotMode = 'edit'; a.lotMode('edit'); h.render(); }, editing],
-    ['builder.category.draw', 'draw', () => { s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, s.lotMode === 'rect' || s.lotMode === 'poly'],
-    ['builder.category.facade', 'face', null, false], ['builder.category.roof', 'roof', null, false], ['builder.category.parts', 'components', null, false],
-    ['builder.category.interior', 'interiorView', () => a.inside('toggle'), h.insideFloor() >= 0], ['builder.category.paint', 'paint', null, false],
+    ['builder.category.models', 'models', builder('models'), bt === 'models'],
+    ['ui.build.edit', 'mass', () => { s.buildTab = null; s.lotMode = 'edit'; a.lotMode('edit'); h.render(); }, editing],
+    ['builder.category.draw', 'draw', () => { s.buildTab = null; s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, !bt && (s.lotMode === 'rect' || s.lotMode === 'poly')],
+    ['builder.category.facade', 'face', builder('facade'), bt === 'facade'], ['builder.category.roof', 'roof', builder('roof'), bt === 'roof'],
+    ['builder.category.parts', 'components', builder('parts'), bt === 'parts'],
+    ['builder.category.interior', 'interiorView', () => a.inside('toggle'), h.insideFloor() >= 0], ['builder.category.paint', 'paint', builder('paint'), bt === 'paint'],
   ];
   for (const [key, icon, run, on] of tabs) p.tabs.append(tab(t(key), on, run ?? (() => undefined), svg(icon, 18), run ? undefined : t('ui.soon.buildings')));
-  if (editing) {
+  if (bt) {
+    h.builderTabs.get(bt)!(p.options, b);
+    if (!b) note(p, t('v2.build.selectToEdit'));
+  } else if (editing) {
     if (b) {
       p.options.append(el('div', 'v2-pop-title', `${b.fn ? loose(FN_NAMES[b.fn]) : t(`zone.name.${b.zone}`)} · ${plural('ui.floors', b.floors)}`));
       // the address under the title (the decay has its own row below, with Renovate)
       const address = b.address || (a.addressOf?.() ?? '');
       if (address) p.options.append(el('div', 'v2-pop-sub', address));
-      p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
-      p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(Math.max(1, b.floors + d)); })));
-      p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
+      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
+      p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(b.floors === 0 && d < 0 ? 0 : Math.max(1, Math.min(60, b.floors + d))); })));
+      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
       p.options.append(orow(t('ui.build.actions'),
         button('v2-act danger', t('inspector.demolish'), () => a.demolishBuilding(), svg('demolish', 16)),
         button(`v2-act${h.insideFloor() >= 0 ? ' on' : ''}`, t('inside.toggle'), () => a.inside('toggle'), svg('interiorView', 16)),
@@ -358,13 +405,13 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
         const renovate = button('v2-pill rp-open', t('ui.build.renovate'), () => { a.renovate?.(); h.render(); }, svg('build', 16));
         if (!a.renovate) soon(renovate, SOON());
         renovate.title = t('ui.build.renovateTip');
-        p.options.append(orow(t('ui.build.decay'), el('span', 'v2-stepper-value', `${Math.round(decay * 100)}%`), renovate));
+        p.options.append(orow(t('ui.build.decay'), el('span', 'v2-stepper-value v2-decay', `${Math.round(decay * 100)}%`), renovate));
       }
     } else {
-      p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
+      note(p, t('v2.build.selectToEdit'));
       p.options.append(subhead(t('ui.build.next')));
-      p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], -1, (v) => a.style(Number(v)))));
-      p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), 0, (v) => a.buildingFn(Number(v)))));
+      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { s.nextArch = Number(v); a.style(s.nextArch); })));
+      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { s.nextFn = Number(v); a.buildingFn(s.nextFn); })));
     }
     // extension point: the buildings session mounts its editor here (src/ui/creator.ts)
     p.options.append(h.buildingSlot);
@@ -372,7 +419,7 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
     const draw = section(p.strip, t('builder.category.draw'));
     draw.append(card(t('zone.lot.shape.rect'), s.lotMode === 'rect', () => { s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, svg('plus', 30)),
       card(t('zone.lot.shape.polygon'), s.lotMode === 'poly', () => { s.lotMode = 'poly'; a.lotMode('poly'); h.render(); }, svg('lotPolygon', 30)));
-    p.options.append(orow(t('v2.zone.use'), select(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
+    p.options.append(orow(t('v2.zone.use'), dropdown(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
       (v) => { s.lotUse = Number(v); a.lotUse(s.lotUse); })));
   }
 }
@@ -390,11 +437,19 @@ export function landTabOf(tool: Tool, item: number): LandTab {
 
 export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
   const s = h.s, a = h.a, cur = h.tool();
+  // water, weather and haze as the map on screen has them (an opened map brings its own)
+  const env = a.environment();
+  s.water = env.water;
+  s.fogAll = Math.round(env.fog * 100);
+  if (env.weather) s.weather = { ...env.weather, manual: true }; else s.weather.manual = false;
   const now = landTabOf(cur, s.item);
   s.landTab = now;
+  // an item or a barrier picked places it: Remove poles is left
+  const placing = (): void => { s.itemRemove = false; a.itemRemove(false); };
+  const putItem = (k: number): void => { placing(); s.item = k; a.item(k); h.pick('streetscape'); h.render(); };
   const first: Record<LandTab, () => void> = {
     relief: () => h.pick('raise'), ground: () => h.pick('paint'), nature: () => h.pick('forest'),
-    sky: () => h.pick('sky'), street: () => { s.item = Item.Tree; a.item(s.item); h.pick('streetscape'); }, people: () => h.pick('person'),
+    sky: () => h.pick('sky'), street: () => putItem(Item.Tree), people: () => h.pick('person'),
   };
   for (const [id, key, icon] of [['relief', 'v2.land.relief', 'terrain'], ['ground', 'v2.land.ground', 'paint'], ['nature', 'v2.land.nature', 'ls_tree'],
     ['sky', 'v2.land.sky', 'cloud'], ['street', 'v2.land.street', 'ls_bench'], ['people', 'tool.person', 'people']] as const) {
@@ -416,8 +471,9 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     }
     if (cur === 'river') p.options.append(range(t('ui.river.width'), 6, 60, 1, s.riverWidth, (v) => `${v} m`, (v) => { s.riverWidth = v; a.riverWidth(v); }));
     else p.options.append(radius(), strength());
+    // the water of every river: its rows with the river brush only (Roadcraft 4.0)
     const w = s.water, send = (): void => a.water({ ...w });
-    p.options.append(subhead(t('water.title')),
+    if (cur === 'river') p.options.append(subhead(t('water.title')),
       range(t('water.waves'), 0, 100, 1, Math.round(w.waves * 100), (v) => `${v}%`, (v) => { w.waves = v / 100; send(); }),
       range(t('water.foam'), 0, 100, 1, Math.round(w.foam * 100), (v) => `${v}%`, (v) => { w.foam = v / 100; send(); }),
       range(t('water.current'), 0, 3, 0.1, w.current, (v) => `${fmtDec(v)} m/s`, (v) => { w.current = v; send(); }));
@@ -453,7 +509,7 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
       card(t('terrain.fog'), fogOn, () => { st.fog = 'lay'; st.cloud = 'none'; sendSky(); h.pick('sky'); }, svg('fog', 30)),
       card(t('terrain.weather'), cur === 'weather', () => h.pick('weather'), svg('storm', 30)));
     const effects = section(p.strip, t('el.effects'));
-    for (const [k, name] of EFFECTS) effects.append(card(t(`el.kind.${name}`), cur === 'streetscape' && s.item === k, () => { s.item = k; a.item(k); h.pick('streetscape'); }, svg(`el_${name}`, 30)));
+    for (const [k, name] of EFFECTS) effects.append(card(t(`el.kind.${name}`), cur === 'streetscape' && s.item === k, () => putItem(k), svg(`el_${name}`, 30)));
     if (cloudOn) {
       const icons = { add: 'plus', move: 'move', edit: 'draw', remove: 'eraser' } as const;
       p.options.append(orow(t('v2.row.brush'), choices((['add', 'move', 'edit', 'remove'] as const).map((m) => ({
@@ -464,7 +520,8 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
       range(t('cloud.density'), 10, 100, 1, Math.round(st.density * 100), (v) => `${v}%`, (v) => { st.density = v / 100; sendSky(); }),
       subhead(t('cloud.spread')),
       range(t('cloud.count'), 1, 24, 1, s.cloudCount, (v) => String(v), (v) => { s.cloudCount = v; }),
-      orow(t('v2.row.sky'), button('v2-act', t('cloud.scatter'), () => a.scatterClouds(s.cloudCount, 0.5), svg('scatter', 16)),
+      range(t('cloud.variation'), 0, 100, 5, s.cloudVariation, (v) => `${v}%`, (v) => { s.cloudVariation = v; }, t('v2.s.variation')),
+      orow(t('v2.row.sky'), button('v2-act', t('cloud.scatter'), () => a.scatterClouds(s.cloudCount, s.cloudVariation / 100), svg('scatter', 16)),
         button('v2-act danger', t('cloud.clear'), () => a.clearClouds(), svg('trash', 16))));
     } else if (fogOn) {
       p.options.append(orow(t('v2.row.brush'), choices([
@@ -475,21 +532,29 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     } else if (cur === 'weather') {
       const w = s.weather;
       const send = (): void => a.weather(w.manual ? { rain: w.rain, wind: w.wind, dir: w.dir, lightning: w.lightning, thunder: w.thunder } : null);
-      const manual = (): void => { if (!w.manual) { w.manual = true; h.render(); } send(); };
-      p.options.append(orow(t('ui.weather.mode'), choices([
+      const mode = choices([
         { label: t('ui.weather.auto'), on: !w.manual, run: () => { w.manual = false; send(); h.render(); } },
         { label: t('ui.weather.manual'), on: w.manual, run: () => { w.manual = true; send(); h.render(); } },
-      ])),
+      ]);
+      // a slider moved in automatic mode turns to "set here" without rebuilding the panel (the drag goes on)
+      const manual = (): void => {
+        if (!w.manual) {
+          w.manual = true;
+          mode.querySelectorAll('button').forEach((b, i) => { b.classList.toggle('on', i === 1); b.setAttribute('aria-pressed', String(i === 1)); });
+        }
+        send();
+      };
+      p.options.append(orow(t('ui.weather.mode'), mode),
       range(t('weather.rain'), 0, 100, 1, Math.round(w.rain * 100), (v) => `${v}%`, (v) => { w.rain = v / 100; manual(); }),
-      range(t('weather.wind'), 0, 25, 1, w.wind, (v) => `${v} m/s`, (v) => { w.wind = v; manual(); }),
-      range(t('weather.windDirection'), 0, 359, 1, w.dir, (v) => `${v}°`, (v) => { w.dir = v; manual(); }, t('v2.s.direction')),
+      range(t('weather.wind'), 0, 30, 1, w.wind, (v) => `${v} m/s`, (v) => { w.wind = v; manual(); }),
+      range(t('weather.windDirection'), 0, 355, 5, w.dir, (v) => `${v}°`, (v) => { w.dir = v; manual(); }, t('v2.s.direction')),
       subhead(t('weather.storm')),
-      range(t('weather.lightning'), 0, 12, 1, w.lightning, (v) => String(v), (v) => { w.lightning = v; manual(); }, t('v2.s.lightning')),
+      range(t('weather.lightning'), 0, 30, 1, w.lightning, (v) => String(v), (v) => { w.lightning = v; manual(); }, t('v2.s.lightning')),
       range(t('weather.thunder'), 0, 100, 1, Math.round(w.thunder * 100), (v) => `${v}%`, (v) => { w.thunder = v / 100; manual(); }, t('v2.s.thunder')));
     }
   } else if (now === 'street') {
     const furniture = section(p.strip, t('tool.streetscape'));
-    for (const [k, key, icon] of STREET) furniture.append(card(t(key), cur === 'streetscape' && s.item === k, () => { s.itemRemove = false; a.itemRemove(false); s.item = k; a.item(k); h.pick('streetscape'); h.render(); }, svg(icon, 30)));
+    for (const [k, key, icon] of STREET) furniture.append(card(t(key), cur === 'streetscape' && s.item === k, () => putItem(k), svg(icon, 30)));
     const walls = section(p.strip, t('v2.land.walls'));
     for (const [k, key, icon] of WALLS) walls.append(card(t(key), cur === 'barrier' && s.barrier === k, () => { s.itemRemove = false; a.itemRemove(false); s.barrier = k; a.barrierKind(k); h.pick('barrier'); h.render(); }, svg(icon, 30)));
     const poles = section(p.strip, t('tool.pole'));
@@ -497,14 +562,17 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     poles.append(card(t('pole.mode.build'), poleOn && !s.itemRemove, () => { s.itemRemove = false; a.itemRemove(false); s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_build', 30)));
     poles.append(card(t('pole.mode.remove'), poleOn && s.itemRemove, () => { s.itemRemove = true; a.itemRemove(true); s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_remove', 30)));
     if (cur === 'streetscape' && s.item === Item.Sign) {
-      p.options.append(orow(t('v2.row.sign'), select(t('sign.type'), SIGNS.map(([k, key]) => [k, t(key)] as const), s.sign, (v) => { s.sign = Number(v); a.signType(s.sign); h.render(); })));
-      p.options.append(orow(t('v2.row.text'), textInput(t(s.sign === 2 ? 'sign.street.placeholder' : s.sign === 0 ? 'sign.text.speed' : 'sign.text'), s.signText, (v) => { s.signText = v; a.signText(v); })));
+      p.options.append(orow(t('v2.row.sign'), dropdown(t('sign.type'), SIGNS.map(([k, key]) => [k, t(key)] as const), s.sign, (v) => { s.sign = Number(v); a.signType(s.sign); h.render(); })));
+      // words only on the signs that carry them: speed, street name, direction, information (Roadcraft 4.0)
+      if ([0, 2, 9, 10].includes(s.sign)) p.options.append(orow(t('v2.row.text'), textInput(t(s.sign === 2 ? 'sign.street.placeholder' : s.sign === 0 ? 'sign.text.speed' : 'sign.text'), s.signText, (v) => { s.signText = v; a.signText(v); })));
     }
     if (cur === 'barrier' && s.barrier === Item.PoleLine && !s.itemRemove) {
       p.options.append(orow(t('v2.row.lights'), choices((['none', 'alternate', 'all'] as const).map((m, i) => ({
         label: `${t('pole.lamps')}: ${t(`pole.lamps.${m}`)}`, on: s.poleLights === i, run: () => { s.poleLights = i; a.poleLights(i); h.render(); }, icon: svg(`pl_${m}`, 18),
       })))));
     }
+    // what the tool does (Roadcraft 4.0)
+    note(p, t(cur === 'barrier' ? (s.barrier === Item.PoleLine ? (s.itemRemove ? 'help.tool.poleRemove' : 'help.tool.pole') : 'help.tool.barrier') : 'help.tool.streetscape'));
   } else {
     renderPeople(h, p, CLOTHES);
   }
@@ -524,7 +592,12 @@ function elementRows(h: DrawerHost, p: DrawerParts): void {
 }
 
 // ------------------------------------------------------------------ transit
-const RAIL = { trainTrack: 'Ferrovia dupla', metroTrack: 'Metrô (duplo)' } as const;
+const RAIL = { trainTrack: 'Ferrovia dupla', metroTrack: 'Metrô (duplo)' } as const; // not for the player: profile names are ids
+
+/** A line's mode, stops and passengers an hour, as its row shows them. */
+export function lineInfo(l: LineRow): string {
+  return `${t(`transit.mode.${['bus', 'train', 'metro'][l.mode] ?? 'bus'}`)} · ${plural(l.mode ? 'ui.transit.stations' : 'ui.transit.stops', l.stops)} · ${t('ui.transit.perHour', { n: fmtInt(l.perHour) })}`;
+}
 
 export function transitTabOf(tool: Tool, s: ShellState): TransitTab {
   if (tool === 'road') return s.transitTab === 'metroTrack' ? 'metroTrack' : 'trainTrack';
@@ -556,10 +629,12 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
   const items = section(p.strip, t('transit.lines'));
   for (const l of rows) {
     const row = el('div', `v2-transit-line${l.id === current ? ' on' : ''}`);
+    row.dataset.line = String(l.id);
     const sw = el('i');
-    sw.style.background = hex(l.color);
-    const name = el('b', '', t('ui.transit.line', { n: l.id }));
-    const info = el('span', '', `${t(`transit.mode.${['bus', 'train', 'metro'][l.mode] ?? 'bus'}`)} · ${plural(l.mode ? 'ui.transit.stations' : 'ui.transit.stops', l.stops)} · ${t('ui.transit.perHour', { n: fmtInt(l.perHour) })}`);
+    sw.style.background = hex(PAINTS[l.color & 15]);
+    // its own name, as Roadcraft 4.0 (v2/transitLine.ts:10-11): 1, 2… for buses, T1… trains, M1… metro
+    const name = el('b', '', lineName(rows, l));
+    const info = el('span', 'v2-transit-info', lineInfo(l));
     const count = el('span', 'v2-transit-count', String(l.buses));
     count.title = t('transit.vehicles');
     const pickLine = (): void => { a.line(l.id); };
@@ -570,7 +645,31 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
       button('v2-icon danger', t('transit.remove'), () => { pickLine(); a.deleteLine(); }, svg('demolish', 14)));
     items.append(row);
   }
-  p.strip.append(el('p', 'v2-note', t(`ui.transit.help.${now}`)));
+  // no line yet: what to do first, and no empty section (Roadcraft 4.0)
+  if (!rows.length) items.parentElement?.remove();
+  note(p, rows.length ? t(`ui.transit.help.${now}`) : t('transit.noLines'));
+  // a track is drawn like a road: snapping, height and cut sides
+  if (now === 'trainTrack' || now === 'metroTrack') p.options.append(snapRow(h), ...heightRows(h));
+  // the chosen line: its colour, and for buses whether it runs out and back or as a ring
+  const line = rows.find((l) => l.id === current);
+  if (line && a.lineColor) {
+    const sws = el('div', 'v2-swatches v2-line-colours');
+    for (const c of LINE_COLORS) {
+      const b = el('button', `v2-swatch${line.color === c ? ' on' : ''}`);
+      b.type = 'button';
+      b.style.setProperty('--c', hex(PAINTS[c & 15]));
+      b.title = t('ui.transit.colour');
+      b.addEventListener('click', (e) => { e.stopPropagation(); a.lineColor?.(c); });
+      sws.append(b);
+    }
+    p.options.append(el('div', 'v2-pop-title', t('ui.transit.line', { n: lineName(rows, line) })), orow(t('ui.transit.colour'), sws));
+  }
+  if (line && line.mode === 0 && a.lineLoop) {
+    p.options.append(orow(t('ui.transit.route'), choices([
+      { label: t('ui.transit.outBack'), on: !line.loop, run: () => a.lineLoop?.(false) },
+      { label: t('ui.transit.ring'), on: line.loop, run: () => a.lineLoop?.(true) },
+    ])));
+  }
 }
 
 // ------------------------------------------------------------------ demolish
@@ -579,6 +678,6 @@ export function renderDemolish(h: DrawerHost, p: DrawerParts): void {
   for (const [tool, key, icon] of [['bulldoze', 'tool.bulldoze', 'demolish'], ['pistol', 'actions.pistol', 'actions'], ['bomb', 'actions.bomb', 'bomb']] as const) {
     p.tabs.append(tab(t(key), cur === tool, () => { if (cur !== tool) h.pick(tool); }, svg(icon, 18)));
   }
-  if (cur === 'bomb') p.options.append(orow(t('strike.force'), stepper(t('strike.force'), String(s.bomb), (d) => { s.bomb = Math.max(1, Math.min(5, s.bomb + d)); a.bombForce(s.bomb); return String(s.bomb); })));
-  p.strip.append(el('p', 'v2-note', t(cur === 'bulldoze' ? 'help.tool.bulldoze' : cur === 'pistol' ? 'help.strike.shoot' : 'help.strike.strike')));
+  if (cur === 'bomb') p.options.append(orow(t('strike.force'), stepper(t('strike.force'), String(s.bomb), (d) => { s.bomb = bombStep(s.bomb, d); a.bombForce(s.bomb); return String(s.bomb); })));
+  note(p, t(cur === 'bulldoze' ? 'help.tool.bulldoze' : cur === 'pistol' ? 'help.strike.shoot' : 'help.strike.strike'));
 }

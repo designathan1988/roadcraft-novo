@@ -5,7 +5,7 @@
 
 import type { DrawerHost, DrawerParts } from './drawers.ts';
 import { section } from './drawers.ts';
-import { card, choices, el, orow, range, select } from './dom.ts';
+import { card, choices, dropdown, el, orow, range } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, t } from './i18n.ts';
 
@@ -15,7 +15,13 @@ export function renderPeople(h: DrawerHost, p: DrawerParts, simpleColours: reado
   const s = h.s, a = h.a;
   const cat = a.peopleCatalog?.() ?? null;
   if (!cat) {
-    const ps = s.person, send = (): void => a.personSpec({ ...ps });
+    // the cooked people may load before the click: they get the same count and behaviour as this panel shows
+    const ps = s.person, send = (): void => {
+      a.personSpec({ ...ps });
+      Object.assign(s.people, { count: ps.count, mode: ps.walk ? 'walk' : 'stand' });
+      a.personOptions?.({ ...s.people });
+    };
+    send();
     const sw = el('div', 'v2-swatches');
     simpleColours.forEach((c, i) => {
       const b = el('button', `v2-swatch${ps.color === i ? ' on' : ''}`);
@@ -57,7 +63,7 @@ export function renderPeople(h: DrawerHost, p: DrawerParts, simpleColours: reado
     orow(t('ui.people.hair'), swatches(cat.palettes.hair, o.hair, (i) => pick({ hair: i }))),
     range(t('ui.person.height'), 85, 115, 1, Math.round(o.height * 100), (v) => `${v}%`, (v) => { o.height = v / 100; send(); }),
     range(t('ui.person.count'), 1, cat.maxCount, 1, o.count, (v) => String(v), (v) => { o.count = v; send(); }),
-    orow(t('ui.people.hold'), select(t('ui.people.hold'), cat.holds.map((x) => [x, t(`ui.people.hold.${x}`)] as const), o.hold, (v) => pick({ hold: v as typeof o.hold }))),
+    orow(t('ui.people.hold'), dropdown(t('ui.people.hold'), cat.holds.map((x) => [x, t(`ui.people.hold.${x}`)] as const), o.hold, (v) => pick({ hold: v as typeof o.hold }))),
     orow(t('ui.people.mixed'), choices([{ label: t('ui.people.mixed.on'), on: o.mixed, run: () => pick({ mixed: !o.mixed }) }])),
   );
 }

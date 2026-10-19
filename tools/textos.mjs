@@ -10,7 +10,7 @@ const keysOf = (file) => new Set([...fs.readFileSync(path.join(root, file), 'utf
 const pt = new Set([...keysOf('data/textos-roadcraft/pt-BR.ts'), ...keysOf('src/ui/lang/engine.pt-BR.ts')]);
 const en = new Set([...keysOf('data/textos-roadcraft/en.ts'), ...keysOf('src/ui/lang/engine.en.ts')]);
 
-const files = [...fs.readdirSync(path.join(root, 'src/ui')).filter((f) => f.endsWith('.ts')).map((f) => `src/ui/${f}`), 'src/main.ts'];
+const files = [...fs.readdirSync(path.join(root, 'src/ui')).filter((f) => f.endsWith('.ts')).map((f) => `src/ui/${f}`), 'src/main.ts', 'src/game.ts'];
 const wanted = new Map();
 const want = (k, f) => { if (!wanted.has(k)) wanted.set(k, f); };
 for (const f of files) {

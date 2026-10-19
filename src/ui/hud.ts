@@ -8,15 +8,20 @@ import './shell.css';
 import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
 import type { LaneChoice, ParkingPreset } from '../roads/roadVariant.ts';
-import { button, el, orow, range, choices } from './dom.ts';
+import { button, rename, closeDropdown, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
-import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
+import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, onLanguageChange, plural, setLang, t } from './i18n.ts';
+import { MAP_SIZE } from '../config.ts';
 import { mountCompass, type Compass } from './compass.ts';
+import { keyHelp, keyName } from './keys.ts';
+import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
+import { centreText } from './readouts.ts';
+import { closeRoadKeys, type RoadKeys } from './roadKeysPanel.ts';
 import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
 import {
-  CATS, ShellState, categoriesOf, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
-  type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
+  CATS, ShellState, categoriesOf, lineInfo, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
+  type BuilderTab, type BuilderTabRender, type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
 } from './drawers.ts';
 
 declare const __BUILD__: string;
@@ -39,6 +44,8 @@ export interface SimSettings { traffic: number; people: number; demand: 'baixa' 
 export interface CityStatus {
   cars: number; peds: number; residents: number; jobs: number; buildings: number;
   speedKmh: number; tripsPerMin: number; lostPerMin: number; stopped: number; roads: number; nodes: number;
+  /** Junctions that cannot be built (two roads under 25°). */
+  impossible: number;
 }
 
 /**
@@ -70,6 +77,14 @@ export interface OptionalActions {
   streetNameAt?(x: number, z: number): string;
   /** Regional road paint of this map, saved with it. */
   mapPaint?(style: string): void;
+  /** Colour of the chosen transit line (index into the vehicle paints, world/transit.ts LINE_COLORS). */
+  lineColor?(color: number): void;
+  /** The chosen bus line as a ring (true) or out and back. */
+  lineLoop?(loop: boolean): void;
+  /** Points the camera at the next impossible junction and inspects it (the top bar's warning). */
+  showImpossible?(): void;
+  /** The health panel's state for the dot on its button: ok, slow, broken. */
+  healthLevel?(): string;
   /** The people creator's choices (people front, src/render/people/creator.ts). */
   personOptions?(o: Partial<PersonOptions>): void;
   /** What the people creator offers; null until the cooked people load. */
@@ -114,6 +129,8 @@ export interface HudActions extends OptionalActions {
   newMap(): void;
   testCity(): void;
   generate(): void;
+  /** The title screen (seed, map size, empty map, last game). */
+  startScreen(): void;
   options(): void;
   help(): void;
   trafficView(): void;
@@ -122,8 +139,6 @@ export interface HudActions extends OptionalActions {
   grid(): void;
   /** Compass: north up. */
   north(): void;
-  timeSpeed(): void;
-  pause(): void;
   line(id: number): void;
   newLine(): void;
   lineMode(mode: number): void;
@@ -153,6 +168,8 @@ export interface HudActions extends OptionalActions {
   fogLevel(v: number): void;
   personSpec(p: { color: number; height: number; walk: boolean; count: number }): void;
   bombForce(f: number): void;
+  /** The road tool's keys changed in their panel (kept with the options). */
+  roadKeys(patch: Partial<RoadKeys>): void;
   // ---- added with the Roadcraft interface
   /** Simulation speed: 0 paused, 1, 2 or 4. */
   speed(n: number): void;
@@ -166,7 +183,11 @@ export interface HudActions extends OptionalActions {
   zoneLayer(on: boolean): void;
   /** Traffic %, people % and demand. */
   simulation(s: Partial<SimSettings>): void;
-  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string };
+  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string; roadAlign: string; preset: string; webgpu: boolean };
+  /** A quality preset (baixo, medio, alto, ultra), applied and kept. */
+  quality(preset: string): void;
+  /** The view the city opened with (Home). */
+  resetView(): void;
   /** Regional road markings: br, us, eu, classic. */
   paint(style: string): void;
   /** Furniture of new roads: 0 complete, 1 basic, 2 none. */
@@ -175,19 +196,23 @@ export interface HudActions extends OptionalActions {
   ring(f: number): void;
   /** Stops become terminals when clicked. */
   terminal(on: boolean): void;
-  /** The F9 panel. */
+  /** The F9 panel (a developer's tool). */
   health(): void;
+  /** The developer panels are on (?dev, or roadcraft.dev in the browser's storage, or the development server). */
+  developer(): boolean;
+  /** Water, weather set by hand (null: automatic) and overall haze (0..2) of the map on screen (saved with it). */
+  environment(): { water: { waves: number; foam: number; current: number }; weather: WeatherCtl | null; fog: number };
   /** Street item clicks remove (on) or place (off). */
   itemRemove(on: boolean): void;
   /** Camera distance to its target (m) and the target on the map. */
-  cameraNumbers(): { dist: number; x: number; z: number };
+  cameraNumbers(): { zoom: number; x: number; z: number };
 }
 
 type PopId = 'menu' | 'layers' | 'sim' | 'camera' | 'help';
 
 /** The keys of each tool, for the help panel: [key, what it does]. */
 const TOOL_KEYS: Partial<Record<Tool | 'roads' | 'terrain', Array<[string, string]>>> = {
-  roads: [['help.key.click', 'ui.do.roadPoint'], ['ui.key.altClick', 'ui.do.copyProfile'], ['help.key.pageUpDown', 'palette.height'], ['help.key.esc', 'ui.do.cancel']],
+  roads: [['help.key.click', 'ui.do.roadPoint'], ['ui.key.altClick', 'ui.do.copyProfile'], ['help.key.pageUpDown', 'palette.height'], ['ui.key.v', 'roadKeys.alignment'], ['help.key.esc', 'ui.do.cancel']],
   roundabout: [['help.key.click', 'ui.do.roundabout'], ['ui.key.brackets', 'v2.roundabout.radius']],
   terrain: [['v2.key.drag', 'ui.do.brush'], ['ui.key.brackets', 'terrain.radius']],
   bulldoze: [['help.key.click', 'help.do.remove'], ['v2.key.drag', 'ui.do.boxRemove'], ['help.key.undo', 'help.do.undo']],
@@ -200,9 +225,7 @@ const TOOL_KEYS: Partial<Record<Tool | 'roads' | 'terrain', Array<[string, strin
   zone: [['v2.key.drag', 'ui.do.zone'], ['ui.key.brackets', 'terrain.radius']],
 };
 const CAMERA_KEYS: Array<[string, string]> = [['help.key.orbitDrag', 'help.do.orbit'], ['help.key.panDrag', 'help.do.pan'], ['help.key.wheel', 'help.do.zoom'], ['help.key.qe', 'ui.do.turn'],
-  ['ui.key.rf', 'ui.do.tilt'], ['ui.key.v', 'ui.do.iso'], ['ui.key.c', 'ui.do.follow'], ['ui.key.k', 'sim.congestionLabel']];
-const GLOBAL_KEYS: Array<[string, string]> = [['v2.key.tools', 'v2.do.tools'], ['help.key.undo', 'v2.do.undo'], ['v2.key.redo', 'v2.do.redo'], ['ui.key.save', 'action.saveMap'],
-  ['v2.key.space', 'v2.do.pause'], ['ui.key.p', 'sim.speed'], ['ui.key.f1', 'builder.help'], ['v2.key.f9', 'v2.do.health'], ['help.key.esc', 'ui.do.escape']];
+  ['ui.key.rf', 'ui.do.tilt']];
 
 export class Hud {
   readonly root: HTMLElement;
@@ -221,6 +244,10 @@ export class Hud {
   private clockText = document.createTextNode('');
   private moneyText = document.createTextNode('');
   private statsText = document.createTextNode('');
+  private impossibleB: HTMLButtonElement;
+  private impossibleText = document.createTextNode('');
+  private impossibleShown = 0;
+  private healthB!: HTMLButtonElement;
   private stats: HTMLElement;
   private skyButtons: HTMLButtonElement[] = [];
   private speedButtons: HTMLButtonElement[] = [];
@@ -248,8 +275,8 @@ export class Hud {
   private toolOptions: HTMLElement;
   private parts: DrawerParts;
   private hint: HTMLElement;
-  private toastEl: HTMLElement;
-  private toastTimer = 0;
+  /** The toasts shown now (newest first). */
+  private toasts: HTMLElement;
   private tip: HTMLElement;
   private tipFor: HTMLElement | null = null;
   private compass: Compass;
@@ -257,10 +284,16 @@ export class Hud {
   private loadingText: HTMLElement;
   private rows: LineRow[] = [];
   private rowsKey = '';
+  private rowsNums = '';
+  private stripSignature = '';
   private lineNow = 0;
   private picked: BuildingInfo | null = null;
+  private peopleShown = false;
+  private builderTabs = new Map<BuilderTab, BuilderTabRender>();
   private host: DrawerHost;
   private fileIn: HTMLInputElement;
+  /** What writes the bar's and the dock's names again when the language changes. */
+  private relabels: Array<() => void> = [];
 
   constructor(a: HudActions) {
     this.a = a;
@@ -269,8 +302,6 @@ export class Hud {
     this.loading = document.getElementById('loading')!;
     this.loadingText = document.getElementById('loading-text')!;
     this.catalog = new RoadCatalog({ use: (id) => a.profile(id), toast: (text) => this.toast(text) });
-    const st = a.settings();
-    this.s.furniture = st.furniture;
 
     // ============================================================ top bar
     const hud = el('header', 'v2-hud');
@@ -287,10 +318,14 @@ export class Hud {
     clock.append(this.clockText);
     const moneyEl = el('strong', 'v2-money');
     moneyEl.append(this.moneyText);
-    moneyEl.title = t('ui.money.tip');
+    moneyEl.title = t('ui.money.tip', { refund: Math.round(ROAD_TUNING.economy.demolitionRefund * 100) });
     this.stats = el('div', 'v2-stats');
     this.stats.append(this.statsText);
-    city.append(sky, clock, moneyEl, this.stats);
+    // junctions that cannot be built: their count, and a click visits them one by one
+    this.impossibleB = button('v2-warn', '', () => a.showImpossible?.(), svg('warn', 16));
+    this.impossibleB.append(this.impossibleText);
+    this.impossibleB.hidden = true;
+    city.append(sky, clock, moneyEl, this.impossibleB, this.stats);
 
     const speed = el('div', 'v2-speed');
     for (const n of [0, 1, 2, 4]) {
@@ -316,7 +351,11 @@ export class Hud {
     const camB = button('v2-pill', t('camera.label'), () => this.toggle('camera', camB), svg('camera', 18));
     this.undoB = button('v2-icon', t('action.undo'), () => a.undo(), svg('undo', 18));
     this.redoB = button('v2-icon', t('action.redo'), () => a.redo(), svg('redo', 18));
-    const healthB = button('v2-icon', t('health.button'), () => a.health(), svg('health', 18));
+    // the health panel is a developer's tool: its button only when the developer panels are on
+    const healthB = button('v2-icon health-btn', t('health.button'), () => a.health(), svg('health', 18));
+    healthB.append(el('i', 'health-dot'));
+    healthB.hidden = !a.developer();
+    this.healthB = healthB;
     const helpB = button('v2-icon', `${t('builder.help')} (F1)`, () => this.toggle('help', helpB), svg('help', 18));
     helpB.dataset.pop = 'help';
     const menuB = button('v2-pill', t('builder.menu.app'), () => this.toggle('menu', menuB), svg('menu', 18));
@@ -358,6 +397,8 @@ export class Hud {
     const body = el('div', 'v2-drawer-body');
     const strip = el('div', 'v2-strip');
     body.append(strip);
+    // a row that scrolls sideways fades at the side with more in it (Roadcraft 4.0; the look is in shell.css)
+    strip.addEventListener('scroll', (e) => { if (e.target instanceof HTMLElement) fadeEdges(e.target); }, { passive: true, capture: true });
     strip.addEventListener('wheel', (e) => {
       if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { strip.scrollLeft += e.deltaY; e.preventDefault(); }
       e.stopPropagation();
@@ -373,14 +414,16 @@ export class Hud {
 
     this.side = el('aside', 'v2-side');
     this.hint = el('div', 'v2-hintbar');
+    // the map's description (index.html, aria-describedby), as Roadcraft 4.0 (v2/shell.ts:844-846)
+    this.hint.id = 'v2Hint';
     this.hint.hidden = true;
-    this.toastEl = el('div', 'v2-toast');
-    this.toastEl.setAttribute('role', 'status');
-    this.toastEl.hidden = true;
+    this.toasts = el('div', 'v2-toasts');
+    this.toasts.setAttribute('role', 'status');
+    this.toasts.setAttribute('aria-live', 'polite');
     this.tip = el('div', 'v2-tip');
     this.tip.hidden = true;
 
-    this.root.append(hud, this.pop, this.drawer, this.toolOptions, this.side, this.hint, dock, this.toastEl, this.tip, this.about.root, this.fileIn);
+    this.root.append(hud, this.pop, this.drawer, this.toolOptions, this.side, this.hint, dock, this.toasts, this.tip, this.about.root, this.fileIn);
     this.compass = mountCompass(this.root, { north: () => a.north(), drag: (dx, dy) => a.orbit(dx, dy) });
     // the panels never let a click or a wheel through to the map
     for (const e of [hud, this.pop, this.drawer, this.toolOptions, this.side, dock]) {
@@ -391,6 +434,21 @@ export class Hud {
     window.addEventListener('resize', () => this.fitDrawer());
     // the tool options panel follows the side panel: the drawer gives way to both
     new ResizeObserver(() => this.fitDrawer()).observe(this.side);
+    // the inspector scrolls inside the side panel and fades at the end with more past it (Roadcraft 4.0,
+    // v2/shell.ts:891-903; the look is in shell.css .v2-side .inspector[data-more-y])
+    const fadeEnds = (): void => {
+      for (const panel of this.side.querySelectorAll<HTMLElement>(':scope > .inspector')) {
+        const more = panel.scrollHeight - panel.clientHeight;
+        const top = more > 1 && panel.scrollTop > 1, bottom = more > 1 && panel.scrollTop < more - 1;
+        const v = top && bottom ? 'both' : top ? 'top' : bottom ? 'bottom' : '';
+        if ((panel.dataset.moreY ?? '') !== v) { if (v) panel.dataset.moreY = v; else delete panel.dataset.moreY; }
+      }
+    };
+    this.side.addEventListener('scroll', fadeEnds, { passive: true, capture: true });
+    let fading = 0;
+    const later = (): void => { if (!fading) fading = requestAnimationFrame(() => { fading = 0; fadeEnds(); }); };
+    new MutationObserver(later).observe(this.side, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'style'] });
+    new ResizeObserver(later).observe(this.side);
 
     const self = this;
     this.host = {
@@ -401,11 +459,44 @@ export class Hud {
       lines: () => ({ rows: self.rows, current: self.lineNow }),
       building: () => self.picked,
       insideFloor: () => self.insideFloor,
-      roadKeys: () => { const k = a.settings(); return `${keyName(k.roadUp)} / ${keyName(k.roadDown)}`; },
+      builderTabs: this.builderTabs,
+      // short names, so the three fit in the pill (Roadcraft 4.0: PgUp · PgDn · V)
+      roadKeys: () => { const k = a.settings(); const n = (c: string): string => keyName(c).replace('Page Up', 'PgUp').replace('Page Down', 'PgDn'); return `${n(k.roadUp)} · ${n(k.roadDown)} · ${n(k.roadAlign)}`; },
     };
+    // the names written once, written again in the new language (Roadcraft 4.0, v2/shell.ts:2032-2046)
+    const name = (b: HTMLElement, f: () => string): void => { this.relabels.push(() => rename(b, f())); };
+    this.skyButtons.forEach((b, i) => name(b, () => t((['sky.day', 'sky.night', 'sky.cycle'] as const)[i])));
+    this.speedButtons.forEach((b, i) => this.relabels.push(() => { const n = [0, 1, 2, 4][i]; b.title = n === 0 ? `${t('sim.pause')} (${t('v2.key.space')})` : `${t('sim.speed')} ${n}×`; }));
+    this.relabels.push(() => { sky.title = t('sky.title'); moneyEl.title = t('ui.money.tip', { refund: Math.round(ROAD_TUNING.economy.demolitionRefund * 100) }); });
+    const [inside, down, , up] = [...this.insideBar.children] as HTMLElement[];
+    name(inside, () => t('inside.toggle')); name(down, () => t('inside.down')); name(up, () => t('inside.up'));
+    name(layersB, () => t('v2.layers')); name(simB, () => t('builder.menu.simulation')); name(camB, () => t('camera.label'));
+    name(this.undoB, () => t('action.undo')); name(this.redoB, () => t('action.redo')); name(healthB, () => t('health.button'));
+    name(helpB, () => `${t('builder.help')} (F1)`); name(menuB, () => t('builder.menu.app')); name(close, () => t('v2.close'));
+    for (const c of CATS) {
+      const b = this.catButtons.get(c.id)!;
+      this.relabels.push(() => { b.querySelector('.v2-cat-name')!.textContent = t(`v2.dock.${c.id}`); b.title = `${t(`ui.cat.${c.id}`)}  ${c.key}`; });
+    }
+    onLanguageChange(() => this.relabel());
     this.setSky('ciclo');
     this.syncSpeed();
     this.render();
+  }
+
+  /** The language changed: every name on screen written again, the open panels made again, nothing reloaded. */
+  private relabel(): void {
+    for (const f of this.relabels) f();
+    this.compass.relabel();
+    this.moneyShown = NaN; this.clockShown = ''; this.impossibleShown = -1;
+    if (this.status) this.setStatus(this.status);
+    this.setInside(this.insideFloor);
+    // the road catalogue and its section editor write their cards again, an open edit kept (the roads session's
+    // RoadCatalog.languageChanged, area/vias 8d2f92b; Roadcraft 4.0 roads/catalogPanel.ts:73); absent before that lands
+    (this.catalog as { languageChanged?: () => void }).languageChanged?.();
+    const hint = `hint.tool.${this.current}`;
+    if (t(hint) !== hint) this.setHint(t(hint));
+    this.render();
+    if (this.popId) this.fillPop(this.popId);
   }
 
   // ================================================================ categories
@@ -446,8 +537,15 @@ export class Hud {
   private render(): void {
     for (const [id, b] of this.catButtons) b.classList.toggle('on', this.open && id === this.cat);
     const p = this.parts;
+    closeDropdown();
+    // the same panel rebuilt (a pick in it): the strip keeps its scroll (Roadcraft 4.0)
+    const signature = `${this.cat}|${this.current}|${this.s.landTab}|${this.s.transitTab}`;
+    const scroll = p.strip.scrollLeft;
     p.tabs.replaceChildren(); p.options.replaceChildren(); p.strip.replaceChildren(); p.tools.replaceChildren();
+    p.note = undefined;
     const show = this.open && this.cat !== null && this.cat !== 'info';
+    // the keys panel belongs to the road tool
+    if (!show || this.cat !== 'roads') closeRoadKeys();
     if (show) {
       if (this.cat !== 'roads' && this.cat !== 'transit') this.catalog.visible = false;
       switch (this.cat) {
@@ -460,11 +558,18 @@ export class Hud {
       }
       if (this.cat === 'transit' && this.current === 'road') { this.catalog.visible = false; }
     } else this.catalog.visible = false;
+    // the tool's note: the drawer's description; a paragraph only in an empty strip (Roadcraft 4.0 v2/shell.ts:1882-1884)
+    if (p.note) this.drawer.setAttribute('aria-description', p.note); else this.drawer.removeAttribute('aria-description');
+    if (p.note && p.strip.childElementCount === 0) p.strip.append(el('p', 'v2-note', p.note));
     this.drawer.hidden = !show || (p.tabs.childElementCount === 0 && p.strip.childElementCount === 0);
     this.toolOptions.hidden = !show || p.options.childElementCount === 0;
     p.strip.classList.toggle('two-rows', p.strip.querySelectorAll('.v2-card').length > 10);
+    if (signature === this.stripSignature) p.strip.scrollLeft = scroll;
+    this.stripSignature = signature;
+    fadeEdges(p.strip);
     this.root.dataset.tool = this.current;
     this.fitDrawer();
+    this.tipCheck();
     if (this.popId === 'help') this.fillPop('help');
   }
 
@@ -477,13 +582,26 @@ export class Hud {
     const sr = this.side.getBoundingClientRect();
     if (sr.width > 0 && sr.bottom > this.drawer.getBoundingClientRect().top - 4) right = Math.min(right, sr.left - 12);
     const room = Math.max(320, right - left);
-    this.drawer.style.left = `${Math.round(right - left >= 320 ? (left + right) / 2 : vw / 2)}px`;
-    this.drawer.style.maxWidth = `${Math.floor(room)}px`;
+    // a narrow screen pins the drawer to both edges (shell.css, max-width: 780px), as Roadcraft 4.0
+    this.drawer.style.left = vw <= 780 ? '' : `${Math.round(right - left >= 320 ? (left + right) / 2 : vw / 2)}px`;
+    this.drawer.style.maxWidth = vw <= 780 ? '' : `${Math.floor(room)}px`;
+    // a card whose name has a word wider than the card grows to the word
+    for (const name of this.parts.strip.querySelectorAll<HTMLElement>('.v2-card-name')) {
+      const over = name.scrollWidth - name.clientWidth, card = name.parentElement;
+      if (over > 1 && card) card.style.width = `${Math.ceil(card.offsetWidth + over)}px`;
+    }
+    // the modes keep their names while they fit; when they do not, only the one in use keeps its name, then none
+    const tabs = this.parts.tabs, head = tabs.parentElement!;
+    tabs.classList.remove('compact', 'tight');
+    if (tabs.scrollWidth > head.clientWidth - 8) tabs.classList.add('compact');
+    if (tabs.scrollWidth > head.clientWidth - 8) tabs.classList.add('tight');
   }
 
   // ================================================================ popovers
   private toggle(id: PopId, anchor: HTMLElement): void {
     if (this.popId === id) { this.closePop(); return; }
+    // another menu open: it closes (and its button goes out) first
+    if (this.popId) this.closePop();
     this.popId = id;
     this.popAnchor = anchor;
     this.fillPop(id);
@@ -509,10 +627,16 @@ export class Hud {
   }
 
   get helpOpen(): boolean { return this.popId === 'help'; }
+  /** Ctrl+O: the file picker of "Open file". */
+  openFile(): void { this.fileIn.click(); }
+  /** The About box (a dialog over the game). */
+  get aboutOpen(): boolean { return this.about.isOpen; }
+  closeAbout(): void { this.about.close(); }
 
   /** Esc: closes the open menu, then the About box. False: nothing was open here. */
   escape(): boolean {
-    if (this.popId) { this.closePop(); return true; }
+    // the menu closes and its button takes the focus back (as in Roadcraft 4.0)
+    if (this.popId) { const anchor = this.popAnchor; this.closePop(); anchor?.focus({ preventScroll: true }); return true; }
     if (this.about.isOpen) { this.about.close(); return true; }
     return false;
   }
@@ -534,18 +658,23 @@ export class Hud {
     if (id === 'menu') {
       const st = a.settings();
       body.append(
+        // Roadcraft 4.0's order (v2/shell.ts:710-714): New map, New city over the whole map, Open, Save; then this
+        // game's own: the last game, the save slot and the title screen
         this.row(t('action.newMap'), () => a.newMap(), 'm_new'),
-        this.row(t('ui.menu.generate'), () => a.generate(), 'generate'),
-        this.row(t('ui.menu.load'), () => a.load(), 'm_open'),
+        this.row(t('ui.menu.newWorld', { km: fmtInt(MAP_SIZE / 1000) }), () => a.generate(), 'm_new'),
         this.row(t('action.openMap'), () => this.fileIn.click(), 'm_open'),
-        this.row(t('ui.menu.save'), () => a.save(), 'm_save'),
         this.row(t('action.saveMap'), () => a.exportMap(), 'm_save'),
+        this.row(t('ui.menu.load'), () => a.load(), 'm_open'),
+        this.row(t('ui.menu.save'), () => a.save(), 'm_save'),
+        this.row(t('ui.menu.start'), () => a.startScreen(), 'roads'),
         el('hr'),
+        // the four quality presets in the menu, as in Roadcraft 4.0 (Graphics options has the rest)
+        this.seg(t('menu.quality'), (['baixo', 'medio', 'alto', 'ultra'] as const).map((q) => [q, t(`quality.${q === 'baixo' ? 'low' : q === 'medio' ? 'medium' : q === 'alto' ? 'high' : 'ultra'}`)] as const), st.preset, (v) => a.quality(v)),
         this.row(t('menu.graphicsOptions'), () => a.options(), 'm_quality'),
         this.seg(t('menu.language'), LANGUAGES, lang(), (v) => setLang(v as 'pt-BR' | 'en')),
         this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => { a.paint(v); a.mapPaint?.(v); }),
         el('hr'),
-        this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate'),
+        ...(a.developer() ? [this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate')] : []),
         this.row(t('action.about'), () => this.about.open(), 'm_about'),
       );
     } else if (id === 'layers') {
@@ -565,8 +694,8 @@ export class Hud {
     } else if (id === 'sim') {
       const st = a.settings();
       body.append(
-        range(t('sim.traffic'), 10, 200, 10, Math.round(st.traffic * 100), (v) => `${v}%`, (v) => a.simulation({ traffic: v / 100 })),
-        range(t('sim.people'), 10, 200, 10, Math.round(st.people * 100), (v) => `${v}%`, (v) => a.simulation({ people: v / 100 })),
+        range(t('sim.traffic'), 0, 300, 10, Math.round(st.traffic * 100), (v) => `${v}%`, (v) => a.simulation({ traffic: v / 100 })),
+        range(t('sim.people'), 0, 300, 10, Math.round(st.people * 100), (v) => `${v}%`, (v) => a.simulation({ people: v / 100 })),
         this.seg(t('sim.demand'), [['baixa', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['pico', t('sim.demand.peak')]], st.demand, (v) => a.simulation({ demand: v as SimSettings['demand'] })),
       );
       this.metrics = el('dl', 'v2-metrics');
@@ -574,7 +703,8 @@ export class Hud {
       this.syncMetrics();
     } else if (id === 'camera') {
       body.classList.add('icons');
-      const cam = (key: string, icon: string, run: () => void, on = false): HTMLButtonElement => button(`v2-icon${on ? ' on' : ''}`, t(key), run, svg(icon, 18));
+      // the name without its key or its explanation: "Girar à esquerda", not "… (Q)" (Roadcraft 4.0 v2/shell.ts:759)
+      const cam = (key: string, icon: string, run: () => void, on = false): HTMLButtonElement => button(`v2-icon${on ? ' on' : ''}`, t(key).replace(/\s*[(·].*$/, ''), run, svg(icon, 18));
       body.append(
         cam('ui.camera.turnLeft', 'undo', () => a.turn(-1)),
         cam('camera.tiltDown', 'lower', () => a.tilt(-1)),
@@ -584,13 +714,15 @@ export class Hud {
         cam('camera.perspective', 'mass', () => { a.view(this.view === 'iso' ? 'persp' : 'iso'); this.fillPop('camera'); }, this.view === 'persp'),
         cam('ui.camera.top', 'top', () => a.view('top')),
         cam('ui.camera.follow', 'follow', () => a.follow()),
+        cam('action.resetView', 'resetView', () => a.resetView()),
       );
       const dl = el('dl', 'v2-metrics');
       const zoom = el('dd', '', ''), centre = el('dd', '', '');
       dl.append(el('dt', '', t('camera.zoom')), zoom, el('dt', '', t('camera.centre')), centre);
       const sync = (): void => {
         const c = a.cameraNumbers();
-        const zt = `${fmtInt(c.dist)} m`, ct = `X ${fmtInt(c.x)} · Z ${fmtInt(c.z)}`;
+        // as Roadcraft 4.0 (v2/shell.ts:644-645): pixels per metre in %, and the centre with Y the map's north
+        const zt = `${fmtInt(c.zoom)} %`, ct = centreText(c.x, c.z, fmtInt);
         if (zoom.textContent !== zt) zoom.textContent = zt;
         if (centre.textContent !== ct) centre.textContent = ct;
       };
@@ -612,7 +744,17 @@ export class Hud {
       const own = TOOL_KEYS[c] ?? (categoriesOf(c)[0] === 'roads' ? TOOL_KEYS.roads : categoriesOf(c)[0] === 'landscape' ? TOOL_KEYS.terrain : undefined);
       if (own) body.append(keyList(`${t('help.section.tool')}: ${t(`ui.toolName.${c}`)}`, own));
       if (isTouch()) body.append(keyList(t('ui.touch.title'), [['ui.touch.tapKey', 'ui.touch.tapDo'], ['ui.touch.dragKey', 'ui.touch.dragDo'], ['ui.touch.compassKey', 'ui.touch.compassDo']]));
-      body.append(keyList(t('help.section.camera'), CAMERA_KEYS), keyList(t('v2.help.global'), GLOBAL_KEYS));
+      // the shortcuts and the tool keys come from the key table (keys.ts): the help never drifts from the keys
+      const keys = keyHelp(a.developer());
+      const raw = (title: string, rows: Array<[string, string]>): HTMLElement => {
+        const box = el('div', 'v2-keys');
+        box.append(el('div', 'v2-subhead', title));
+        const dl = el('dl');
+        for (const [k, d] of rows) { const dt = el('dt'); dt.append(el('kbd', '', k)); dl.append(dt, el('dd', '', d)); }
+        box.append(dl);
+        return box;
+      };
+      body.append(keyList(t('help.section.camera'), CAMERA_KEYS), raw(t('keys.section.game'), keys.game), raw(t('keys.section.tools'), keys.tools));
     }
     const key = titles[id];
     this.pop.replaceChildren(...(key ? [el('div', 'v2-pop-title', t(key))] : []), body);
@@ -636,14 +778,25 @@ export class Hud {
   }
 
   // ================================================================ tooltip
+  /** A control rebuilt or removed under the pointer takes its tooltip with it. */
+  private tipCheck(): void {
+    if (this.tipFor && (!this.tipFor.isConnected || this.tipFor.getBoundingClientRect().width === 0)) { this.tipFor = null; this.tip.hidden = true; }
+  }
+
   private bindTips(): void {
     const tip = this.tip;
+    /** Whether a control's name is on screen: an icon button keeps its name in a span clipped to nothing. */
+    const nameShown = (c: HTMLElement): boolean => [...c.querySelectorAll('span')].every((s) => { const r = s.getBoundingClientRect(); return r.width > 2 && r.height > 2; });
+    /** Whether a control's own text is cut short (an ellipsis): its tip then says it whole. */
+    const cutShort = (c: HTMLElement): boolean => c.scrollWidth > c.clientWidth + 1 || [...c.querySelectorAll('span')].some((s) => s.scrollWidth > s.clientWidth + 1);
     this.root.addEventListener('pointerover', (e) => {
       const target = (e.target as HTMLElement).closest<HTMLElement>('[title], [data-tip]');
       if (!target || !this.root.contains(target)) return;
       if (target.title) { target.dataset.tip = target.title; target.removeAttribute('title'); }
       const text = target.dataset.tip ?? '';
       if (!text) return;
+      // a control that already shows its whole name: the tip would only say it again (Roadcraft 4.0)
+      if (nameShown(target) && target.innerText.trim() === text && !cutShort(target)) return;
       this.tipFor = target;
       tip.textContent = text;
       tip.hidden = false;
@@ -665,12 +818,23 @@ export class Hud {
 
   // ================================================================ what the game tells
   setLines(rows: LineRow[], current: number): void {
-    const key = `${current}|${rows.map((r) => `${r.id},${r.mode},${r.buses},${r.stops},${Math.round(r.perHour / 10)}`).join(';')}`;
-    if (key === this.rowsKey) return;
-    this.rowsKey = key;
+    // the passengers an hour change all the time: only their text is written; the panel is rebuilt when lines change
+    const key = `${current}|${rows.map((r) => `${r.id},${r.mode},${r.color},${r.loop},${r.buses},${r.stops}`).join(';')}`;
     this.rows = rows;
     this.lineNow = current;
-    if (this.cat === 'transit' && this.open) this.render();
+    if (key !== this.rowsKey) {
+      this.rowsKey = key;
+      if (this.cat === 'transit' && this.open) this.render();
+      return;
+    }
+    const nums = rows.map((r) => Math.round(r.perHour)).join(',');
+    if (nums === this.rowsNums) return;
+    this.rowsNums = nums;
+    for (const r of rows) {
+      const info = this.drawer.querySelector(`.v2-transit-line[data-line="${r.id}"] .v2-transit-info`);
+      const text = lineInfo(r);
+      if (info && info.textContent !== text) info.textContent = text;
+    }
   }
 
   setRadius(r: number): void { this.s.radius = Math.round(r); if (this.cat === 'landscape' && this.open) this.render(); }
@@ -680,19 +844,32 @@ export class Hud {
 
     for (const b of this.skyButtons) { const on = b.dataset.sky === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
   }
-  setZone(_z: number): void { /* the shell keeps the zone it chose */ }
   setLotMode(m: LotMode): void {
     this.s.lotExtra = null;
     if (this.s.lotMode === m) return;
     this.s.lotMode = m;
     if (this.open && (this.cat === 'build' || this.cat === 'zones')) this.render();
   }
+  /**
+   * Mount point for the buildings session: the Build drawer's tab `id` (Models, Facade, Roof, Parts, Colours) turns
+   * on and, when open, `render` fills the tool options for the building picked. Until then the tab says "being built".
+   */
+  registerBuilderTab(id: BuilderTab, render: BuilderTabRender): void {
+    this.builderTabs.set(id, render);
+    if (this.open && this.cat === 'build') this.render();
+  }
+
   /** The building picked with the Build tool (null: none). */
   setBuilding(b: BuildingInfo | null): void {
     this.picked = b;
     if (this.open && this.cat === 'build') this.render();
   }
-  setElevation(e: number): void { this.s.elevation = e; }
+  /** The road height (the stepper, PageUp and PageDown): the open panel shows it. */
+  setElevation(e: number): void { this.s.elevation = e; if (this.open && (this.cat === 'roads' || this.cat === 'transit')) this.render(); }
+  /** The roundabout radius ([ and ]). */
+  setRing(r: number): void { this.s.ring = r; if (this.open && this.cat === 'roads') this.render(); }
+  /** The zone brush radius ([ and ] with the zone tool). */
+  setZoneRadius(r: number): void { this.s.zoneRadius = Math.round(r); if (this.cat === 'zones' && this.open) this.render(); }
   /** See inside: the floor shown (−1: off). */
   setInside(floor: number): void {
     this.insideFloor = floor;
@@ -725,11 +902,26 @@ export class Hud {
   /** The city's numbers (twice a second). */
   setStatus(s: CityStatus): void {
     this.status = s;
+    // the People tab shown before the cooked people loaded: it becomes the full creator when they arrive
+    if (!this.peopleShown && this.a.peopleCatalog?.()) { this.peopleShown = true; if (this.open && this.cat === 'landscape' && this.s.landTab === 'people') this.render(); }
     const line = s.cars + s.peds > 0 ? `${plural('status.vehicles', s.cars)} · ${plural('status.people', s.peds)}` : '';
     if (this.statsText.data !== line) this.statsText.data = line;
     const tip = t('ui.stats.tip', { residents: fmtCount(s.residents), jobs: fmtCount(s.jobs), buildings: fmtCount(s.buildings), speed: fmtInt(s.speedKmh) });
     if (this.stats.title !== tip && !this.stats.dataset.tip) this.stats.title = tip; else if (this.stats.dataset.tip) this.stats.dataset.tip = tip;
     this.syncMetrics();
+    // the health button's dot: green, amber (a slow frame in 30 s) or red (an error)
+    if (!this.healthB.hidden) { const lv = this.a.healthLevel?.() ?? 'ok'; if (this.healthB.dataset.status !== lv) this.healthB.dataset.status = lv; }
+    // the decay of the building in the Build panel follows the city clock
+    const decayEl = this.open && this.cat === 'build' ? this.toolOptions.querySelector('.v2-decay') : null;
+    if (decayEl) { const d = `${Math.round(Math.max(0, this.a.decayOf?.() ?? 0) * 100)}%`; if (decayEl.textContent !== d) decayEl.textContent = d; }
+    if (s.impossible !== this.impossibleShown) {
+      this.impossibleShown = s.impossible;
+      this.impossibleB.hidden = s.impossible === 0;
+      this.impossibleText.data = fmtInt(s.impossible);
+      const tip = `${plural('status.impossible', s.impossible)} · ${t('ui.impossible.visit')}`;
+      this.impossibleB.title = tip; this.impossibleB.dataset.tip = tip;
+      this.impossibleB.querySelector('span')!.textContent = tip;
+    }
   }
 
   setTrafficView(on: boolean): void { this.layers.traffic = on; if (this.popId === 'layers') this.fillPop('layers'); }
@@ -751,11 +943,21 @@ export class Hud {
 
   setView(mode: 'persp' | 'iso'): void { this.view = mode; if (this.popId === 'camera') this.fillPop('camera'); }
 
+  /**
+   * A short message. Several can show at once (a repair notice is not hidden by "City loaded"): the newest on top, at
+   * most four, each for as long as it takes to read; the same text again only restarts its time.
+   */
   toast(text: string): void {
-    this.toastEl.textContent = forTouch(loose(text));
-    this.toastEl.hidden = false;
-    clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => { this.toastEl.hidden = true; }, 2600);
+    const shown = forTouch(loose(text));
+    let box = [...this.toasts.children].find((e) => e.textContent === shown) as HTMLElement | undefined;
+    if (!box) {
+      box = el('div', 'v2-toast', shown);
+      this.toasts.prepend(box);
+      while (this.toasts.childElementCount > 4) this.toasts.lastElementChild!.remove();
+    } else this.toasts.prepend(box);
+    clearTimeout(Number(box.dataset.timer));
+    const b = box;
+    b.dataset.timer = String(window.setTimeout(() => b.remove(), Math.min(9000, 2600 + shown.length * 45)));
   }
 
   showLoading(text: string): void {
@@ -765,17 +967,17 @@ export class Hud {
 
   hideLoading(): void { this.loading.classList.add('hidden'); }
 
-  fatal(text: string): void {
-    this.loadingText.textContent = loose(text);
-    this.loading.classList.add('error');
-    this.loading.classList.remove('hidden');
-  }
-
   /** The decimal notation of the interface (for panels of other areas). */
   static dec(n: number, d = 1): string { return fmtDec(n, d); }
 }
 
-/** A key code as the player reads it. */
-export function keyName(code: string): string {
-  return code.replace(/^Key/, '').replace(/^Digit/, '').replace('PageUp', 'Page Up').replace('PageDown', 'Page Down');
+/** Marks a sideways-scrolling row with the side that has more (data-more: left, right, both). */
+function fadeEdges(box: HTMLElement): void {
+  const more = box.scrollWidth - box.clientWidth;
+  const left = more > 1 && box.scrollLeft > 1, right = more > 1 && box.scrollLeft < more - 1;
+  const v = left && right ? 'both' : left ? 'left' : right ? 'right' : '';
+  if ((box.dataset.more ?? '') !== v) { if (v) box.dataset.more = v; else delete box.dataset.more; }
 }
+
+/** A key code as the player reads it. */
+export { keyName };
