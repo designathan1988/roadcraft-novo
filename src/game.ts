@@ -60,7 +60,7 @@ import { demolishBox } from './tools/demolish.ts';
 import { curveLotSide, deleteLot, joinLots, lotAt, lotToWorld, moveLotCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt } from './roads/streetNames.ts';
-import { Ground, GroundStroke, RiverCommand } from './world/ground.ts';
+import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
 import { ZoneTool } from './tools/zoneTool.ts';
@@ -74,7 +74,7 @@ import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParam
 import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
-import { packSlot, quarantineSlot, unpackToSlot } from './mapFile.ts';
+import { keepPreviousCity, packSlot, quarantineSlot, unpackToSlot } from './mapFile.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
 
 const SLOT = 'cidade-1';
@@ -213,8 +213,11 @@ export class Game {
   private hitKind: 'pistol' | 'bomb' | null = null;
   private insideId = -1;
   private insideFloor = 0;
-  /** Something changed since the last save (autosave every 2 min). */
-  private unsaved = false;
+  /** Something changed since the last save (autosave every 2 min). Every change bumps `unsavedSerial`. */
+  private unsavedNow = false;
+  private unsavedSerial = 0;
+  private get unsaved(): boolean { return this.unsavedNow; }
+  private set unsaved(v: boolean) { if (v) this.unsavedSerial++; this.unsavedNow = v; }
   private autosaveAt = 0;
   /** Pause (Space): clock and simulation stopped. */
   private paused = false;
@@ -562,21 +565,17 @@ export class Game {
   }
 
   /** Generates the base terrain from the seed, one tile per job. */
-  private generateTerrain(): Promise<void> {
-    return new Promise((resolve) => {
-      let left = TILE_COUNT;
-      for (let t = 0; t < TILE_COUNT; t++) {
-        this.pool.submit('terrainGen', { seed: this.world.seed, tile: t }, (r) => {
-          this.world.tileMin[r.tile] = r.min;
-          this.world.tileMax[r.tile] = r.max;
-          this.world.layerDirty.add(r.tile);
-          // the tile's props (trees) depend on the terrain
-          const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
-          this.world.dirty.markRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Props);
-          if (--left === 0) resolve();
-        }, { key: `terrain:${t}`, priority: 0 });
-      }
-    });
+  /** Terrain of every tile from the seed, in the workers; rejects if any tile fails. */
+  private async generateTerrain(): Promise<void> {
+    await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
+      const r = await this.pool.run('terrainGen', { seed: this.world.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
+      this.world.tileMin[r.tile] = r.min;
+      this.world.tileMax[r.tile] = r.max;
+      this.world.layerDirty.add(r.tile);
+      // the tile's props (trees) depend on the terrain
+      const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
+      this.world.dirty.markRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Props);
+    }));
   }
 
   // ----------------------------------------------------------------- frame
@@ -594,7 +593,7 @@ export class Game {
     else if (!this.paused) this.hour = (this.hour + dt * this.clockSpeed / 60) % 24;
     // city clock in minutes (building decay); the sky mode only fixes the light
     if (!this.paused) this.world.advanceClock(dt * this.clockSpeed);
-    if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if (this.unsaved && !this.busy && this.world.roads.segs.size) void this.save(true); }
+    if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.busy && !this.saveBlocked) void this.save(true); }
     const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
     this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
@@ -1904,6 +1903,26 @@ export class Game {
     this.clouds = []; this.cloudView.set([]);
     w.signTexts.clear(); w.streetNames.clear(); this.textSigns.version++;
     w.money = START_MONEY;
+    // another city: nothing of it is in the save yet, and it is not the city the slot holds
+    w.tileInSave.fill(0);
+    w.gameId = (Math.random() * 2 ** 32) >>> 0;
+  }
+
+  /**
+   * After a flow that rebuilds the world failed half way: the world on screen is incomplete, so saving is refused until
+   * another city is opened or made (an autosave would write the half-built world over the player's save).
+   */
+  private saveBlocked = false;
+
+  /** Ends a flow that rebuilds the world: the loading screen goes, the game is free; on failure, says why. */
+  private endRebuild(err: unknown, what: string): void {
+    this.generating = false;
+    this.hud.hideLoading();
+    this.busy = false;
+    if (err === null) { this.saveBlocked = false; return; }
+    console.error(`${what} failed:`, err);
+    this.saveBlocked = true;
+    this.hud.toast(`${what} não terminou: ${(err as Error)?.message ?? String(err)}. A cidade na tela está incompleta e não será salva; o salvamento anterior não foi tocado.`);
   }
 
   /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
@@ -1914,69 +1933,64 @@ export class Game {
     const phase = (name: string) => console.log(`fase: ${name} ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     this.hud.showLoading('Gerando a cidade…');
     const w = this.world;
-    this.resetCity();
-    this.generating = true;
-    await this.generateTerrain();
-    phase('relevo');
-    const city = await new Promise<{ nodes: Float32Array; segs: Int32Array }>((resolve) =>
-      this.pool.submit('cityGen', { seed: w.seed }, (r) => resolve(r), { priority: 0 }));
-    phase('malha viária');
-    this.hud.showLoading('Assentando as vias…');
-    const ids: number[] = [];
-    for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
-    const nc = w.roads.nodes.cols;
-    const perTile: number[][] = Array.from({ length: TILE_COUNT }, () => []);
-    for (let k = 0; k < city.segs.length; k += 5) {
-      const a = ids[city.segs[k]], b = ids[city.segs[k + 1]], profile = city.segs[k + 2];
-      const mx = (nc.x[a] + nc.x[b]) / 2, mz = (nc.z[a] + nc.z[b]) / 2;
-      try {
-        w.roads.addSeg({ a, b, cx: mx, cz: mz, profile, flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
-      } catch { continue; }
-      // straight segment to conform the terrain to, in every tile it touches
-      const half = PROFILE_INFO[profile].right + 0.5;
-      const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half];
-      const r = half + 8;
-      const tx0 = tileX(Math.min(nc.x[a], nc.x[b]) - r), tx1 = tileX(Math.max(nc.x[a], nc.x[b]) + r);
-      const tz0 = tileX(Math.min(nc.z[a], nc.z[b]) - r), tz1 = tileX(Math.max(nc.z[a], nc.z[b]) + r);
-      for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) perTile[tileId(tx, tz)].push(...rec);
-    }
-    // dead ends with a turning bulb: a disc when conforming the terrain
-    for (const n of ids) {
-      if (!bulbAt(w.roads, n)) continue;
-      const half = BULB_R + BULB_WALK + 1, r = half + 8;
-      const rec = [nc.x[n], nc.z[n], nc.y[n], nc.x[n], nc.z[n], nc.y[n], half];
-      for (let tz = tileX(nc.z[n] - r); tz <= tileX(nc.z[n] + r); tz++) for (let tx = tileX(nc.x[n] - r); tx <= tileX(nc.x[n] + r); tx++) perTile[tileId(tx, tz)].push(...rec);
-    }
-    phase('vias inseridas');
-    await new Promise<void>((resolve) => {
-      let left = 0;
-      for (let t = 0; t < TILE_COUNT; t++) {
-        if (!perTile[t].length) continue;
-        left++;
-        const segs = new Float32Array(perTile[t]);
-        this.pool.submit('conform', { tile: t, segs }, (r) => {
-          w.tileMin[r.tile] = r.min; w.tileMax[r.tile] = r.max;
-          w.layerDirty.add(r.tile);
-          const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
-          w.touchRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Terrain);
-          if (--left === 0) resolve();
-        }, { priority: 0, transfer: [segs.buffer] });
+    try {
+      this.resetCity();
+      this.generating = true;
+      await this.generateTerrain();
+      phase('relevo');
+      const city = await this.pool.run('cityGen', { seed: w.seed }, { priority: 0 });
+      phase('malha viária');
+      this.hud.showLoading('Assentando as vias…');
+      const ids: number[] = [];
+      for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
+      const nc = w.roads.nodes.cols;
+      const perTile: number[][] = Array.from({ length: TILE_COUNT }, () => []);
+      for (let k = 0; k < city.segs.length; k += 5) {
+        const a = ids[city.segs[k]], b = ids[city.segs[k + 1]], profile = city.segs[k + 2];
+        const mx = (nc.x[a] + nc.x[b]) / 2, mz = (nc.z[a] + nc.z[b]) / 2;
+        try {
+          w.roads.addSeg({ a, b, cx: mx, cz: mz, profile, flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
+        } catch { continue; }
+        // straight segment to conform the terrain to, in every tile it touches
+        const half = PROFILE_INFO[profile].right + 0.5;
+        const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half];
+        const r = half + 8;
+        const tx0 = tileX(Math.min(nc.x[a], nc.x[b]) - r), tx1 = tileX(Math.max(nc.x[a], nc.x[b]) + r);
+        const tz0 = tileX(Math.min(nc.z[a], nc.z[b]) - r), tz1 = tileX(Math.max(nc.z[a], nc.z[b]) + r);
+        for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) perTile[tileId(tx, tz)].push(...rec);
       }
-      if (left === 0) resolve();
-    });
-    this.generating = false;
-    phase('relevo assentado');
-    this.hud.showLoading('Lotes e prédios…');
-    this.growth.processDirty();
-    await this.pool.whenIdle();
-    phase('lotes');
-    const n = this.growth.fillAll();
-    phase('prédios');
-    this.hud.hideLoading();
-    this.busy = false;
-    achieve('CIDADE_GERADA');
-    const secs = ((performance.now() - t0) / 1000).toFixed(0);
-    this.hud.toast(`Cidade gerada em ${secs} s: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de via.`);
+      // dead ends with a turning bulb: a disc when conforming the terrain
+      for (const n of ids) {
+        if (!bulbAt(w.roads, n)) continue;
+        const half = BULB_R + BULB_WALK + 1, r = half + 8;
+        const rec = [nc.x[n], nc.z[n], nc.y[n], nc.x[n], nc.z[n], nc.y[n], half];
+        for (let tz = tileX(nc.z[n] - r); tz <= tileX(nc.z[n] + r); tz++) for (let tx = tileX(nc.x[n] - r); tx <= tileX(nc.x[n] + r); tx++) perTile[tileId(tx, tz)].push(...rec);
+      }
+      phase('vias inseridas');
+      await Promise.all(perTile.map(async (list, t) => {
+        if (!list.length) return;
+        const segs = new Float32Array(list);
+        const r = await this.pool.run('conform', { tile: t, segs }, { priority: 0, transfer: [segs.buffer] });
+        w.tileMin[r.tile] = r.min; w.tileMax[r.tile] = r.max;
+        w.layerDirty.add(r.tile);
+        const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
+        w.touchRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Terrain);
+      }));
+      this.generating = false;
+      phase('relevo assentado');
+      this.hud.showLoading('Lotes e prédios…');
+      this.growth.processDirty();
+      await this.pool.whenIdle();
+      phase('lotes');
+      const n = this.growth.fillAll();
+      phase('prédios');
+      this.endRebuild(null, '');
+      achieve('CIDADE_GERADA');
+      const secs = ((performance.now() - t0) / 1000).toFixed(0);
+      this.hud.toast(`Cidade gerada em ${secs} s: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de via.`);
+    } catch (err) {
+      this.endRebuild(err, 'A geração da cidade');
+    }
   }
 
   // ------------------------------------------------------------- test city
@@ -1987,42 +2001,41 @@ export class Game {
     this.busy = true;
     this.hud.toast('Gerando a cidade de teste…');
     const w = this.world;
-    this.resetCity();
-    const nodes: Float32Array[] = [], segs: Int32Array[] = [];
-    let left = TILE_COUNT;
-    await new Promise<void>((resolve) => {
-      for (let t = 0; t < TILE_COUNT; t++) {
-        this.pool.submit('debugTile', { seed: w.seed, tile: t }, (r) => {
-          w.tileMin[r.tile] = Math.min(w.tileMin[r.tile], r.min);
-          w.tileMax[r.tile] = Math.max(w.tileMax[r.tile], r.max);
-          w.layerDirty.add(r.tile);
-          nodes.push(r.roadNodes); segs.push(r.roadSegs);
-          if (--left === 0) resolve();
-        }, { priority: 1 });
+    try {
+      this.resetCity();
+      const nodes: Float32Array[] = [], segs: Int32Array[] = [];
+      await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
+        const r = await this.pool.run('debugTile', { seed: w.seed, tile: t }, { priority: 1 });
+        w.tileMin[r.tile] = Math.min(w.tileMin[r.tile], r.min);
+        w.tileMax[r.tile] = Math.max(w.tileMax[r.tile], r.max);
+        w.layerDirty.add(r.tile);
+        nodes.push(r.roadNodes); segs.push(r.roadSegs);
+      }));
+      // streets: all the nodes first, then the segments (which may link tiles)
+      const key = new Map<number, number>();
+      for (const a of nodes) for (let k = 0; k < a.length; k += 5) {
+        key.set(a[k] * 1000 + a[k + 1], w.roads.addNode({ x: a[k + 2], z: a[k + 3], y: a[k + 4] }));
       }
-    });
-    // streets: all the nodes first, then the segments (which may link tiles)
-    const key = new Map<number, number>();
-    for (const a of nodes) for (let k = 0; k < a.length; k += 5) {
-      key.set(a[k] * 1000 + a[k + 1], w.roads.addNode({ x: a[k + 2], z: a[k + 3], y: a[k + 4] }));
+      const nc = w.roads.nodes.cols;
+      for (const a of segs) for (let k = 0; k < a.length; k += 4) {
+        const na = key.get(a[k] * 1000 + a[k + 1]), nb = key.get(a[k + 2] * 1000 + a[k + 3]);
+        if (na === undefined || nb === undefined) continue;
+        const mx = (nc.x[na] + nc.x[nb]) / 2, mz = (nc.z[na] + nc.z[nb]) / 2;
+        const r = Math.hypot(mx, mz);
+        const zone = r < 1300 ? Zone.Commercial : r < 2600 ? Zone.Mixed : mx > 2800 ? Zone.Industrial : Zone.Residential;
+        // a horizontal segment (same j) follows line j; a vertical one, line i
+        const profile = a[k + 1] === a[k + 3] ? lineProfile(a[k + 1]) : lineProfile(a[k]);
+        w.roads.addSeg({ a: na, b: nb, cx: mx, cz: mz, profile, flags: 0, zl: zone, zr: zone });
+      }
+      // lots in the workers, then a building on every free lot
+      this.growth.processDirty();
+      await this.pool.whenIdle();
+      const n = this.growth.fillAll();
+      this.endRebuild(null, '');
+      this.hud.toast(`Cidade de teste: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de rua.`);
+    } catch (err) {
+      this.endRebuild(err, 'A cidade de teste');
     }
-    const nc = w.roads.nodes.cols;
-    for (const a of segs) for (let k = 0; k < a.length; k += 4) {
-      const na = key.get(a[k] * 1000 + a[k + 1]), nb = key.get(a[k + 2] * 1000 + a[k + 3]);
-      if (na === undefined || nb === undefined) continue;
-      const mx = (nc.x[na] + nc.x[nb]) / 2, mz = (nc.z[na] + nc.z[nb]) / 2;
-      const r = Math.hypot(mx, mz);
-      const zone = r < 1300 ? Zone.Commercial : r < 2600 ? Zone.Mixed : mx > 2800 ? Zone.Industrial : Zone.Residential;
-      // a horizontal segment (same j) follows line j; a vertical one, line i
-      const profile = a[k + 1] === a[k + 3] ? lineProfile(a[k + 1]) : lineProfile(a[k]);
-      w.roads.addSeg({ a: na, b: nb, cx: mx, cz: mz, profile, flags: 0, zl: zone, zr: zone });
-    }
-    // lots in the workers, then a building on every free lot
-    this.growth.processDirty();
-    await this.pool.whenIdle();
-    const n = this.growth.fillAll();
-    this.busy = false;
-    this.hud.toast(`Cidade de teste: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de rua.`);
   }
 
   private insertBoxes(b: BoxColumns): void {
@@ -2033,154 +2046,182 @@ export class Game {
 
   // -------------------------------------------------- saving and loading
 
-  private async save(auto = false): Promise<void> {
-    if (this.busy) return;
-    this.unsaved = false;
+  /**
+   * Writes the changed tiles and the map's description. Everything is copied at the start, in one go (tiles, their
+   * ground and water, money, clock, junctions…), so the files describe one moment. A tile's mark and `unsaved` are
+   * cleared only once every file is written, and only if nothing changed after the copy; a failed write leaves them
+   * set and the next save tries again. True when the save completed.
+   */
+  private async save(auto = false): Promise<boolean> {
+    if (this.busy) return false;
+    if (this.saveBlocked) {
+      if (!auto) this.hud.toast('A cidade na tela está incompleta (a abertura ou a geração não terminou) e não é salva. Abra ou crie uma cidade.');
+      return false;
+    }
     this.busy = true;
+    try { await this.keepSlotForThisCity(); } catch (err) {
+      this.busy = false;
+      this.hud.toast(`Não foi possível salvar: a cidade salva antes não pôde ser guardada (${(err as Error).message}). Nada foi gravado.`);
+      return false;
+    }
     const w = this.world;
+    const serial = this.unsavedSerial;
     const tiles: number[] = [];
     for (let t = 0; t < TILE_COUNT; t++) if (w.saveDirty[t]) tiles.push(t);
-    let bytes = 0;
+    const versions = tiles.map((t) => w.saveVer[t]);
+    const listed = new Uint8Array(w.tileInSave);
+    for (const t of tiles) listed[t] = 1;
+    const tileOf = (x: number, z: number) => tileId(tileX(x), tileX(z));
+    const gl = WATER_TILE_RES * WATER_TILE_RES;
+    const writes = tiles.map((t) => {
+      const heights = packTileHeights(w.heights, t);
+      const boxes = w.gatherBoxes(cellsOfTile(t));
+      const roads = w.roads.saveTile(t, tileOf);
+      roads.items = w.items.saveTile(tileOf, t, cellsOfTile(t));
+      const ground = w.ground32.slice(t * gl, (t + 1) * gl), water = w.water.slice(t * gl, (t + 1) * gl);
+      return this.pool.run('saveTile', { slot: SLOT, tile: t, heights, boxes, roads, ground, water }, { priority: -1,
+        transfer: [heights.buffer as ArrayBuffer, ...boxTransfer(boxes), roads.nodes.buffer as ArrayBuffer, roads.segs.buffer as ArrayBuffer, roads.items.buffer as ArrayBuffer, ground.buffer, water.buffer] });
+    });
+    const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: listed, camera: this.rig.state(), hour: this.hour, transit: this.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.unlimited ? NaN : w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
+      extra: JSON.stringify({ sky: this.skyMode, weather: this.weatherCtl, water: this.waterCtl, clouds: this.clouds, fog: fogLevel.value, terminals: this.transit.terminals,
+        signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: this.settings.paint ?? 'br' }) });
     try {
-      await Promise.all(tiles.map((t) => new Promise<void>((resolve) => {
-        w.saveDirty[t] = 0;
-        const heights = packTileHeights(w.heights, t);
-        const boxes = w.gatherBoxes(cellsOfTile(t));
-        const roads = w.roads.saveTile(t, (x, z) => tileId(tileX(x), tileX(z)));
-        roads.items = w.items.saveTile((x, z) => tileId(tileX(x), tileX(z)), t, cellsOfTile(t));
-        this.pool.submit('saveTile', { slot: SLOT, tile: t, heights, boxes, roads }, (r) => {
-          w.tileInSave[r.tile] = 1;
-          bytes += r.bytes;
-          resolve();
-        }, { priority: -1, transfer: [heights.buffer as ArrayBuffer, ...boxTransfer(boxes), roads.nodes.buffer as ArrayBuffer, roads.segs.buffer as ArrayBuffer, roads.items.buffer as ArrayBuffer] });
-      })));
-      const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: w.tileInSave, camera: this.rig.state(), hour: this.hour, transit: this.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.unlimited ? NaN : w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
-        extra: JSON.stringify({ sky: this.skyMode, weather: this.weatherCtl, water: this.waterCtl, clouds: this.clouds, fog: fogLevel.value, terminals: this.transit.terminals,
-          signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: this.settings.paint ?? 'br' }) });
-      await new Promise<void>((resolve) => this.pool.submit('saveMeta', { slot: SLOT, meta }, () => resolve(), { priority: -1 }));
+      let bytes = 0;
+      for (const r of await Promise.all(writes)) bytes += r.bytes;
+      await this.pool.run('saveMeta', { slot: SLOT, meta }, { priority: -1 });
+      tiles.forEach((t, k) => { w.tileInSave[t] = 1; if (w.saveVer[t] === versions[k]) w.saveDirty[t] = 0; });
+      if (this.unsavedSerial === serial) this.unsaved = false;
       if (auto) this.hud.toast('Salvo automaticamente.');
       else this.hud.toast(tiles.length ? `Salvo (${tiles.length} ladrilhos, ${(bytes / 1024 / 1024).toFixed(1)} MB).` : 'Salvo.');
+      return true;
     } catch (err) {
-      this.hud.toast(`Não foi possível salvar: ${String(err)}`);
+      this.hud.toast(`Não foi possível salvar: ${(err as Error).message ?? String(err)}. Nada foi perdido; o jogo tenta de novo no próximo salvamento.`);
+      return false;
     } finally {
       this.busy = false;
     }
   }
 
-  private async load(): Promise<void> {
-    if (this.busy) return;
-    const raw = await new Promise<Uint8Array | null>((resolve) =>
-      this.pool.submit('loadMeta', { slot: SLOT }, (r) => resolve(r.meta), { priority: -1 }));
-    if (!raw) { this.hud.toast('Nenhum salvamento encontrado.'); return; }
+  /**
+   * Opens the saved city. Any failure after the world was cleared ends the flow (no hung loading screen) and blocks
+   * saving until another city is opened or made, so the half-built world never overwrites the save. Dead ends of old
+   * maps repaired here stay marked: the next save writes the repair (otherwise the ids the repair freed and new roads
+   * reuse would be in two files at the next opening). True when the city opened.
+   */
+  private async load(): Promise<boolean> {
+    if (this.busy) return false;
+    this.busy = true;
+    const w = this.world;
+    let raw: Uint8Array | null;
+    try { raw = (await this.pool.run('loadMeta', { slot: SLOT }, { priority: -1 })).meta; } catch (err) {
+      this.busy = false;
+      this.hud.toast(`Não foi possível ler o salvamento: ${(err as Error).message}.`);
+      return false;
+    }
+    if (!raw) { this.busy = false; this.hud.toast('Nenhum salvamento encontrado.'); return false; }
     let meta;
     try { meta = decodeMeta(raw); } catch (err) {
-      if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { reloadWithMap(err.tiles, 'carregar'); return; }
+      this.busy = false;
+      if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { reloadWithMap(err.tiles, 'carregar'); return false; }
       const q = await quarantineSlot(SLOT).catch(() => null);
-      this.hud.toast(q ? `Não deu para ler o mapa (${(err as Error).message}). Ele foi guardado intacto em "${q}".` : String(err)); return;
+      this.hud.toast(q ? `Não deu para ler o mapa (${(err as Error).message}). Ele foi guardado intacto em "${q}".` : String(err));
+      return false;
     }
-    this.busy = true;
     this.hud.showLoading('Carregando a cidade…');
-    const w = this.world;
-    w.clearBuildings();
-    w.items.clear();
-    w.clearGround();
-    w.roads.clear();
-    this.growth.clear();
-    for (const l of this.layers) l.reset();
-    this.props.clear();
-    this.transit.clear();
-    this.commands.clear();
-    try { setCustomProfiles(meta.profiles ? JSON.parse(meta.profiles) as Profile[] : []); } catch { setCustomProfiles([]); }
-    w.clearGround();
-    this.setBiome(meta.biome ?? 0);
-    w.unlimited = meta.money !== undefined && Number.isNaN(meta.money);
-    w.money = meta.money !== undefined && !Number.isNaN(meta.money) ? meta.money : START_MONEY;
-    const roads: RoadSave[] = [];
-    w.seed = meta.seed;
-    w.gameId = meta.gameId;
-    if (meta.hour !== undefined) this.hour = meta.hour;
-    if (meta.transit) this.transit.decode(meta.transit); else this.transit.clear();
     try {
-      const extra = meta.extra ? JSON.parse(meta.extra) as { sky?: SkyMode; weather?: WeatherCtl | null; water?: { waves: number; foam: number; current: number } } : {};
-      this.setWater(extra.water ?? { waves: 0.3, foam: 0.4, current: 0.5 });
-      const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]>; clock?: number; paint?: string };
-      w.clock = ex.clock ?? 0;
-      // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
-      if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
-      w.signTexts.clear(); for (const [k, v] of ex.signs ?? []) w.signTexts.set(k, v);
-      w.streetNames.clear(); for (const [k, v] of ex.streets ?? []) w.streetNames.set(k, v);
-      this.textSigns.version++;
-      this.transit.terminals = ex.terminals ?? []; this.transit.version++;
-      this.clouds = ex.clouds ?? []; this.cloudView.set(this.clouds); fogLevel.value = ex.fog ?? 1;
-      this.skyMode = extra.sky ?? 'ciclo'; this.hud.setSky(this.skyMode);
-      this.setWeather(extra.weather ?? null);
-    } catch { /* old save */ }
-    w.tileInSave.set(meta.tiles);
-    let left = TILE_COUNT, corrupt = 0;
-    await new Promise<void>((resolve) => {
-      const done = () => { if (--left === 0) resolve(); };
-      for (let t = 0; t < TILE_COUNT; t++) {
-        const cells = cellsOfTile(t);
+      w.clearBuildings();
+      w.items.clear();
+      w.clearGround();
+      w.roads.clear();
+      this.growth.clear();
+      for (const l of this.layers) l.reset();
+      this.props.clear();
+      this.transit.clear();
+      this.commands.clear();
+      try { setCustomProfiles(meta.profiles ? JSON.parse(meta.profiles) as Profile[] : []); } catch { setCustomProfiles([]); }
+      w.clearGround();
+      this.setBiome(meta.biome ?? 0);
+      w.unlimited = meta.money !== undefined && Number.isNaN(meta.money);
+      w.money = meta.money !== undefined && !Number.isNaN(meta.money) ? meta.money : START_MONEY;
+      const roads: RoadSave[] = [];
+      w.seed = meta.seed;
+      w.gameId = meta.gameId;
+      if (meta.hour !== undefined) this.hour = meta.hour;
+      if (meta.transit) this.transit.decode(meta.transit); else this.transit.clear();
+      try {
+        const extra = meta.extra ? JSON.parse(meta.extra) as { sky?: SkyMode; weather?: WeatherCtl | null; water?: { waves: number; foam: number; current: number } } : {};
+        this.setWater(extra.water ?? { waves: 0.3, foam: 0.4, current: 0.5 });
+        const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]>; clock?: number; paint?: string };
+        w.clock = ex.clock ?? 0;
+        // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
+        if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
+        w.signTexts.clear(); for (const [k, v] of ex.signs ?? []) w.signTexts.set(k, v);
+        w.streetNames.clear(); for (const [k, v] of ex.streets ?? []) w.streetNames.set(k, v);
+        this.textSigns.version++;
+        this.transit.terminals = ex.terminals ?? []; this.transit.version++;
+        this.clouds = ex.clouds ?? []; this.cloudView.set(this.clouds); fogLevel.value = ex.fog ?? 1;
+        this.skyMode = extra.sky ?? 'ciclo'; this.hud.setSky(this.skyMode);
+        this.setWeather(extra.weather ?? null);
+      } catch { /* old save */ }
+      w.tileInSave.set(meta.tiles);
+      let corrupt = 0;
+      await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
         if (meta.tiles[t]) {
-          this.pool.submit('loadTile', { slot: SLOT, tile: t }, (r) => {
-            if (r.corrupt) {
-              // unreadable tile: its terrain comes back from the seed; the save goes to quarantine below
-              corrupt++;
-              this.pool.submit('terrainGen', { seed: w.seed, tile: t }, (g) => {
-                w.tileMin[t] = g.min; w.tileMax[t] = g.max; w.layerDirty.add(t);
-                for (const c of cells) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
-                done();
-              }, { key: `terrain:${t}`, priority: 0 });
-              return;
-            }
-            if (r.found) {
-              w.tileMin[t] = r.min; w.tileMax[t] = r.max;
-              if (r.boxes) this.insertBoxes(r.boxes);
-              if (r.roads) roads.push(r.roads);
-              if (r.roads?.items) w.items.loadTile(r.roads.items);
-              w.groundDirty.add(t); w.waterDirty.add(t);
-              w.tileWater[t] = r.hasWater ? 1 : 0;
-            }
-            w.layerDirty.add(t);
-            for (const c of cells) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
-            done();
-          }, { key: `terrain:${t}`, priority: 0 });
-        } else {
-          this.pool.submit('terrainGen', { seed: w.seed, tile: t }, (r) => {
+          const r = await this.pool.run('loadTile', { slot: SLOT, tile: t }, { key: `terrain:${t}`, priority: 0 });
+          if (r.corrupt) {
+            // unreadable tile: its terrain comes back from the seed; the save goes to quarantine below
+            corrupt++;
+            const g = await this.pool.run('terrainGen', { seed: w.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
+            w.tileMin[t] = g.min; w.tileMax[t] = g.max;
+          } else if (r.found) {
             w.tileMin[t] = r.min; w.tileMax[t] = r.max;
-            w.layerDirty.add(t);
-            for (const c of cells) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
-            done();
-          }, { key: `terrain:${t}`, priority: 0 });
+            if (r.boxes) this.insertBoxes(r.boxes);
+            if (r.roads) roads.push(r.roads);
+            if (r.roads?.items) w.items.loadTile(r.roads.items);
+            w.groundDirty.add(t); w.waterDirty.add(t);
+            w.tileWater[t] = r.hasWater ? 1 : 0;
+          }
+        } else {
+          const r = await this.pool.run('terrainGen', { seed: w.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
+          w.tileMin[t] = r.min; w.tileMax[t] = r.max;
         }
+        w.layerDirty.add(t);
+        for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
+      }));
+      // roads: all nodes before the segments (segments link tiles)
+      for (const r of roads) w.roads.loadNodes(r);
+      for (const r of roads) w.roads.loadSegs(r);
+      // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
+      for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
+      try {
+        for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
+      } catch { /* save without chosen junctions */ }
+      // what was read is what the save holds; only the repair below needs writing
+      w.saveDirty.fill(0);
+      // old maps: dead ends lying inside another road become junctions (marked to save)
+      const repaired = repairDanglingEnds(w);
+      if (repaired) this.unsaved = true;
+      if (corrupt) {
+        const q = await quarantineSlot(SLOT).catch(() => null);
+        this.hud.toast(`${corrupt} ${corrupt === 1 ? 'pedaço do mapa estava ilegível e voltou' : 'pedaços do mapa estavam ilegíveis e voltaram'} do relevo original${q ? `; o salvamento original foi guardado intacto em "${q}"` : ''}.`);
       }
-    });
-    // roads: all nodes before the segments (segments link tiles)
-    for (const r of roads) w.roads.loadNodes(r);
-    for (const r of roads) w.roads.loadSegs(r);
-    // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
-    for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
-    try {
-      for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
-    } catch { /* save without chosen junctions */ }
-    // old maps: dead ends lying inside another road become junctions
-    const repaired = repairDanglingEnds(w);
-    if (corrupt) {
-      const q = await quarantineSlot(SLOT).catch(() => null);
-      this.hud.toast(`${corrupt} ${corrupt === 1 ? 'pedaço do mapa estava ilegível e voltou' : 'pedaços do mapa estavam ilegíveis e voltaram'} do relevo original${q ? `; o salvamento original foi guardado intacto em "${q}"` : ''}.`);
+      if (repaired) this.hud.toast(`Mapa reparado: ${repaired} ${repaired === 1 ? 'ponta solta dentro de outra via virou cruzamento' : 'pontas soltas dentro de outras vias viraram cruzamentos'}.`);
+      this.rig.restore(meta.camera);
+      this.hud.setView(this.rig.mode);
+      this.saveBlocked = false;
+      this.slotGame = meta.gameId;
+      this.endRebuild(null, '');
+      this.hud.toast('Cidade carregada.');
+      return true;
+    } catch (err) {
+      this.endRebuild(err, 'A abertura da cidade');
+      return false;
     }
-    if (repaired) this.hud.toast(`Mapa reparado: ${repaired} ${repaired === 1 ? 'ponta solta dentro de outra via virou cruzamento' : 'pontas soltas dentro de outras vias viraram cruzamentos'}.`);
-    w.saveDirty.fill(0);
-    this.rig.restore(meta.camera);
-    this.hud.setView(this.rig.mode);
-    this.hud.hideLoading();
-    this.busy = false;
-    this.hud.toast('Cidade carregada.');
   }
 
-  /** Saves and downloads the whole map as a .cidade file. */
+  /** Saves and downloads the whole map as a .cidade file (only a save that completed is exported). */
   private async exportMap(): Promise<void> {
-    await this.save();
+    if (!await this.save()) { this.hud.toast('O mapa não foi exportado porque o salvamento não terminou.'); return; }
     const blob = await packSlot(SLOT);
     if (!blob) { this.hud.toast('Nada salvo para exportar ainda.'); return; }
     const a = document.createElement('a');
@@ -2191,27 +2232,67 @@ export class Game {
     this.hud.toast(`Mapa exportado (${(blob.size / 1024 / 1024).toFixed(1)} MB).`);
   }
 
-  /** Opens a map from a file: replaces the save with it and loads. */
+  /**
+   * Opens a map from a file. The file is read and its map description checked before anything is touched; the city
+   * saved before is kept as a previous city; then the file replaces the save and is opened.
+   */
   private async importMap(file: Blob): Promise<void> {
     if (this.busy) return;
-    try { await unpackToSlot(SLOT, file); } catch (err) { this.hud.toast(`Não abriu: ${(err as Error).message}.`); return; }
+    this.busy = true;
+    let kept: string | null;
+    try {
+      kept = await unpackToSlot(SLOT, file, (metaBytes) => {
+        try { decodeMeta(metaBytes); } catch (err) { if (!(err instanceof MapSizeError && MAP_SIZES.includes(err.tiles))) throw err; }
+      });
+    } catch (err) {
+      this.hud.toast(`Não abriu: ${(err as Error).message}. O salvamento atual não foi tocado.`);
+      return;
+    } finally {
+      this.busy = false;
+    }
+    this.slotGame = null;
+    if (kept) this.hud.toast(`A cidade salva antes foi guardada em "${kept}".`);
     await this.load();
   }
+
+  /**
+   * The slot holds one city. Before the first save of another city (a new map, a generated one, an imported one), the
+   * city saved there is copied aside as a previous city, never overwritten. Throws when the copy fails (nothing is
+   * written then).
+   */
+  private async keepSlotForThisCity(): Promise<void> {
+    const w = this.world;
+    if (this.slotGame === w.gameId) return;
+    const { meta } = await this.pool.run('loadMeta', { slot: SLOT }, { priority: -1 });
+    let other = meta !== null;
+    // a description that cannot be read (damaged, or a map of another size) is kept aside too
+    if (meta) { try { other = decodeMeta(meta).gameId !== w.gameId; } catch { other = true; } }
+    if (other) {
+      const kept = await keepPreviousCity(SLOT);
+      if (kept) this.hud.toast(`A cidade salva antes foi guardada em "${kept}".`);
+    }
+    this.slotGame = w.gameId;
+  }
+
+  /** The gameId of the city in the save slot (null: not known yet). */
+  private slotGame: number | null = null;
 
   private async newMap(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.hud.showLoading('Gerando o relevo…');
     const w = this.world;
-    this.resetCity();
-    w.seed = (Math.random() * 2 ** 32) >>> 0;
-    w.gameId = (Math.random() * 2 ** 32) >>> 0;
-    w.tileInSave.fill(0);
-    await this.generateTerrain();
-    for (let t = 0; t < TILE_COUNT; t++) for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain);
-    // the new terrain comes from the seed: it only needs to be written after being edited
-    w.saveDirty.fill(0);
-    this.hud.hideLoading();
-    this.busy = false;
+    try {
+      this.resetCity();
+      w.seed = (Math.random() * 2 ** 32) >>> 0;
+      w.gameId = (Math.random() * 2 ** 32) >>> 0;
+      await this.generateTerrain();
+      for (let t = 0; t < TILE_COUNT; t++) for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain);
+      // the new terrain comes from the seed: it only needs to be written after being edited
+      w.saveDirty.fill(0);
+      this.endRebuild(null, '');
+    } catch (err) {
+      this.endRebuild(err, 'O mapa novo');
+    }
   }
 }

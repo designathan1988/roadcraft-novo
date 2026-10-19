@@ -67,10 +67,10 @@ const handlers: { [K in JobKind]: Handler<K> } = {
   },
   conform: (p) => [{ tile: p.tile, ...conformTile(H(), p.tile, p.segs) }, []],
   saveTile: async (p) => {
-    // tile ground and water read straight from shared memory
+    // the ground and water the page copied with the rest of the snapshot (read here only if it sent none)
     const gl = WATER_TILE_RES * WATER_TILE_RES, wl = gl;
-    const g = ground ? ground.slice(p.tile * gl, (p.tile + 1) * gl) : undefined;
-    const w = water ? water.slice(p.tile * wl, (p.tile + 1) * wl) : undefined;
+    const g = p.ground ?? (ground ? ground.slice(p.tile * gl, (p.tile + 1) * gl) : undefined);
+    const w = p.water ?? (water ? water.slice(p.tile * wl, (p.tile + 1) * wl) : undefined);
     return [{ tile: p.tile, bytes: await storage.saveTile(p.slot, p.tile, p.heights, p.boxes, p.roads, g, w) }, []];
   },
   saveMeta: async (p) => [{ bytes: await storage.saveMeta(p.slot, p.meta) }, []],

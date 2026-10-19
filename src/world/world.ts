@@ -75,6 +75,8 @@ export class World {
   readonly layerDirty = new Set<number>();
   /** Tiles changed since the last save. */
   readonly saveDirty = new Uint8Array(TILE_COUNT);
+  /** Bumped with every change of a tile: a save clears a tile's mark only if no change came after its snapshot. */
+  readonly saveVer = new Uint32Array(TILE_COUNT);
   /** Tiles present in the current save. */
   readonly tileInSave = new Uint8Array(TILE_COUNT);
 
@@ -180,14 +182,20 @@ export class World {
     const x0 = cellX(minX), x1 = cellX(maxX), z0 = cellX(minZ), z1 = cellX(maxZ);
     for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) this.cellVersion[cellId(cx, cz)]++;
     const tx0 = tileX(minX), tx1 = tileX(maxX), tz0 = tileX(minZ), tz1 = tileX(maxZ);
-    for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) this.saveDirty[tileId(tx, tz)] = 1;
+    for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) this.markSave(tileId(tx, tz));
   }
 
   touchCell(cid: number, kinds: number): void {
     if (kinds & (Dirty.Roads | Dirty.Buildings | Dirty.Terrain)) kinds |= Dirty.Props;
     this.dirty.mark(cid, kinds);
     this.cellVersion[cid]++;
-    this.saveDirty[tileOfCell(cid)] = 1;
+    this.markSave(tileOfCell(cid));
+  }
+
+  /** A tile to write at the next save. */
+  markSave(t: number): void {
+    this.saveDirty[t] = 1;
+    this.saveVer[t]++;
   }
 
   /** Residents and jobs (O(1) updates for every building added, removed or changed). */

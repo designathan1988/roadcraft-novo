@@ -81,7 +81,8 @@ export interface JobPayloads {
   props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number };
   cityGen: { seed: number };
   conform: { tile: number; segs: Float32Array };
-  saveTile: { slot: string; tile: number; heights: Uint16Array; boxes: BoxColumns; roads: RoadSave };
+  /** ground and water: the tile's painted ground and water, copied by the page with the rest of the snapshot. */
+  saveTile: { slot: string; tile: number; heights: Uint16Array; boxes: BoxColumns; roads: RoadSave; ground?: Uint32Array; water?: Float32Array };
   saveMeta: { slot: string; meta: Uint8Array };
   loadTile: { slot: string; tile: number };
   loadMeta: { slot: string };
