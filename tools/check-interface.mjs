@@ -662,6 +662,21 @@ export const SCENARIOS = {
     click(QA('.v2-strip .v2-card')[16]); await frames(2);
     check('the strip keeps its scroll after a pick', Q('.v2-strip').scrollLeft > 60, 'scroll ' + Q('.v2-strip').scrollLeft);
   ` },
+  // The 4.0 graphics dialog (ui/graphicsPanel.ts): a full screen row and the graphics card's name
+  'options-4.0': `
+    let asked = 0;
+    const req = Element.prototype.requestFullscreen;
+    Element.prototype.requestFullscreen = function () { asked++; return Promise.resolve(); };
+    click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
+    const dlg = g.optionsPanel.root;
+    const row = [...dlg.querySelectorAll('.opt-row')].find((r) => /Tela cheia|Full screen/.test(r.textContent));
+    check('the options have a full screen row', !!row, 'rows: ' + [...dlg.querySelectorAll('.opt-row > span:first-child')].map((x) => x.textContent).join(', '));
+    if (row) { click(row.querySelector('input')); await frames(2); }
+    Element.prototype.requestFullscreen = req;
+    check('it asks for full screen at once', asked === 1, 'asked ' + asked);
+    const gpu = dlg.querySelector('.opt-gpu');
+    check('the options name the graphics card', !!gpu && gpu.textContent.length > 15, 'gpu: ' + (gpu && gpu.textContent));
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

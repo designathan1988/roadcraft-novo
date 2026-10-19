@@ -476,4 +476,7 @@ export const ENGINE_PT: Record<string, string> = {
   'refuse.move.tooShort': 'uma via ali ficaria curta demais',
   'refuse.move.roundabout': 'nó de rotatória não se move',
   'refuse.sign.noRule': 'o cruzamento tem semáforo ou é rotatória: a placa não muda a regra',
+  // the road tool steps 4 m (Roadcraft's dictionary says 1 m)
+  'roadKeys.heightUp': 'Subir a via 4 m',
+  'roadKeys.heightDown': 'Descer a via 4 m',
 };

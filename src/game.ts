@@ -552,7 +552,7 @@ export class Game {
     this.creator.el.style.display = 'none';
     this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
       !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.testCity(); }],
-        [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]]);
+        [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]], () => this.gpuName());
     await this.applySettings(this.settings, false);
     await renderer.compileAsync(scene, this.rig.persp);
     await renderer.compileAsync(scene, this.rig.ortho);
@@ -1617,6 +1617,17 @@ export class Game {
       },
       options: () => this.optionsPanel.open(),
     });
+  }
+
+  /** The graphics card's name as the driver gives it ('' when the browser does not say). */
+  private gpuName(): string {
+    const backend = (this.parts.renderer as unknown as { backend?: { device?: { adapterInfo?: { description?: string; vendor?: string; architecture?: string } }; gl?: WebGL2RenderingContext } }).backend;
+    const info = backend?.device?.adapterInfo;
+    if (info) return info.description || [info.vendor, info.architecture].filter(Boolean).join(' ');
+    const gl = backend?.gl, ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    const raw = gl && ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    // "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x…) Direct3D11 …)" → "NVIDIA GeForce RTX 3060", as Roadcraft 4.0
+    return raw.replace(/^ANGLE \([^,]*,\s*/, '').replace(/\s*\(0x[0-9A-Fa-f]+\).*$/, '').replace(/\s*Direct3D.*$/, '');
   }
 
   /** The health panel's World tab: the latest edits and what the world holds now. */

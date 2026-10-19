@@ -78,7 +78,11 @@ export class OptionsPanel {
   private webgpu: boolean;
   private extra: Array<[string, string, () => void]>;
 
-  constructor(parent: HTMLElement, current: () => Settings, webgpu: boolean, apply: (s: Settings) => void, extra: Array<[string, string, () => void]> = []) {
+  /** The graphics card's name as the driver gives it (the dialog shows it, as Roadcraft 4.0). */
+  private gpu: () => string;
+
+  constructor(parent: HTMLElement, current: () => Settings, webgpu: boolean, apply: (s: Settings) => void, extra: Array<[string, string, () => void]> = [], gpu: () => string = () => '') {
+    this.gpu = gpu;
     this.current = current;
     this.extra = extra;
     this.apply = apply;
@@ -178,6 +182,12 @@ export class OptionsPanel {
     row(t('ui.options.weather'), select(s.weather, [['auto', t('ui.weather.auto')], ['limpo', t('ui.options.clear')], ['chuva', t('weather.rain').replace(/\s*\(.*$/, '')], ['tempestade', t('weather.storm')]], (v) => { s.weather = v; }));
     row(t('menu.language'), select<Lang>(lang(), LANGUAGES.map(([c, name]) => [c, name] as [Lang, string]), (v) => setLang(v)));
     row(t('ui.options.volume'), range(s.volume ?? 0.6, 0, 1, 0.05, pct, (v) => { s.volume = v; }));
+    {
+      // full screen at once, as Roadcraft 4.0 (it is the window's state, not an option kept)
+      const fs = document.createElement('input'); fs.type = 'checkbox'; fs.checked = !!document.fullscreenElement;
+      fs.addEventListener('change', () => { if (fs.checked) void document.documentElement.requestFullscreen?.().catch(() => { fs.checked = false; }); else void document.exitFullscreen?.().catch(() => undefined); });
+      row(t('gfx.fullscreen'), fs);
+    }
     if (!this.webgpu) {
       const p = document.createElement('p'); p.className = 'opt-note';
       p.textContent = t('ui.options.compat');
@@ -188,6 +198,8 @@ export class OptionsPanel {
       b.addEventListener('click', () => { this.close(); fn(); });
       row(t('ui.options.game'), b);
     }
+    const name = this.gpu();
+    if (name) { const g = document.createElement('p'); g.className = 'opt-note opt-gpu'; g.textContent = `${t('gfx.gpu')}: ${name}`; box.append(g); }
     const buttons = document.createElement('div'); buttons.className = 'opt-buttons';
     const ok = document.createElement('button'); ok.className = 'v2-btn primary'; ok.textContent = t('ui.options.apply');
     // what other panels changed while the dialog was open (simulation, road paint and furniture) is kept

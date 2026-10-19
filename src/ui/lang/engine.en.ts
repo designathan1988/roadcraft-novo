@@ -476,4 +476,7 @@ export const ENGINE_EN: Record<string, string> = {
   'refuse.move.tooShort': 'a road there would be too short',
   'refuse.move.roundabout': 'a roundabout node does not move',
   'refuse.sign.noRule': 'the junction has traffic lights or is a roundabout: the sign does not change the rule',
+  // the road tool steps 4 m (Roadcraft's dictionary says 1 m)
+  'roadKeys.heightUp': 'Raise the road 4 m',
+  'roadKeys.heightDown': 'Lower the road 4 m',
 };

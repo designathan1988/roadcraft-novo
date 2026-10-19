@@ -15,7 +15,7 @@ const H = `const W=(ms)=>new Promise(r=>setTimeout(r,ms));const Q=(s)=>document.
 const click=(s)=>{const e=typeof s==='string'?Q(s):s;if(!e)throw new Error('sem '+s);e.click();};
 const byText=(sel,re)=>QA(sel).find(e=>new RegExp(re).test(e.textContent||e.title||e.dataset.tip||''));
 const esc=()=>window.dispatchEvent(new KeyboardEvent('keydown',{code:'Escape',key:'Escape',bubbles:true}));
-const g=window.__cidade.game;const reset=async()=>{esc();esc();esc();const hp=Q('.health:not(.hidden)');if(hp)hp.classList.add('hidden');QA('.v2-dialog-back').forEach(e=>{e.classList.add('hidden');e.hidden=true;});g.hudActions.tool('camera');await W(200);};`;
+const g=window.__cidade.game;const reset=async()=>{esc();esc();esc();const hp=Q('.health:not(.hidden)');if(hp)hp.classList.add('hidden');g.hudActions.tool('camera');await W(200);};`;
 const scene = (body) => `(async()=>{${H}await reset();${body};await W(600);})().catch(e=>console.log('script: '+e.message))`;
 
 export const SCENES = {
