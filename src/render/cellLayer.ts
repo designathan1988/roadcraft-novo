@@ -40,8 +40,9 @@ export interface LayerOptions {
   sparse?: boolean;
 }
 
-interface Slot { mesh: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number }
-const slot = (): Slot => ({ mesh: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0 });
+/** One mesh of the layer: a cell, a tile or a plate (`size` metres from its origin corner). */
+interface Slot { mesh: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number; size: number }
+const slot = (size: number) => (): Slot => ({ mesh: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size });
 
 const FADE = 0.35;
 const PLATE_COUNT = MAP_PLATES * MAP_PLATES;
@@ -63,8 +64,8 @@ export class CellLayer {
   readonly group = new THREE.Group();
   readonly material: THREE.Material;
   private cells: Slot[][];
-  private tiles: Slot[] = Array.from({ length: TILE_COUNT }, slot);
-  private plates: Slot[] = Array.from({ length: PLATE_COUNT }, slot);
+  private tiles: Slot[] = Array.from({ length: TILE_COUNT }, slot(TILE_SIZE));
+  private plates: Slot[] = Array.from({ length: PLATE_COUNT }, slot(PLATE_SIZE));
   private cellVer = new Uint32Array(CELL_COUNT).fill(1);
   private tileVer = new Uint32Array(TILE_COUNT).fill(1);
   private plateVer = new Uint32Array(PLATE_COUNT).fill(1);
@@ -100,8 +101,8 @@ export class CellLayer {
     this.opt = opt;
     this.extra = extra;
     this.facade = facade;
-    this.cells = [Array.from({ length: CELL_COUNT }, slot)];
-    if (opt.detail) this.cells.push(Array.from({ length: CELL_COUNT }, slot));
+    this.cells = [Array.from({ length: CELL_COUNT }, slot(CELL_SIZE))];
+    if (opt.detail) this.cells.push(Array.from({ length: CELL_COUNT }, slot(CELL_SIZE)));
     this.group.matrixAutoUpdate = false;
   }
 
@@ -208,6 +209,11 @@ export class CellLayer {
       g.setAttribute('fuv', new THREE.BufferAttribute(m.fuv ?? new Int16Array(m.vertexCount * 2), 2, true));
     }
     g.setIndex(new THREE.BufferAttribute(m.index, 1));
+    // bounds from what the worker already knows (the slot's square plus the margin, the mesh's height range), in the
+    // mesh's local units: three would otherwise walk every vertex on the main thread at the first draw
+    const k = 1 / m.scale, e = this.opt.margin;
+    g.boundingBox = new THREE.Box3(new THREE.Vector3(-e * k, m.minY * k, -e * k), new THREE.Vector3((s.size + e) * k, m.maxY * k, (s.size + e) * k));
+    g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
     const mesh = new THREE.Mesh(g, this.material);
     mesh.position.set(m.originX, m.originY, m.originZ);
     mesh.scale.setScalar(m.scale);

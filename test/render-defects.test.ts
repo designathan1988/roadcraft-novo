@@ -155,3 +155,20 @@ test('E13: the road layer keeps and draws its tiles to the same distance at ever
     assert.ok(farKept < limit * 1.2, `pixel scale ${pixelScale}: tiles kept to ${(farKept / 1000).toFixed(1)} km but drawn to ${(farShown / 1000).toFixed(1)} km`);
   }
 });
+
+test('E21: a new cell mesh comes with its bounds (three never walks its vertices on the main thread)', () => {
+  const w = new World();
+  const layer = new CellLayer(recordingSource(), w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40 });
+  const L = inside(layer);
+  const s = L.cells[0][0];
+  L.setMesh(s, triangle(), 1);
+  const g = s.mesh!.geometry;
+  assert.ok(g.boundingSphere !== null, 'the bounding sphere is set with the mesh (null: computed from the vertices at first draw)');
+  assert.ok(g.boundingBox !== null, 'the bounding box is set with the mesh');
+  // the given bounds hold every vertex
+  const p = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i));
+    assert.ok(g.boundingSphere!.containsPoint(v), `vertex ${i} inside the sphere`);
+  }
+});
