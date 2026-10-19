@@ -24,6 +24,8 @@ const EYE = 1.6;
 
 /** Keys: how long the speed takes to ramp up and to stop (time constant, s). */
 const EASE_S = 0.1;
+/** Whether a building between the target and the eye pulls the eye in front of it. */
+const PULL_IN_FRONT = false;
 /** One wheel notch is spent over this time constant (s). */
 const ZOOM_EASE_S = 0.085;
 /** Isometric 45° turn (Q/E) and the compass north. */
@@ -323,8 +325,8 @@ export class CameraRig {
    */
   private updatePull(dt: number): void {
     let want = Infinity;
-    // only at street level (the eye under the roofs): from above the camera never jumps in front of a tower
-    if (this.solid && this.mode !== 'iso' && this.dist < 320 && this.dist * Math.sin(this.drawPitch) < 25) {
+    // off: pulling the eye in front of a building made the camera jump toward it while zooming (player, 2026-10-19)
+    if (PULL_IN_FRONT && this.solid && this.mode !== 'iso' && this.dist < 320) {
       const cp = Math.cos(this.drawPitch), sp = Math.sin(this.drawPitch);
       const ux = Math.sin(this.yaw) * cp, uy = sp, uz = Math.cos(this.yaw) * cp;
       const lookY = this.y + Math.min(EYE, this.dist * 0.3);
