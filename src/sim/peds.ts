@@ -16,7 +16,13 @@ import { MAX_DEG } from '../roads/network.ts';
 import type { SimNet } from './lanes.ts';
 import { Router } from './routing.ts';
 
-const MAX_PEDS = 100000;
+/**
+ * Guard against a runaway only (2 million people, ~1 GB): the number of pedestrians is the demand (street length ×
+ * density × the player's share); no map's demand comes near it.
+ */
+const PEDS_GUARD = 1 << 21;
+/** Spawns per step: the steady rate, and while below half the demand (a map opening) the fill rate. */
+const SPAWN_STEADY = 40, SPAWN_FILL = 400;
 /** Chance of spawning at a node by the zone of the roads around it (none, residential, commercial, industrial, mixed). */
 const ZONE_PULL = [0.12, 0.4, 1, 0.15, 0.8];
 const ROUTE = 32;
@@ -242,7 +248,7 @@ export class Peds {
 
   /** Got off the bus at the node: they walk on to a nearby destination. */
   spawnAt(node: number, count: number, color = -1): void {
-    for (let k = 0; k < count && this.t.size < MAX_PEDS; k++) {
+    for (let k = 0; k < count && this.t.size < PEDS_GUARD; k++) {
       this.nextColor = color;
       this.spawnFrom(node, 600, -1, 0, 0, 0);
     }
@@ -298,7 +304,7 @@ export class Peds {
 
   /** Someone starts walking at (x, z) (a door, or a passenger getting out of a car at the kerb): to the sidewalk, then on. */
   spawnFromPoint(x: number, z: number): boolean {
-    if (this.t.size >= MAX_PEDS) return false;
+    if (this.t.size >= PEDS_GUARD) return false;
     const net = this.sim.net, sc = net.segs.cols, nc = net.nodes.cols, sim = this.sim;
     const hit = net.nearestSeg(x, z, 30, (s) => PROFILE_INFO[sc.profile[s]].walk);
     if (!hit) return false;
@@ -682,8 +688,9 @@ export class Peds {
 
   step(dt: number): void {
     this.time += dt;
-    const target = Math.min(MAX_PEDS, Math.floor(this.sim.laneMeters * this.density * this.share));
-    for (let k = 0; k < 40 && this.t.size < target; k++) this.spawn();
+    const target = Math.min(PEDS_GUARD, Math.floor(this.sim.laneMeters * this.density * this.share));
+    const rate = this.t.size < target / 2 ? SPAWN_FILL : SPAWN_STEADY;
+    for (let k = 0; k < rate && this.t.size < target; k++) this.spawn();
     const c = this.t.cols;
     let budget = 20000;
     while (this.heapN > 0 && this.heapT[0] <= this.time && budget-- > 0) {

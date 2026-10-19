@@ -440,3 +440,14 @@ test('C21: where pedestrians walk to is not drawn with a bias to the south', asy
   assert.ok(n > 300, `walkers ${n}`);
   assert.ok(Math.abs(dz / n) < 60 && Math.abs(dx / n) < 60, `mean trip offset x ${(dx / n).toFixed(0)} m, z ${(dz / n).toFixed(0)} m`);
 });
+
+test('C48: the number of pedestrians follows the demand, not a fixed ceiling of 100,000', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { sim } = gridCity(10, 100, -1);
+  const peds = new Peds(sim);
+  peds.density = 4; // a city whose demand is ~140,000 people
+  const want = Math.floor(sim.laneMeters * peds.density);
+  assert.ok(want > 120000, `demand ${want}`);
+  for (let i = 0; i < 20 * 300 && peds.count <= 110000; i++) peds.step(0.05);
+  assert.ok(peds.count > 110000, `${peds.count} pedestrians for a demand of ${want}`);
+});
