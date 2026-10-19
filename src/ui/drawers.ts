@@ -204,33 +204,13 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
           stepper(t('palette.blocks.size'), `${b.size} m`, (d) => { b.size = Math.max(40, Math.min(300, b.size + d * 10)); send(); return `${b.size} m`; }),
           stepper(t('palette.blocks.angle'), `${b.angle}°`, (d) => { b.angle = Math.max(-90, Math.min(90, b.angle + d * 15)); send(); return `${b.angle}°`; })));
     }
-    const snap = (mode: number): void => { s.snap = mode; a.roadSnap(mode); h.render(); };
-    p.options.append(orow(t('v2.snap.title'), choices([
-      { label: t('v2.snap.on'), on: s.snap > 0, run: () => snap(s.snap > 0 ? 0 : 1), icon: svg('magnet', 18) },
-      { label: t('v2.snap.angles'), on: s.snap >= 1, run: () => snap(s.snap >= 1 ? 0 : 1), icon: svg('angle', 18), disabled: s.snap === 0 },
-      { label: t('v2.snap.grid'), on: s.snap === 2, run: () => snap(s.snap === 2 ? 1 : 2), icon: svg('cells', 18), disabled: s.snap === 0 },
-    ])));
+    p.options.append(snapRow(h));
   }
   if (drawing || cur === 'upgrade') {
-    const heightText = (): string => (s.elevation === 0 ? t('ui.height.ground') : `${s.elevation > 0 ? '+' : ''}${s.elevation} m`);
-    // the game answers with the height the road is drawn at (Hud.setElevation writes s.elevation)
-    const hr = orow(t('v2.row.height'), stepper(t('palette.height'), heightText(), (d) => { a.elevation(d * 4); return heightText(); }));
-    hr.title = `${t('palette.height')} (${h.roadKeys()})`;
-    p.options.append(hr);
-    const seg = (items: Array<[string, boolean, () => void]>, data: string): HTMLElement => {
-      const r = el('div', 'v2-seg');
-      for (const [label, on, run] of items) {
-        const b = button(`v2-seg-b rp-seg-text${on ? ' on' : ''}`, label, () => { run(); h.render(); });
-        b.dataset[data] = label;
-        r.append(b);
-      }
-      return r;
-    };
-    p.options.append(orow(t('cutSides.row'), seg([[t('cutSides.batter'), !s.cutWalls, () => { s.cutWalls = false; a.cutWalls(false); }],
-      [t('cutSides.walls'), s.cutWalls, () => { s.cutWalls = true; a.cutWalls(true); }]], 'cut')));
+    p.options.append(...heightRows(h));
     // read from the game's options each time (they load after the interface is built)
     const furnNow = a.settings().furniture;
-    const furn = orow(t('roadFurniture.row'), seg((['complete', 'basic', 'none'] as const).map((k, i) => [t(`roadFurniture.${k}`), furnNow === i,
+    const furn = orow(t('roadFurniture.row'), seg(h, (['complete', 'basic', 'none'] as const).map((k, i) => [t(`roadFurniture.${k}`), furnNow === i,
       () => a.furniture(i)] as [string, boolean, () => void]), 'furniture'));
     furn.title = t('roadFurniture.tip');
     p.options.append(furn);
@@ -245,6 +225,39 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
     // the game answers with the radius (Hud.setRing writes s.ring)
     p.options.append(orow(t('v2.roundabout.radius'), stepper(t('v2.roundabout.radius'), `${s.ring} m`, (d) => { a.ring(d > 0 ? 1.2 : 1 / 1.2); return `${s.ring} m`; })));
   }
+}
+
+/** Segmented buttons (cut sides, furniture). */
+function seg(h: DrawerHost, items: Array<[string, boolean, () => void]>, data: string): HTMLElement {
+  const r = el('div', 'v2-seg');
+  for (const [label, on, run] of items) {
+    const b = button(`v2-seg-b rp-seg-text${on ? ' on' : ''}`, label, () => { run(); h.render(); });
+    b.dataset[data] = label;
+    r.append(b);
+  }
+  return r;
+}
+
+/** Snapping of what is drawn like a road (roads, and rail tracks): off, angles, angles and grid. */
+function snapRow(h: DrawerHost): HTMLElement {
+  const s = h.s, a = h.a;
+  const snap = (mode: number): void => { s.snap = mode; a.roadSnap(mode); h.render(); };
+  return orow(t('v2.snap.title'), choices([
+    { label: t('v2.snap.on'), on: s.snap > 0, run: () => snap(s.snap > 0 ? 0 : 1), icon: svg('magnet', 18) },
+    { label: t('v2.snap.angles'), on: s.snap >= 1, run: () => snap(s.snap >= 1 ? 0 : 1), icon: svg('angle', 18), disabled: s.snap === 0 },
+    { label: t('v2.snap.grid'), on: s.snap === 2, run: () => snap(s.snap === 2 ? 1 : 2), icon: svg('cells', 18), disabled: s.snap === 0 },
+  ]));
+}
+
+/** Height and cut sides of what is drawn like a road. */
+function heightRows(h: DrawerHost): HTMLElement[] {
+  const s = h.s, a = h.a;
+  const heightText = (): string => (s.elevation === 0 ? t('ui.height.ground') : `${s.elevation > 0 ? '+' : ''}${s.elevation} m`);
+  // the game answers with the height the road is drawn at (Hud.setElevation writes s.elevation)
+  const hr = orow(t('v2.row.height'), stepper(t('palette.height'), heightText(), (d) => { a.elevation(d * 4); return heightText(); }));
+  hr.title = `${t('palette.height')} (${h.roadKeys()})`;
+  return [hr, orow(t('cutSides.row'), seg(h, [[t('cutSides.batter'), !s.cutWalls, () => { s.cutWalls = false; a.cutWalls(false); }],
+    [t('cutSides.walls'), s.cutWalls, () => { s.cutWalls = true; a.cutWalls(true); }]], 'cut'))];
 }
 
 // ------------------------------------------------------------------ zones
@@ -576,6 +589,8 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
     items.append(row);
   }
   p.strip.append(el('p', 'v2-note', t(`ui.transit.help.${now}`)));
+  // a track is drawn like a road: snapping, height and cut sides
+  if (now === 'trainTrack' || now === 'metroTrack') p.options.append(snapRow(h), ...heightRows(h));
   // the chosen line: its colour, and for buses whether it runs out and back or as a ring
   const line = rows.find((l) => l.id === current);
   if (line && a.lineColor) {
