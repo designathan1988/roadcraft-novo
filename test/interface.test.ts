@@ -52,3 +52,13 @@ test('B3: Ctrl + a letter, a digit or Space never reaches the plain game shortcu
   w.send('keydown', { code: 'KeyZ', ctrlKey: true });
   assert.deepEqual(calls, ['undo'], 'Ctrl+Z still undoes');
 });
+
+test('B46: the money tip says the refund the game gives on demolishing (roads/tuning.ts), in both languages', async () => {
+  const { ROAD_TUNING } = await import('../src/roads/tuning.ts');
+  const { ENGINE_PT } = await import('../src/ui/lang/engine.pt-BR.ts');
+  const { ENGINE_EN } = await import('../src/ui/lang/engine.en.ts');
+  const pct = String(Math.round(ROAD_TUNING.economy.demolitionRefund * 100));
+  for (const [name, tip] of [['pt-BR', ENGINE_PT['ui.money.tip']], ['en', ENGINE_EN['ui.money.tip']]]) {
+    assert.ok(tip.includes('{refund}'), `${name}: "${tip}" does not take the refund from the tuning (${pct} %)`);
+  }
+});

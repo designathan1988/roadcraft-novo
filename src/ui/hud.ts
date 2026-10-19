@@ -11,6 +11,7 @@ import { button, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
 import { mountCompass, type Compass } from './compass.ts';
+import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
 import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
 import {
@@ -292,7 +293,7 @@ export class Hud {
     clock.append(this.clockText);
     const moneyEl = el('strong', 'v2-money');
     moneyEl.append(this.moneyText);
-    moneyEl.title = t('ui.money.tip');
+    moneyEl.title = t('ui.money.tip', { refund: Math.round(ROAD_TUNING.economy.demolitionRefund * 100) });
     this.stats = el('div', 'v2-stats');
     this.stats.append(this.statsText);
     // junctions that cannot be built: their count, and a click visits them one by one

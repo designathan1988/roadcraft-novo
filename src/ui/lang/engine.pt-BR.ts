@@ -7,7 +7,7 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.soon.buildings': 'em construção (construtor de prédios)',
   'fmt.thousands': '{n} mil',
   'ui.perMin': '{n}/min',
-  'ui.money.tip': 'Dinheiro em caixa. Vias custam pela largura e pelo comprimento; pontes e túneis custam mais. Demolir devolve metade.',
+  'ui.money.tip': 'Dinheiro em caixa. Vias custam pela largura e pelo comprimento; pontes e túneis custam mais. Demolir devolve {refund} % do preço.',
   'ui.money.unlimited': 'R$ ∞',
   'ui.stats.tip': '{residents} moradores · {jobs} empregos · {buildings} prédios · {speed} km/h de média perto daqui',
   'ui.cat.roads': 'Vias',
