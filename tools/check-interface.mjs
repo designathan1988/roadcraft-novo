@@ -551,6 +551,28 @@ export const SCENARIOS = {
     road(1400, 1600, 1700, 1600); await wait(1300);
     check('the world tab follows the edits while open', Q('.health-list').textContent.includes('segments · ' + w.roads.segs.size), Q('.health-list').textContent.slice(0, 80));
   ` },
+  // B43: the title screen opens again from the menu, with the seed and the map size; generating there uses its seed;
+  // "load the last game" with no save comes back to it; the menu's "generate" takes a new seed
+  'B43-title-screen': `
+    const idle = async () => { for (let k = 0; k < 600 && (g.busy || window.__cidade.status !== 'pronto'); k++) await wait(200); await wait(300); };
+    click('[data-pop=menu]'); await frames(2);
+    const row = byText('.v2-pop .v2-row', 'Tela inicial|Title screen');
+    check('the menu opens the title screen', !!row, 'no row in the menu');
+    if (!row) throw new Error('no title screen row');
+    click(row); await frames(2);
+    const start = Q('.v2-start');
+    check('the title screen shows, with seed and map size', start && !start.classList.contains('hidden') && start.querySelector('input') && start.querySelector('select'), 'title screen ' + (start ? start.className : 'missing'));
+    click(byText('.v2-start button', 'Carregar|Load')); await wait(1500); await idle();
+    check('loading with no save comes back to the title screen', !Q('.v2-start').classList.contains('hidden'), 'title screen closed on an empty map');
+    const seed = start.querySelector('input');
+    seed.value = '4321'; seed.dispatchEvent(new Event('input'));
+    click(byText('.v2-start button', 'Gerar|Generate')); await wait(500); await idle();
+    check('generating from the title screen uses its seed', w.seed === 4321 && w.roads.segs.size > 0, 'seed ' + w.seed + ', segments ' + w.roads.segs.size);
+    w.money = w.money; g.unsaved = false; for (let t = 0; t < w.saveDirty.length; t++) w.saveDirty[t] = 0;
+    click('[data-pop=menu]'); await frames(2);
+    click(byText('.v2-pop .v2-row', 'Gerar cidade|Generate')); await wait(500); await idle();
+    check('the generate of the menu takes a new seed', w.seed !== 4321, 'seed ' + w.seed);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

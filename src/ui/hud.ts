@@ -115,6 +115,8 @@ export interface HudActions extends OptionalActions {
   newMap(): void;
   testCity(): void;
   generate(): void;
+  /** The title screen (seed, map size, empty map, last game). */
+  startScreen(): void;
   options(): void;
   help(): void;
   trafficView(): void;
@@ -554,6 +556,7 @@ export class Hud {
       const st = a.settings();
       body.append(
         this.row(t('action.newMap'), () => a.newMap(), 'm_new'),
+        this.row(t('ui.menu.start'), () => a.startScreen(), 'roads'),
         this.row(t('ui.menu.generate'), () => a.generate(), 'generate'),
         this.row(t('ui.menu.load'), () => a.load(), 'm_open'),
         this.row(t('action.openMap'), () => this.fileIn.click(), 'm_open'),

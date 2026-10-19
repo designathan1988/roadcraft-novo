@@ -335,7 +335,9 @@ export class Game {
       importMap: (f) => { if (this.discardOk()) void this.importMap(f); },
       newMap: () => { if (this.discardOk()) void this.newMap(); },
       testCity: () => { if (this.discardOk()) void this.testCity(); },
-      generate: () => { if (this.discardOk()) void this.generatedCity(); },
+      // another city: a seed of its own (the title screen takes a chosen seed)
+      generate: () => { if (this.discardOk()) { this.world.seed = (Math.random() * 2 ** 31) >>> 0 || 1; void this.generatedCity(); } },
+      startScreen: () => this.showStart(),
       options: () => this.optionsPanel?.open(),
       help: () => this.hud.toggleHelp(),
       trafficView: () => this.toggleTrafficView(),
@@ -568,15 +570,7 @@ export class Game {
     else if (params.has('carregar')) await this.load();
     else if (!params.has('cam') && !params.has('vazio')) {
       // start screen (automated photos skip it with ?cam, ?teste or ?cidade)
-      this.startMenu = new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
-        newCity: (seed, tiles) => {
-          if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
-          this.world.seed = seed; void this.generatedCity();
-        },
-        empty: (tiles) => { if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio'); },
-        load: () => { if (this.discardOk()) void this.load(); },
-        options: () => this.optionsPanel.open(),
-      });
+      this.showStart();
     }
     await this.settle();
     this.homeView ??= this.rig.state();
@@ -1035,7 +1029,7 @@ export class Game {
       setTool: (t) => this.setTool(t),
       openCategory: (c) => this.hud.openCategory(c),
       dialog: () => this.optionsPanel.isOpen || this.hud.aboutOpen || !!this.startMenu?.open,
-      closeDialog: () => { if (this.optionsPanel.isOpen) this.optionsPanel.close(); else this.hud.closeAbout(); },
+      closeDialog: () => { if (this.optionsPanel.isOpen) this.optionsPanel.close(); else if (this.hud.aboutOpen) this.hud.closeAbout(); else this.startMenu?.hide(); },
       closeMenu: () => this.hud.escape(),
       closePanel: () => {
         if (this.optionsPanel.isOpen) { this.optionsPanel.close(); return true; }
@@ -1587,6 +1581,32 @@ export class Game {
     const col = this.world.buildings.cols;
     const y = heightAt(this.world.heights, col.x[id], col.z[id]);
     this.preview.showCircle(col.x[id], y, col.z[id], Math.hypot(col.w[id], col.d[id]) / 2 + 2, true);
+  }
+
+  /**
+   * The title screen: at start, and again from the menu. A new city from its seed and size (another size reloads the
+   * page with it), an empty map, the last game (with no save it comes back), the options. A city on screen with
+   * unsaved work is asked about first.
+   */
+  private showStart(): void {
+    if (this.startMenu) { this.startMenu.show(); return; }
+    this.startMenu = new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
+      newCity: (seed, tiles) => {
+        if (!this.discardOk()) { this.startMenu?.show(); return; }
+        if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
+        this.world.seed = seed; void this.generatedCity();
+      },
+      empty: (tiles) => {
+        if (!this.discardOk()) { this.startMenu?.show(); return; }
+        if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio');
+        else if (this.world.roads.segs.size || this.world.buildings.size) void this.newMap();
+      },
+      load: () => {
+        if (!this.discardOk()) { this.startMenu?.show(); return; }
+        void this.load().then((ok) => { if (!ok) this.startMenu?.show(); });
+      },
+      options: () => this.optionsPanel.open(),
+    });
   }
 
   /** The health panel's World tab: the latest edits and what the world holds now. */
