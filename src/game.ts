@@ -2385,7 +2385,9 @@ export class Game {
     let kept: string | null;
     try {
       const saved = await savedIn(await readPackage(file));
-      try { decodeMeta(saved.meta); } catch (err) { if (!(err instanceof MapSizeError && MAP_SIZES.includes(err.tiles))) throw err; }
+      try { decodeMeta(saved.meta); } catch (err) {
+        if (!(err instanceof MapSizeError && MAP_SIZES.includes(err.tiles))) throw new MapFileError(/newer/.test(errorText(err)) ? 'save.file.newer' : 'save.file.damaged', errorText(err));
+      }
       const slot = await this.slot();
       kept = await keepPreviousCity(slot);
       await slot.adopt(saved.meta, saved.tiles, saved.gameId, saved.seed);

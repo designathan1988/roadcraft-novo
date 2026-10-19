@@ -303,6 +303,7 @@ export const ENGINE_PT: Record<string, string> = {
   'save.file.notMap': 'esse arquivo não é um mapa do Roadcraft',
   'save.file.cut': 'o arquivo de mapa está cortado',
   'save.file.damaged': 'o arquivo de mapa está danificado',
+  'save.file.newer': 'o mapa foi salvo por uma versão mais nova do jogo',
   'save.otherTab': 'Esta cidade está aberta em outra aba, que é quem salva. Feche a outra aba para salvar aqui.',
   'save.nowWriter': 'A outra aba fechou: esta aba agora salva a cidade.',
   'save.previousFailed': 'A cidade anterior não abriu: {why}. O salvamento atual não foi tocado.',

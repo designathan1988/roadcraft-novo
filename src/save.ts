@@ -30,7 +30,7 @@ export interface SaveMeta {
 /** The save is for another map size: the page reloads at that size. */
 export class MapSizeError extends Error {
   readonly tiles: number;
-  constructor(tiles: number) { super(`salvamento de um mapa de ${tiles} km`); this.tiles = tiles; }
+  constructor(tiles: number) { super(`a save of a ${tiles} km map`); this.tiles = tiles; }
 }
 
 /**
@@ -82,10 +82,10 @@ export function encodeMeta(m: SaveMeta): Uint8Array {
 export function decodeMeta(data: Uint8Array): SaveMeta {
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let o = 0;
-  if (dv.getUint32(o, true) !== MAGIC_META) throw new Error('salvamento inválido');
+  if (dv.getUint32(o, true) !== MAGIC_META) throw new Error('not a map description');
   o += 4;
   const version = dv.getUint32(o, true); o += 4;
-  if (version > SAVE_VERSION) throw new Error('salvamento de uma versão mais nova do jogo');
+  if (version > SAVE_VERSION) throw new Error('a save from a newer version of the game');
   const seed = dv.getUint32(o, true); o += 4;
   const gameId = dv.getUint32(o, true); o += 4;
   const count = dv.getUint32(o, true); o += 4;
