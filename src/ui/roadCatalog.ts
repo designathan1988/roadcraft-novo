@@ -375,7 +375,8 @@ export class RoadCatalog {
       // a deleted model leaves "Mine" (Roadcraft 4.0 ui/roads/templates.ts:27); a road already drawn with it keeps its
       // profile, which is no longer offered as a card
       for (const tp of readTemplates()) items.push({ def: tp, id: -1, del: () => { writeTemplates(readTemplates().filter((x) => x.name !== tp.name)); this.deleted.add(tp.name); this.built = ''; this.build(); } });
-      for (const p of PROFILES) if (p.custom && !this.deleted.has(p.name) && !items.some((i) => i.def.name === p.name)) items.push({ def: p, id: p.id });
+      // the road tool's variants (lanes, width, parking) are not cards of their own
+      for (const p of PROFILES) if (p.custom && p.variantOf === undefined && !this.deleted.has(p.name) && !items.some((i) => i.def.name === p.name)) items.push({ def: p, id: p.id });
     } else for (const p of PROFILES) if (!p.custom && !p.ring && p.category === this.cat) items.push({ def: p, id: p.id });
     // the language is part of what the cards were built for (Roadcraft 4.0 ui/roads/catalogPanel.ts:73)
     const key = `${lang()}|${this.cat}|${PROFILES.length}|${items.map((i) => i.def.name).join(',')}`;
@@ -389,7 +390,7 @@ export class RoadCatalog {
         b.setAttribute('role', 'tab');
         b.dataset.category = c;
         // "Mine" counts the cards it shows: the models, and the session's own profiles that are not one of them nor deleted
-        const count = c === 'meus' ? mine.length + PROFILES.filter((p) => p.custom && !this.deleted.has(p.name) && !mine.some((x) => x.name === p.name)).length
+        const count = c === 'meus' ? mine.length + PROFILES.filter((p) => p.custom && p.variantOf === undefined && !this.deleted.has(p.name) && !mine.some((x) => x.name === p.name)).length
           : PROFILES.filter((p) => !p.custom && !p.ring && p.category === c).length;
         b.append(el('span', '', t(k)), el('em', '', String(count)));
         b.addEventListener('click', (e) => { e.stopPropagation(); this.cat = c; this.build(); });

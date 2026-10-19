@@ -6,6 +6,7 @@ import type { CommandStack } from '../core/commands.ts';
 import { RoadJournal, buildRoad, buildRoundabout, planPrice, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
 import { bez, type Quad } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
+import { registerVariant, type RoadOptions } from '../roads/roadVariant.ts';
 import { SegFlag } from '../roads/flags.ts';
 import type { RoadPreview } from '../render/preview.ts';
 import type { Hud, Tool } from '../ui/hud.ts';
@@ -19,7 +20,12 @@ const p2 = new Float64Array(2);
 
 export class RoadTool {
   mode: Tool = 'road';
+  /** The profile roads are drawn with: the road picked, or its variant by the options below. */
   profile = 0;
+  /** The road picked (catalogue, eyedropper, class card). */
+  base = 0;
+  /** Lanes, total width and parking the next road is drawn with (Roadcraft 4.0's road tool options); null: the road's own. */
+  readonly options: RoadOptions = { lanes: null, width: null, parking: null };
   elevation = 0;
   ringRadius = 22;
   private start: Anchor | null = null;
@@ -355,7 +361,23 @@ export class RoadTool {
     this.commit(r);
   }
 
-  setProfile(p: number): void { this.profile = p; this.updateHint(); }
+  /** A road picked: drawn as it is (the options go back to the road's own). */
+  setProfile(p: number): void {
+    this.base = p; this.profile = p;
+    this.options.lanes = null; this.options.width = null; this.options.parking = null;
+    this.updateHint();
+  }
+
+  /** Lanes, width or parking chosen: the road picked, varied (roads/roadVariant.ts). False when the map has no room for one more profile. */
+  setOptions(o: Partial<RoadOptions>): boolean {
+    const next = { ...this.options, ...o };
+    const id = registerVariant(this.base, next);
+    if (id < 0) return false;
+    Object.assign(this.options, next);
+    this.profile = id;
+    this.updateHint();
+    return true;
+  }
 
   setElevation(e: number): void { this.elevation = Math.max(-12, Math.min(16, e)); }
 

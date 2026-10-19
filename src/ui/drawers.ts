@@ -9,7 +9,8 @@ import { PROFILES } from '../roads/profiles.ts';
 import { DEFAULT_PERSON_OPTIONS, type PersonOptions } from '../render/people/creator.ts';
 import { renderPeople } from './peoplePanel.ts';
 import type { HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hud.ts';
-import type { RoadCatalog } from './roadCatalog.ts';
+import { topSwatch, type RoadCatalog } from './roadCatalog.ts';
+import { LANE_CHOICES, PARKING_PRESETS } from '../roads/roadVariant.ts';
 import { button, card, choices, el, orow, range, select, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, fmtInt, loose, plural, t } from './i18n.ts';
@@ -196,6 +197,30 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
       { label: t('v2.snap.angles'), on: s.snap >= 1, run: () => snap(s.snap >= 1 ? 0 : 1), icon: svg('angle', 18), disabled: s.snap === 0 },
       { label: t('v2.snap.grid'), on: s.snap === 2, run: () => snap(s.snap === 2 ? 1 : 2), icon: svg('cells', 18), disabled: s.snap === 0 },
     ])));
+    // lanes, total width and parking of the next road (Roadcraft 4.0 ui/v2/shell.ts:1244-1258, :1293-1299; the vias session's)
+    const ro = a.roadOptions?.();
+    if (ro && a.roadLanes && a.roadWidth && a.roadParking) {
+      const lanesNow = ro.lanes ?? ro.ownLanes;
+      p.options.append(orow(t('v2.row.lanes'), choices(LANE_CHOICES.map((c) => ({
+        label: c === 'median' ? t('palette.lanes.median') : plural('palette.lanes.count', c),
+        on: c === 'median' ? ro.lanes === 'median' : ro.lanes !== 'median' && lanesNow === c,
+        run: () => { a.roadLanes!(ro.lanes === c ? null : c); h.render(); },
+        icon: svg(c === 'median' ? 'median' : `lanes${c}`, 18),
+      })))));
+      p.options.append(orow(t('v2.row.width'),
+        stepper(t('palette.width'), ro.width === null ? t('palette.width.auto') : `${ro.width} m`, (d) => {
+          const now = Math.max(6, Math.min(70, (a.roadOptions?.().width ?? ro.ownWidth) + d));
+          a.roadWidth!(now);
+          return `${now} m`;
+        }),
+        ...(ro.width === null ? [] : [button('v2-icon', t('palette.width.auto'), () => { a.roadWidth!(null); h.render(); }, svg('undo', 14))])));
+      p.options.append(orow(t('v2.row.parking'), choices(PARKING_PRESETS.map((k) => ({
+        label: t(`parking.preset.${k}`),
+        on: (ro.parking ?? null) === k,
+        run: () => { a.roadParking!(ro.parking === k ? null : k); h.render(); },
+        icon: svg(`park-${k}`, 18),
+      })))));
+    }
   }
   if (drawing || cur === 'upgrade') {
     const heightText = (): string => (s.elevation === 0 ? t('ui.height.ground') : `${s.elevation > 0 ? '+' : ''}${s.elevation} m`);
@@ -224,9 +249,18 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
     const keys = button('v2-pill rp-open', h.roadKeys(), () => a.options(), svg('keyboard', 16));
     keys.title = t('roadKeys.title');
     p.options.append(orow(t('roadKeys.row'), keys));
-    // the catalogue of ready roads: tabs by category, a card drawn for each
-    h.catalog.visible = true;
-    p.strip.append(h.catalog.el);
+    if (cur === 'upgrade' && a.roadClasses) {
+      // Upgrade: a card for each road class (Roadcraft 4.0 ui/v2/shell.ts:1308-1314), the one in hand lit
+      h.catalog.visible = false;
+      const items = section(p.strip, t('palette.kind'));
+      const span = Math.max(...PROFILES.filter((x) => x && !x.ring).map((x) => x.strips.reduce((q, y) => q + y.width, 0)));
+      const base = a.roadOptions?.().base ?? -1;
+      for (const [id, key] of a.roadClasses()) items.append(card(t(key), id === base, () => { a.profile(id); h.render(); }, topSwatch(PROFILES[id], span), 'wide'));
+    } else {
+      // the catalogue of ready roads: tabs by category, a card drawn for each
+      h.catalog.visible = true;
+      p.strip.append(h.catalog.el);
+    }
   } else h.catalog.visible = false;
   if (cur === 'roundabout') {
     p.options.append(orow(t('v2.roundabout.radius'), stepper(t('v2.roundabout.radius'), `${s.ring} m`, (d) => {

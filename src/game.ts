@@ -60,6 +60,7 @@ import { demolishBox } from './tools/demolish.ts';
 import { curveLotSide, deleteLot, deleteLotsAlong, joinLots, lotAt, lotFits, lotOutlineWorld, lotToWorld, moveSharedCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotsByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
+import { laneCount, roadClasses } from './roads/roadVariant.ts';
 import { CITY_STYLES, type CityStyle } from './jobs/cityField.ts';
 import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
@@ -340,6 +341,14 @@ export class Game {
       buses: (d) => { const l = this.transit.line(this.lineSel); const c = l && this.transit.setBuses(l.id, l.buses + d); if (c) this.commands.run(c); },
       deleteLine: () => { const c = this.transit.removeLine(this.lineSel); if (c) { this.commands.run(c); this.lineSel = this.transit.lines[0]?.id ?? 0; } },
       profile: (p) => { this.roadTool.setProfile(p); },
+      roadOptions: () => {
+        const rt = this.roadTool, p = PROFILES[rt.base];
+        return { ...rt.options, ownLanes: laneCount(p), ownWidth: Math.round(p.strips.reduce((s, x) => s + x.width, 0)), base: rt.base };
+      },
+      roadLanes: (c) => { if (!this.roadTool.setOptions({ lanes: c })) this.hud.toast(t('ui.catalog.tooMany')); },
+      roadWidth: (m) => { if (!this.roadTool.setOptions({ width: m })) this.hud.toast(t('ui.catalog.tooMany')); },
+      roadParking: (p) => { if (!this.roadTool.setOptions({ parking: p })) this.hud.toast(t('ui.catalog.tooMany')); },
+      roadClasses: () => roadClasses(),
       zone: (z) => { this.zoneTool.zone = z; },
       zoneRadius: (r) => { this.zoneTool.radius = r; },
       floors: (d) => this.editSelected(d),

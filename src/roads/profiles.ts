@@ -60,6 +60,8 @@ export interface Profile {
   category?: Category;
   /** Made by the player (goes into the save). */
   custom?: boolean;
+  /** A variant the road tool made of this profile (lanes, width, parking: roads/roadVariant.ts); not a card of its own. */
+  variantOf?: number;
 }
 
 export interface LaneInfo { u: number; w: number; bus: boolean; turns: number; rail: boolean }

@@ -152,6 +152,27 @@ const SCENARIOS = {
     g.commands.undo();
     check('undo brings the street back', w.roads.segs.cols.profile[w.roads.nearestSeg(1540, 1500, 3)[0]] === 0, 'profile ' + w.roads.segs.cols.profile[w.roads.nearestSeg(1540, 1500, 3)[0]]);
   `,
+  // Roadcraft 4.0 ui/v2/shell.ts:1244-1314: lanes, width, parking of the next road; Upgrade with class cards
+  'road-options': `
+    g.setTool('road');
+    await wait(300);
+    const rows = () => [...document.querySelectorAll('.v2-orow, .orow, [class*="orow"]')];
+    const click = (text) => { const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('aria-label') || x.title || x.textContent || '').trim() === text); if (!b) throw new Error('no button ' + text); b.click(); };
+    click('4 faixas');
+    await wait(100);
+    click('Vagas paralelas nos dois lados');
+    await wait(100);
+    const rt = g.roadTool;
+    check('the options vary the road in hand', rt.options.lanes === 4 && rt.options.parking === 'parallel' && rt.profile !== rt.base, JSON.stringify(rt.options) + ' profile ' + rt.profile + ' base ' + rt.base);
+    rt.click({ x: 1500, y: a.ground(1500, 1500), z: 1500 }, false); rt.click({ x: 1600, y: a.ground(1600, 1500), z: 1500 }, false); rt.cancel();
+    const s = w.roads.nearestSeg(1550, 1500, 3);
+    const strips = s ? w.roads.segs.cols.profile[s[0]] : -1;
+    check('the road is drawn with 4 lanes and parking on both kerbs', s && strips === rt.profile, 'segment profile ' + strips + ', tool ' + rt.profile);
+    g.setTool('upgrade');
+    await wait(300);
+    const cards = [...document.querySelectorAll('.v2-card.wide')].map((c) => c.getAttribute('aria-label'));
+    check('Upgrade shows a card for each road class', cards.length >= 5 && cards.includes('Avenida'), 'cards ' + cards);
+  `,
   // B50: a street name typed in the inspector can be taken away (an empty name gives the generated one back)
   'street-name-clear': `
     road(1500, 1500, 1700, 1500);
