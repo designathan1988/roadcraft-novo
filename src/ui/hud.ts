@@ -481,6 +481,9 @@ export class Hud {
     this.moneyShown = NaN; this.clockShown = ''; this.impossibleShown = -1;
     if (this.status) this.setStatus(this.status);
     this.setInside(this.insideFloor);
+    // the road catalogue and its section editor write their cards again, an open edit kept (the roads session's
+    // RoadCatalog.languageChanged, area/vias 8d2f92b; Roadcraft 4.0 roads/catalogPanel.ts:73); absent before that lands
+    (this.catalog as { languageChanged?: () => void }).languageChanged?.();
     const hint = `hint.tool.${this.current}`;
     if (t(hint) !== hint) this.setHint(t(hint));
     this.render();
