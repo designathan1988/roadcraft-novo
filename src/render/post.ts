@@ -254,12 +254,25 @@ export class Post {
     for (const l of csm.lights) { l.shadow.autoUpdate = false; l.shadow.needsUpdate = !still; }
   }
 
+  /**
+   * Day or night image (with bloom), switched only when it changes (rebuilding the final image every frame zeroes the
+   * TRAA's history). The image taking over starts its anti-aliasing history from the current frame: its own history was
+   * from the last time it was shown, and blended in as a ghost for a moment.
+   */
+  selectOutput(): void {
+    const want = (this.bloomOverride ?? nightU.value > 0.04) ? this.nightOut : this.dayOut;
+    if (this.active === want) return;
+    this.active = want;
+    this.pipeline.outputNode = want;
+    this.pipeline.needsUpdate = true;
+    const t = this.traas[want === this.nightOut && this.traas.length > 1 ? 1 : 0] as unknown as { restartHistory: boolean };
+    t.restartHistory = true;
+  }
+
   /** `moving`: casters that move this frame (see prepareShadows). */
   render(moving = true): void {
     this.prepareShadows(moving);
-    // switch only when it changes (kept here: rebuilding the final image every frame zeroes the TRAA's history)
-    const want = (this.bloomOverride ?? nightU.value > 0.04) ? this.nightOut : this.dayOut;
-    if (this.active !== want) { this.active = want; this.pipeline.outputNode = want; this.pipeline.needsUpdate = true; }
+    this.selectOutput();
     updateVelocityCamera(this.camera);
     this.pipeline.render();
   }

@@ -642,3 +642,17 @@ test('E30: the far trees\' photo atlas has mipmaps (no shimmer far away)', async
   assert.equal(rt.texture.generateMipmaps, true, 'mipmaps are generated after the bake');
   assert.equal(rt.texture.minFilter, THREE.LinearMipmapLinearFilter, 'minification reads the mipmaps');
 });
+
+test('E22: switching between the day and the night image starts the new one\'s history from the current frame', async () => {
+  const { Post } = await import('../src/render/post.ts');
+  const { nightU } = await import('../src/render/scene.ts');
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), sun = new THREE.DirectionalLight();
+  const post = new Post(fakeRenderer(), new THREE.Scene(), camera, sun, { shadows: false, ao: false, bloom: true });
+  const inner = post as unknown as { traas: Array<{ restartHistory?: boolean }>; selectOutput?(): void };
+  assert.equal(typeof inner.selectOutput, 'function', 'the output is chosen in one place');
+  nightU.value = 0; inner.selectOutput!();
+  for (const t of inner.traas) t.restartHistory = false;
+  nightU.value = 1; inner.selectOutput!(); // dusk: the night image (with bloom) takes over
+  assert.equal(inner.traas[1].restartHistory, true, 'the night image\'s anti-aliasing restarts from the current frame');
+  nightU.value = 0;
+});
