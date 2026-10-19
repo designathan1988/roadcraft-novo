@@ -417,6 +417,20 @@ const SCENARIOS = {
     const r = await within(g.load(), 30000);
     check('the road built before the key is there', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500) + ', toasts: ' + toasts.join(' | '));
   `]])),
+  // Alt+F4 (what Windows sends for it, from outside the game) closes through the close that saves
+  'alt-f4': [`
+    road(1500, 1500, 1700, 1500);
+    check('there is something unsaved', g.unsaved === true, 'unsaved=' + g.unsaved);
+    console.log('CHECK END');
+    await wait(500);
+    console.log('ALT-F4 NOW');
+    await wait(30000);
+    // still here: Alt+F4 did not close the window (the run would then close it itself, and that close saves too)
+    check('Alt+F4 closes the window', false, 'the window was still open 30 s later');
+  `, `
+    const r = await within(g.load(), 30000);
+    check('the road built before Alt+F4 is there', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500) + ', toasts: ' + toasts.join(' | '));
+  `],
   // The desktop window's other shortcuts: DevTools only with ?dev, no page zoom on Ctrl +, F11 still toggles full screen
   'window-keys': `
     let r = await window.roadcraftApp.testKey('I', ['control', 'shift']);
@@ -568,6 +582,18 @@ async function inChrome(steps) {
   return checks;
 }
 
+/** Alt+F4 on the game window started by the shot.mjs of process `parent`: Windows turns the key into WM_SYSCOMMAND SC_CLOSE. */
+function altF4(parent) {
+  const ps = `
+$c = Get-CimInstance Win32_Process -Filter "ParentProcessId=${parent} AND Name='electron.exe'" | Select-Object -First 1
+$h = (Get-Process -Id $c.ProcessId).MainWindowHandle
+Add-Type -Namespace W -Name U -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);'
+"posted " + [W.U]::PostMessage($h, 0x0112, [System.IntPtr]0xF060, [System.IntPtr]0) + " to " + $h`;
+  const r = spawn('powershell.exe', ['-NoProfile', '-Command', ps], { stdio: ['ignore', 'pipe', 'pipe'] });
+  r.stdout.on('data', (d) => console.log(`  (alt+f4: ${String(d).trim()})`));
+  r.stderr.on('data', (d) => console.log(`  (alt+f4 error: ${String(d).trim()})`));
+}
+
 const pick = process.argv.slice(2);
 const names = pick.length ? pick : [...Object.keys(SCENARIOS), ...Object.keys(BROWSER)];
 let failed = 0;
@@ -592,7 +618,12 @@ for (const name of names) {
       const out = [];
       const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), '?vazio&hora=11&workers=3', script],
         { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '420', CIDADE_CLOSE_SAVES: '1' } });
-      p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
+      p.stdout.on('data', (d) => {
+        const got = String(d).split('\n');
+        out.push(...got);
+        // a session asking for Alt+F4: the window gets what Windows sends for it (WM_SYSCOMMAND SC_CLOSE)
+        if (got.some((l) => l.includes('ALT-F4 NOW'))) altF4(p.pid);
+      });
       p.on('exit', () => resolve(out));
     });
     const got = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
