@@ -841,12 +841,30 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
   return j;
 }
 
+/** Roads that meet a roundabout's circle closer than this (m) enter the ring at the same node. */
+const ENTRY_MERGE = 6;
+
 function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, radius: number, y: number,
   hits: Array<{ s: number; q: Quad; crossings: number[] }>): void {
   const net = world.roads;
   const cut = radius;
   const entries: Array<{ angle: number; node: number }> = [];
   const approaches: number[] = [];
+  /**
+   * The ring node where a road meets the circle: roads that meet it within ENTRY_MERGE metres share one node, so
+   * the ring never gets a piece of almost no length nor goes round twice.
+   */
+  const entryNode = (x: number, z: number): number => {
+    const angle = Math.atan2(-(z - cz), x - cx);
+    for (const e of entries) {
+      let d = Math.abs(e.angle - angle);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      if (d * radius < ENTRY_MERGE) return e.node;
+    }
+    const node = j.addNode(x, z, y);
+    entries.push({ angle, node });
+    return node;
+  };
   const p = new Float64Array(2);
   const created = new Set<number>(); // new ids may reuse victims' ids
   for (const { s, q, crossings } of hits) {
@@ -861,10 +879,8 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
       if (inside((t0 + t1) / 2)) continue;
       let sub = subQuad(q, t0, t1);
       // the ring is flat at the center's height; the entry ramps to the rest of the road
-      let na = t0 === 0 ? rec.a : j.addNode(sub.x0, sub.z0, y);
-      let nb = t1 === 1 ? rec.b : j.addNode(sub.x1, sub.z1, y);
-      if (t0 !== 0) entries.push({ angle: Math.atan2(-(sub.z0 - cz), sub.x0 - cx), node: na });
-      if (t1 !== 1) entries.push({ angle: Math.atan2(-(sub.z1 - cz), sub.x1 - cx), node: nb });
+      let na = t0 === 0 ? rec.a : entryNode(sub.x0, sub.z0);
+      let nb = t1 === 1 ? rec.b : entryNode(sub.x1, sub.z1);
       // short piece up to a plain joint of the same road: swallow the joint
       const outer = t0 === 0 ? rec.a : t1 === 1 ? rec.b : -1;
       const pieceLen = Math.hypot(sub.x1 - sub.x0, sub.z1 - sub.z0);
@@ -914,16 +930,18 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
       }
     }
   }
+  const ringSegs: number[] = [];
   for (let i = 0; i < filled.length; i++) {
     const a = filled[i], b = filled[(i + 1) % filled.length];
     let span = b.angle - a.angle;
     if (span <= 0) span += Math.PI * 2;
     const mid = a.angle + span / 2;
     const r = radius / Math.cos(span / 2);
-    j.addSeg({ a: a.node, b: b.node, cx: cx + Math.cos(mid) * r, cz: cz - Math.sin(mid) * r, profile: RING_PROFILE, flags: SegFlag.Ring });
+    ringSegs.push(j.addSeg({ a: a.node, b: b.node, cx: cx + Math.cos(mid) * r, cz: cz - Math.sin(mid) * r, profile: RING_PROFILE, flags: SegFlag.Ring }));
   }
-  // terrain under the ring
+  // terrain under the ring, then the ring clears what stands in its way like any road
   conformDisc(j, world, cx, cz, radius + PROFILE_INFO[RING_PROFILE].right + 6, y);
+  for (const s of ringSegs) { const sq = net.quad(s); clearAndConform(j, world, sq, RING_PROFILE, () => y, arcTable(sq, 32)); }
   // the entries settle on top of the disc
   for (const s of approaches) {
     if (!net.segs.alive[s]) continue;

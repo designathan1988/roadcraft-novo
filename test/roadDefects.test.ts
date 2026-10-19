@@ -474,3 +474,48 @@ test('D11: a road across a river the player dug crosses it on a bridge and leave
   // a road 2 m over a riverbed that is under water is a bridge, never an embankment
   assert.equal(buildKindAt(bed + 2, bed, level), BuildKind.Bridge, 'over the river the road is priced as an embankment');
 });
+
+test('D12: the roundabout ring clears the buildings under it', () => {
+  const w = flatWorld(1e9);
+  road(w, -120, 0, 120, 0);
+  // a house where the ring will pass (radius 30, north side), and one well outside
+  const under = w.addBuilding({ x: 0, z: -30, w: 12, d: 12, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  const away = w.addBuilding({ x: 0, z: -80, w: 12, d: 12, h: 0, rot: 0, color: 0, seed: 2, zone: Zone.Residential, floors: 2, style: 1 });
+  const j = buildRoundabout(w, 0, 0, 30);
+  assert.ok(j && j.settle());
+  assert.equal(w.buildings.alive[under], 0, 'the house under the ring is still standing in the roundabout');
+  assert.equal(w.buildings.alive[away], 1, 'the house away from the ring was demolished');
+  j.invert();
+  assert.equal(w.buildings.alive[under], 1, 'undo brings the house back');
+});
+
+/** Ring segments: each ring node in exactly two, none shorter than `min` m, and the arcs going round once. */
+function checkRing(w: World, cx: number, cz: number, min: number): void {
+  const net = w.roads, sc = net.segs.cols, nc = net.nodes.cols;
+  const uses = new Map<number, number>();
+  let turn = 0;
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s] && sc.flags[s] & 1) {
+    assert.ok(sc.len[s] >= min, `ring segment ${s} is ${sc.len[s].toFixed(2)} m long`);
+    for (const n of [sc.a[s], sc.b[s]]) uses.set(n, (uses.get(n) ?? 0) + 1);
+    let d = Math.atan2(nc.z[sc.b[s]] - cz, nc.x[sc.b[s]] - cx) - Math.atan2(nc.z[sc.a[s]] - cz, nc.x[sc.a[s]] - cx);
+    while (d <= -Math.PI) d += 2 * Math.PI;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    turn += d;
+  }
+  for (const [n, k] of uses) assert.equal(k, 2, `ring node ${n} is in ${k} ring segments`);
+  assert.ok(Math.abs(Math.abs(turn) - 2 * Math.PI) < 0.01, `the ring turns ${(turn / Math.PI).toFixed(2)}π`);
+}
+
+test('D13: a roundabout over roads that meet the circle close together makes one clean ring', () => {
+  for (const gap of [1, 3, 6]) {
+    const w = flatWorld(1e9);
+    // two roads that cross the circle (radius 25) a few metres apart on its east side
+    road(w, 0, 0, 120, gap);
+    road(w, 0, 0, 120, -gap - 2);
+    road(w, -120, 0, 0, 0);
+    const j = buildRoundabout(w, 0, 0, 25);
+    if (!j) continue; // refusing is fine; a broken ring is not
+    assert.ok(j.settle());
+    checkRing(w, 0, 0, 4);
+  }
+});
