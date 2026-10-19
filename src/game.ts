@@ -936,7 +936,8 @@ export class Game {
         const hit = this.rig.pick(this.ndcX(), this.ndcY());
         if (this.tool === 'inspect') { if (hit) this.inspector.pick(hit.x, hit.z); }
         else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
-        else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey || this.itemRemove);
+        else if (this.tool === 'barrier' && this.itemRemove) this.removePole(hit);
+        else if (this.tool === 'streetscape' || this.tool === 'barrier') this.itemTool.click(hit, e.shiftKey);
         else if (this.tool === 'building') this.clickBuilding(hit, e.shiftKey);
         else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey || this.transitTerminal);
         else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
@@ -1000,6 +1001,15 @@ export class Game {
       wake: () => this.ambient.start(),
       camera: this.rig,
     });
+  }
+
+  /** Remove poles: the pole line under the click goes; walls, fences, hedges and guardrails stay. */
+  private removePole(hit: THREE.Vector3 | null): void {
+    const items = this.world.items, id = hit ? items.nearest(hit.x, hit.z, 3) : -1;
+    if (id < 0 || items.t.cols.type[id] !== Item.PoleLine) return;
+    const c = new ItemsCommand(items, 'remover item');
+    c.remove(id);
+    this.commands.push(c);
   }
 
   /** The keys the tool in hand reads itself; false: not one of its keys (the table goes on). */
