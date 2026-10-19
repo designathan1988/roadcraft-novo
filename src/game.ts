@@ -51,6 +51,7 @@ import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
 import { installKeys } from './ui/keys.ts';
 import { attachPinch } from './ui/touch.ts';
+import { BOMB_START, bombRadius } from './ui/strike.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
@@ -222,7 +223,7 @@ export class Game {
   private blast = new Blast();
   /** People from the creator and the bomb strength. */
   private personSpec = { color: 3, height: 7, walk: false, count: 1 };
-  private bombForce = 3;
+  private bombForce = BOMB_START;
   private hitKind: 'pistol' | 'bomb' | null = null;
   private insideId = -1;
   private insideFloor = 0;
@@ -1479,7 +1480,7 @@ export class Game {
   /** Bomb: flash, fire and smoke; buildings in the radius collapse into rubble (one command); the simulation removes whoever was near. */
   private bomb(x: number, z: number): void {
     const w = this.world, col = w.buildings.cols;
-    const r = 8 + this.bombForce * 6;
+    const r = bombRadius(this.bombForce);
     const y = heightAt(w.heights, x, z);
     this.blast.boom(x, y, z, r);
     this.ambient.sfx('boom');

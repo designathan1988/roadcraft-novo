@@ -15,6 +15,7 @@ import type { RoadCatalog } from './roadCatalog.ts';
 import { button, card, choices, dropdown, el, orow, range, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, fmtInt, loose, plural, t } from './i18n.ts';
+import { BOMB_START, bombStep } from './strike.ts';
 
 export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
 
@@ -134,7 +135,7 @@ export class ShellState {
   person = { color: 3, height: 7, walk: false, count: 1 };
   /** The people creator's choices (DEFAULT_PERSON_OPTIONS, one person standing to start). */
   people: PersonOptions = { ...DEFAULT_PERSON_OPTIONS, count: 1, mode: 'stand' };
-  bomb = 3;
+  bomb = BOMB_START;
   landTab: LandTab = 'relief';
   /** The builder tab open in the Build drawer (null: Edit or Draw). */
   buildTab: BuilderTab | null = null;
@@ -632,6 +633,6 @@ export function renderDemolish(h: DrawerHost, p: DrawerParts): void {
   for (const [tool, key, icon] of [['bulldoze', 'tool.bulldoze', 'demolish'], ['pistol', 'actions.pistol', 'actions'], ['bomb', 'actions.bomb', 'bomb']] as const) {
     p.tabs.append(tab(t(key), cur === tool, () => { if (cur !== tool) h.pick(tool); }, svg(icon, 18)));
   }
-  if (cur === 'bomb') p.options.append(orow(t('strike.force'), stepper(t('strike.force'), String(s.bomb), (d) => { s.bomb = Math.max(1, Math.min(5, s.bomb + d)); a.bombForce(s.bomb); return String(s.bomb); })));
+  if (cur === 'bomb') p.options.append(orow(t('strike.force'), stepper(t('strike.force'), String(s.bomb), (d) => { s.bomb = bombStep(s.bomb, d); a.bombForce(s.bomb); return String(s.bomb); })));
   p.strip.append(el('p', 'v2-note', t(cur === 'bulldoze' ? 'help.tool.bulldoze' : cur === 'pistol' ? 'help.strike.shoot' : 'help.strike.strike')));
 }

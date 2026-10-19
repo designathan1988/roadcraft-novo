@@ -128,3 +128,20 @@ test('reload keys (Ctrl+R, Ctrl+Shift+R, F5) never reach the browser, even from 
     for (const target of [null, box]) assert.ok(w.send('keydown', { code, ...mods, target: target as EventTarget | null }).prevented, `${code} ${JSON.stringify(mods)} ${target ? 'in a box' : ''} reaches the browser`);
   }
 });
+
+// Roadcraft 4.0 v2/shell.ts:1632-1634: the bomb's force goes 1..50, a step of 1 up to 10 and of 5 above; its blast
+// radius is 2.5 + 1.1 × force metres (actionsWiring.ts:230), force 5 to start (toolChoices.ts:214).
+test('bomb force steps 1..50 and blast radius as Roadcraft 4.0', async () => {
+  const { bombStep, bombRadius, BOMB_START } = await import('../src/ui/strike.ts');
+  assert.equal(BOMB_START, 5);
+  let f = 1;
+  const ups: number[] = [];
+  for (let k = 0; k < 20; k++) { f = bombStep(f, 1); ups.push(f); }
+  assert.deepEqual(ups.slice(0, 13), [2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30]);
+  assert.equal(f, 50);
+  assert.equal(bombStep(15, -1), 10);
+  assert.equal(bombStep(10, -1), 9);
+  assert.equal(bombStep(1, -1), 1);
+  assert.ok(Math.abs(bombRadius(5) - 8) < 1e-9);
+  assert.ok(Math.abs(bombRadius(50) - 57.5) < 1e-9);
+});
