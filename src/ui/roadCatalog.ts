@@ -4,8 +4,8 @@
 // with it or saves it as a template. Cards are drawn once per category shown; picking a road only moves the ring.
 
 import {
-  PROFILES, PROFILE_INFO, Paving, Surface, TurnBit, normalize, registerProfile,
-  type Category, type Centre, type Profile, type Strip, type StripKind,
+  PROFILES, PROFILE_INFO, Paving, Surface, TurnBit, normalize, profileIssues, registerProfile,
+  type Category, type ProfileIssue, type Centre, type Profile, type Strip, type StripKind,
 } from '../roads/profiles.ts';
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
@@ -462,19 +462,14 @@ class SectionEditor {
 }
 
 /** What stops a profile from being built (sentences for the player). */
+/** The section's problems in the player's words (the checks are `roads/profiles.ts` profileIssues). */
 export function problemsOf(d: Omit<Profile, 'id'>): string[] {
-  const out: string[] = [];
-  const lanes = d.strips.filter((s) => s.kind === 'lane');
-  if (lanes.length === 0) out.push(t('profile.problem.noLanes'));
-  if (lanes.length > 8) out.push(t('ui.problem.maxLanes'));
-  const fwd = lanes.filter((s) => (s.dir ?? 1) === 1), back = lanes.filter((s) => s.dir === -1);
-  if (fwd.length > 0 && fwd.every((s) => s.bus) || back.length > 0 && back.every((s) => s.bus)) out.push(t('profile.problem.busOnly'));
-  const firstBack = d.strips.findIndex((s) => s.kind === 'lane' && s.dir === -1);
-  const lastFwd = d.strips.map((s) => s.kind === 'lane' && (s.dir ?? 1) === 1).lastIndexOf(true);
-  if (firstBack >= 0 && lastFwd > firstBack) out.push(t('ui.problem.order'));
-  if (d.strips.slice(1, -1).some((s) => s.kind === 'sidewalk')) out.push(t('ui.problem.footways'));
-  if (d.strips.reduce((s, x) => s + x.width, 0) > 70) out.push(t('ui.problem.wide'));
-  return out;
+  const key: Record<ProfileIssue, string> = {
+    noLanes: 'profile.problem.noLanes', maxLanes: 'ui.problem.maxLanes', busOnly: 'profile.problem.busOnly', order: 'ui.problem.order',
+    footways: 'ui.problem.footways', wide: 'ui.problem.wide', laneBalance: 'profile.problem.laneBalance', parkingSide: 'profile.problem.parkingSide',
+    width: 'profile.problem.width', median: 'profile.problem.median', class: 'profile.problem.class',
+  };
+  return profileIssues(d).map((p) => t(key[p]));
 }
 
 function btn(text: string, fn: () => void, cls = '', title = ''): HTMLButtonElement {

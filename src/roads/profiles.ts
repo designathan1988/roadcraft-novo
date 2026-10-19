@@ -278,6 +278,51 @@ export function setCustomProfiles(list: Profile[]): void {
 
 export function profileCount(): number { return PROFILES.length; }
 
+/** What the section editor refuses (Roadcraft 4.0 `world/roads/profile.ts` profileIssues, on this engine's strips). */
+export type ProfileIssue = 'noLanes' | 'maxLanes' | 'busOnly' | 'order' | 'footways' | 'wide' | 'laneBalance' | 'parkingSide' | 'width' | 'median' | 'class';
+
+/** Widths each strip kind can be built at (m): Roadcraft's lane 2–6, footway 1–12, median up to 8; the rest the editor's. */
+export const STRIP_WIDTH: Record<StripKind, [number, number]> = {
+  sidewalk: [1, 12], curb: [0.1, 0.4], parking: [2, 3], bike: [1.2, 2.5], lane: [2, 6], median: [0.3, 8], shoulder: [0.5, 4], barrier: [0.3, 1.2],
+};
+
+/**
+ * The problems of a cross-section (empty = it can be built): lanes in each direction kept together with the
+ * right-hand rule, the same number of lanes both ways on a two-way road, parking and cycle lanes only at the kerb
+ * (never between lanes or by the median), a median only between the two directions, every strip within its widths,
+ * no parking or cycle lane on highways and ramps (priority 4 and up), footways only at the edges.
+ */
+export function profileIssues(d: Omit<Profile, 'id'>): ProfileIssue[] {
+  const out: ProfileIssue[] = [];
+  const st = d.strips;
+  const lanes = st.filter((s) => s.kind === 'lane');
+  if (lanes.length === 0) out.push('noLanes');
+  if (lanes.length > MAX_LINES) out.push('maxLanes');
+  const fwd = lanes.filter((s) => (s.dir ?? 1) === 1), back = lanes.filter((s) => s.dir === -1);
+  if ((fwd.length > 0 && fwd.every((s) => s.bus)) || (back.length > 0 && back.every((s) => s.bus))) out.push('busOnly');
+  const firstBack = st.findIndex((s) => s.kind === 'lane' && s.dir === -1);
+  const lastFwd = st.map((s) => s.kind === 'lane' && (s.dir ?? 1) === 1).lastIndexOf(true);
+  if (firstBack >= 0 && lastFwd > firstBack) out.push('order');
+  if (st.slice(1, -1).some((s) => s.kind === 'sidewalk')) out.push('footways');
+  if (st.reduce((s, x) => s + x.width, 0) > 70) out.push('wide');
+  if (fwd.length > 0 && back.length > 0 && fwd.length !== back.length) out.push('laneBalance');
+  // parking and cycle lanes: walking outwards through other parking/cycle strips reaches the kerb side, not a lane
+  const edge = (k: StripKind) => k === 'sidewalk' || k === 'curb' || k === 'shoulder' || k === 'barrier';
+  const atKerb = (i: number) => {
+    for (const step of [-1, 1]) {
+      let k = i + step;
+      while (k >= 0 && k < st.length && (st[k].kind === 'parking' || st[k].kind === 'bike')) k += step;
+      if (k < 0 || k >= st.length || edge(st[k].kind)) return true;
+    }
+    return false;
+  };
+  if (st.some((s, i) => (s.kind === 'parking' || s.kind === 'bike') && !atKerb(i))) out.push('parkingSide');
+  if (!d.ring && st.some((s, i) => s.kind === 'median' && (s.flush ? false : !(fwd.length > 0 && back.length > 0 && i > lastFwd && i < firstBack)))) out.push('median');
+  if (st.some((s) => s.width < STRIP_WIDTH[s.kind][0] - 1e-6 || s.width > STRIP_WIDTH[s.kind][1] + 1e-6)) out.push('width');
+  if ((d.priority ?? 0) >= 4 && st.some((s) => s.kind === 'parking' || s.kind === 'bike')) out.push('class');
+  return out;
+}
+
 function derive(p: Profile): ProfileInfo {
   const total = p.strips.reduce((s, x) => s + x.width, 0);
   let u = -total / 2;
