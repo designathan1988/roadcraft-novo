@@ -61,7 +61,7 @@ import { demolishBox } from './tools/demolish.ts';
 import { curveLotSide, deleteLot, joinLots, lotAt, lotToWorld, moveLotCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt } from './roads/streetNames.ts';
-import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
+import { Ground, GroundStroke, RiverCommand, WATER_MAP_RES, WATER_TILE_RES, waterCoord, waterIndex } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
 import { ZoneTool } from './tools/zoneTool.ts';
@@ -641,7 +641,7 @@ export class Game {
       const st = this.simStats?.type === 'stats' ? this.simStats : null;
       this.ambient.update(dt, {
         rain: rainU.value, wind: windU.value, traffic: Math.min(1, (st?.micro ?? 0) / 120),
-        height: this.rig.eye.y - groundY, day: 1 - nightU.value, green: 0.7,
+        height: this.rig.eye.y - groundY, day: 1 - nightU.value, green: this.green,
       });
     }
     this.hud.setClock(this.hour, this.simSpeed, this.paused);
@@ -731,10 +731,36 @@ export class Game {
   }
 
   private infoTimer = 0;
+  /** Trees near the camera, 0..1 (the birds sing only with trees around). */
+  green = 0.7;
+
+  /**
+   * How green the place under the camera is: trees placed by the player and planted forest count; buildings and roads
+   * take room from the trees the map grows by itself. A query of 80 m around the camera (bounded, twice a second).
+   */
+  private greenAt(x: number, z: number): number {
+    const w = this.world, R = 80, ic = w.items.t.cols;
+    let trees = 0;
+    w.items.index.query(x - R, z - R, x + R, z + R, (i) => { if (ic.type[i] === Item.Tree || ic.type[i] === Item.Conifer || ic.type[i] === Item.Palm) trees++; });
+    let built = 0;
+    const bc = w.buildings.cols;
+    w.buildingIndex.query(x - R, z - R, x + R, z + R, (id) => { built += bc.w[id] * bc.d[id]; });
+    let road = 0;
+    w.roads.forSegsNear(x - R, z - R, x + R, z + R, () => { road++; });
+    // planted forest: the ground's blue channel at a few points
+    let forest = 0;
+    for (const [dx, dz] of [[0, 0], [40, 0], [-40, 0], [0, 40], [0, -40]]) {
+      const gx = Math.max(0, Math.min(WATER_MAP_RES - 1, Math.floor(waterCoord(x + dx)))), gz = Math.max(0, Math.min(WATER_MAP_RES - 1, Math.floor(waterCoord(z + dz))));
+      forest += ((w.ground32[waterIndex(gx, gz)] >> 16) & 255) / 255 / 5;
+    }
+    const open = Math.max(0, 1 - built / (Math.PI * R * R * 0.35) - road / 12);
+    return Math.min(1, trees / 8 + forest + 0.7 * open);
+  }
   /** City numbers in the corner (twice per second). */
   private updateInfo(now: number): void {
     if (now - this.infoTimer < 500) return;
     this.infoTimer = now;
+    this.green = this.greenAt(this.rig.target.x, this.rig.target.z);
     const w = this.world, st = this.simStats?.type === 'stats' ? this.simStats : null;
     this.hud.setStatus({
       cars: st?.cars ?? 0, peds: st?.peds ?? 0, residents: w.residents, jobs: w.jobs, buildings: w.buildings.size,

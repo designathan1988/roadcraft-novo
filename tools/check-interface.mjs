@@ -455,6 +455,27 @@ export const SCENARIOS = {
     const t = g.rig.target;
     check('and does not drag the map away', Math.hypot(t.x - 1500, t.z - 1500) < 60, 'target ' + t.x.toFixed(0) + ', ' + t.z.toFixed(0));
   `,
+  // B55: the sound stops while the game is hidden (minimised); no birds in a city block with no trees
+  'B55-sound-hidden-birds': `
+    g.ambient.start(); await wait(300);
+    const ctx = g.ambient.ctx;
+    check('the sound runs', ctx && ctx.state === 'running', 'state ' + (ctx && ctx.state));
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange')); await wait(400);
+    check('hidden, the sound stops', ctx && ctx.state === 'suspended', 'state ' + (ctx && ctx.state));
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange')); await wait(400);
+    check('shown again, it plays', ctx && ctx.state === 'running', 'state ' + (ctx && ctx.state));
+    await g.view(1500, 1500, 0, 50, 120); await wait(1500);
+    check('birds in the open country', g.green > 0.5, 'green ' + g.green);
+    // a block of streets and buildings, no trees
+    for (let k = 0; k < 5; k++) { road(1400, 1400 + k * 50, 1600, 1400 + k * 50); road(1400 + k * 50, 1400, 1400 + k * 50, 1600); }
+    for (let k = 0; k < 4; k++) for (let m = 0; m < 4; m++) a.lot(1405 + k * 50, 1420 + m * 50, 1445 + k * 50, 1420 + m * 50, 1425 + k * 50, 1445 + m * 50, 2, 6);
+    await g.view(1500, 1500, 0, 50, 120); await wait(1500);
+    check('no birds over a treeless block', typeof g.green === 'number' && g.green < 0.2, 'green ' + g.green);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
