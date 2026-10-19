@@ -9,7 +9,8 @@ import { MAP_HALF, SEA_LEVEL } from '../config.ts';
 import { Rng, fbm } from '../core/rng.ts';
 import { baseHeight } from './terrainGen.ts';
 import { Zone } from '../roads/zones.ts';
-import { PROFILES } from '../roads/profiles.ts';
+import { PROFILES, PROFILE_INFO } from '../roads/profiles.ts';
+import { MIN_LEG_ANGLE } from '../roads/impossible.ts';
 import { blockLines, districtField, districtLevels, simplifyLine, traceStreets, type CityStyle, type P2 } from './cityField.ts';
 
 export const GEN = { Local: 1, Avenue: 3, AvenueBike: 4, Expressway: 5 } as const;
@@ -410,7 +411,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     return best;
   };
   const zr = new Rng(seed * 31 + 7);
-  const segs: number[] = [];
+  const segs: number[] = [], strength: number[] = [];
   // catalogue variety by district (broad noise: a whole street stays the same)
   const P = (name: string) => { const i = PROFILES.findIndex((p) => p.name === name); return i < 0 ? 0 : i; };
   const V = {
@@ -459,10 +460,11 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
         to = nx.length;
         nx.push(x); nz.push(z); ny.push(ny[a] + (ny[b] - ny[a]) * t);
       }
-      segs.push(from, to, prof, zone, zone);
+      segs.push(from, to, prof, zone, zone); strength.push(rank(profile));
       from = to;
     }
   }
+  tidyGraph(nx, nz, ny, segs, strength, (x, z) => H(x, z) > SEA_LEVEL + 1.2);
   // only the nodes in use, with new indices
   const remap = new Int32Array(nx.length).fill(-1);
   const out: number[] = [];
@@ -475,4 +477,119 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
   }
   const nodes = new Float32Array(out);
   return { nodes, segs: new Int32Array(segs), centers: new Float32Array(centers.flatMap((c) => [c.x, c.z, c.r])) };
+}
+
+/** A dead end closer than this to another road's ends is a near miss, not inside it (roads/repair.ts END_GAP). */
+const END_GAP = 4;
+/** Shortest piece a split or a moved end may leave (the generator's own floor, test/citygen.test.ts). */
+const MIN_PIECE = 9;
+
+/**
+ * The graph the city is born with must open clean: no node where two roads leave at less than MIN_LEG_ANGLE (an
+ * impossible junction) and no dead end lying inside another road (what repairDanglingEnds would join on reopening).
+ * At a too sharp pair the weaker leg goes (on a tie, the one whose far end keeps another road, then the shorter).
+ * A dead end inside a road becomes a junction with it (the road split at the closest point) when its street meets
+ * the road at MIN_LEG_ANGLE or more; within MIN_PIECE of the road's end it ends on that end's node; else (or over water, on a bridge)
+ * its last piece goes. Repeated until nothing changes. `segs` is rewritten
+ * in place (a, b, profile, zl, zr); `nx`, `nz`, `ny` grow by the split nodes.
+ */
+function tidyGraph(nx: number[], nz: number[], ny: number[], segs: number[], strength: number[], land: (x: number, z: number) => boolean): void {
+  const a: number[] = [], b: number[] = [], prof: number[] = [], zl: number[] = [], zr: number[] = [], rk: number[] = [], alive: boolean[] = [];
+  const legs = new Map<number, number[]>();
+  const legsOf = (n: number): number[] => legs.get(n) ?? legs.set(n, []).get(n)!;
+  // a segment is filed in every cell its box, widened by the widest road, touches
+  const C = 64, PAD = 12, cells = new Map<number, number[]>();
+  const ck = (i: number, j: number) => (i + 4000) * 8192 + (j + 4000);
+  const add = (sa: number, sb: number, p: number, l: number, r: number, k: number): number => {
+    const s = a.length;
+    a.push(sa); b.push(sb); prof.push(p); zl.push(l); zr.push(r); rk.push(k); alive.push(true);
+    legsOf(sa).push(s); legsOf(sb).push(s);
+    const i0 = Math.floor((Math.min(nx[sa], nx[sb]) - PAD) / C), i1 = Math.floor((Math.max(nx[sa], nx[sb]) + PAD) / C);
+    const j0 = Math.floor((Math.min(nz[sa], nz[sb]) - PAD) / C), j1 = Math.floor((Math.max(nz[sa], nz[sb]) + PAD) / C);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) (cells.get(ck(i, j)) ?? cells.set(ck(i, j), []).get(ck(i, j))!).push(s);
+    return s;
+  };
+  const remove = (s: number): void => {
+    alive[s] = false;
+    for (const n of [a[s], b[s]]) { const l = legs.get(n)!; l.splice(l.indexOf(s), 1); }
+  };
+  const other = (s: number, n: number) => (a[s] === n ? b[s] : a[s]);
+  const heading = (n: number, m: number) => Math.atan2(nz[m] - nz[n], nx[m] - nx[n]) * 180 / Math.PI;
+  const gapBetween = (h1: number, h2: number) => { const d = Math.abs(h1 - h2) % 360; return Math.min(d, 360 - d); };
+  for (let i = 0; i < segs.length; i += 5) add(segs[i], segs[i + 1], segs[i + 2], segs[i + 3], segs[i + 4], strength[i / 5]);
+
+  /** The two neighbouring legs at `n` closest in angle, if closer than MIN_LEG_ANGLE. */
+  const sharpPair = (n: number): [number, number] | null => {
+    const l = legs.get(n);
+    if (!l || l.length < 2) return null;
+    const hs = l.map((s) => ({ s, h: heading(n, other(s, n)) })).sort((x, y) => x.h - y.h);
+    let best: [number, number] | null = null, gap = MIN_LEG_ANGLE;
+    for (let i = 0; i < hs.length; i++) {
+      const j = (i + 1) % hs.length, g = j === 0 ? hs[0].h + 360 - hs[i].h : hs[j].h - hs[i].h;
+      if (g < gap) { gap = g; best = [hs[i].s, hs[j].s]; }
+    }
+    return best;
+  };
+  const weaker = (n: number, s: number, t: number): number => {
+    if (rk[s] !== rk[t]) return rk[s] < rk[t] ? s : t;
+    const keeps = (x: number) => legsOf(other(x, n)).length >= 3;
+    if (keeps(s) !== keeps(t)) return keeps(s) ? s : t;
+    const len = (x: number) => Math.hypot(nx[a[x]] - nx[b[x]], nz[a[x]] - nz[b[x]]);
+    return len(s) <= len(t) ? s : t;
+  };
+  /** The road a dead end lies inside (repairDanglingEnds' test): segment, position along it, or −1. */
+  const inside = (n: number, own: number): [number, number] => {
+    const x = nx[n], z = nz[n];
+    let best = -1, bt = 0, bd = Infinity;
+    const l = cells.get(ck(Math.floor(x / C), Math.floor(z / C)));
+    if (l) for (const s of l) {
+      if (!alive[s] || s === own || a[s] === n || b[s] === n) continue;
+      const dx = nx[b[s]] - nx[a[s]], dz = nz[b[s]] - nz[a[s]], L = Math.hypot(dx, dz);
+      if (L < 1e-6) continue;
+      const t = Math.max(0, Math.min(1, ((x - nx[a[s]]) * dx + (z - nz[a[s]]) * dz) / (L * L)));
+      const d = Math.hypot(x - nx[a[s]] - dx * t, z - nz[a[s]] - dz * t);
+      if (d > Math.max(1.5, PROFILE_INFO[prof[s]]?.asphaltRight ?? 3) || d >= bd) continue;
+      if (t * L < END_GAP || (1 - t) * L < END_GAP) continue;
+      if (Math.abs(ny[a[s]] + (ny[b[s]] - ny[a[s]]) * t - ny[n]) > 2) continue;
+      best = s; bt = t; bd = d;
+    }
+    return [best, bt];
+  };
+  for (let changed = true, pass = 0; changed && pass < 20; pass++) {
+    changed = false;
+    for (const n of [...legs.keys()]) {
+      for (let p = sharpPair(n); p; p = sharpPair(n)) { remove(weaker(n, p[0], p[1])); changed = true; }
+    }
+    for (const n of [...legs.keys()]) {
+      const l = legs.get(n)!;
+      if (l.length !== 1) continue;
+      const own = l[0], [s, t] = inside(n, own);
+      if (s < 0) continue;
+      changed = true;
+      const far = other(own, n);
+      const x = nx[a[s]] + (nx[b[s]] - nx[a[s]]) * t, z = nz[a[s]] + (nz[b[s]] - nz[a[s]]) * t;
+      const h = Math.atan2(nz[far] - z, nx[far] - x) * 180 / Math.PI, hr = heading(a[s], b[s]);
+      const L = Math.hypot(nx[b[s]] - nx[a[s]], nz[b[s]] - nz[a[s]]);
+      if (t * L < MIN_PIECE || (1 - t) * L < MIN_PIECE) {
+        // too near the road's end for a piece of its own: the street ends on that node instead
+        const e = t * L < MIN_PIECE ? a[s] : b[s];
+        const free = legsOf(e).length < 6 && land(nx[e], nz[e]) && !legsOf(e).some((x) => other(x, e) === far);
+        remove(own);
+        if (free && Math.hypot(nx[far] - nx[e], nz[far] - nz[e]) >= MIN_PIECE) add(a[own] === n ? e : a[own], a[own] === n ? b[own] : e, prof[own], zl[own], zr[own], rk[own]);
+        continue;
+      }
+      if (gapBetween(h, hr) < MIN_LEG_ANGLE || gapBetween(h, hr + 180) < MIN_LEG_ANGLE || Math.hypot(nx[far] - x, nz[far] - z) < MIN_PIECE || !land(x, z)) { remove(own); continue; }
+      // split the road there and bring the street's end onto the new node
+      const m = nx.length;
+      nx.push(x); nz.push(z); ny.push(ny[a[s]] + (ny[b[s]] - ny[a[s]]) * t);
+      remove(s);
+      add(a[s], m, prof[s], zl[s], zr[s], rk[s]);
+      add(m, b[s], prof[s], zl[s], zr[s], rk[s]);
+      remove(own);
+      if (a[own] === n) add(m, b[own], prof[own], zl[own], zr[own], rk[own]);
+      else add(a[own], m, prof[own], zl[own], zr[own], rk[own]);
+    }
+  }
+  segs.length = 0;
+  for (let s = 0; s < a.length; s++) if (alive[s]) segs.push(a[s], b[s], prof[s], zl[s], zr[s]);
 }
