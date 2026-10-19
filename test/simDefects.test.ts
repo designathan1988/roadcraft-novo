@@ -489,3 +489,23 @@ test('C22: the HUD speed and stopped count and the road inspector cover the whol
   assert.ok(p.queue > 0, `inspector: ${p.vehicles} vehicles, queue ${p.queue}`);
   assert.ok(p.speed < 0.6 * 50 / 3.6, `inspector: ${(p.speed * 3.6).toFixed(0)} km/h on a jammed street`);
 });
+
+test('C19: a pedestrian coming back near the camera starts from where it is, not from where it was last drawn', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { sim } = gridCity(10, 100, -1);
+  const peds = new Peds(sim);
+  peds.density = 1 / 6;
+  for (let i = 0; i < 20 * 10; i++) peds.step(0.05);
+  const out = new Float32Array(11 * 50000);
+  peds.camX = -400; peds.camZ = -400; peds.checkWindow();
+  peds.writePoses(out, 11, 0, 50000);
+  // the camera goes away for two minutes and comes back
+  peds.camX = 5000; peds.camZ = 5000; peds.checkWindow();
+  for (let i = 0; i < 20 * 120; i++) { peds.step(0.05); peds.writePoses(out, 11, 0, 50000); }
+  peds.camX = -400; peds.camZ = -400; peds.checkWindow();
+  const n = peds.writePoses(out, 11, 0, 50000);
+  let worst = 0;
+  for (let i = 0; i < n; i++) worst = Math.max(worst, Math.hypot(out[i * 11 + 4] - out[i * 11], out[i * 11 + 6] - out[i * 11 + 2]));
+  assert.ok(n > 50, `pedestrians drawn ${n}`);
+  assert.ok(worst < 2, `a pedestrian drawn moving ${worst.toFixed(0)} m in one step after the camera came back`);
+});

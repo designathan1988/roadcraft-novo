@@ -63,8 +63,8 @@ const schema = {
   speed: Float32Array, color: Uint8Array,
   // appearance id (16 bits) for the people renderer: drawn when the pedestrian is born, published at pose index 10
   look: Uint16Array,
-  // last published position (for interpolation)
-  px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array,
+  // last published position (for interpolation) and the publication it was in
+  px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array, wf: Uint32Array,
   // bus trip: line (-1 = on foot only), boarding stop and alighting stop
   tLine: Int16Array, tFrom: Uint8Array, tTo: Uint8Array,
   // by bicycle (rides on the bike lane)
@@ -711,8 +711,11 @@ export class Peds {
   /** Removed segments: whoever was on them disappears at their next event (checked in step). */
 
   /** Writes the poses of the people nearby, starting at `start`. Returns how many it wrote. */
+  /** Publications so far (a person not in the previous one starts from where it is now, not where it was last seen). */
+  private frame = 0;
+
   writePoses(data: Float32Array, stride: number, start: number, max: number): number {
-    const c = this.t.cols;
+    const c = this.t.cols, frame = ++this.frame;
     let n = 0;
     for (const node of this.windowNodes) {
       if (!this.sim.net.nodes.alive[node]) continue;
@@ -721,7 +724,8 @@ export class Peds {
         if (c.mode[p] === 0 && !this.sim.net.segs.alive[c.seg[p]]) continue;
         const q = this.posNow(p);
         const o = (start + n) * stride;
-        if (!c.has[p]) { c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.pyaw[p] = q[3]; c.has[p] = 1; }
+        if (!c.has[p] || c.wf[p] !== frame - 1) { c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.pyaw[p] = q[3]; c.has[p] = 1; }
+        c.wf[p] = frame;
         data[o] = c.px[p]; data[o + 1] = c.py[p]; data[o + 2] = c.pz[p]; data[o + 3] = c.pyaw[p];
         data[o + 4] = q[0]; data[o + 5] = q[1]; data[o + 6] = q[2]; data[o + 7] = q[3];
         data[o + 8] = (c.bike[p] ? 5 : 3) * 256 + c.color[p];
