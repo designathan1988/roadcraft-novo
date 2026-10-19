@@ -107,6 +107,9 @@ export class ShellState {
   splitKind: 'side' | 'depth' = 'side';
   splitParts = 2;
   lotUse = 1;
+  /** Style (−1: by neighbourhood) and function of the next lot drawn or built. */
+  nextArch = -1;
+  nextFn = 0;
   radius = 60;
   strength = 40;
   riverWidth = 14;
@@ -343,8 +346,8 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
     } else {
       p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
       p.options.append(subhead(t('ui.build.next')));
-      p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], -1, (v) => a.style(Number(v)))));
-      p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), 0, (v) => a.buildingFn(Number(v)))));
+      p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { s.nextArch = Number(v); a.style(s.nextArch); })));
+      p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { s.nextFn = Number(v); a.buildingFn(s.nextFn); })));
     }
     // extension point: the buildings session mounts its editor here (src/ui/creator.ts)
     p.options.append(h.buildingSlot);
