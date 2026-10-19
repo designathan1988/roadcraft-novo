@@ -7,7 +7,7 @@ import * as THREE from 'three/webgpu';
 import { currentU, foamU, waveU } from './scene.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
-import { GRASS_TEX, GRASS_TILE, WATER_TEX } from './surfaceBake.ts';
+import { GRASS_TEX, GRASS_TILE, ROCK_NORMAL, ROCK_TEX, ROCK_TILE, TERRAIN_NOISE, WATER_TEX } from './surfaceBake.ts';
 import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
 import {
   HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TILES, PLATE_SIZE, SEA_LEVEL, TILE_SIZE,
@@ -22,7 +22,7 @@ import { heightAt } from '../world/heights.ts';
 export const gridU = T.uniform(0);
 
 const {
-  Fn, attribute, clamp, float, floor, fract, int, ivec2, max, min, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot,
+  Fn, attribute, clamp, float, floor, fract, int, ivec2, max, min, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot, dFdx, dFdy, If,
   transformNormalToView, uniform, varyingProperty, vec2, vec3, vec4, length, abs, sRGBTransferEOTF,
   positionWorld, fwidth, mx_noise_float, select, texture, instanceIndex, hash, sin, cos, time, positionLocal, step,
 } = T;
@@ -238,6 +238,28 @@ export class TerrainRenderer {
     return textureLoad(this.heightTex, ivec2(cx.bitAnd(int(255)), cz.bitAnd(int(255)))).depth(layer).r;
   }
 
+  /**
+   * Rock, dirt and talus weights (Roadcraft 4.0 terrain.ts:834-896): slope in degrees plus a wander of four noise scales
+   * (0.00575, 0.0275, 0.05, 0.2075 per metre: ±14, ±10, ±30, ±16°) and a fine break-up (±13°) faded with distance;
+   * rock = smoothstep(30°, 56°) or the altitude (168-232 m); dirt = smoothstep(27°, 42°) under the rock; talus where the
+   * rock weight is between 0.06 and 0.92.
+   */
+  private groundBlend(vNormal: N): { rockW: N; dirtW: N; talus: N } {
+    const p = positionWorld;
+    const n = normalize(vNormal);
+    const deg = T.acos(clamp(n.y, -1, 1)).mul(57.2958);
+    const tn = (k: number) => texture(TERRAIN_NOISE, p.xz.mul(k / 4));
+    const wander = tn(0.00575).r.sub(0.5).mul(14).add(tn(0.0275).r.sub(0.5).mul(10)).add(tn(0.05).r.sub(0.5).mul(30)).add(tn(0.2075).r.sub(0.5).mul(16));
+    const fineFade = clamp(float(1).sub(fwidth(p.x).div(1.5)), 0, 1);
+    const breakup = tn(0.475).g.sub(0.5).mul(26).mul(fineFade);
+    const altitude = smoothstep(168, 232, p.y);
+    const rockW = max(smoothstep(30, 56, deg.add(wander.mul(float(1).sub(smoothstep(45, 70, deg).mul(0.5)))).add(breakup)), altitude.mul(0.92));
+    const sw = deg.add(wander);
+    const dirtW = smoothstep(27, 42, sw).mul(float(1).sub(rockW)).mul(float(1).sub(smoothstep(36, 48, sw).mul(0.6)));
+    const talus = smoothstep(0.06, 0.4, rockW).mul(float(1).sub(smoothstep(0.5, 0.92, rockW)));
+    return { rockW, dirtW, talus };
+  }
+
   /** Water level at a global 8 m sample (NO_WATER where dry). */
   private loadWater(gx: N, gz: N): N {
     const WRES = WATER_TILE_RES * MAP_TILES;
@@ -321,6 +343,23 @@ export class TerrainRenderer {
     m.positionNode = position();
     withPrevious(m);
 
+    // rock, dirt and grass weights as Roadcraft 4.0's (terrain.ts:834-896): by the slope in degrees, wandering with
+    // noise at four scales and a fine break-up, rock also above 168-232 m; scree (talus) in a band at the rock's fringe
+    const blend = this.groundBlend(vNormal);
+    // the rock texture, triplanar (pow(|n|, 4) weights), read only where rock shows: the derivatives are taken before
+    // the branch (a texture read inside it needs them given)
+    const triplanar = (tex: THREE.Texture, n: N, p: N, rockW: N): N => {
+      const out = vec4(0.5, 0.5, 1, 1).toVar();
+      const w3 = pow(abs(n), vec3(4, 4, 4));
+      const ws = w3.div(w3.x.add(w3.y).add(w3.z));
+      const uvX = p.zy.div(ROCK_TILE), uvY = p.xz.div(ROCK_TILE), uvZ = p.xy.div(ROCK_TILE);
+      const dX = [dFdx(uvX), dFdy(uvX)], dY = [dFdx(uvY), dFdy(uvY)], dZ = [dFdx(uvZ), dFdy(uvZ)];
+      If(rockW.greaterThan(0.001), () => {
+        out.assign(texture(tex, uvX).grad(dX[0], dX[1]).mul(ws.x).add(texture(tex, uvY).grad(dY[0], dY[1]).mul(ws.y)).add(texture(tex, uvZ).grad(dZ[0], dZ[1]).mul(ws.z)));
+      });
+      return out;
+    };
+
     // fine relief (Roadcraft terrainRelief.ts, here analytic): on slopes the normal is bent by a ridged noise, so dirt
     // and rock read as eroded ground near the camera; it fades before it turns into noise far away
     const relief = Fn(() => {
@@ -333,7 +372,11 @@ export class TerrainRenderer {
       const h = (o: N) => abs(mx_noise_float(q.add(o)));
       const h0 = h(vec2(0, 0));
       const dx = h(vec2(e, 0)).sub(h0), dz = h(vec2(0, e)).sub(h0);
-      return normalize(n.add(vec3(dx, 0, dz).mul(-2.2).mul(fade)));
+      const soil = normalize(n.add(vec3(dx, 0, dz).mul(-2.2).mul(fade)));
+      // the rock's own relief where it shows (softened 45 % toward the surface, as 4.0)
+      const rn = triplanar(ROCK_NORMAL, n, p, blend.rockW).xyz.mul(2).sub(1);
+      const bent = normalize(n.add(vec3(rn.x, 0, rn.y).mul(0.55)));
+      return normalize(mix(soil, bent, blend.rockW));
     })();
     m.normalNode = transformNormalToView(relief);
 
@@ -361,8 +404,17 @@ export class TerrainRenderer {
       const g2 = texture(GRASS_TEX, p.xz.div(GRASS_TILE * 4.37).add(0.37)).xyz.mul(2);
       c = c.mul(g1).mul(mix(vec3(1, 1, 1), g2, 0.45));
       const speck = clamp(g1.y.mul(0.5), 0, 1);
-      c = mix(c, dirt, smoothstep(0.12, 0.25, slope.add(mid.mul(0.04).mul(fadeMid))));
-      c = mix(c, rock, smoothstep(0.28, 0.42, slope));
+      void slope;
+      // red-brown dirt (4.0's latossolo: tone × (1.22, 0.8, 0.58)), rock from the baked granite tinted by the strata,
+      // scree at the rock's fringe
+      const soil = sRGBTransferEOTF(vec3(0.61, 0.4, 0.29)).mul(texture(TERRAIN_NOISE, p.xz.div(13.6)).r.mul(0.35).add(0.82));
+      const dirtC = mix(dirt, soil, 0.6);
+      // the baked texture is sRGB: to linear, then tinted by the strata (relative to the granite's mean tone)
+      const rockC = sRGBTransferEOTF(triplanar(ROCK_TEX, n, p, blend.rockW).xyz).mul(rock.div(sRGBTransferEOTF(vec3(0.46, 0.455, 0.44))));
+      c = mix(c, dirtC, blend.dirtW);
+      c = mix(c, rockC, blend.rockW);
+      const scree = mix(rockC.mul(0.7), dirtC.mul(0.8), 0.4).mul(mix(float(0.75), float(1.2), texture(TERRAIN_NOISE, p.xz.mul(1.325 / 8)).b));
+      c = mix(c, scree, blend.talus.mul(0.75));
       c = mix(c, sand, smoothstep(float(SEA_LEVEL + 2.5), float(SEA_LEVEL + 0.5), p.y));
       // painted ground: 4 neighbouring samples, each its own kind, blended (edge broken by noise)
       {
