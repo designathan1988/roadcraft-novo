@@ -38,6 +38,10 @@ const LODS = 3;
 const KINDS = propKindTable().count;
 const DRAWS = KINDS * LODS;
 const FADE_BAND = 0.12;
+/** Share of the ipês in flower. */
+const IPE_IN_FLOWER = 0.35;
+/** The leaf tones (treeMeshes.ts LEAF, linear) an ipê out of flower takes. */
+const LEAF_DARK = new THREE.Color(0x24401c), LEAF_LIT = new THREE.Color(0x4f7a34);
 
 export class PropRenderer {
   readonly group = new THREE.Group();
@@ -302,7 +306,11 @@ export class PropRenderer {
       const yaw = float(w.bitAnd(uint(4095))).mul(Math.PI * 2 / 4096);
       const variant = float(w.shiftRight(uint(12)).bitAnd(uint(15)));
       const scale = float(w.shiftRight(uint(16)).bitAnd(uint(63))).div(42).add(0.5);
-      // (the ipê is a model of its own now, its yellow or pink crown in the mesh: no tree is tinted into flower)
+      // the ipê (tree or oak, variant 3) is a model of its own with its crown in flower; each one draws a number that
+      // says whether it is in flower (about a third are, as the season spreads them)
+      const typeF = float(keyRaw.bitAnd(uint(31)));
+      const isIpe = max(step(abs(typeF.sub(PROP.Tree)), float(0.5)), step(abs(typeF.sub(PROP.Oak)), float(0.5))).mul(step(abs(variant.sub(3)), float(0.5)));
+      flowerN = isIpe.mul(hash(floor(inst.x).add(floor(inst.z).mul(157))).mul(0.998).add(0.001));
       const c = cos(yaw), s = sin(yaw);
       // wire: scale = span length (m), variant = height difference; z goes from 0 to 1 along the span
       const isWire = step(abs(pcol.w.mul(255).sub(PMAT.Wire)), float(0.5));
@@ -420,15 +428,20 @@ export class PropRenderer {
     const isAtlasF = step(abs(mat.sub(PMAT.Atlas)), float(0.5));
     const atlasC = this.signAtlas.sample(vAtlasUV);
     const signFace = mix(atlasC.xyz, pcol.xyz, vAtlasBack);
-    const base = mix(mix(mix(pcol.xyz.mul(mix(vec3(1, 1, 1), leafC.xyz, isCardF)), paint, isPaint), signFace, isAtlasF), impC.xyz, isImpF).mul(mix(tint, mix(vec3(1, 1, 1), tint, step(float(0.5), vVar)), isImpF));
+    // an ipê out of flower: its bloom (redder than green) takes the leaf tone of the same brightness
+    const bloomVert = step(pcol.y.mul(1.05), pcol.x).mul(isLeaf.max(isImpF));
+    const outOfFlower = step(float(0.0005), vFlower).mul(step(float(IPE_IN_FLOWER), vFlower)).mul(bloomVert);
+    const leafOf = mix(LEAF_DARK, LEAF_LIT, clamp(dot(pcol.xyz, vec3(0.2126, 0.7152, 0.0722)).mul(3), 0, 1));
+    const pc = mix(pcol.xyz, leafOf, outOfFlower);
+    const impBase = mix(impC.xyz, leafOf.mul(dot(impC.xyz, vec3(0.2126, 0.7152, 0.0722)).mul(4)), step(float(0.0005), vFlower).mul(step(float(IPE_IN_FLOWER), vFlower)).mul(step(impC.y.mul(1.05), impC.x)));
+    const base = mix(mix(mix(pc.mul(mix(vec3(1, 1, 1), leafC.xyz, isCardF)), paint, isPaint), signFace, isAtlasF), impBase, isImpF).mul(mix(tint, mix(vec3(1, 1, 1), tint, step(float(0.5), vVar)), isImpF));
     const bulbOff = base.mul(0.12);
     // foliage: each tree with its own tone (lighter, yellower or darker), the top of the crown lighter and the
     // light that passes through the leaves (the shadow side does not go black)
     const treeH = hash(floor(positionWorldP.xz.div(7)).dot(vec2(1, 57.3)));
     const leafTone = mix(mix(vec3(0.82, 0.9, 0.8), vec3(1.12, 1.08, 0.82), step(float(0.55), treeH)), vec3(1.0, 1.12, 0.92), step(float(0.85), treeH));
     // flower: multiplies the leaf colour (sRGB 0x6a9a45 in linear) up to the flower colour; the impostor trunk barely changes
-    const flowerC = select(vFlower.lessThan(1.5), vec3(5.9, 1.67, 0.45), select(vFlower.lessThan(2.5), vec3(4.2, 0.6, 7.2), vec3(6.0, 1.1, 3.4)));
-    const leafK = mix(leafTone, flowerC, step(float(0.5), vFlower));
+    const leafK = leafTone;
     const leafBase = base.mul(mix(vec3(1, 1, 1), leafK, isLeaf.max(isImpF)));
     const up = clamp(normalize(mix(vN, impNW, isImpF)).y, 0, 1);
     const through = leafBase.mul(float(0.1).add(up.mul(0.1))).mul(float(1).sub(nightU.mul(0.9))).mul(isLeaf.max(isImpF));
