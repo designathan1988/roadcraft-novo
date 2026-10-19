@@ -8,6 +8,7 @@ import { currentU, foamU, waveU } from './scene.ts';
 import { windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
+import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
 import {
   HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TILES, PLATE_SIZE, SEA_LEVEL, TILE_SIZE,
 } from '../config.ts';
@@ -32,6 +33,11 @@ const GRID = 32; // squares per side of a patch
 const LEAF = 128; // side of the finest node (m) → 4 m between vertices
 const LEVELS = Math.log2(PLATE_SIZE / LEAF) + 1; // 0..4
 const MAX_NODES = 4096;
+/** The shadow copy of the terrain: its LOD factor (coarser than the view's), how far round the camera it goes (the
+ *  cascades' reach plus a ridge's shadow) and how much it is sunk (the coarse copy must not shadow the fine ground). */
+const SHADOW_LOD = 1.6;
+const SHADOW_SINK = 1.5;
+const MAX_SHADOW_NODES = 1024;
 /** Water tiles nearer than this (m) use the 8 m grid; farther ones the 32 m grid. */
 const WATER_FINE = 1500;
 
@@ -57,6 +63,16 @@ export class TerrainRenderer {
   readonly waterMesh: THREE.Mesh;
   /** Grass tufts round the camera (a child of `mesh`). */
   readonly grassMesh: THREE.Mesh;
+  /**
+   * The terrain's sun shadow: a coarse copy round the camera (behind it too: a ridge behind the camera shadows the
+   * valley in view), in a layer only the cascades' cameras see. A child of `mesh`.
+   */
+  readonly shadowMesh: THREE.Mesh;
+  private shadowGeo: THREE.InstancedBufferGeometry;
+  private shadowInst: THREE.InstancedBufferAttribute;
+  private shadowArray = new Float32Array(MAX_SHADOW_NODES * 4);
+  private shadowCount = 0;
+  private shadowRangeBase: Node = uniform(LEAF * SHADOW_LOD);
   private waterGeo: THREE.InstancedBufferGeometry;
   private waterInst: THREE.InstancedBufferAttribute;
   /** Water tiles far from the camera: a 32 m grid (a child of `waterMesh`). */
@@ -188,6 +204,21 @@ export class TerrainRenderer {
 
     this.grassMesh = this.createGrass();
     this.mesh.add(this.grassMesh);
+
+    const sg = new THREE.InstancedBufferGeometry();
+    sg.setAttribute('position', g.attributes.position);
+    sg.setIndex(g.index);
+    this.shadowInst = new THREE.InstancedBufferAttribute(this.shadowArray, 4);
+    this.shadowInst.setUsage(THREE.DynamicDrawUsage);
+    sg.setAttribute('node', this.shadowInst);
+    sg.instanceCount = 0;
+    this.shadowGeo = sg;
+    this.shadowMesh = new THREE.Mesh(sg, this.createShadowMaterial());
+    this.shadowMesh.frustumCulled = false;
+    this.shadowMesh.castShadow = true;
+    this.shadowMesh.receiveShadow = false;
+    this.shadowMesh.layers.set(SHADOW_ONLY_LAYER);
+    this.mesh.add(this.shadowMesh);
     this.setLodFactor(this.lodFactor);
   }
 
@@ -500,6 +531,28 @@ export class TerrainRenderer {
     return m;
   }
 
+  /** Depth only: the patch on the height texture, morphed between its levels like the view's, sunk SHADOW_SINK. */
+  private createShadowMaterial(): THREE.MeshBasicNodeMaterial {
+    const heightAt = this.heightFn();
+    const cam = this.camUniform, rangeBase = this.shadowRangeBase;
+    const position = Fn(() => {
+      const node = attribute('node', 'vec4');
+      const uv = attribute('position', 'vec3').xz;
+      const size = node.z, level = node.w;
+      const step = size.div(float(GRID));
+      const xz = node.xy.add(uv.mul(size));
+      const dist = length(vec3(xz.x, heightAt(xz), xz.y).sub(cam));
+      const range = rangeBase.mul(level.exp2());
+      const morph = clamp(dist.sub(range.mul(0.72)).div(range.mul(0.28)), 0, 1);
+      const odd = fract(uv.mul(float(GRID)).mul(0.5)).mul(2);
+      const mxz = xz.sub(odd.mul(step).mul(morph));
+      return vec3(mxz.x, heightAt(mxz).sub(SHADOW_SINK), mxz.y);
+    });
+    const m = new THREE.MeshBasicNodeMaterial();
+    m.positionNode = position();
+    return m;
+  }
+
   /** Map biome: grass colours. */
   setBiome(b: number): void {
     const pal: Array<[number, number]> = [[0x46642f, 0x58723a], [0x9c9450, 0xb0a565], [0x4e7a35, 0x5f8a40], [0x3f6e2c, 0x4f7f34], [0x8a8458, 0x9e906a], [0x7a9a50, 0x92a860], [0x5f8a45, 0x7a9050]];
@@ -561,6 +614,13 @@ export class TerrainRenderer {
       }
     }
     this.geometry.instanceCount = this.count;
+    // the shadow copy: every patch round the camera within the cascades' reach, in view or not
+    this.shadowCount = 0;
+    for (let rz = 0; rz < roots; rz++) for (let rx = 0; rx < roots; rx++) this.selectShadow(rx * PLATE_SIZE - MAP_HALF, rz * PLATE_SIZE - MAP_HALF, PLATE_SIZE, top);
+    this.shadowGeo.instanceCount = this.shadowCount;
+    this.shadowInst.clearUpdateRanges();
+    this.shadowInst.addUpdateRange(0, this.shadowCount * 4);
+    this.shadowInst.needsUpdate = true;
     for (const [g, a, n] of [[this.waterGeo, this.waterInst, this.waterNear], [this.waterFarGeo, this.waterFarInst, this.waterFarCount]] as const) {
       g.instanceCount = n;
       a.clearUpdateRanges();
@@ -636,6 +696,21 @@ export class TerrainRenderer {
       }
     }
     return true;
+  }
+
+  /** The shadow copy's quadtree: within SHADOW_REACH of the eye, by the copy's coarser bands, without the view test. */
+  private selectShadow(x: number, z: number, size: number, level: number): void {
+    if (x >= MAP_HALF || z >= MAP_HALF) return;
+    const d = this.bounds(x, z, size).distanceToPoint(this.camPos);
+    if (d > SHADOW_REACH) return;
+    if (level > 0 && d < LEAF * (1 << (level - 1)) * SHADOW_LOD) {
+      const h = size / 2;
+      for (let k = 0; k < 4; k++) this.selectShadow(x + (k & 1 ? h : 0), z + (k & 2 ? h : 0), h, level - 1);
+      return;
+    }
+    if (this.shadowCount >= MAX_SHADOW_NODES) return;
+    const o = this.shadowCount++ * 4;
+    this.shadowArray[o] = x; this.shadowArray[o + 1] = z; this.shadowArray[o + 2] = size; this.shadowArray[o + 3] = level;
   }
 
   /** Tile side, for whoever needs it. */

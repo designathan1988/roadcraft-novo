@@ -64,3 +64,32 @@ test('E33: water is drawn only on the tiles in view, with a coarse grid far away
   assert.deepEqual(outside.slice(0, 5), [], `${outside.length} water tiles drawn outside the view`);
   assert.ok(tris < 2e6, `${(tris / 1e6).toFixed(1)} M water triangles for one river`);
 });
+
+test('E36: the terrain casts sun shadows round the camera, seen only by the shadow cascades', async () => {
+  const sunMod = await import('../src/render/sun.ts') as Record<string, unknown>;
+  const { Post } = await import('../src/render/post.ts');
+  const w = new World();
+  w.tileMin.fill(0); w.tileMax.fill(300);
+  const terrain = new TerrainRenderer(w);
+  const { camera, eye } = centreCamera();
+  terrain.update(camera, eye);
+  const casters: THREE.Mesh[] = [];
+  terrain.mesh.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.castShadow && (m.geometry as THREE.InstancedBufferGeometry).instanceCount > 0) casters.push(m); });
+  if (terrain.mesh.castShadow) casters.push(terrain.mesh);
+  for (const m of [(terrain as unknown as { shadowMesh?: THREE.Mesh }).shadowMesh]) if (m?.castShadow && (m.geometry as THREE.InstancedBufferGeometry).instanceCount > 0) casters.push(m);
+  assert.ok(casters.length > 0, 'some terrain mesh casts a shadow');
+  const caster = casters[0];
+  // it covers the ground behind the camera too (a ridge behind the camera shadows the valley in view)
+  const g = caster.geometry as THREE.InstancedBufferGeometry, node = g.attributes.node as THREE.InstancedBufferAttribute;
+  let behind = false;
+  for (let i = 0; i < g.instanceCount; i++) if (node.getY(i) > 200) behind = true;
+  assert.ok(behind, 'patches south of the camera (behind it) cast too');
+  // the main view does not draw the shadow copy; the cascades do
+  if (caster !== terrain.mesh) {
+    assert.equal(caster.layers.test(camera.layers), false, 'the main camera does not see the shadow copy');
+    const sun = new THREE.DirectionalLight();
+    new Post({ shadowMap: {}, coordinateSystem: THREE.WebGPUCoordinateSystem, reversedDepthBuffer: false } as unknown as THREE.WebGPURenderer, new THREE.Scene(), camera, sun, { shadows: true, ao: false, bloom: false });
+    assert.ok(caster.layers.test(sun.shadow.camera.layers), 'the cascades\' cameras see it');
+    assert.ok(typeof sunMod.SHADOW_ONLY_LAYER === 'number');
+  }
+});

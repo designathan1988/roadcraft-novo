@@ -11,7 +11,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { SHADOW_REACH } from './sun.ts';
+import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
@@ -56,6 +56,8 @@ export class Post {
       sun.shadow.camera.far = 4000;
       sun.shadow.bias = -0.0004;
       sun.shadow.normalBias = 0.4;
+      // the cascades also draw what only casts (the terrain's coarse shadow copy); cloned into each cascade
+      sun.shadow.camera.layers.enable(SHADOW_ONLY_LAYER);
       const csm = new CSMShadowNode(sun, { cascades: 3, maxFar: PERSP_SHADOW_FAR, mode: 'practical', lightMargin: 300 });
       csm.fade = true;
       sun.shadow.shadowNode = csm;
