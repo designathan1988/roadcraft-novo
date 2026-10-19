@@ -395,3 +395,26 @@ test('F9: civic buildings and warehouses fit their lot', () => {
   }
   assert.deepEqual(failures, []);
 });
+
+test('F10: the parts, parked cars and yard plants of a building near the cell edge are all kept', async () => {
+  const { buildProps, PROP } = await import('../src/jobs/props.ts');
+  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const { cellId, cellX, cellOriginX } = await import('../src/core/grid.ts');
+  const w = new World();
+  w.heights.fill(10);
+  const x0 = cellOriginX(cellX(128)), cell = cellId(cellX(128), cellX(128));
+  let lost = 0, total = 0;
+  for (let seed = 1; seed <= 20; seed++) {
+    // a mid-rise block 8 m from the cell's east edge, 36 m wide: its east third is in the next cell
+    const b = oneBuilding(seed % 2 ? Zone.Residential : Zone.Mixed, 5, 36, 44, seed * 7919, seed * 6);
+    b.x[0] = x0 + 256 - 8; b.z[0] = x0 + 128;
+    const parts: number[] = [];
+    buildBuildingParts(w.heights, b, () => parts.push(1));
+    const r = buildProps(w.heights, w.roads.gather([], []), b, cell);
+    let furniture = 0;
+    for (let k = 0; k < r.count; k++) if ((r.extra[k] & 31) === PROP.Furniture) furniture++;
+    total += parts.length; lost += Math.max(0, parts.length - furniture);
+  }
+  assert.ok(total > 0);
+  assert.equal(lost, 0, `${lost} of ${total} building parts dropped at the cell edge`);
+});

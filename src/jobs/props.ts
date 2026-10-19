@@ -53,7 +53,13 @@ class Out {
     return cellId(cellX(Math.fround(x)), cellX(Math.fround(z))) === this.cell;
   }
   add(type: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number): void {
-    if (!this.inCell(x, z)) return;
+    if (this.inCell(x, z)) this.addOwn(type, x, y, z, yaw, variant, scale, key);
+  }
+  /**
+   * A prop of one of this cell's own buildings (parts, parked cars, yard plants): kept even past the cell edge, where
+   * the building overhangs it. A building is filed in one cell only, so its props come from one job only.
+   */
+  addOwn(type: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number): void {
     const a = ((yaw / (Math.PI * 2)) % 1 + 1) % 1;
     const yq = Math.min(4095, Math.round(a * 4096) & 4095);
     const sq = Math.max(0, Math.min(63, Math.round((scale - 0.5) * 42)));
@@ -439,13 +445,13 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         // o carro fica de frente ou de ré na vaga (perpendicular à fileira)
         const dx = -tz * c + tx * sn, dz = tz * sn + tx * c;
         const yaw = Math.atan2(dx, dz) + (r.next() < 0.5 ? Math.PI : 0) + r.range(-0.05, 0.05);
-        out.add(PROP.ParkedCar, x, heightAt(heights, x, z) + 0.22, z, yaw, r.int(0, 16), 1, r.nextU32());
+        out.addOwn(PROP.ParkedCar, x, heightAt(heights, x, z) + 0.22, z, yaw, r.int(0, 16), 1, r.nextU32());
       }
     }
   }
 
   // yards: trees at the back of the houses, shrubs along the fronts
-  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.add(k, x, y, z, yaw, v, sc, key));
+  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key));
 
   // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio
   {
@@ -515,7 +521,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   }
 
   // peças de fachada dos prédios (sessão prédios): ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água
-  buildBuildingParts(heights, b, (v, x, y, z, yaw, s) => out.add(PROP.Furniture, x, y, z, yaw, v, s, 0));
+  buildBuildingParts(heights, b, (v, x, y, z, yaw, s) => out.addOwn(PROP.Furniture, x, y, z, yaw, v, s, 0));
 
   const count = out.extra.length;
   return { count, data: new Float32Array(out.data), extra: new Uint32Array(out.extra) };
