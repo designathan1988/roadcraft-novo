@@ -268,3 +268,24 @@ test('C5: pedestrians are not born around the camera (doors only change where so
   assert.ok(all > 200, `pedestrians ${all}`);
   assert.ok(close / all < share * 1.5 + 0.03, `${(100 * close / all).toFixed(0)}% of the pedestrians within ${R} m of the camera, where ${(100 * share).toFixed(0)}% of the nodes are`);
 });
+
+test('C15: trips that end without reaching their destination are counted as lost, never as arrivals', async () => {
+  const { recordOps, mirror, syncNet } = await import('./simCity.ts');
+  const { laneSeg } = await import('../src/sim/lanes.ts');
+  const { w, sim } = gridCity(4, 120);
+  const ops = recordOps(w);
+  const tr = traffic(sim);
+  tr.density = 1 / 20;
+  for (let i = 0; i < 20 * 60; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
+  // the segment with most vehicles on it (near the camera: in the lists) is demolished
+  const c = tr.veh.cols, on = new Map<number, number>();
+  for (let i = 0; i < tr.microN; i++) { const v = tr.micro[i]; if (c.conn[v] < 0 && c.lane[v] >= 0 && !c.dying[v] && c.line[v] < 0) on.set(laneSeg(c.lane[v]), (on.get(laneSeg(c.lane[v])) ?? 0) + 1); }
+  const [seg, cars] = [...on].sort((a, b) => b[1] - a[1])[0];
+  assert.ok(cars >= 2, `cars on the busiest segment: ${cars}`);
+  const arrived = tr.arrived, lost = tr.lost;
+  w.roads.removeSeg(seg);
+  mirror(sim, ops.splice(0));
+  syncNet(sim, tr);
+  assert.equal(tr.arrived, arrived, 'removed cars were counted as arrivals');
+  assert.ok(tr.lost - lost >= cars, `${cars} cars removed with the road, lost went from ${lost} to ${tr.lost}`);
+});

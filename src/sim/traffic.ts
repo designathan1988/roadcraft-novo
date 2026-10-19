@@ -97,7 +97,12 @@ const vehSchema = {
   pk: Float32Array,
   // manoeuvre (sim/manoeuvres.ts, −1 = none) and the lane position (front) where it ends
   mv: Int32Array, ms: Float32Array,
+  // how the trip ends once it leaves (End)
+  why: Uint8Array,
 };
+
+/** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
+const End = { Arrived: 0, Lost: 1, NoTrip: 2 } as const;
 
 /** Bus line as the simulation sees it: stops resolved to lanes. */
 interface SimLine {
@@ -297,6 +302,7 @@ export class Traffic {
       if (!c.has[v] || Math.hypot(c.px[v] - x, c.pz[v] - z) > r) continue;
       // parking: already out of the lane, just fade it (`stepParkers` finishes it)
       if (c.dying[v] !== 2) c.dying[v] = 1;
+      if (c.why[v] === End.Arrived) c.why[v] = End.Lost;
       c.fade[v] = Math.min(c.fade[v], 0.3); n++;
     }
     return n;
@@ -521,7 +527,7 @@ export class Traffic {
       const lane = c.lane[v];
       if (!c.micro[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) {
         this.mvs.end(m); c.mv[v] = -1;
-        if (c.dying[v] === 3) c.dying[v] = 1;
+        if (c.dying[v] === 3) this.lose(v);
         continue;
       }
       const kind = mc.kind[m];
@@ -566,14 +572,14 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim;
     for (const v of this.parkers) {
       const lane = c.lane[v];
-      if (!this.veh.alive[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) { this.parkers.delete(v); if (this.veh.alive[v]) this.despawn(v); continue; }
+      if (!this.veh.alive[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) { this.parkers.delete(v); if (this.veh.alive[v]) { c.why[v] = End.Lost; this.finish(v); } continue; }
       // on a manoeuvre: it drives itself (stepManoeuvres); once at the end it stays (a truck at the dock longer), then goes
       if (c.mv[v] >= 0) {
         if (this.mvs.moving(c.mv[v]) || this.mvs.t.cols.d[c.mv[v]] < this.mvs.t.cols.total[c.mv[v]] - 1e-3) continue;
         c.dwell[v] += dt;
         if (c.dwell[v] > (c.kind[v] === 2 ? 25 : PARK_STAY + 2)) {
           c.fade[v] -= dt * 1.2;
-          if (c.fade[v] <= 0) { this.parkers.delete(v); this.arrived++; this.despawn(v); }
+          if (c.fade[v] <= 0) { this.parkers.delete(v); this.finish(v); }
         }
         continue;
       }
@@ -585,7 +591,7 @@ export class Traffic {
       c.brk[v] = 1;
       if (nv === 0 && c.dwell[v] > PARK_SIDE_S + PARK_STAY) {
         c.fade[v] -= dt * 1.2;
-        if (c.fade[v] <= 0) { this.parkers.delete(v); this.arrived++; this.despawn(v); }
+        if (c.fade[v] <= 0) { this.parkers.delete(v); this.finish(v); }
       }
     }
   }
@@ -735,7 +741,7 @@ export class Traffic {
     const c = this.veh.cols;
     if (c.line[v] >= 0) { this.busPlan(v, node); return; }
     if (node === c.dest[v]) { this.routes[v * ROUTE_CAP] = node; c.rLen[v] = 1; c.rIdx[v] = 0; return; }
-    if (!this.plan(v, node, c.dest[v])) { c.dying[v] = 1; return; }
+    if (!this.plan(v, node, c.dest[v])) { this.lose(v); return; }
     c.rIdx[v] = 0;
   }
 
@@ -944,7 +950,21 @@ export class Traffic {
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
     c.v[v] = 0;
     c.line[v] = -1; c.stopI[v] = 0; c.dwell[v] = 0; c.load[v] = 0; c.served[v] = 0; c.wait[v] = 0;
-    c.held[v] = 0;
+    c.held[v] = 0; c.why[v] = End.Arrived;
+  }
+
+  /** The trip will not reach its destination: the vehicle fades out and is counted as lost. */
+  private lose(v: number): void {
+    const c = this.veh.cols;
+    if (c.why[v] === End.Arrived) c.why[v] = End.Lost;
+    if (c.dying[v] !== 2) c.dying[v] = 1;
+  }
+
+  /** The vehicle leaves the simulation and its trip is counted (arrived or lost; a bus is not a trip). */
+  private finish(v: number): void {
+    const c = this.veh.cols;
+    if (c.line[v] < 0 && c.why[v] !== End.NoTrip) { if (c.why[v] === End.Lost) this.lost++; else this.arrived++; }
+    this.despawn(v);
   }
 
   private despawn(v: number): void {
@@ -1014,19 +1034,20 @@ export class Traffic {
   private mesoAdvance(v: number): void {
     const c = this.veh.cols, sim = this.sim;
     const lane = c.lane[v];
-    if (!sim.net.segs.alive[laneSeg(lane)] || c.dying[v]) { this.despawn(v); return; }
+    if (!sim.net.segs.alive[laneSeg(lane)]) { c.why[v] = End.Lost; this.finish(v); return; }
+    if (c.dying[v]) { this.finish(v); return; }
     if (this.atDestination(v)) {
-      if (c.line[v] < 0) { this.arrived++; this.despawn(v); return; }
+      if (c.line[v] < 0) { this.finish(v); return; }
       this.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
-      if (c.dying[v]) { this.despawn(v); return; }
+      if (c.dying[v]) { this.finish(v); return; }
     }
     let ns = this.nextSeg(v);
     if (ns < 0) {
       // route ended before the destination (truncated route): plan again from here
       this.replanFrom(v, sim.laneTo(lane));
-      if (c.dying[v]) { this.despawn(v); return; }
+      if (c.dying[v]) { this.finish(v); return; }
       ns = this.nextSeg(v);
-      if (ns < 0) { this.despawn(v); return; }
+      if (ns < 0) { this.lose(v); this.finish(v); return; }
     }
     const conn = sim.connToward(lane, ns, c.line[v] >= 0);
     const node = sim.laneTo(lane);
@@ -1040,7 +1061,7 @@ export class Traffic {
     // as in micro; otherwise everyone reaches the window in a single lane)
     let to = conn >= 0 ? this.pickLane(ns, dir, this.segAfter(v, 1), c.line[v] >= 0, sim.conns.cols.to[conn]) : sim.laneToward(ns, dir, ns, 0);
     if (to < 0 && ns === laneSeg(lane)) to = laneId(ns, dir, 0); // U-turn at a dead end
-    if (to < 0 || !sim.net.segs.alive[ns]) { this.despawn(v); return; }
+    if (to < 0 || !sim.net.segs.alive[ns]) { this.lose(v); this.finish(v); return; }
     // queue: a full lane holds the vehicle
     const cap = sim.laneLen(to) / 7.5;
     // queue: wait for room; stuck too long (deadlock far from the camera, where nobody sees), go anyway. Meso
@@ -1334,7 +1355,7 @@ export class Traffic {
       const to = sim.conns.cols.to[conn];
       this.unlink(v);
       c.conn[v] = -1;
-      if (!sim.net.segs.alive[laneSeg(to)]) { this.despawn(v); v = next; continue; }
+      if (!sim.net.segs.alive[laneSeg(to)]) { c.why[v] = End.Lost; this.finish(v); v = next; continue; }
       this.setLaneCount(c.lane[v], -1);
       this.setLaneCount(to, 1);
       c.lane[v] = to; c.s[v] = 0; c.rIdx[v]++;
@@ -1369,7 +1390,7 @@ export class Traffic {
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
       const lane = c.conn[v] >= 0 ? this.sim.conns.cols.to[c.conn[v]] : c.lane[v];
-      if (dead.has(laneSeg(lane)) || (c.lane[v] >= 0 && dead.has(laneSeg(c.lane[v])))) this.despawn(v);
+      if (dead.has(laneSeg(lane)) || (c.lane[v] >= 0 && dead.has(laneSeg(c.lane[v])))) { c.why[v] = End.Lost; this.finish(v); }
     }
     for (const s of segs) { this.segLoad[s * 2] = 0; this.segLoad[s * 2 + 1] = 0; }
     for (const s of segs) for (let k = 0; k < 16; k++) { this.laneCount[s * 16 + k] = 0; this.laneHead[s * 16 + k] = -1; this.laneTail[s * 16 + k] = -1; this.activeLanes.delete(s * 16 + k); }
@@ -1510,7 +1531,7 @@ export class Traffic {
     c.v[v] = nv;
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2);
     c.lcCool[v] -= dt;
-    if (c.dying[v]) { c.fade[v] -= dt * 1.5; if (c.fade[v] <= 0) { this.arrived++; this.despawn(v); } return; }
+    if (c.dying[v]) { c.fade[v] -= dt * 1.5; if (c.fade[v] <= 0) this.finish(v); return; }
     if (c.fade[v] < 1) c.fade[v] = Math.min(1, c.fade[v] + dt * 1.2);
     if (nv < 0.5) c.held[v] += dt; else c.held[v] = 0;
     if (c.s[v] >= L) {
@@ -1847,6 +1868,7 @@ export class Traffic {
     const c = this.veh.cols;
     if (!this.veh.alive[v] || c.line[v] < 0) return;
     this.riders.delete(v);
+    c.why[v] = End.NoTrip;
     if (c.micro[v]) { c.dying[v] = 1; c.line[v] = -1; } else { c.line[v] = -1; this.despawn(v); }
   }
 
