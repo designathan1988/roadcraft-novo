@@ -1,5 +1,5 @@
-// Demolir qualquer coisa: o que estiver sob o cursor (item ou muro, prédio, via) ou tudo dentro
-// de um retângulo arrastado. Consultas só pelo índice espacial da área; um comando só (desfazer).
+// Demolish anything: what is under the cursor (item or wall, building, road) or everything inside
+// a dragged rectangle. Queries only through the area's spatial index; a single command (undo).
 
 import type { Command } from '../core/commands.ts';
 import { RoadJournal } from '../roads/build.ts';
@@ -9,7 +9,7 @@ import type { World } from '../world/world.ts';
 
 export type Target = { kind: 'item'; id: number } | { kind: 'building'; id: number } | { kind: 'seg'; id: number } | null;
 
-/** O que um clique em (x, z) demoliria: item ou muro bem perto, senão o prédio, senão a via. */
+/** What a click at (x, z) would demolish: an item or wall very near, else the building, else the road. */
 export function targetAt(world: World, x: number, z: number): Target {
   const it = world.items.nearest(x, z, 2.5);
   if (it >= 0) return { kind: 'item', id: it };
@@ -20,13 +20,13 @@ export function targetAt(world: World, x: number, z: number): Target {
   return null;
 }
 
-/** Junta um diário de vias/prédios e um de itens num comando só. */
+/** Joins a roads/buildings journal and an items one into a single command. */
 function both(label: string, j: RoadJournal, items: ItemsCommand | null): Command {
   if (!items) return j;
   return { label, apply: () => { j.apply(); items.apply(); }, invert: () => { items.invert(); j.invert(); } };
 }
 
-/** Demole o alvo (já aplicado; o comando volta para registrar). */
+/** Demolishes the target (already applied; the command comes back to be recorded). */
 export function demolishTarget(world: World, t: NonNullable<Target>): { cmd: Command; charge: number } {
   if (t.kind === 'item') {
     const c = new ItemsCommand(world.items, 'remover item');
@@ -46,7 +46,7 @@ function removeSegAndOrphans(world: World, j: RoadJournal, s: number): void {
   for (const n of [rec.a, rec.b]) if (net.nodes.alive[n] && net.nodes.cols.deg[n] === 0) j.removeNode(n);
 }
 
-/** Tudo dentro do retângulo (x0, z0)–(x1, z1): vias pelo meio do trecho, prédios pelo centro, itens pela ponta. */
+/** Everything inside the rectangle (x0, z0)–(x1, z1): roads by the segment's middle, buildings by the centre, items by their start. */
 export function demolishBox(world: World, x0: number, z0: number, x1: number, z1: number): { cmd: Command; count: number; charge: number } | null {
   const ax = Math.min(x0, x1), bx = Math.max(x0, x1), az = Math.min(z0, z1), bz = Math.max(z0, z1);
   const inside = (x: number, z: number) => x >= ax && x <= bx && z >= az && z <= bz;
