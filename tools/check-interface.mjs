@@ -421,6 +421,17 @@ export const SCENARIOS = {
     g.canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: innerWidth / 2, clientY: innerHeight / 2 })); await frames(2);
     check('a double click ends the wall', !g.wallOpen && g.tool === 'barrier', 'wall still open ' + g.wallOpen + ', tool ' + g.tool);
   `,
+  // B48: split by line and curve side show the line from the first click to the cursor
+  'B48-lot-line-preview': `
+    click('[data-cat=build]'); await frames(2);
+    a.lot(1500, 1500, 1540, 1500, 1520, 1540, 1, 2);
+    A.lotLine(); await frames(2);
+    await mapClick(1490, 1520);
+    await g.view(1550, 1520, 0, 70, 140); await frames(2);
+    const c = g.canvas, r = c.getBoundingClientRect();
+    c.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 1, bubbles: true })); await frames(3);
+    check('the line from the first click shows', g.preview.mesh.visible, 'no preview');
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

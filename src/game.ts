@@ -1711,6 +1711,15 @@ export class Game {
   }
 
   private hoverLotTool(hit: THREE.Vector3 | null): void {
+    // split by line, curve side: the line from the first click to the cursor (yellow), or the point to click
+    if (this.lotExtra) {
+      if (!hit) return;
+      const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.7;
+      const p = this.lotExtraPts[0];
+      if (p) this.preview.show({ x0: p[0], z0: p[1], cx: (p[0] + hit.x) / 2, cz: (p[1] + hit.z) / 2, x1: hit.x, z1: hit.z }, 0.4, [0, 1], [H(p[0], p[1]), H(hit.x, hit.z)], true, 0xffd36b);
+      else { this.preview.hide(); this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true); }
+      return;
+    }
     if (this.lotMode === 'edit') { this.showSelection(); return; }
     if (this.lotMode === 'rect') { if (this.lotPts) this.hoverLot(hit); return; }
     if (!hit) return;
