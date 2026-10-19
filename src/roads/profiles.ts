@@ -302,19 +302,27 @@ export const STRIP_WIDTH: Record<StripKind, [number, number]> = {
  * no parking or cycle lane on highways and ramps (priority 4 and up), footways only at the edges.
  */
 export function profileIssues(d: Omit<Profile, 'id'>): ProfileIssue[] {
-  const out: ProfileIssue[] = [];
+  return profileIssueSpots(d).map((x) => x.problem);
+}
+
+/** Each problem of a cross-section with the strips it is about (their indices; empty when it is about the whole
+ *  road), so the editor can point at them (Roadcraft 4.0 ui/roads/profileEditor.ts:451-462, "see"). */
+export function profileIssueSpots(d: Omit<Profile, 'id'>): Array<{ problem: ProfileIssue; strips: number[] }> {
+  const out: Array<{ problem: ProfileIssue; strips: number[] }> = [];
   const st = d.strips;
+  const where = (test: (s: Strip, i: number) => boolean): number[] => st.flatMap((s, i) => (test(s, i) ? [i] : []));
+  const push = (problem: ProfileIssue, strips: number[] = []): void => { out.push({ problem, strips }); };
   const lanes = st.filter((s) => s.kind === 'lane');
-  if (lanes.length === 0) out.push('noLanes');
-  if (lanes.length > MAX_LINES) out.push('maxLanes');
+  if (lanes.length === 0) push('noLanes');
+  if (lanes.length > MAX_LINES) push('maxLanes', where((s) => s.kind === 'lane'));
   const fwd = lanes.filter((s) => (s.dir ?? 1) === 1), back = lanes.filter((s) => s.dir === -1);
-  if ((fwd.length > 0 && fwd.every((s) => s.bus)) || (back.length > 0 && back.every((s) => s.bus))) out.push('busOnly');
+  if ((fwd.length > 0 && fwd.every((s) => s.bus)) || (back.length > 0 && back.every((s) => s.bus))) push('busOnly', where((s) => s.kind === 'lane' && !!s.bus));
   const firstBack = st.findIndex((s) => s.kind === 'lane' && s.dir === -1);
   const lastFwd = st.map((s) => s.kind === 'lane' && (s.dir ?? 1) === 1).lastIndexOf(true);
-  if (firstBack >= 0 && lastFwd > firstBack) out.push('order');
-  if (st.slice(1, -1).some((s) => s.kind === 'sidewalk')) out.push('footways');
-  if (st.reduce((s, x) => s + x.width, 0) > 70) out.push('wide');
-  if (fwd.length > 0 && back.length > 0 && fwd.length !== back.length) out.push('laneBalance');
+  if (firstBack >= 0 && lastFwd > firstBack) push('order', where((s, i) => s.kind === 'lane' && (((s.dir ?? 1) === 1 && i > firstBack) || (s.dir === -1 && i < lastFwd))));
+  if (st.slice(1, -1).some((s) => s.kind === 'sidewalk')) push('footways', where((s, i) => s.kind === 'sidewalk' && i > 0 && i < st.length - 1));
+  if (st.reduce((s, x) => s + x.width, 0) > 70) push('wide');
+  if (fwd.length > 0 && back.length > 0 && fwd.length !== back.length) push('laneBalance', where((s) => s.kind === 'lane'));
   // parking and cycle lanes: walking outwards through other parking/cycle strips reaches the kerb side, not a lane
   const edge = (k: StripKind) => k === 'sidewalk' || k === 'curb' || k === 'shoulder' || k === 'barrier';
   const atKerb = (i: number) => {
@@ -325,10 +333,13 @@ export function profileIssues(d: Omit<Profile, 'id'>): ProfileIssue[] {
     }
     return false;
   };
-  if (st.some((s, i) => (s.kind === 'parking' || s.kind === 'bike') && !atKerb(i))) out.push('parkingSide');
-  if (!d.ring && st.some((s, i) => s.kind === 'median' && (s.flush ? false : !(fwd.length > 0 && back.length > 0 && i > lastFwd && i < firstBack)))) out.push('median');
-  if (st.some((s) => s.width < STRIP_WIDTH[s.kind][0] - 1e-6 || s.width > STRIP_WIDTH[s.kind][1] + 1e-6)) out.push('width');
-  if ((d.priority ?? 0) >= 4 && st.some((s) => s.kind === 'parking' || s.kind === 'bike')) out.push('class');
+  const astray = where((s, i) => (s.kind === 'parking' || s.kind === 'bike') && !atKerb(i));
+  if (astray.length) push('parkingSide', astray);
+  const medians = d.ring ? [] : where((s, i) => s.kind === 'median' && (s.flush ? false : !(fwd.length > 0 && back.length > 0 && i > lastFwd && i < firstBack)));
+  if (medians.length) push('median', medians);
+  const sized = where((s) => s.width < STRIP_WIDTH[s.kind][0] - 1e-6 || s.width > STRIP_WIDTH[s.kind][1] + 1e-6);
+  if (sized.length) push('width', sized);
+  if ((d.priority ?? 0) >= 4 && st.some((s) => s.kind === 'parking' || s.kind === 'bike')) push('class', where((s) => s.kind === 'parking' || s.kind === 'bike'));
   return out;
 }
 

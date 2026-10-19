@@ -123,6 +123,35 @@ const SCENARIOS = {
     const moves = document.querySelectorAll('.inspector .rp-move').length;
     check('a movement chip per pair of roads, named by the turn', moves === 12 && /esquerda|left|direita|right|frente|through/.test(document.querySelector('.inspector .rp-move').textContent), 'chips ' + moves);
   `,
+  // Roadcraft 4.0 ui/roads/profileEditor.ts: opened from a road, template cards, palette, keys, problems, apply
+  'profile-editor': `
+    road(1500, 1500, 1580, 1500);
+    const s = w.roads.nearestSeg(1540, 1500, 3)[0];
+    g.setTool('inspect');
+    g.inspector.pick(1540, 1500);
+    await wait(300);
+    const open = [...document.querySelectorAll('.inspector button')].find((b) => /Editar perfil|Edit profile/.test(b.textContent));
+    check('the road panel opens the editor', !!open, 'no button');
+    open.click();
+    await wait(300);
+    const ed = document.querySelector('.section-editor');
+    check('opened from a road: template cards and an Apply button', ed.querySelectorAll('.rp-card').length > 10 && !!ed.querySelector('[data-action="apply"]'), 'cards ' + ed.querySelectorAll('.rp-card').length);
+    ed.querySelector('[data-palette="laneForward"]').click();
+    await wait(100);
+    check('an unbalanced road shows its problem and cannot be applied', ed.querySelectorAll('.rp-issue').length > 0 && ed.querySelector('[data-action="apply"]').disabled, 'issues ' + ed.querySelectorAll('.rp-issue').length);
+    ed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+    await wait(100);
+    check('Delete removes the picked strip and the road is whole again', ed.querySelectorAll('.rp-issue').length === 0 && !ed.querySelector('[data-action="apply"]').disabled, 'issues ' + ed.querySelectorAll('.rp-issue').length);
+    const card = [...ed.querySelectorAll('.rp-card-main')].find((b) => /Avenida$|Avenue$/.test(b.textContent));
+    card.click();
+    await wait(100);
+    ed.querySelector('[data-action="apply"]').click();
+    await wait(300);
+    const now = w.roads.nearestSeg(1540, 1500, 3)[0];
+    check('Apply gives the road the avenue section (one undo step)', w.roads.segs.cols.profile[now] !== 0 && ed.classList.contains('hidden'), 'profile ' + w.roads.segs.cols.profile[now]);
+    g.commands.undo();
+    check('undo brings the street back', w.roads.segs.cols.profile[w.roads.nearestSeg(1540, 1500, 3)[0]] === 0, 'profile ' + w.roads.segs.cols.profile[w.roads.nearestSeg(1540, 1500, 3)[0]]);
+  `,
   // B50: a street name typed in the inspector can be taken away (an empty name gives the generated one back)
   'street-name-clear': `
     road(1500, 1500, 1700, 1500);
