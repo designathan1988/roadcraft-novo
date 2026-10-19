@@ -416,13 +416,22 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const glassC = mix(glassTint.add(skyRefl.mul(refl)), wallC.mul(revealK.mul(float(1).sub(night.mul(0.6)))), reveal);
   // the roller over the pane where it is down (near and mid; far it is in the average)
   const rollAmt = roller.mul(win).mul(detail).mul(float(1).sub(reveal));
-  const albedo = mix(mix(mix(wallFinal, glassC.mul(mix(float(1), float(0.6), darkPane)), winAmt), rollerC, rollAmt), signC, signMask.mul(detail));
+  // the 4.0 frame (kit.ts:239-257) painted where the detail layer does not stand it: the border 4.5 % of the opening,
+  // a mullion in the middle and a transom at 68 %, in the trim; seen at the pane's depth (the recess's parallax)
+  const px = select(isGlass.greaterThan(0.5), fx, gx), py = select(isGlass.greaterThan(0.5), fy, gy);
+  const fxw = px.sub(ww).div(float(1).sub(ww.mul(2)).max(0.05)), fyw = py.sub(wLow).div(wHigh.sub(wLow).max(0.05));
+  const ax2 = fwidth(fxw).add(1e-4), ay2 = fwidth(fyw).add(1e-4);
+  const edgeBar = float(1).sub(band(float(0.045), float(0.955), fxw, ax2).mul(band(float(0.045), float(0.955), fyw, ay2)));
+  const crossBar = max(band(float(0.482), float(0.518), fxw, ax2), band(float(0.662), float(0.698), fyw, ay2));
+  const paneFrame = max(edgeBar, crossBar).mul(win).mul(plainWin).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt))
+    .mul(clamp(float(1.6).sub(max(ax2, ay2).mul(12)), 0, 1));
+  const albedo = mix(mix(mix(mix(wallFinal, glassC.mul(mix(float(1), float(0.6), darkPane)), winAmt), rollerC, rollAmt), trimC, paneFrame), signC, signMask.mul(detail));
   m.colorNode = vec4(albedo, 1);
-  m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
+  m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt)).mul(float(1).sub(paneFrame)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
 
   const rough0 = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
   const rough = mix(rough0, finA.w, hasFinE);
-  m.roughnessNode = mix(mix(rough, float(0.12), winAmt.mul(float(1).sub(reveal))), float(0.6), rollAmt);
+  m.roughnessNode = mix(mix(rough, float(0.12), winAmt.mul(float(1).sub(reveal))), float(0.6), max(rollAmt, paneFrame));
   m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), look.z.mul(mix(float(1), finN.w, look.w)).mul(hasFinE)).mul(float(1).sub(winAmt)).mul(float(1).sub(rollAmt));
   // the finish's relief (off the glass), in the face's frame
   const nm = finN.xyz.mul(2).sub(1);

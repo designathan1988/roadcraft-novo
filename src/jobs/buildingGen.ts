@@ -1252,7 +1252,7 @@ function windowDetailWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx:
   // sill in the trim; the frame 3 cm in front of the glass; the sill 7 cm proud with a drip under its front.
   const reveal = shadeHex(mixHex(0xe4dfd4, trim, 0.35), WIN_REVEAL_SHADE), head = shadeHex(reveal, 0.8), inner = shadeHex(mixHex(0xe4dfd4, trim, 0.35), 0.92);
   const sillCol = mixHex(0xe4dfd4, trim, 0.15);
-  const frameCol = FRAME_COLORS[style] ?? 0xe6e6e2;
+  const frameCol = (ARCHES[style] ?? ARCHES[0]).trim;
   const molded = (ARCHES[style] ?? ARCHES[0]).frame, moldCol = mixHex(0xeeeae2, trim, 0.4);
   const D = WIN_REVEAL;
   const NX = nx(f, nxl, nzl), NZ = nz(f, nxl, nzl), TX = nx(f, dx, dz), TZ = nz(f, dx, dz);
@@ -1283,12 +1283,16 @@ function windowDetailWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx:
       mb.curU = 0;
       blank(mb);
       // the frame: a bar round the pane 3 cm in front of it, a mullion in a wide pane, a transom in a tall one
-      const t = 0.06, fo = -D;
-      const bar = (u0: number, u1: number, ya: number, yb2: number) => ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0, u1, ya, yb2, 0.03, frameCol, 1, fo);
-      bar(a0, a0 + t, yb, yt); bar(a1 - t, a1, yb, yt); if (!cutT) bar(a0, a1, yt - t, yt);
-      if (!cutB) bar(a0, a1, yb, yb + t);
-      if (a1 - a0 > 1.1) { const m = (a0 + a1) / 2; bar(m - 0.03, m + 0.03, yb, yt); }
-      if (yt0 - yb0 > 1.7) { const y = yb0 + (yt0 - yb0) * 0.72; if (y - 0.03 > yb && y + 0.03 < yt) bar(a0, a1, y - 0.03, y + 0.03); }
+      // 4.0 frame (kit.ts:239-257, buildingMesh.ts:1631): 6 cm deep in front of the pane, its bars 4.5 % of the
+      // opening (the border with its inner sides, a mullion in the middle and a transom at 68 % of the height, 80 %
+      // as thick), in the trim
+      const tw = FRAME_BAR * (a1 - a0), th = FRAME_BAR * (yt0 - yb0), fo = -D;
+      const bar = (u0: number, u1: number, ya: number, yb2: number, faces: number) => ledge(mb, f, ax, az, dx, dz, nxl, nzl, u0, u1, ya, yb2, 0.06, frameCol, faces, fo);
+      bar(a0, a0 + tw, yb, yt, 1 | 8); bar(a1 - tw, a1, yb, yt, 1 | 8);
+      if (!cutT) bar(a0 + tw, a1 - tw, yt - th, yt, 1 | 4);
+      if (!cutB) bar(a0 + tw, a1 - tw, yb, yb + th, 1 | 2);
+      { const m = (a0 + a1) / 2, h = tw * 0.4; bar(m - h, m + h, Math.max(yb, yb0 + th), Math.min(yt, yt0 - th), 1); }
+      { const y = yb0 + (yt0 - yb0) * 0.68, h = th * 0.4; if (y - h > yb && y + h < yt) bar(a0 + tw, a1 - tw, y - h, y + h, 1); }
       // the sill: 7 cm out past the wall, 6 cm thick, with its drip
       if (!cutB && yb - y0 > 0.25) ledge(mb, f, ax, az, dx, dz, nxl, nzl, a0 - 0.07, a1 + 0.07, yb - 0.06, yb, 0.07, sillCol, LEDGE_SILL | 8);
       // a moulded surround in the styles that have one
@@ -1317,6 +1321,8 @@ function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
 
 /** Faces de uma peça saliente: 1 frente, 2 topo, 4 base, 8 pontas. */
 const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4, LEDGE_JAMB = 1 | 8;
+/** 4.0 FRAME_BAR (kit.ts:240): a window frame's bar, as a share of the opening. */
+export const FRAME_BAR = 0.045;
 /** Roadcraft 4.0 storey band and cornice (BAND_OUT, BAND_H, CORNICE_OUT) and plinth (PLINTH_GROW, PLINTH_MATERIAL). */
 const BAND_OUT = 0.07, BAND_H = 0.22, CORNICE_OUT = 0.16, PLINTH_GROW = 0.12, PLINTH_COL = 0x7f786d;
 /** Depth of a window's opening (Roadcraft 4.0 REVEAL) and how much light its reveals keep (REVEAL_SHADE). */

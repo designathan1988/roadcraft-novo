@@ -198,3 +198,24 @@ test('telhado 4: pitched roofs have the 4.0 body (18 cm fascia, soffit, ridge ca
   assert.ok(Math.abs(lowest - (6 - 0.45 * slope - 0.18)) < 1e-3, `fascia bottom ${lowest}`);
   assert.ok(Math.abs(highest - (6 + 2.5 + 0.07)) < 1e-3, `ridge cap ${highest}`);
 });
+
+test('janela 1b: every pane has the 4.0 frame in front of it (border, mullion, transom at 68 %)', () => {
+  const { heights, b } = block();
+  const md = buildBuildings(heights, b, 0, 0, 256, -1)!, pd = positions(md);
+  const glass = triangles(md, pd).filter((g) => (md.color[md.index[g.t] * 4 + 3] & 15) === BMAT.WinGlass && g.n[1] === 0 || (md.color[md.index[g.t] * 4 + 3] & 15) === BMAT.WinGlass && Math.abs(g.n[1]) < 0.1);
+  // frame vertices: 6 cm in front of a pane (the frame's front face), by plane
+  const frames = pd.filter((_, i) => (md.color[i * 4 + 3] & 15) === BMAT.Plain);
+  let checked = 0;
+  const missing: string[] = [];
+  for (let k = 0; k < glass.length; k += 2) {
+    const g = glass[k];
+    const ys = [g.a[1], g.b[1], g.c[1]], y0 = Math.min(...ys), y1 = Math.max(...ys);
+    if (y1 - y0 < 1) continue;
+    const ty = y0 + (y1 - y0) * 0.68, c: V3 = [(g.a[0] + g.b[0] + g.c[0]) / 3, ty, (g.a[2] + g.b[2] + g.c[2]) / 3];
+    checked++;
+    const hit = frames.some((p) => Math.abs(p[1] - ty) < 0.02 * (y1 - y0) + 0.008 && Math.abs(Math.abs(dot(g.n, p) - g.d) - 0.06) < 0.012 && Math.hypot(p[0] - c[0], p[2] - c[2]) < 2);
+    if (!hit && missing.length < 5) missing.push(`pane at ${c.map((v) => v.toFixed(1)).join(', ')} without its transom`);
+  }
+  assert.ok(checked > 50, `${checked} panes`);
+  assert.deepEqual(missing, []);
+});
