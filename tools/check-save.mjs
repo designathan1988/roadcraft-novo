@@ -417,6 +417,19 @@ const SCENARIOS = {
     const r = await within(g.load(), 30000);
     check('the road built before the key is there', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500) + ', toasts: ' + toasts.join(' | '));
   `]])),
+  // A generated city, saved and opened again, is the same city: same roads and buildings, nothing repaired on opening
+  'generated-reopens-same': `
+    const r = await within(g.generatedCity(), 240000);
+    check('the city is generated', r === 'returned' && !g.busy, 'generatedCity() ' + r);
+    g.growth.rate = 0;
+    const segs = w.roads.segs.size, nodes = w.roads.nodes.size, builds = w.buildings.size;
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    toasts.length = 0;
+    await g.load();
+    check('it opens the same', w.roads.segs.size === segs && w.roads.nodes.size === nodes && w.buildings.size === builds,
+      'segments ' + segs + ' → ' + w.roads.segs.size + ', nodes ' + nodes + ' → ' + w.roads.nodes.size + ', buildings ' + builds + ' → ' + w.buildings.size);
+    check('nothing is repaired on opening', !toasts.some((m) => /reparado|repaired/.test(m)) && g.unsaved === false, 'toasts: ' + toasts.join(' | ') + ', unsaved=' + g.unsaved);
+  `,
   // A city just opened has nothing unsaved (opening another one does not ask to discard anything)
   'opened-is-saved': `
     road(1500, 1500, 1700, 1500);
