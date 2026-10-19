@@ -425,10 +425,14 @@ export class CellLayer {
       // already drawn in an earlier frame: the data is on the GPU
       if (!u.freed) { if (u.drawnAt === undefined) u.drawnAt = this.frame; else if (this.frame - u.drawnAt >= 2) { freeCpuCopy(mesh.geometry); u.freed = true; } }
       if (!this.shown.has(mesh)) {
-        u.since = u.instant || this.shown.size === 0 ? -1e9 : now;
-        u.instant = false;
         const i = this.fading.findIndex((f) => f.mesh === mesh);
-        if (i >= 0) { this.fading[i] = this.fading[this.fading.length - 1]; this.fading.pop(); }
+        if (i >= 0) {
+          // it comes back while fading out: it goes on from how visible it still was (restarting from 0 jumped)
+          const left = Math.max(0, 1 - (now - this.fading[i].t0) / FADE);
+          u.since = now - left * FADE;
+          this.fading[i] = this.fading[this.fading.length - 1]; this.fading.pop();
+        } else u.since = u.instant || this.shown.size === 0 ? -1e9 : now;
+        u.instant = false;
       }
       if (lostOutgoing) u.since = -1e9;
       u.fade = Math.min(1, (now - (u.since ?? -1e9)) / FADE);

@@ -587,3 +587,12 @@ test('E44: when the outgoing mesh is thrown away mid-fade, the incoming one show
   assert.equal(fade(b), 1, `the incoming mesh is at ${fade(b).toFixed(2)}: dithered holes where the outgoing one was`);
 });
 
+test('E45: a mesh that comes back while fading out goes on from where it was', () => {
+  const { show, mesh, fade } = fadeRig();
+  const a = mesh(1), b = mesh(2);
+  show([a], 10);
+  show([b], 10.5); // a starts fading out
+  show([a, b], 10.6); // a comes back 0.1 s later: it was still ~71% visible
+  assert.ok(fade(a) > 0.6, `the returning mesh restarted its fade at ${fade(a).toFixed(2)} (a visible jump)`);
+});
+
