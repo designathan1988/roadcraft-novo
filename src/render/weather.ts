@@ -9,7 +9,7 @@ import { colorOnly } from './post.ts';
 
 const {
   uniform, vec2, vec3, vec4, float, mix, smoothstep, clamp, positionWorld, positionLocal, time, mx_fractal_noise_float,
-  instanceIndex, hash, fract, cameraPosition, normalize, cross, sRGBTransferEOTF, attribute, sin,
+  instanceIndex, hash, fract, cameraPosition, normalize, cross, sRGBTransferEOTF, attribute, sin, step, cameraProjectionMatrix,
 } = T;
 
 /** 0 céu limpo .. 1 encoberto. */
@@ -101,7 +101,12 @@ export class Weather {
     // are as spread as all of them
     // gota colada na câmera vira um risco enorme: some perto
     const near = smoothstep(float(3), float(8), cameraPosition.distance(center));
-    rm.colorNode = vec4(0.75, 0.78, 0.82, near.mul(0.32));
+    // isometric (the game centres the box on what is looked at): the box covers a close view; a wider view would show
+    // it as a block of rain in the middle (the drops are under a pixel there anyway), so the rain fades out
+    const ortho = step(float(0.5), cameraProjectionMatrix.element(3).element(3));
+    const viewW = float(2).div(cameraProjectionMatrix.element(0).element(0));
+    const fit = mix(float(1), smoothstep(float(RAIN_BOX * 1.1), float(RAIN_BOX * 0.7), viewW), ortho);
+    rm.colorNode = vec4(0.75, 0.78, 0.82, near.mul(0.32).mul(fit));
     rm.fog = true;
     const rain = this.rain = new THREE.Mesh(g, rm);
     rain.frustumCulled = false;
@@ -211,7 +216,10 @@ export class Weather {
   /** Raio no ponto (x, z) do chão (clique do jogador). */
   strikeAt(eye: THREE.Vector3, x: number, z: number, ground: number): void { this.strike(eye, ground, false, [x, z]); }
 
-  /** Muda o tempo devagar; molha e seca o chão. */
+  /**
+   * Muda o tempo devagar; molha e seca o chão. `eye`: where the rain box is centred (the eye; in the isometric view,
+   * the point looked at).
+   */
   update(dt: number, gameDt: number, eye: THREE.Vector3, ground = 0, fog?: THREE.Color): void {
     this.eyeU.value.copy(eye);
     // sem chuva, os riscos nem são desenhados; acima da camada, as nuvens também não

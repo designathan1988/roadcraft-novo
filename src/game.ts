@@ -624,7 +624,8 @@ export class Game {
     if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.busy && !this.saveBlocked) void this.save(true); }
     const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
-    this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
+    // the rain box round the eye; isometric: round what is looked at (round the perspective eye it was a block of rain)
+    this.weather.update(dt, dt * this.clockSpeed * 60, this.rig.mode === 'iso' ? this.rig.target : this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
     setTimeOfDay(this.parts, this.hour, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
     this.particles.update(dt, this.rig.eye);
     this.textSigns.update(this.rig.eye);
