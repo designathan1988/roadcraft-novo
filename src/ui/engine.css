@@ -66,8 +66,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 #loading-text { color: #a3b4b0; max-width: 520px; text-align: center; }
 #loading.error #loading-text { color: #ffb3aa; }
 
-/* The F9 panel. */
-.health { position: absolute; top: calc(12px + var(--v-hud-h) + 10px); right: 12px; z-index: 8; width: 380px; max-height: 60vh; overflow: auto; padding: 12px 14px; pointer-events: auto;
+/* The developer's F9 panel: on the left, clear of the inspector on the right. */
+.health { position: absolute; top: calc(12px + var(--v-hud-h) + 10px); left: 12px; z-index: 8; width: 420px; max-height: 60vh; overflow: auto; padding: 12px 14px; pointer-events: auto;
   background: var(--v-bg); border: 1px solid var(--v-line); border-radius: 16px; box-shadow: var(--v-shadow); color: var(--v-text); }
 .health.hidden { display: none; }
 .health h3 { margin: 0 0 8px; font-size: 15px; }
@@ -75,6 +75,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .health-status.ok { color: var(--v-accent); } .health-status.warn { color: #ffc864; } .health-status.bad { color: var(--v-danger); }
 .health-list { font-size: 12px; color: var(--v-muted); display: grid; gap: 3px; margin-bottom: 10px; }
 .health .row { display: flex; gap: 6px; }
+.health-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.health-list > div { overflow-wrap: anywhere; }
 
 /* The start screen (StartMenu). */
 .v2-start { position: fixed; inset: 0; z-index: 25; display: grid; place-items: center; pointer-events: auto;

@@ -408,4 +408,17 @@ export const ENGINE_EN: Record<string, string> = {
   'game.toast.demolished.other': 'Demolished: {count} things',
   'game.toast.corruptKept': '; the original save was kept intact in "{where}"',
   'game.toast.refunded': ' · refunded {money}',
+  // the key table (src/ui/keys.ts)
+  'keys.ctrlShiftZ': 'Ctrl + Shift + Z',
+  'keys.ctrlO': 'Ctrl + O',
+  'keys.ctrlD': 'Ctrl + D',
+  'keys.shiftQE': 'Shift + Q / E',
+  'keys.do.save': 'Save',
+  'keys.do.open': 'Open a map saved to a file',
+  'keys.do.duplicate': 'Duplicate alongside the road shown in the inspector',
+  'keys.do.home': 'Back to the view the city opened with',
+  'keys.do.quarterTurn': 'Turn a quarter',
+  'keys.do.changes': 'Recent changes to the world (developer)',
+  'keys.section.tools': 'Tools',
+  'keys.section.game': 'Shortcuts',
 };

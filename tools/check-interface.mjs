@@ -44,6 +44,7 @@ const road = (ax, az, bx, bz, profile = 0) => { const r = a.road(ax, az, bx, bz,
 w.unlimited = true;
 `;
 
+export { PRELUDE };
 export const SCENARIOS = {
   // B16: the road height stepper shows the height the road is drawn at
   'B16-road-height': `
@@ -476,6 +477,80 @@ export const SCENARIOS = {
     await g.view(1500, 1500, 0, 50, 120); await wait(1500);
     check('no birds over a treeless block', typeof g.green === 'number' && g.green < 0.2, 'green ' + g.green);
   `,
+  // B34: the help (F1) lists every key the game answers, from the key table
+  'B34-help-lists-keys': `
+    key('F1'); await frames(2);
+    const lines = Q('.v2-pop').innerText.split(String.fromCharCode(10)).map((l) => l.trim());
+    const want = ['Ctrl + O', 'Ctrl + D', 'Home', 'Shift + Q / E', 'U', 'M', 'X', 'G', 'N', '2', '0', 'K', 'V', 'C', 'P'];
+    const missing = want.filter((k) => !lines.includes(k));
+    check('every key is listed', missing.length === 0, 'missing ' + missing.join(', '));
+    check('no bundle of letters', !lines.includes('1 Z H T O B I'), 'still lists "1 Z H T O B I"');
+    const save = lines[lines.indexOf('Ctrl + S') + 1];
+    check('Ctrl + S is Save (not Save map, which exports)', /^(Salvar|Save)$/.test(save || ''), 'Ctrl + S says "' + save + '"');
+  `,
+  // B38: Enter on a button clicked before does not click it again
+  'B38-enter-no-reclick': `
+    const b = Q('[data-cat=roads]');
+    b.focus();
+    const e = new KeyboardEvent('keydown', { code: 'Enter', key: 'Enter', bubbles: true, cancelable: true });
+    b.dispatchEvent(e);
+    check('Enter does not activate the focused button', e.defaultPrevented, 'the browser would click it again');
+    check('the button lets the focus go', document.activeElement !== b, 'still focused');
+  `,
+  // The 4.0 keys: Ctrl+O opens a map file, Ctrl+D duplicates the inspected road, Home goes back to the opening view,
+  // Shift+Q / Shift+E turn a quarter
+  'keys-from-4.0': `
+    road(1400, 1500, 1700, 1500);
+    let picker = 0;
+    const click0 = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function () { if (this.type === 'file') picker++; else click0.call(this); };
+    key('KeyO', { ctrlKey: true }); await frames(2);
+    HTMLInputElement.prototype.click = click0;
+    check('Ctrl+O opens the map file picker', picker === 1, 'picker opened ' + picker + ' times');
+    click('[data-cat=info]'); await frames(2);
+    { const sc = w.roads.segs.cols, nc = w.roads.nodes.cols; const k = w.roads.segs.alive.indexOf(1); g.inspector.pick((nc.x[sc.a[k]] + nc.x[sc.b[k]]) / 2, (nc.z[sc.a[k]] + nc.z[sc.b[k]]) / 2); } await frames(4);
+    const segs = w.roads.segs.size;
+    key('KeyD', { ctrlKey: true }); await frames(4);
+    check('Ctrl+D duplicates the inspected road', w.roads.segs.size > segs, 'segments ' + segs + ' → ' + w.roads.segs.size + ', inspector ' + g.inspector.isOpen + ' seg ' + g.inspector.seg + ', toasts ' + QA('.v2-toast').map((e) => e.textContent).join(' / '));
+    key('Escape'); key('Escape'); await frames(2);
+    const home = [g.rig.target.x, g.rig.target.z, g.rig.dist];
+    await g.view(3000, 3000, 30, 40, 200);
+    key('Home'); await wait(600);
+    check('Home goes back to the opening view', Math.hypot(g.rig.target.x - home[0], g.rig.target.z - home[1]) < 5, 'target ' + g.rig.target.x.toFixed(0) + ', ' + g.rig.target.z.toFixed(0) + ' (home ' + home[0].toFixed(0) + ', ' + home[1].toFixed(0) + ')');
+    const y0 = g.rig.yaw;
+    key('KeyQ', { shiftKey: true }); keyUp('KeyQ', { shiftKey: true }); await wait(3000);
+    const d = ((g.rig.yaw - y0) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+    check('Shift+Q turns a quarter', Math.abs(Math.abs(d) - Math.PI / 2) < 0.05, 'turned ' + (d * 180 / Math.PI).toFixed(1) + '°');
+  `,
+  // B42: the health panel and the worst case are developer tools, out of the player's interface
+  'B42-dev-tools-hidden': `
+    const hb = byText('.v2-hud button', 'Saúde do jogo|Game health');
+    check('no health button in the player top bar', !hb || hb.hidden, 'the health button shows');
+    key('F9'); await frames(2);
+    check('F9 does nothing for the player', !Q('.health') || Q('.health').classList.contains('hidden'), 'the health panel opened');
+    click('[data-pop=menu]'); await frames(2);
+    check('no worst case in the menu', !byText('.v2-pop .v2-row', 'pior caso|worst case'), 'the menu has the worst case test');
+  `,
+  // B30 and the 4.0 panel: for a developer, F9 opens health with World and State tabs, refreshed while open, clear of the inspector
+  'B30-health-panel-dev': { query: '?vazio&hora=11&workers=3&dev', script: `
+    road(1400, 1500, 1700, 1500);
+    click('[data-cat=info]'); await frames(2);
+    g.inspector.pick(1450, 1500); await frames(4);
+    key('F9'); await frames(2);
+    const p = Q('.health');
+    check('F9 opens the health panel', p && !p.classList.contains('hidden'), 'not open');
+    const tabs = QA('.health [data-tab]').map((b) => b.dataset.tab).join(',');
+    check('it has Health, World and State tabs', tabs === 'health,world,state', 'tabs ' + tabs);
+    const pr = p.getBoundingClientRect(), ir = Q('.v2-side').getBoundingClientRect();
+    check('it does not cover the inspector', ir.width === 0 || pr.right <= ir.left || pr.left >= ir.right, 'panel ' + pr.left.toFixed(0) + '-' + pr.right.toFixed(0) + ', inspector ' + ir.left.toFixed(0) + '-' + ir.right.toFixed(0));
+    click(Q('.health [data-tab=state]')); await frames(2);
+    check('State shows the tool', /inspect/.test(Q('.health-list').textContent), Q('.health-list').textContent.slice(0, 120));
+    key('F9'); await frames(2);
+    key('F8'); await frames(2);
+    check('F8 opens it on the world changes', Q('.health [data-tab=world]').classList.contains('on') && /segments/.test(Q('.health-list').textContent), Q('.health-list').textContent.slice(0, 120));
+    road(1400, 1600, 1700, 1600); await wait(1300);
+    check('the world tab follows the edits while open', Q('.health-list').textContent.includes('segments · ' + w.roads.segs.size), Q('.health-list').textContent.slice(0, 80));
+  ` },
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
@@ -491,35 +566,40 @@ export const SCENARIOS = {
   `,
 };
 
-const pick = process.argv.slice(2);
-const names = pick.length ? pick : Object.keys(SCENARIOS);
-let failed = 0;
-for (const name of names) {
-  const bodies = SCENARIOS[name];
-  if (!bodies) { console.log(`unknown scenario ${name}`); failed++; continue; }
-  // a scenario is one session, or several sessions one after the other over the same folder (closing and reopening)
-  const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-ui-'));
-  const checks = [];
-  for (const body of Array.isArray(bodies) ? bodies : [bodies]) {
-    const query = typeof body === 'object' ? body.query : '?vazio&hora=11&workers=3';
-    const code = typeof body === 'object' ? body.script : body;
-    const script = `(async()=>{${PRELUDE}\ntry {${code}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
-    const lines = await new Promise((resolve) => {
-      const out = [];
-      const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), query, script],
-        { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '300' } });
-      p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
-      p.on('exit', () => resolve(out));
-    });
-    const got = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
-    if (!got.includes('END')) got.push('FAILED the session did not finish (hung or crashed) after: ' + (got[got.length - 1] ?? 'nothing'));
-    checks.push(...got.filter((c) => c !== 'END'));
+// run only when called as a program (a test may import the scenarios to check them)
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+
+async function main() {
+  const pick = process.argv.slice(2);
+  const names = pick.length ? pick : Object.keys(SCENARIOS);
+  let failed = 0;
+  for (const name of names) {
+    const bodies = SCENARIOS[name];
+    if (!bodies) { console.log(`unknown scenario ${name}`); failed++; continue; }
+    // a scenario is one session, or several sessions one after the other over the same folder (closing and reopening)
+    const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-ui-'));
+    const checks = [];
+    for (const body of Array.isArray(bodies) ? bodies : [bodies]) {
+      const query = typeof body === 'object' ? body.query : '?vazio&hora=11&workers=3';
+      const code = typeof body === 'object' ? body.script : body;
+      const script = `(async()=>{${PRELUDE}\ntry {${code}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
+      const lines = await new Promise((resolve) => {
+        const out = [];
+        const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), query, script],
+          { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '300' } });
+        p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
+        p.on('exit', () => resolve(out));
+      });
+      const got = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
+      if (!got.includes('END')) got.push('FAILED the session did not finish (hung or crashed) after: ' + (got[got.length - 1] ?? 'nothing'));
+      checks.push(...got.filter((c) => c !== 'END'));
+    }
+    const bad = checks.filter((c) => c.startsWith('FAILED'));
+    failed += bad.length;
+    console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
+    for (const c of checks) console.log('  ' + c);
+    fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 });
   }
-  const bad = checks.filter((c) => c.startsWith('FAILED'));
-  failed += bad.length;
-  console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
-  for (const c of checks) console.log('  ' + c);
-  fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 });
+  console.log(failed ? `interface check: ${failed} FAILED` : 'interface check: ok');
+  process.exit(failed ? 1 : 0);
 }
-console.log(failed ? `interface check: ${failed} FAILED` : 'interface check: ok');
-process.exit(failed ? 1 : 0);

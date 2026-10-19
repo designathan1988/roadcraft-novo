@@ -61,11 +61,13 @@ export const SCENES = {
 const names = process.argv.slice(3).length ? process.argv.slice(3) : Object.keys(SCENES);
 const [first, ...rest] = names;
 const lang = names.includes('ingles') && names.length === 1 ? '&lang=en' : '';
+// the health panel is a developer's tool: its photo opens the game with ?dev
+const dev = names.length === 1 && names[0] === 'saude' ? '&dev' : '';
 const env = {
   ...process.env, CIDADE_W: '1920', CIDADE_H: '1080', CIDADE_SETTLE: '2',
   CIDADE_SEQ: JSON.stringify(rest.map((n) => [path.join(out, `${n}.png`), SCENES[n]])),
 };
 delete env.ELECTRON_RUN_AS_NODE;
-const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first}.png`), first === 'inicio' ? '?mapa=10&limpo&hora=11' : `?cidade&mapa=10&limpo&hora=11&cam=0,0,35,32,260${lang}`, SCENES[first]],
+const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first}.png`), first === 'inicio' ? '?mapa=10&limpo&hora=11' : `?cidade&mapa=10&limpo&hora=11&cam=0,0,35,32,260${lang}${dev}`, SCENES[first]],
   { cwd: root, env, stdio: 'inherit' });
 p.on('exit', (code) => process.exit(code ?? 0));

@@ -133,6 +133,16 @@ export class Game {
   /** A wall is being traced with the barrier tool (its first point was clicked). */
   private wallOpen = false;
   private health!: HealthPanel;
+  /** The developer panels (F8, F9, the worst case test): ?dev, roadcraft.dev = 1 in the browser's storage, or the dev server. */
+  private readonly developer = ((): boolean => {
+    let stored = false;
+    try { stored = localStorage.getItem('roadcraft.dev') === '1'; } catch { /* no storage */ }
+    return stored || new URLSearchParams(location.search).has('dev') || !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+  })();
+  /** The latest edits (the health panel's World tab): when, what. */
+  private changesLog: Array<[number, string]> = [];
+  /** The view the city opened with (Home goes back to it). */
+  private homeView: Float64Array | null = null;
   private creator!: Creator;
   private lineSel = 0;
   private linesSent = -1;
@@ -374,7 +384,8 @@ export class Game {
       terminal: (on) => { this.transitTerminal = on; },
       itemRemove: (on) => { this.itemRemove = on; },
       cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
-      health: () => this.health.toggle(),
+      health: () => { if (this.developer) this.health.toggle(); },
+      developer: () => this.developer,
       environment: () => ({ water: { ...this.waterCtl }, weather: this.weatherCtl ? { ...this.weatherCtl } : null, fog: fogLevel.value }),
       showImpossible: () => {
         // the next one after the last visited (the set is small: only the nodes under 25°)
@@ -415,6 +426,8 @@ export class Game {
     });
     this.commands.onPush = (c) => {
       const l = c.label;
+      this.changesLog.unshift([Date.now(), l]);
+      if (this.changesLog.length > 40) this.changesLog.pop();
       this.ambient.sfx(l.startsWith('demolir') || l.startsWith('remover') || l.startsWith('tirar') || l.startsWith('apagar') ? 'demolish'
         : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place'); // not for the player: undo labels pick the sound (B60)
     };
@@ -520,13 +533,13 @@ export class Game {
     if (params.has('tempestade')) this.settings.weather = 'tempestade';
     // the address's photo parameters hold for this run only: the player's options keep their own values
     keepOverAddress(asStored, this.settings);
-    this.health = new HealthPanel(document.getElementById('hud')!);
+    this.health = new HealthPanel(document.getElementById('hud')!, { world: () => this.healthWorld(), state: () => this.healthState() });
     this.creator = new Creator({ apply: (d, fl) => this.applyDesign(d, fl) });
     this.hud.buildingSlot.append(this.creator.el);
     followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
     this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
-      [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.testCity(); }],
+      !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.testCity(); }],
         [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]]);
     await this.applySettings(this.settings, false);
     await renderer.compileAsync(scene, this.rig.persp);
@@ -566,6 +579,7 @@ export class Game {
       });
     }
     await this.settle();
+    this.homeView ??= this.rig.state();
     status.value = 'pronto';
   }
 
@@ -1046,6 +1060,19 @@ export class Game {
       save: () => void this.save(),
       help: () => this.hud.toggleHelp(),
       health: () => this.health.toggle(),
+      changes: () => this.health.show('world'),
+      developer: () => this.developer,
+      openMap: () => this.hud.openFile(),
+      duplicate: () => {
+        const s = this.inspector.isOpen ? this.inspector.seg : -1;
+        const j = s >= 0 ? duplicateRoad(this.world, s) : null;
+        if (!j) return;
+        if (typeof j === 'string') { this.hud.toast(loose(j)); return; }
+        if (!j.empty && j.settle()) this.commands.push(j);
+      },
+      home: () => { if (this.homeView) this.rig.restore(this.homeView); },
+      // as Q (−1) or E (+1), a quarter at once
+      quarterTurn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 2),
       pause: () => this.setSpeed(this.paused ? this.simSpeed : 0),
       nextSpeed: () => this.setSpeed(this.paused ? this.simSpeed : this.simSpeed === 1 ? 2 : this.simSpeed === 2 ? 4 : 1),
       toggleIso: () => this.setView(this.rig.mode === 'iso' ? 'persp' : 'iso'),
@@ -1562,6 +1589,32 @@ export class Game {
     this.preview.showCircle(col.x[id], y, col.z[id], Math.hypot(col.w[id], col.d[id]) / 2 + 2, true);
   }
 
+  /** The health panel's World tab: the latest edits and what the world holds now. */
+  private healthWorld(): Array<[string, string]> {
+    const w = this.world, now = Date.now();
+    let dirty = 0;
+    for (let i = 0; i < w.saveDirty.length; i++) dirty += w.saveDirty[i];
+    return [
+      ['buildings', String(w.buildings.size)], ['segments', String(w.roads.segs.size)], ['nodes', String(w.roads.nodes.size)],
+      ['items', String(w.items.size)], ['impossible nodes', String(w.impossible.count)], ['lines', String(this.transit.lines.length)],
+      ['unsaved tiles', String(dirty)], ['jobs idle', String(this.pool.isIdle())],
+      ...this.changesLog.slice(0, 20).map(([at, label]): [string, string] => [`${((now - at) / 1000).toFixed(0)} s`, label]),
+    ];
+  }
+
+  /** The health panel's State tab: the game's state now. */
+  private healthState(): Array<[string, string]> {
+    const r = this.rig, st = this.simStats?.type === 'stats' ? this.simStats : null;
+    return [
+      ['tool', this.tool], ['lot mode', this.lotMode], ['selected building', String(this.selected)], ['inspector', this.inspector.isOpen ? `segment ${this.inspector.seg}` : 'closed'],
+      ['paused', String(this.paused)], ['speed', String(this.simSpeed)], ['clock', `${this.hour.toFixed(2)} h ×${this.clockSpeed}`], ['sky', this.skyMode],
+      ['camera', `${r.mode} ${r.target.x.toFixed(0)}, ${r.target.z.toFixed(0)} · ${r.dist.toFixed(0)} m · yaw ${(r.yaw * 180 / Math.PI).toFixed(0)}°`],
+      ['undo / redo', `${this.commands.canUndo} / ${this.commands.canRedo}`], ['unsaved', String(this.unsaved)], ['save blocked', String(this.saveBlocked)],
+      ['money', this.world.unlimited ? '∞' : String(Math.round(this.world.money))],
+      ['simulation', st ? `${st.cars} cars · ${st.micro} near · ${st.peds} pedestrians` : '—'],
+    ];
+  }
+
   /** Follows the vehicle nearest the centre of the screen, or lets go. */
   private toggleFollow(): void {
     if (this.vehicles.follow) { this.vehicles.follow = null; return; }
@@ -2033,7 +2086,7 @@ export class Game {
     this.generating = false;
     this.hud.hideLoading();
     this.busy = false;
-    if (err === null) { this.saveBlocked = false; return; }
+    if (err === null) { this.saveBlocked = false; this.homeView = this.rig.state(); return; }
     console.error(`${what} failed:`, err);
     this.saveBlocked = true;
     this.hud.toast(t('game.toast.flowFailed', { what, message: (err as Error)?.message ?? String(err) }));

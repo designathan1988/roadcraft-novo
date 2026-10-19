@@ -1,37 +1,71 @@
-// Game health (F9): errors from the page and the workers, and slow frames in the last 30 s, with what the player
-// was doing. Keeps only a short list (a ring); nothing runs per frame beyond one comparison.
+// Game health, a developer's panel (F9; F8 opens it on the world's changes): errors from the page and the workers
+// and slow frames in the last 30 s, with what the player was doing; the world's recent changes; the game's state now.
+// It is not in the player's top bar. Keeps only short lists (rings); while open it refreshes once a second, and
+// nothing runs per frame beyond one comparison.
 
+import { el } from './dom.ts';
 import { t } from './i18n.ts';
 
 interface Entry { t: number; kind: 'error' | 'slow'; text: string }
+export type HealthTab = 'health' | 'world' | 'state';
+
+/** What the World and State tabs show, as [name, value] rows (the game gives them). */
+export interface HealthSources {
+  /** The latest changes to the world, newest first: [when and what, detail]. */
+  world(): Array<[string, string]>;
+  /** The game's state now. */
+  state(): Array<[string, string]>;
+}
 
 const KEEP = 60;
 const WINDOW_MS = 30000;
 
 export class HealthPanel {
+  readonly root: HTMLElement;
   private entries: Entry[] = [];
-  private root: HTMLElement;
-  private list: HTMLElement;
+  private tabs = new Map<HealthTab, HTMLButtonElement>();
+  private body: HTMLElement;
   private status: HTMLElement;
+  private tab: HealthTab = 'health';
+  private timer = 0;
+  private sources: HealthSources;
   /** What the player was doing (the tool), kept with each entry. */
   context = '';
 
-  constructor(parent: HTMLElement) {
-    const r = document.createElement('div');
-    r.className = 'health hidden';
-    const h = document.createElement('h3'); h.textContent = t('health.title');
-    this.status = document.createElement('div'); this.status.className = 'health-status';
-    this.list = document.createElement('div'); this.list.className = 'health-list';
-    const copy = document.createElement('button'); copy.className = 'v2-btn'; copy.textContent = t('health.copy');
+  constructor(parent: HTMLElement, sources: HealthSources) {
+    this.sources = sources;
+    const r = el('div', 'health hidden');
+    r.setAttribute('role', 'dialog');
+    r.setAttribute('aria-label', t('health.title'));
+    const head = el('div', 'health-tabs');
+    head.setAttribute('role', 'tablist');
+    for (const id of ['health', 'world', 'state'] as const) {
+      const b = el('button', 'v2-tab', t(`health.tab.${id}`));
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.dataset.tab = id;
+      b.addEventListener('click', () => this.show(id));
+      this.tabs.set(id, b);
+      head.append(b);
+    }
+    this.status = el('div', 'health-status');
+    this.body = el('div', 'health-list');
+    const copy = el('button', 'v2-btn', t('health.copy'));
+    copy.type = 'button';
     copy.addEventListener('click', () => {
-      const txt = this.entries.map((e) => `${new Date(e.t).toLocaleTimeString()} ${this.kindName(e.kind)}: ${e.text}`).join('\n') || t('health.empty');
-      navigator.clipboard?.writeText(txt).then(() => { copy.textContent = t('health.copied'); }, () => { copy.textContent = t('health.copyFailed'); });
+      const lines = [
+        ...this.entries.map((e) => `${new Date(e.t).toLocaleTimeString()} ${this.kindName(e.kind)}: ${e.text}`),
+        '', ...this.sources.world().map(([a, b]) => `${a} ${b}`), '', ...this.sources.state().map(([a, b]) => `${a}: ${b}`),
+      ];
+      navigator.clipboard?.writeText(lines.join('\n')).then(() => { copy.textContent = t('health.copied'); }, () => { copy.textContent = t('health.copyFailed'); });
       setTimeout(() => { copy.textContent = t('health.copy'); }, 1500);
     });
-    const close = document.createElement('button'); close.className = 'v2-btn'; close.textContent = t('v2.close');
-    close.addEventListener('click', () => this.toggle());
-    const row = document.createElement('div'); row.className = 'row'; row.append(copy, close);
-    r.append(h, this.status, this.list, row);
+    const close = el('button', 'v2-btn', t('v2.close'));
+    close.type = 'button';
+    close.addEventListener('click', () => this.close());
+    const row = el('div', 'row');
+    row.append(copy, close);
+    r.append(el('h3', '', t('health.title')), head, this.status, this.body, row);
     r.addEventListener('pointerdown', (e) => e.stopPropagation());
     r.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
     parent.append(r);
@@ -47,30 +81,47 @@ export class HealthPanel {
     const k: Entry['kind'] = kind === 'erro' || kind === 'error' ? 'error' : 'slow';
     this.entries.push({ t: Date.now(), kind: k, text: this.context ? `${text} (${t('health.context')}: ${this.context})` : text });
     if (this.entries.length > KEEP) this.entries.shift();
-    if (this.open) this.render();
+    if (this.open && this.tab === 'health') this.render();
   }
 
   /** A frame's duration: above 100 ms it is recorded. */
   frame(ms: number): void { if (ms > 100) this.add('slow', t('ui.health.frame', { ms: Math.round(ms) })); }
 
   get open(): boolean { return !this.root.classList.contains('hidden'); }
+  get shownTab(): HealthTab { return this.tab; }
 
-  toggle(): void { this.root.classList.toggle('hidden'); if (this.open) this.render(); }
+  toggle(): void { if (this.open) this.close(); else this.show(this.tab); }
 
-  close(): boolean { if (!this.open) return false; this.root.classList.add('hidden'); return true; }
+  /** Opens on a tab (or switches to it); refreshed once a second while open. */
+  show(tab: HealthTab): void {
+    this.tab = tab;
+    for (const [id, b] of this.tabs) { b.classList.toggle('on', id === tab); b.setAttribute('aria-selected', String(id === tab)); }
+    this.root.classList.remove('hidden');
+    clearInterval(this.timer);
+    this.timer = window.setInterval(() => this.render(), 1000);
+    this.render();
+  }
+
+  close(): boolean {
+    if (!this.open) return false;
+    this.root.classList.add('hidden');
+    clearInterval(this.timer);
+    return true;
+  }
 
   private render(): void {
+    if (!this.open) return;
     const now = Date.now();
     const recent = this.entries.filter((e) => now - e.t < WINDOW_MS);
     const broken = recent.some((e) => e.kind === 'error'), slow = recent.some((e) => e.kind === 'slow');
     this.status.textContent = t(broken ? 'health.status.broken' : slow ? 'health.status.slow' : 'health.status.ok');
     this.status.className = `health-status ${broken ? 'bad' : slow ? 'warn' : 'ok'}`;
-    this.list.replaceChildren();
-    if (!this.entries.length) { this.list.textContent = t('health.empty'); return; }
-    for (const e of [...this.entries].reverse().slice(0, 20)) {
-      const d = document.createElement('div');
-      d.textContent = `${new Date(e.t).toLocaleTimeString()} · ${this.kindName(e.kind)} · ${e.text}`;
-      this.list.append(d);
-    }
+    const rows: string[] = this.tab === 'health'
+      ? [...this.entries].reverse().slice(0, 20).map((e) => `${new Date(e.t).toLocaleTimeString()} · ${this.kindName(e.kind)} · ${e.text}`)
+      : (this.tab === 'world' ? this.sources.world() : this.sources.state()).map(([a, b]) => (b ? `${a} · ${b}` : a));
+    if (!rows.length) { this.body.textContent = t('health.empty'); return; }
+    // the same rows: nothing written
+    if (this.body.childElementCount === rows.length && rows.every((r, i) => this.body.children[i].textContent === r)) return;
+    this.body.replaceChildren(...rows.map((r) => el('div', '', r)));
   }
 }

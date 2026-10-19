@@ -11,6 +11,7 @@ import { button, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, plural, setLang, t } from './i18n.ts';
 import { mountCompass, type Compass } from './compass.ts';
+import { keyHelp, keyName } from './keys.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
 import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
@@ -173,8 +174,10 @@ export interface HudActions extends OptionalActions {
   ring(f: number): void;
   /** Stops become terminals when clicked. */
   terminal(on: boolean): void;
-  /** The F9 panel. */
+  /** The F9 panel (a developer's tool). */
   health(): void;
+  /** The developer panels are on (?dev, or roadcraft.dev in the browser's storage, or the development server). */
+  developer(): boolean;
   /** Water, weather set by hand (null: automatic) and overall haze (0..2) of the map on screen (saved with it). */
   environment(): { water: { waves: number; foam: number; current: number }; weather: WeatherCtl | null; fog: number };
   /** Street item clicks remove (on) or place (off). */
@@ -200,9 +203,7 @@ const TOOL_KEYS: Partial<Record<Tool | 'roads' | 'terrain', Array<[string, strin
   zone: [['v2.key.drag', 'ui.do.zone'], ['ui.key.brackets', 'terrain.radius']],
 };
 const CAMERA_KEYS: Array<[string, string]> = [['help.key.orbitDrag', 'help.do.orbit'], ['help.key.panDrag', 'help.do.pan'], ['help.key.wheel', 'help.do.zoom'], ['help.key.qe', 'ui.do.turn'],
-  ['ui.key.rf', 'ui.do.tilt'], ['ui.key.v', 'ui.do.iso'], ['ui.key.c', 'ui.do.follow'], ['ui.key.k', 'sim.congestionLabel']];
-const GLOBAL_KEYS: Array<[string, string]> = [['v2.key.tools', 'v2.do.tools'], ['help.key.undo', 'v2.do.undo'], ['v2.key.redo', 'v2.do.redo'], ['ui.key.save', 'action.saveMap'],
-  ['v2.key.space', 'v2.do.pause'], ['ui.key.p', 'sim.speed'], ['ui.key.f1', 'builder.help'], ['v2.key.f9', 'v2.do.health'], ['help.key.esc', 'ui.do.escape']];
+  ['ui.key.rf', 'ui.do.tilt']];
 
 export class Hud {
   readonly root: HTMLElement;
@@ -324,7 +325,9 @@ export class Hud {
     const camB = button('v2-pill', t('camera.label'), () => this.toggle('camera', camB), svg('camera', 18));
     this.undoB = button('v2-icon', t('action.undo'), () => a.undo(), svg('undo', 18));
     this.redoB = button('v2-icon', t('action.redo'), () => a.redo(), svg('redo', 18));
+    // the health panel is a developer's tool: its button only when the developer panels are on
     const healthB = button('v2-icon', t('health.button'), () => a.health(), svg('health', 18));
+    healthB.hidden = !a.developer();
     const helpB = button('v2-icon', `${t('builder.help')} (F1)`, () => this.toggle('help', helpB), svg('help', 18));
     helpB.dataset.pop = 'help';
     const menuB = button('v2-pill', t('builder.menu.app'), () => this.toggle('menu', menuB), svg('menu', 18));
@@ -520,6 +523,8 @@ export class Hud {
   }
 
   get helpOpen(): boolean { return this.popId === 'help'; }
+  /** Ctrl+O: the file picker of "Open file". */
+  openFile(): void { this.fileIn.click(); }
   /** The About box (a dialog over the game). */
   get aboutOpen(): boolean { return this.about.isOpen; }
   closeAbout(): void { this.about.close(); }
@@ -559,7 +564,7 @@ export class Hud {
         this.seg(t('menu.language'), LANGUAGES, lang(), (v) => setLang(v as 'pt-BR' | 'en')),
         this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => { a.paint(v); a.mapPaint?.(v); }),
         el('hr'),
-        this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate'),
+        ...(a.developer() ? [this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate')] : []),
         this.row(t('action.about'), () => this.about.open(), 'm_about'),
       );
     } else if (id === 'layers') {
@@ -626,7 +631,17 @@ export class Hud {
       const own = TOOL_KEYS[c] ?? (categoriesOf(c)[0] === 'roads' ? TOOL_KEYS.roads : categoriesOf(c)[0] === 'landscape' ? TOOL_KEYS.terrain : undefined);
       if (own) body.append(keyList(`${t('help.section.tool')}: ${t(`ui.toolName.${c}`)}`, own));
       if (isTouch()) body.append(keyList(t('ui.touch.title'), [['ui.touch.tapKey', 'ui.touch.tapDo'], ['ui.touch.dragKey', 'ui.touch.dragDo'], ['ui.touch.compassKey', 'ui.touch.compassDo']]));
-      body.append(keyList(t('help.section.camera'), CAMERA_KEYS), keyList(t('v2.help.global'), GLOBAL_KEYS));
+      // the shortcuts and the tool keys come from the key table (keys.ts): the help never drifts from the keys
+      const keys = keyHelp(a.developer());
+      const raw = (title: string, rows: Array<[string, string]>): HTMLElement => {
+        const box = el('div', 'v2-keys');
+        box.append(el('div', 'v2-subhead', title));
+        const dl = el('dl');
+        for (const [k, d] of rows) { const dt = el('dt'); dt.append(el('kbd', '', k)); dl.append(dt, el('dd', '', d)); }
+        box.append(dl);
+        return box;
+      };
+      body.append(keyList(t('help.section.camera'), CAMERA_KEYS), raw(t('keys.section.game'), keys.game), raw(t('keys.section.tools'), keys.tools));
     }
     const key = titles[id];
     this.pop.replaceChildren(...(key ? [el('div', 'v2-pop-title', t(key))] : []), body);
@@ -831,6 +846,4 @@ export class Hud {
 }
 
 /** A key code as the player reads it. */
-export function keyName(code: string): string {
-  return code.replace(/^Key/, '').replace(/^Digit/, '').replace('PageUp', 'Page Up').replace('PageDown', 'Page Down');
-}
+export { keyName };

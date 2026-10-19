@@ -2,7 +2,7 @@
 // in Roadcraft's dialog look. Kept in the browser/Electron (localStorage when it works); without it, the defaults.
 
 import { LANGUAGES, lang, loose, setLang, t, type Lang } from './i18n.ts';
-import { keyName } from './hud.ts';
+import { keyName, reservedKeys } from './keys.ts';
 
 export type Preset = 'baixo' | 'medio' | 'alto' | 'ultra';
 
@@ -31,9 +31,8 @@ export interface Settings {
   roadDown?: string;
 }
 
-/** Keys the game already uses (they cannot be picked for the road). */
-const RESERVED = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyZ', 'KeyB', 'KeyL', 'KeyC', 'KeyV', 'KeyP', 'KeyK', 'KeyO', 'KeyT', 'KeyI', 'KeyJ', 'KeyM', 'KeyU', 'KeyG', 'KeyN', 'KeyH', 'KeyX', 'KeyY',
-  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Space', 'Escape', 'Enter', 'Backspace', 'Delete', 'F1', 'F9', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'BracketLeft', 'BracketRight']);
+/** Keys the game already uses (they cannot be picked for the road): read from the key table (keys.ts). */
+const RESERVED = reservedKeys();
 
 export const PRESETS: Record<Preset, Omit<Settings, 'preset' | 'weather'>> = {
   baixo: { resolution: 0.75, shadows: false, ao: false, bloom: false, detail: 0.7 },

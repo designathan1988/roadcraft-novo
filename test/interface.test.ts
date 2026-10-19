@@ -29,6 +29,7 @@ function deps(over: Partial<GameKeyDeps> = {}): { d: GameKeyDeps; calls: string[
     tool: () => 'camera', setTool: (t) => calls.push(`tool ${t}`), openCategory: (c) => calls.push(`category ${c}`),
     dialog: () => false, closeDialog: () => undefined, closeMenu: () => false, closePanel: () => false, cancelStroke: () => false, toolKey: () => false,
     undo: log('undo'), redo: log('redo'), save: log('save'), help: log('help'), health: log('health'), pause: log('pause'),
+    openMap: log('open'), duplicate: log('duplicate'), home: log('home'), quarterTurn: (d) => calls.push(`quarter ${d}`), changes: log('changes'), developer: () => true,
     nextSpeed: log('speed'), toggleIso: log('iso'), congestion: log('congestion'), follow: log('follow'), wake: () => undefined,
     camera: { keyDown: (c) => calls.push(`camera ${c}`), keyUp: () => undefined, clearKeys: () => undefined },
     ...over,
@@ -84,4 +85,22 @@ test('B59: each language writes money with one currency (the unlimited money too
     assert.ok(t('ui.money.unlimited').startsWith(symbol), `${l}: money is "${symbol} …" but unlimited money is "${t('ui.money.unlimited')}"`);
   }
   initLang('pt-BR');
+});
+
+test('B35: the road keys cannot take a key the game answers (zoom = − + included), and can take Page Up / Down', async () => {
+  const { reservedKeys } = await import('../src/ui/keys.ts');
+  const r = reservedKeys();
+  for (const c of ['Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'Home', 'F8', 'KeyO', 'KeyU', 'Digit0', 'Space']) assert.ok(r.has(c), `${c} is free for the road keys`);
+  for (const c of ['PageUp', 'PageDown', 'Numpad8']) assert.ok(!r.has(c), `${c} is refused`);
+});
+
+test('B34: the help lists every key of the table, Ctrl+S as Save, and no bundle of letters', async () => {
+  const { keyHelp, DOCK_KEYS, TOOL_KEYS, keyName } = await import('../src/ui/keys.ts');
+  const { t } = await import('../src/ui/i18n.ts');
+  const h = keyHelp();
+  const keys = [...h.game, ...h.tools].map(([k]) => k);
+  for (const c of [...Object.keys(DOCK_KEYS), ...Object.keys(TOOL_KEYS)]) assert.ok(keys.includes(keyName(c)), `${c} is not in the help`);
+  for (const k of ['Ctrl + O', 'Ctrl + D', 'Home', 'Shift + Q / E']) assert.ok(keys.includes(k), `${k} is not in the help`);
+  assert.equal(h.game.find(([k]) => k === 'Ctrl + S')?.[1], t('keys.do.save'));
+  assert.ok(!keys.includes('1 Z H T O B I'));
 });
