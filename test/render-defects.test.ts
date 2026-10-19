@@ -64,3 +64,51 @@ test('E11: a mesh of the previous city that arrives after reset is thrown away',
   fresh.done(triangle());
   assert.notEqual(L.cells[0][c].mesh, null, 'the new city\'s mesh was taken');
 });
+
+/** A source that answers tiles and plates at once (cells are left pending), counting the requests. */
+function farSource(): LayerSource & { tileAsks: number[]; plateAsks: number[] } {
+  const tileAsks: number[] = [], plateAsks: number[] = [];
+  return {
+    tileAsks, plateAsks,
+    buildCell() { /* near cells never answer: the far bands are under test */ },
+    buildTile(t, _p, done) { tileAsks.push(t); done(triangle()); },
+    buildPlate(p, _q, done) { plateAsks.push(p); done(triangle()); },
+    hasContent: () => true,
+  };
+}
+
+/** A camera at the map's south-west corner, 300 m up, looking at the centre with a 90° view. */
+function cornerCamera(): { camera: THREE.PerspectiveCamera; eye: THREE.Vector3 } {
+  const camera = new THREE.PerspectiveCamera(90, 1, 1, 30000);
+  const eye = new THREE.Vector3(-5100, 300, -5100);
+  camera.position.copy(eye);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  return { camera, eye };
+}
+
+test('E12: every tile in view between 4.2 and 6 km is covered by its tile or by its plate', async () => {
+  const { MAP_TILES, MAP_PLATES, TILE_SIZE, PLATE_SIZE } = await import('../src/config.ts');
+  const w = new World();
+  const src = farSource();
+  // the building layer's own options (render/city.ts)
+  const layer = new CellLayer(src, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 650, plate: 4200, budget: 256e6 });
+  const L = inside(layer);
+  const { camera, eye } = cornerCamera();
+  for (let i = 0; i < 4; i++) layer.update(camera, eye);
+  const drawn = new Set(layer.group.children);
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const per = PLATE_SIZE / TILE_SIZE;
+  const missing: string[] = [];
+  for (let tz = 0; tz < MAP_TILES; tz++) for (let tx = 0; tx < MAP_TILES; tx++) {
+    const x = -MAP_TILES * TILE_SIZE / 2 + tx * TILE_SIZE, z = -MAP_TILES * TILE_SIZE / 2 + tz * TILE_SIZE;
+    const box = new THREE.Box3(new THREE.Vector3(x + 1, 0, z + 1), new THREE.Vector3(x + TILE_SIZE - 1, 1, z + TILE_SIZE - 1));
+    if (!frustum.intersectsBox(box)) continue;
+    const d = Math.hypot(Math.max(0, x - eye.x), Math.max(0, z - eye.z));
+    if (d < 1600) continue; // the near band draws by cells (they never answer here)
+    const t = tz * MAP_TILES + tx, p = Math.floor(tz / per) * MAP_PLATES + Math.floor(tx / per);
+    const covered = (L.tiles[t].mesh && drawn.has(L.tiles[t].mesh!)) || (L.plates[p].mesh && drawn.has(L.plates[p].mesh!));
+    if (!covered) missing.push(`tile ${tx},${tz} at ${(d / 1000).toFixed(1)} km`);
+  }
+  assert.deepEqual(missing, [], 'tiles in view with nothing drawn');
+});

@@ -69,6 +69,8 @@ export class CellLayer {
   private tileVer = new Uint32Array(TILE_COUNT).fill(1);
   private plateVer = new Uint32Array(PLATE_COUNT).fill(1);
   private tileNear = new Uint8Array(TILE_COUNT);
+  /** The tile's cells are all ready this frame (it draws by cells). */
+  private tileCellsReady = new Uint8Array(TILE_COUNT);
   private cellFine = new Uint8Array(CELL_COUNT);
   private plateFar = new Uint8Array(PLATE_COUNT);
   private frustum = new THREE.Frustum();
@@ -255,11 +257,17 @@ export class CellLayer {
       if (far && visible) this.requestPlate(p);
     }
     const ps = this.plates[p];
-    const usePlate = far && ps.mesh !== null;
+    // tiles: asked for and kept unless the plate is far and ready to stand in for them
+    const plateCovers = far && ps.mesh !== null;
+    let tilesCover = true;
     for (let j = 0; j < TILES_PER_PLATE; j++) for (let i = 0; i < TILES_PER_PLATE; i++) {
-      this.visitTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j, visible && !usePlate);
+      if (!this.manageTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j, limit > 0 && !plateCovers)) tilesCover = false;
     }
-    if (usePlate && visible) this.draw(ps.mesh!, x, z, PLATE_SIZE, ps);
+    if (!visible) return;
+    // never a hole: the plate stands in while its tiles are not all ready (the camera came closer), the tiles while
+    // the plate is not ready
+    if (ps.mesh && (far || !tilesCover)) { this.draw(ps.mesh, x, z, PLATE_SIZE, ps); return; }
+    for (let j = 0; j < TILES_PER_PLATE; j++) for (let i = 0; i < TILES_PER_PLATE; i++) this.drawTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j);
   }
 
   private tileKeep(): number {
@@ -279,8 +287,12 @@ export class CellLayer {
     if (this.frustum.intersectsBox(this.box)) this.next.add(mesh);
   }
 
-  private visitTile(tx: number, tz: number, mayDraw: boolean): void {
-    if (tx >= MAP_TILES || tz >= MAP_TILES) return;
+  /**
+   * Asks for and evicts a tile's meshes (its cells near the camera, its L2 farther). `needed`: nothing coarser covers
+   * the tile, so its L2 is asked for at any distance. Returns whether what the tile would draw is ready.
+   */
+  private manageTile(tx: number, tz: number, needed: boolean): boolean {
+    if (tx >= MAP_TILES || tz >= MAP_TILES) return true;
     const t = tileId(tx, tz);
     const ox = tileOriginX(tx), oz = tileOriginX(tz);
     const dist = this.distTo(ox, oz, TILE_SIZE);
@@ -288,9 +300,9 @@ export class CellLayer {
     const near = this.tileNear[t] ? dist < nearD * 1.12 : dist < nearD * 0.88;
     this.tileNear[t] = near ? 1 : 0;
     const ts = this.tiles[t];
-    // the tile (L2) stays on the GPU only in the band where it can be drawn
+    // the tile (L2) stays on the GPU only in the band where it can be drawn, or while its plate cannot stand in
     const keep = this.tileKeep();
-    if (dist < keep) { if (ts.requested !== this.tileVer[t]) this.requestTile(t); }
+    if (dist < keep || needed) { if (ts.requested !== this.tileVer[t]) this.requestTile(t); }
     else if (dist > keep * 1.15 && (ts.mesh || ts.requested)) { this.setMesh(ts, null, 0); ts.requested = 0; }
     const detail = (this.opt.detail ?? 0) * this.pixelScale;
     const levels = this.cells.length;
@@ -325,10 +337,19 @@ export class CellLayer {
         }
       }
     }
-    if (!mayDraw) return;
-    if (this.opt.far && dist > this.opt.far) return;
+    this.tileCellsReady[t] = cellsReady ? 1 : 0;
+    // built and empty (nothing to draw) counts as ready
+    return cellsReady || ts.mesh !== null || (ts.built !== 0 && ts.built === this.tileVer[t]);
+  }
 
-    if (cellsReady) {
+  /** Draws a tile: its cells when they are all ready, else its L2. */
+  private drawTile(tx: number, tz: number): void {
+    if (tx >= MAP_TILES || tz >= MAP_TILES) return;
+    const t = tileId(tx, tz);
+    const ox = tileOriginX(tx), oz = tileOriginX(tz);
+    if (this.opt.far && this.distTo(ox, oz, TILE_SIZE) > this.opt.far) return;
+    const levels = this.cells.length;
+    if (this.tileCellsReady[t]) {
       for (let j = 0; j < CELLS_PER_TILE; j++) {
         for (let i = 0; i < CELLS_PER_TILE; i++) {
           const c = cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j);
@@ -339,8 +360,9 @@ export class CellLayer {
           this.draw(s.mesh, cellOriginX(tx * CELLS_PER_TILE + i), cellOriginX(tz * CELLS_PER_TILE + j), CELL_SIZE, s);
         }
       }
-    } else if (ts.mesh) {
-      this.draw(ts.mesh, ox, oz, TILE_SIZE, ts);
+    } else {
+      const ts = this.tiles[t];
+      if (ts.mesh) this.draw(ts.mesh, ox, oz, TILE_SIZE, ts);
     }
   }
 
