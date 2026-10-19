@@ -50,6 +50,7 @@ import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
 import { installKeys } from './ui/keys.ts';
+import { attachPinch } from './ui/touch.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
@@ -856,6 +857,8 @@ export class Game {
     const c = this.canvas;
     const down = { x: 0, y: 0, button: -1 };
     c.addEventListener('contextmenu', (e) => e.preventDefault());
+    // two fingers zoom (src/ui/touch.ts runs before the listeners below)
+    attachPinch(c, this.rig);
     c.addEventListener('pointerdown', (e) => {
       this.ambient.start();
       c.setPointerCapture(e.pointerId);

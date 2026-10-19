@@ -441,6 +441,20 @@ export const SCENARIOS = {
     check('the furniture choice is kept', kept.furniture === 1, 'stored ' + JSON.stringify(kept));
     check('the shadows of the address are not kept', kept.shadows !== false, 'stored shadows ' + kept.shadows);
   ` },
+  // B54: two fingers apart on a touch screen zoom in
+  'B54-pinch-zoom': `
+    await g.view(1500, 1500, 0, 50, 400); await frames(4);
+    const c = g.canvas, r = c.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const ev = (type, id, x) => c.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: cy, button: 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }));
+    const d0 = g.rig.dist;
+    ev('pointerdown', 1, cx - 50); ev('pointerdown', 2, cx + 50);
+    for (let k = 1; k <= 10; k++) { ev('pointermove', 1, cx - 50 - k * 15); ev('pointermove', 2, cx + 50 + k * 15); await frames(1); }
+    ev('pointerup', 1, cx - 200); ev('pointerup', 2, cx + 200);
+    await wait(800);
+    check('spreading two fingers zooms in', g.rig.dist < d0 * 0.7, 'distance ' + d0.toFixed(0) + ' → ' + g.rig.dist.toFixed(0));
+    const t = g.rig.target;
+    check('and does not drag the map away', Math.hypot(t.x - 1500, t.z - 1500) < 60, 'target ' + t.x.toFixed(0) + ', ' + t.z.toFixed(0));
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
