@@ -864,3 +864,19 @@ test('D30: painting the ground does not rebuild the props; planting a forest doe
   forest.dab(0, 0, 20, 'forest', 0, 1, 0.1);
   assert.ok(w.dirty.drain(Dirty.Props).length > 0, 'planting trees must rebuild the props');
 });
+
+test('D38: applying a segment\'s profile to the whole street reaches the blocks that have another profile', async () => {
+  const { changeProfiles, streetChain } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  const net = w.roads;
+  const n = [-150, -50, 50, 150].map((x) => net.addNode({ x, z: 0, y: 10 }));
+  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas');
+  net.addSeg({ a: n[0], b: n[1], cx: -100, cz: 0, profile: 0, flags: 16 });
+  net.addSeg({ a: n[1], b: n[2], cx: 0, cz: 0, profile: avenue, flags: 16 });
+  net.addSeg({ a: n[2], b: n[3], cx: 100, cz: 0, profile: 0, flags: 16 });
+  const first = net.nearestSeg(-100, 0, 2)![0];
+  const chain = streetChain(w, first, true);
+  assert.equal(chain.length, 3, `the street has ${chain.length} segments`);
+  assert.ok(changeProfiles(w, chain, 0).settle());
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) assert.equal(net.segs.cols.profile[s], 0, 'a block kept its old profile');
+});

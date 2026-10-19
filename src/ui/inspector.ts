@@ -398,7 +398,6 @@ export class Inspector {
 
     // name and numbering of the whole street
     box.append(section(t('ui.insp.street')));
-    const chain = streetChain(w, s);
     let from = 0;
     for (let k = 0; k < whole.segs.length && whole.segs[k] !== s; k++) from += whole.lens[k];
     const name = el('input', 'v2-search');
@@ -411,6 +410,8 @@ export class Inspector {
     // actions
     box.append(section(t('ui.insp.actions')));
     const hasMedian = info.edges.some((e) => e.strip.kind === 'median') && !info.oneWay;
+    // "profile to the whole street": the street as it runs on, whatever profile each block has now
+    const anyChain = streetChain(w, s, true);
     const acts = actions(
       btn(t('inspector.duplicate'), () => {
         const r = duplicateRoad(w, s);
@@ -426,7 +427,7 @@ export class Inspector {
         if (typeof r === 'string') { this.a.toast(r); return; }
         this.commands.push(r); this.a.toast(t('hint.uturn.placed')); this.close();
       }, '', hasMedian ? '' : t('hint.uturn.noMedian'), !hasMedian),
-      btn(`${t('profile.toStreet', { count: chain.length })}`, () => this.edit(changeProfiles(w, chain, sc.profile[s]), t('hint.profile.toStreet')), '', t('profile.toStreetTip'), chain.length < 2),
+      btn(`${t('profile.toStreet', { count: anyChain.length })}`, () => this.edit(changeProfiles(w, anyChain, sc.profile[s], s), t('hint.profile.toStreet')), '', t('profile.toStreetTip'), anyChain.length < 2),
       btn(t('profile.drawWith'), () => this.a.useProfile(sc.profile[s]), 'primary', t('profile.drawWithTip')),
       btn(t('inspector.demolish'), () => {
         const j = demolishSeg(w, s);

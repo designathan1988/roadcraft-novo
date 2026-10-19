@@ -795,9 +795,10 @@ function settleUnder(j: RoadJournal, world: World, s: number): void {
 
 /**
  * The whole street of a segment: walks through the nodes picking, at each one, the segment
- * that continues straightest (up to 35°) with the same profile. One-way roads only follow the same direction.
+ * that continues straightest (up to 35°) with the same profile (`anyProfile`: whatever its profile, never from a
+ * road onto rails or back). One-way roads only follow the same direction.
  */
-export function streetChain(world: World, s0: number): number[] {
+export function streetChain(world: World, s0: number, anyProfile = false): number[] {
   const net = world.roads, sc = net.segs.cols;
   const prof = sc.profile[s0];
   const oneWay = PROFILE_INFO[prof].oneWay;
@@ -814,9 +815,10 @@ export function streetChain(world: World, s0: number): number[] {
       const hx = -here.dx, hz = -here.dz;
       let best = -1, bestDot = Math.cos(35 * Math.PI / 180), bestEnd: 0 | 1 = 0;
       for (const t of net.segsOf(n, list)) {
-        if (seen.has(t) || sc.profile[t] !== prof || (sc.flags[t] & SegFlag.Ring)) continue;
+        if (seen.has(t) || (sc.flags[t] & SegFlag.Ring)) continue;
+        if (anyProfile ? PROFILE_INFO[sc.profile[t]].rail !== PROFILE_INFO[prof].rail : sc.profile[t] !== prof) continue;
         const tEnd: 0 | 1 = sc.a[t] === n ? 0 : 1;
-        if (oneWay && tEnd !== (end === 1 ? 0 : 1)) continue;
+        if (oneWay && PROFILE_INFO[sc.profile[t]].oneWay && tEnd !== (end === 1 ? 0 : 1)) continue;
         const arm = armOf(net.quad(t, q), prof, tEnd);
         const d = arm.dx * hx + arm.dz * hz;
         if (d > bestDot) { bestDot = d; best = t; bestEnd = tEnd; }
