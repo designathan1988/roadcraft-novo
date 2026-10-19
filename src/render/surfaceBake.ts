@@ -168,11 +168,12 @@ function waterNormals(): THREE.DataTexture {
   const relief = N * 0.014;
   const at = (x: number, y: number) => h[((y + N) % N) * N + ((x + N) % N)];
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    const dx = (at(x + 1, y) - at(x - 1, y)) * 0.5 * relief, dy = (at(x, y + 1) - at(x, y - 1)) * 0.5 * relief;
+    // exactly as 4.0's water.ts:105-111 (no ½ on the central difference; z stored as 1 / length)
+    const dx = (at(x + 1, y) - at(x - 1, y)) * relief, dy = (at(x, y + 1) - at(x, y - 1)) * relief;
     const l = Math.hypot(dx, dy, 1), o = (y * N + x) * 4;
     data[o] = Math.round((-dx / l * 0.5 + 0.5) * 255);
     data[o + 1] = Math.round((-dy / l * 0.5 + 0.5) * 255);
-    data[o + 2] = Math.round((1 / l * 0.5 + 0.5) * 255);
+    data[o + 2] = Math.round((1 / l) * 255);
     data[o + 3] = Math.round(fbm(foamN, x * 9 / N, y * 9 / N, 9, 3) * 255);
   }
   return texture(data, N);

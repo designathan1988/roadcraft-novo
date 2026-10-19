@@ -694,9 +694,11 @@ export class TerrainRenderer {
     const W = tex(p.xz.div(36).add(windDirU.mul(t.mul(windU.mul(7).add(0.6)).div(36))));
     // the current: two phases of a 2 s cycle, each carrying the ripples downstream, cross-faded
     const p0 = fract(t.div(2)), p1 = fract(t.div(2).add(0.5)), w0 = float(1).sub(abs(float(1).sub(p0.mul(2))));
-    const shift = flowDir.mul(currentU.mul(2).add(0.6));
+    // 4.0 water.ts:289: the flow × the current × the 2 s cycle
+    const shift = flowDir.mul(currentU.mul(2));
     const flowed = (uv: N, scale: number) => mix(tex(uv.sub(shift.mul(p1).div(scale)).add(vec2(0.37, 0.61))), tex(uv.sub(shift.mul(p0).div(scale))), w0);
-    const A = mix(tex(uvA), flowed(p.xz.div(13.6), 13.6), run), B = mix(tex(uvB), flowed(p.xz.div(4.4), 4.4), run);
+    const runC = run.mul(step(float(0.001), currentU));
+    const A = mix(tex(uvA), flowed(p.xz.div(13.6), 13.6), runC), B = mix(tex(uvB), flowed(p.xz.div(4.4), 4.4), runC);
     const nA = A.xyz.mul(2).sub(1), nB = B.xyz.mul(2).sub(1), nW = W.xyz.mul(2).sub(1);
     // foam: lace in a band in from the shore, whitecaps with the waves, churn in fast water
     const lace = A.w.mul(0.55).add(B.w.mul(0.65));
