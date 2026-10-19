@@ -5,6 +5,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { RoadJournal, buildRoad, planRoad, snap } from '../src/roads/build.ts';
+import { buildBuildings } from '../src/jobs/buildingGen.ts';
+import { emptyBoxes, type PackedMesh } from '../src/jobs/protocol.ts';
+import { Zone } from '../src/roads/zones.ts';
+
+/** World positions of a packed mesh's vertices. */
+function positions(m: PackedMesh): Array<[number, number, number]> {
+  const out: Array<[number, number, number]> = [];
+  for (let i = 0; i < m.vertexCount; i++) {
+    const p = m.position, k = m.scale / 32767;
+    out.push([m.originX + p[i * 4] * k, m.originY + p[i * 4 + 1] * k, m.originZ + p[i * 4 + 2] * k]);
+  }
+  return out;
+}
 
 function flatWorld(money: number): World {
   const w = new World();
@@ -34,5 +47,21 @@ test('D1: raising or lowering a node never gives money back for roads that are s
       assert.ok(j.settle());
     }
     assert.ok(w.money <= start, `after ${i + 1} up/down pairs the money went from ${start} to ${w.money}`);
+  }
+});
+
+test('F1: a building that overhangs its cell is not flattened at the cell edge', () => {
+  const w = flatWorld(0);
+  const b = emptyBoxes(1);
+  // centre 10 m inside the east and south edges of cell (0, 0): the building reaches 10-12 m past both
+  b.x[0] = 246; b.z[0] = 246; b.w[0] = 40; b.d[0] = 44; b.rot[0] = 0;
+  b.zone[0] = Zone.Commercial; b.floors[0] = 8; b.seed[0] = 4242; b.style[0] = 3;
+  b.count = 1;
+  for (const lod of [0, 1, -1]) {
+    const m = buildBuildings(w.heights, b, 0, 0, 256, lod);
+    assert.ok(m, `level ${lod} has a mesh`);
+    let maxX = -Infinity, maxZ = -Infinity;
+    for (const [x, , z] of positions(m)) { maxX = Math.max(maxX, x); maxZ = Math.max(maxZ, z); }
+    assert.ok(maxX > 260 && maxZ > 260, `level ${lod}: the building ends at x=${maxX.toFixed(2)}, z=${maxZ.toFixed(2)} (cut at 256)`);
   }
 });

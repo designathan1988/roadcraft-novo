@@ -1,5 +1,5 @@
-// Acumulador de malha nos workers: arrays que crescem, triângulos orientados
-// pela normal desejada (nunca erra o lado), empacotamento compacto no fim.
+// Mesh accumulator in the workers: growing arrays, triangles wound by the wanted
+// normal (never the wrong side), compact packing at the end.
 
 import { octEncode } from './boxMesh.ts';
 import type { PackedMesh } from './protocol.ts';
@@ -9,14 +9,14 @@ export class MeshBuilder {
   nrm = new Float32Array(3 * 4096);
   col = new Uint32Array(4096); // 0xRRGGBB
   mat = new Uint8Array(4096);
-  /** Valor livre por vértice (vai em position.w): o perfil, nas vias. */
+  /** A free value per vertex (goes in position.w): the profile, on roads. */
   tag = new Uint16Array(4096);
   curTag = 0;
   extra: Float32Array | null;
-  /** Fachada (estilo, semente, tipo, largura da coluna) e coordenadas na parede (u em colunas, h em m). */
+  /** Facade (style, seed, kind, column width) and wall coordinates (u in columns, h in m). */
   fac: Uint8Array | null;
   fuv: Float32Array | null;
-  /** Valores correntes usados por vert() quando a fachada está ligada. */
+  /** Current values used by vert() when the facade is on. */
   curFac = [0, 0, 0, 0];
   curBase = 0;
   curU = 0;
@@ -70,27 +70,27 @@ export class MeshBuilder {
     return i;
   }
 
-  /** Triângulo virado para o lado de (nx, ny, nz). */
+  /** A triangle facing the side of (nx, ny, nz). */
   tri(a: number, b: number, c: number, nx: number, ny: number, nz: number): void {
     const p = this.pos;
     const e1x = p[b * 3] - p[a * 3], e1y = p[b * 3 + 1] - p[a * 3 + 1], e1z = p[b * 3 + 2] - p[a * 3 + 2];
     const e2x = p[c * 3] - p[a * 3], e2y = p[c * 3 + 1] - p[a * 3 + 1], e2z = p[c * 3 + 2] - p[a * 3 + 2];
     const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
-    if (cx * cx + cy * cy + cz * cz < 1e-12) return; // degenerado
+    if (cx * cx + cy * cy + cz * cz < 1e-12) return; // degenerate
     this.growT(3);
     if (cx * nx + cy * ny + cz * nz >= 0) { this.idx[this.t++] = a; this.idx[this.t++] = b; this.idx[this.t++] = c; }
     else { this.idx[this.t++] = a; this.idx[this.t++] = c; this.idx[this.t++] = b; }
   }
 
-  /** Quadrilátero a-b-c-d (em ordem ao redor) virado para n. */
+  /** A quad a-b-c-d (in order round it) facing n. */
   quad(a: number, b: number, c: number, d: number, nx: number, ny: number, nz: number): void {
     this.tri(a, b, c, nx, ny, nz);
     this.tri(a, c, d, nx, ny, nz);
   }
 
-  /** Caixa alinhada a uma direção (dx, dz) no plano: pilares, muretas, portais. */
+  /** A box aligned to a direction (dx, dz) in the plane: pillars, low walls, portals. */
   box(cx: number, cz: number, y0: number, y1: number, dx: number, dz: number, halfLen: number, halfWid: number, rgb: number, mat: number, bottom = false): void {
-    const lx = dz, lz = -dx; // esquerda
+    const lx = dz, lz = -dx; // left
     const corners: Array<[number, number]> = [
       [cx - dx * halfLen - lx * halfWid, cz - dz * halfLen - lz * halfWid],
       [cx + dx * halfLen - lx * halfWid, cz + dz * halfLen - lz * halfWid],
@@ -112,13 +112,22 @@ export class MeshBuilder {
     }
   }
 
-  /** Empacota relativo à origem; escala = extensão (snorm16). */
+  /**
+   * Packs relative to the origin as snorm16; the scale is `extent`, doubled until every vertex fits. Content reaches
+   * past its cell (a building is filed by its centre and overhangs the edge; a tall tower rises past `extent`), and
+   * clamping would flatten it onto the edge: only the meshes that need a larger scale lose precision.
+   */
   pack(originX: number, originZ: number, extent: number): PackedMesh | null {
     const n = this.v;
     if (n === 0 || this.t === 0) return null;
-    let minY = Infinity, maxY = -Infinity;
-    for (let i = 0; i < n; i++) { const y = this.pos[i * 3 + 1]; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    let minY = Infinity, maxY = -Infinity, reach = 0;
+    for (let i = 0; i < n; i++) {
+      const y = this.pos[i * 3 + 1]; if (y < minY) minY = y; if (y > maxY) maxY = y;
+      reach = Math.max(reach, Math.abs(this.pos[i * 3] - originX), Math.abs(this.pos[i * 3 + 2] - originZ));
+    }
     const originY = Math.floor(minY);
+    reach = Math.max(reach, maxY - originY);
+    while (extent < reach) extent *= 2;
     const inv = 32767 / extent;
     const q = (v: number) => Math.max(-32767, Math.min(32767, Math.round(v * inv)));
     const position = new Int16Array(n * 4), normal = new Int8Array(n * 4), color = new Uint8Array(n * 4);
@@ -147,7 +156,7 @@ export class MeshBuilder {
   }
 }
 
-/** u e h da fachada em snorm16 (escala 512 m). */
+/** Facade u and h as snorm16 (512 m scale). */
 function packFuv(f: Float32Array, n: number): Int16Array {
   const out = new Int16Array(n * 2);
   for (let i = 0; i < n * 2; i++) out[i] = Math.max(-32767, Math.min(32767, Math.round(f[i] / 512 * 32767)));
