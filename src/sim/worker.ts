@@ -78,8 +78,15 @@ function step(): void {
     if (!failed) { failed = true; scope.postMessage({ type: 'error', message: String((err as Error)?.stack ?? err) }); }
   }
   next += dtMs;
-  timer = setTimeout(step, Math.max(0, next - performance.now()));
+  // behind the clock (a slow step, the tab in the background): catch up at most MAX_LAG_MS; the rest of the lost time
+  // is dropped (the simulation runs slower for a moment) instead of running steps back to back until it catches up
+  const t = performance.now();
+  if (t - next > MAX_LAG_MS) next = t - MAX_LAG_MS;
+  timer = setTimeout(step, Math.max(0, next - t));
 }
+
+/** Most the step loop will run behind the clock and still catch up (steps back to back). */
+const MAX_LAG_MS = 100;
 
 function stepInner(): void {
   if (!writer) return;
