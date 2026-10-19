@@ -552,8 +552,14 @@ export class Traffic {
   /** At the kerb: brake, edge to the kerb, let the passenger out, then pick a new trip and pull out. */
   private kerbStep(v: number, lane: number, dt: number): void {
     const c = this.veh.cols, sim = this.sim;
-    const nv = Math.max(0, c.v[v] - 3 * dt);
-    c.s[v] = Math.min(sim.laneLen(lane) - 0.3, c.s[v] + (c.v[v] + nv) * 0.5 * dt);
+    // brakes gently, harder if the car ahead is close (it stops behind it, never inside it)
+    const lead = c.prev[v];
+    const room = lead >= 0 ? c.s[lead] - c.len[lead] - c.s[v] - 1 : 1e9;
+    const brake = Math.min(9, Math.max(3, (c.v[v] * c.v[v]) / (2 * Math.max(0.1, room))));
+    const nv = Math.max(0, c.v[v] - brake * dt);
+    let s = Math.min(sim.laneLen(lane) - 0.3, c.s[v] + (c.v[v] + nv) * 0.5 * dt);
+    if (lead >= 0) s = Math.min(s, Math.max(c.s[v], c.s[lead] - c.len[lead] - 0.5));
+    c.s[v] = s;
     c.v[v] = nv; c.brk[v] = 1;
     c.pk[v] = Math.min(1, c.pk[v] + dt / 2);
     if (nv > 0) return;

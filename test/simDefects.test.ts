@@ -509,3 +509,19 @@ test('C19: a pedestrian coming back near the camera starts from where it is, not
   assert.ok(n > 50, `pedestrians drawn ${n}`);
   assert.ok(worst < 2, `a pedestrian drawn moving ${worst.toFixed(0)} m in one step after the camera came back`);
 });
+
+test('C18: a car pulling up at the kerb stops behind the car ahead, not inside it', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const k = sim.conns.cols, conn = someConn(sim), lane = k.from[conn];
+  // a stopped car, and right behind it a car at 12 m/s that starts its kerb stop (4 m of gap)
+  const ahead = place(tr, lane, 30, k.to[conn], true);
+  const c = tr.veh.cols;
+  c.v[ahead] = 0; c.dying[ahead] = 3; // held in place (as a car parking)
+  const v = place(tr, lane, 30 - 4.4 - 4, k.to[conn], true);
+  c.v[v] = 12; c.dying[v] = 4; c.dwell[v] = 0;
+  let worst = 99;
+  for (let i = 0; i < 20 * 5; i++) { tr.step(0.05); worst = Math.min(worst, c.s[ahead] - c.len[ahead] - c.s[v]); }
+  assert.ok(worst > 0, `the car at the kerb ran ${(-worst).toFixed(1)} m into the car ahead`);
+});
