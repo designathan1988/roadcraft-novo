@@ -12,6 +12,8 @@ export const MAX_DEG = 8;
 /** Segments are split while drawing so they never exceed this (the index uses the midpoint). */
 export const MAX_SEG_LEN = 112;
 const SEG_MARGIN = MAX_SEG_LEN / 2 + 40;
+/** How far from a road its lots reach: half the widest road (≈ 25 m), the deepest lot (72 m) and a margin. */
+const LOT_REACH = 100;
 
 export { SegFlag } from './flags.ts';
 import { SegFlag } from './flags.ts';
@@ -191,10 +193,7 @@ export class RoadNetwork {
   /** Zone of one side of the segment (0 = left, 1 = right). */
   setZone(id: number, side: number, zone: number): void {
     (side === 0 ? this.segs.cols.zl : this.segs.cols.zr)[id] = zone;
-    const sc = this.segs.cols;
-    this.world.touchCell(sc.cell[id], Dirty.Lots);
-    this.world.touchCell(this.nodes.cols.cell[sc.a[id]], Dirty.Lots);
-    this.world.touchCell(this.nodes.cols.cell[sc.b[id]], Dirty.Lots);
+    this.markLots(id);
     this.emit({ t: 'zone', id, side, zone });
   }
 
@@ -233,6 +232,17 @@ export class RoadNetwork {
     this.world.touchCell(cellId(cellX(x), cellX(z)), Dirty.Roads | Dirty.RoadPaint | Dirty.Lots);
   }
 
+  /**
+   * The lots of every cell the segment's lots, or the lots it blocks, can stand in: its curve's box widened by
+   * LOT_REACH (at most 3 × 3 cells). A cell's lots are cut from every road near it, not only the ones inside it.
+   */
+  private markLots(s: number): void {
+    const sc = this.segs.cols, nc = this.nodes.cols, a = sc.a[s], b = sc.b[s];
+    const x0 = cellX(Math.min(nc.x[a], nc.x[b], sc.cx[s]) - LOT_REACH), x1 = cellX(Math.max(nc.x[a], nc.x[b], sc.cx[s]) + LOT_REACH);
+    const z0 = cellX(Math.min(nc.z[a], nc.z[b], sc.cz[s]) - LOT_REACH), z1 = cellX(Math.max(nc.z[a], nc.z[b], sc.cz[s]) + LOT_REACH);
+    for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) this.world.touchCell(cellId(cx, cz), Dirty.Lots);
+  }
+
   /** A node changed: its cell and the cell of each connected segment (their setback changes). */
   private touchNode(n: number): void {
     const nc = this.nodes.cols;
@@ -242,6 +252,7 @@ export class RoadNetwork {
     for (let k = 0; k < d; k++) {
       const s = this.adj[o + k];
       this.mark(sc.mx[s], sc.mz[s]);
+      this.markLots(s);
       // the other node also uses this segment's shape
       const other = sc.a[s] === n ? sc.b[s] : sc.a[s];
       this.mark(nc.x[other], nc.z[other]);

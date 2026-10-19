@@ -12,7 +12,7 @@ import { demolishBox } from '../src/tools/demolish.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
-import { Dirty } from '../src/core/grid.ts';
+import { Dirty, cellId, cellX } from '../src/core/grid.ts';
 import { decayTenths } from '../src/world/decay.ts';
 import { Ctl, Rule, type JunctionSpec } from '../src/roads/control.ts';
 import { laneExits } from '../src/roads/laneLinks.ts';
@@ -382,4 +382,22 @@ test('A23: a street name stays with its street and never passes to a road that r
   // undo the new road and the demolition: the name is back on the pieces
   commands.undo(); commands.undo();
   assert.equal(w.streetNames.get(w.roads.nearestSeg(-80, 0, 3)![0]), 'Rua Teste');
+});
+
+test('D7: zoning or building a road near a cell edge refreshes the lots of the cell across the edge', () => {
+  const w = flatWorld(1e9);
+  // a street 14 m south of the edge between two cell rows (z = 256): its north lots stand in the next row
+  road(w, 20, 242, 120, 242);
+  w.dirty.drain(Dirty.Lots);
+  const s = w.roads.nearestSeg(70, 242, 3)![0];
+  const z = new RoadJournal(w, 'zone');
+  z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential);
+  const north = cellId(cellX(70), cellX(270)), south = cellId(cellX(70), cellX(242));
+  assert.notEqual(north, south);
+  const dirty = w.dirty.drain(Dirty.Lots);
+  assert.ok(dirty.includes(south), 'the street\'s own cell');
+  assert.ok(dirty.includes(north), 'zoning did not refresh the lots of the cell across the edge');
+  // a new road in the south cell whose side lots overlap the north cell's lots
+  road(w, 200, 230, 200, 250);
+  assert.ok(w.dirty.drain(Dirty.Lots).includes(cellId(cellX(200), cellX(270))), 'a new road did not refresh the lots across the edge');
 });
