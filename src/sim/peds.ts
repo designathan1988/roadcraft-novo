@@ -85,8 +85,10 @@ export class Peds {
   private rng = new Rng(4242);
   private time = 0;
   private windowNodes: number[] = [];
-  /** Traffic light: are the cars on arm `arm` of node `n` moving? (provided by traffic) */
-  carsGo: (n: number, arm: number) => boolean = () => false;
+  /** Traffic light: may pedestrians start crossing arm `arm` of node `n` now? (provided by traffic) */
+  walkOk: (n: number, arm: number) => boolean = () => true;
+  /** A pedestrian waits at the kerb of the crossing over arm `arm` of node `n` (presses the button). */
+  onWait: (n: number, arm: number) => void = () => {};
   /** People per metre of car lane (simple demand). */
   density = 1 / 30;
   /** Share of people chosen by the player. */
@@ -143,12 +145,16 @@ export class Peds {
   }
 
   /** Is anyone on the node's crosswalk right now (walking the crossing leg)? */
-  crossing(n: number): boolean {
+  crossing(n: number): boolean { return this.crossingArms(n, 0xff); }
+
+  /** Is anyone walking a crossing over one of the node's arms in `mask` (bit per arm)? */
+  crossingArms(n: number, mask: number): boolean {
     const c = this.t.cols;
     for (let p = this.head[n]; p >= 0; p = c.next[p]) {
       if (c.mode[p] !== 1 && c.mode[p] !== 2) continue;
       const w = c.wIdx[p] - 1;
-      if (w >= 0 && this.ways[p * WAYS * 4 + w * 4 + 3] > 0) return true;
+      const cross = w >= 0 ? this.ways[p * WAYS * 4 + w * 4 + 3] : 0;
+      if (cross > 0 && (mask & (1 << (cross - 1))) !== 0) return true;
     }
     return false;
   }
@@ -566,8 +572,9 @@ export class Peds {
     if (c.wIdx[p] >= c.wLen[p]) return this.startSidewalk(p);
     const o = p * WAYS * 4 + c.wIdx[p] * 4;
     const cross = this.ways[o + 3];
-    // signalled crossing: waits for the cars on that arm to stop (only near the camera)
-    if (cross > 0 && this.carsGo(this.wayNode[p], cross - 1)) {
+    // signalled crossing: waits for the light to let them walk (and calls it)
+    if (cross > 0 && !this.walkOk(this.wayNode[p], cross - 1)) {
+      this.onWait(this.wayNode[p], cross - 1);
       c.mode[p] = 2;
       c.t0[p] = this.time; c.dur[p] = 1;
       this.schedule(p, this.time + 1);

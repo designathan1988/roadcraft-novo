@@ -63,6 +63,8 @@ export class SimNet {
    */
   turnAll = new Uint8Array((1 << 14) * 8);
   turnCar = new Uint8Array((1 << 14) * 8);
+  /** Segment of each arm (n * 8 + arm). */
+  armSeg = new Int32Array((1 << 14) * 8);
   /** Conexões que cruzam ou juntam com cada conexão (refeitas com o nó). */
   readonly conflicts = new Map<number, Int32Array>();
   /** Nó de rotatória (entradas dão preferência ao anel). */
@@ -90,6 +92,7 @@ export class SimNet {
       this.armDz = grow(this.armDz, cap * 8, 0);
       this.turnAll = grow(this.turnAll, cap * 8, 0);
       this.turnCar = grow(this.turnCar, cap * 8, 0);
+      this.armSeg = grow(this.armSeg, cap * 8, 0);
       this.nodeRing = grow(this.nodeRing, cap, 0);
       this.nodeFlow = grow(this.nodeFlow, cap, 0);
       this.armMain = grow(this.armMain, cap, 0);
@@ -324,6 +327,7 @@ export class SimNet {
       this.armRule[n * 8 + k] = ctl.legs.get(segs[i]) ?? Rule.Free;
       this.armStage[n * 8 + k] = nStages ? stageOf[k] : 0;
       this.armDx[n * 8 + k] = arms[i].dx; this.armDz[n * 8 + k] = arms[i].dz;
+      this.armSeg[n * 8 + k] = segs[i];
       this.segArm[segs[i] * 2 + ends[i]] = k;
     });
     let mainBits = 0;

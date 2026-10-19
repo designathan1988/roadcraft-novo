@@ -138,3 +138,33 @@ test('C9: the page sending the same bus lines again (after any road edit or zone
   const total2 = buses.reduce((a, v) => a + [...(T.riders.get(v) ?? [])].reduce((x: number, y: number) => x + y, 0), 0);
   assert.ok(Math.abs(total2 - total) < 1e-6, `riders ${total} before, ${total2} after`);
 });
+
+test('C11: at a quiet traffic light (no cars, at night) pedestrians still get to cross', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0; // nobody driving: no vehicle ever asks the light to change
+  const peds = new Peds(sim);
+  peds.density = 1 / 3;
+  // wired as in the worker
+  const P = inner(peds), T = inner(tr);
+  if ('carsGo' in P && 'carsGo' in T) P.carsGo = (n: number, a: number) => T.carsGo(n, a);
+  if ('walkOk' in P && 'walkOk' in T) P.walkOk = (n: number, a: number) => T.walkOk(n, a);
+  if ('onWait' in P && 'pedCall' in T) P.onWait = (n: number, a: number) => T.pedCall(n, a);
+  tr.pedCrossing = (n) => peds.crossing(n);
+  let signals = 0;
+  for (let n = 0; n < sim.net.nodes.end; n++) if (sim.net.nodes.alive[n] && sim.nodePhases[n] > 0) signals++;
+  assert.ok(signals >= 1, 'the grid has a traffic light');
+  const waited = new Float64Array(1 << 16);
+  let worst = 0, waits = 0;
+  for (let i = 0; i < 20 * 300; i++) {
+    tr.step(0.05); peds.step(0.05);
+    if (i % 10 === 0) { tr.checkWindow(); peds.checkWindow(); }
+    const c = peds.t.cols;
+    for (let p = 0; p < peds.t.end; p++) {
+      if (peds.t.alive[p] && c.mode[p] === 2) { if (waited[p] === 0) waits++; waited[p] += 0.05; worst = Math.max(worst, waited[p]); } else waited[p] = 0;
+    }
+  }
+  assert.ok(waits > 5, `pedestrians waited at the light ${waits} times`);
+  assert.ok(worst < 90, `a pedestrian waited ${worst.toFixed(0)} s at a light with no cars`);
+});

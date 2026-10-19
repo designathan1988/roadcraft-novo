@@ -53,8 +53,10 @@ const traffic = new Traffic(sim);
 sim.onConnRemoved = (c) => traffic.evacuateConn(c);
 sim.onSegAdded = (s) => traffic.clearWear(s);
 const peds = new Peds(sim);
-peds.carsGo = (n, arm) => traffic.carsGo(n, arm);
+peds.walkOk = (n, arm) => traffic.walkOk(n, arm);
+peds.onWait = (n, arm) => traffic.pedCall(n, arm);
 traffic.pedCrossing = (n) => peds.crossing(n);
+traffic.sig.pedsOn = (n, mask) => peds.crossingArms(n, mask);
 // buses and pedestrians: bus riders walk to the stop, wait, ride and get off on foot
 peds.pickTrip = () => traffic.pickTrip();
 peds.onStop = (l, a, b) => traffic.pedAtStop(l, a, b);

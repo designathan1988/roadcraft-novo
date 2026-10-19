@@ -16,6 +16,7 @@ import { Router } from './routing.ts';
 import { FlowAdvisor } from './advisor.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
+import { Signals } from './signals.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
@@ -194,11 +195,8 @@ export class Traffic {
   private evT = new Float64Array(1 << 12);
   private evV = new Int32Array(1 << 12);
   private evN = 0;
-  // traffic signals
-  sigPhase = new Uint8Array(1 << 14);
-  sigTimer = new Float32Array(1 << 14);
-  sigGreen = new Float32Array(1 << 14);
-  sigState = new Uint8Array(1 << 14); // 0 green, 1 amber, 2 all-red
+  /** Traffic lights (plans, timed cycle, actuated near the camera). */
+  readonly sig: Signals;
   private signalNodes = new Set<number>();
   /** Signals near the camera (only these run; distant ones stay frozen). */
   private windowSignals = new Set<number>();
@@ -240,6 +238,7 @@ export class Traffic {
     this.activeLanes.clear(); this.activeConns.clear();
     this.signalNodes.clear();
     if (this.signals) for (const n of this.windowSignals) if (n < this.signals.length) this.signals[n] = 0;
+    for (const n of this.windowSignals) this.sig.setActive(n, false);
     this.windowSignals.clear();
     for (const set of this.busSets) set.clear();
     this.riders.clear();
@@ -316,6 +315,9 @@ export class Traffic {
     this.router = new Router(sim);
     this.router.segLoad = this.segLoad;
     this.advisor = new FlowAdvisor(sim);
+    this.sig = new Signals(sim);
+    this.sig.queue = (n, mask) => this.armsQueue(n, mask);
+    this.sig.busNear = (n, mask) => this.busNearArms(n, mask);
     sim.onNodeReset = (n) => { this.advisor.reset(n); };
     this.veh.onGrow((cap) => {
       const r = new Int32Array(cap * ROUTE_CAP); r.set(this.routes); this.routes = r;
@@ -338,10 +340,6 @@ export class Traffic {
       this.connClaim = grow(this.connClaim, cap, -100);
     });
     sim.net.nodes.onGrow((cap) => {
-      this.sigPhase = grow(this.sigPhase, cap, 0);
-      this.sigTimer = grow(this.sigTimer, cap, 0);
-      this.sigGreen = grow(this.sigGreen, cap, 0);
-      this.sigState = grow(this.sigState, cap, 0);
       this.nodePass = grow(this.nodePass, cap, 0);
       this.lastAdmit = grow(this.lastAdmit, cap, 0);
       this.releaseAt = grow(this.releaseAt, cap, 0);
@@ -1077,8 +1075,8 @@ export class Traffic {
 
   /** Is the signal stage open for the connection's arm? */
   private stageGreen(conn: number, amberToo = false): boolean {
-    const sim = this.sim, k = sim.conns.cols, n = k.node[conn];
-    return sim.armStage[n * 8 + k.arm[conn]] === this.sigPhase[n] && (this.sigState[n] === 0 || (amberToo && this.sigState[n] === 1));
+    const k = this.sim.conns.cols;
+    return this.sig.go(k.node[conn], k.arm[conn], amberToo);
   }
 
   /** Can the connection be used now? (signal, ring priority) — without looking at right of way between vehicles. */
@@ -1247,7 +1245,7 @@ export class Traffic {
     if (sim.nodePhases[n] > 0) {
       if (!this.windowSignals.has(n)) return true;
       if (!this.stageGreen(conn)) {
-        if (this.sigState[n] === 1 && this.stageGreen(conn, true)) { const sv = c.v[v]; if (toEnd < (sv * sv) / (2 * 3.5)) return true; }
+        if (this.sig.amberNow(n) && this.stageGreen(conn, true)) { const sv = c.v[v]; if (toEnd < (sv * sv) / (2 * 3.5)) return true; }
         return false;
       }
     } else if (sim.nodeRing[n]) return this.gateOpen(conn);
@@ -1274,103 +1272,56 @@ export class Traffic {
     return true;
   }
 
+  /** Steps the actuated lights and writes the state of the lights near the camera for the drawing. */
   private updateSignals(dt: number): void {
     const sim = this.sim;
+    this.sig.step(dt);
     for (const n of this.windowSignals) {
-      const phases = sim.nodePhases[n];
-      if (!sim.net.nodes.alive[n] || phases === 0) { this.signalNodes.delete(n); this.windowSignals.delete(n); if (this.signals && n < this.signals.length) this.signals[n] = 0; continue; }
-      const spec = sim.net.junctions.get(n);
-      const pedSig = sim.nodeCtl[n] === Ctl.PedSignal;
-      if (spec?.fixed || pedSig) {
-        // fixed time: the cycle follows the clock (with the offset), for the green wave
-        const greens: number[] = [];
-        let cycle = 0;
-        for (let i = 0; i < phases; i++) { const g = Math.max(5, spec?.greens?.[i] ?? (pedSig ? (i === 0 ? 30 : 12) : 20)); greens.push(g); cycle += g + 4.5; }
-        let t = ((this.time + (spec?.offset ?? 0)) % cycle + cycle) % cycle;
-        let st = 0;
-        for (let i = 0; i < phases; i++) {
-          if (t < greens[i]) { st = 0; this.sigPhase[n] = i; break; }
-          t -= greens[i];
-          if (t < 3) { st = 1; this.sigPhase[n] = i; break; }
-          t -= 3;
-          if (t < 1.5) { st = 2; this.sigPhase[n] = i; break; }
-          t -= 1.5;
-        }
-        this.sigState[n] = st;
-      } else {
-        this.sigTimer[n] += dt;
-        const st = this.sigState[n];
-        // bus priority: a bus waiting at red shortens the others' green
-        const busWaiting = spec?.bus && st === 0 && this.sigTimer[n] > 6 && this.busWaitingAt(n);
-        // every second of green (after the minimum): an empty queue here with vehicles waiting on the other side cuts
-        // the green; nobody waiting on the other side holds the green
-        let endGreen = busWaiting || false;
-        const tg = this.sigTimer[n];
-        if (!endGreen && st === 0 && tg >= 6 && Math.floor(tg) !== Math.floor(tg - dt)) {
-          let others = 0;
-          for (let p = 0; p < phases && others === 0; p++) if (p !== this.sigPhase[n]) others += this.stageQueue(n, p);
-          if (others === 0) this.sigGreen[n] = Math.max(this.sigGreen[n], tg + 1.5);
-          else if (this.stageQueue(n, this.sigPhase[n]) === 0) endGreen = true;
-        }
-        if (st === 0 && (tg >= this.sigGreen[n] || endGreen)) { this.sigState[n] = 1; this.sigTimer[n] = 0; }
-        else if (st === 1 && this.sigTimer[n] >= 3) { this.sigState[n] = 2; this.sigTimer[n] = 0; }
-        else if (st === 2 && this.sigTimer[n] >= 1.5) {
-          // next stage with a queue (skips empty stages)
-          let next = this.sigPhase[n];
-          for (let k = 1; k <= phases; k++) {
-            const cand = (this.sigPhase[n] + k) % phases;
-            if (this.stageQueue(n, cand) > 0 || k === phases) { next = cand; break; }
-          }
-          this.sigPhase[n] = next;
-          this.sigState[n] = 0;
-          this.sigTimer[n] = 0;
-          // green adapts to the queue
-          this.sigGreen[n] = Math.min(40, Math.max(8, 5 + this.stageQueue(n, next) * 1.8));
-        }
-      }
+      if (!sim.net.nodes.alive[n] || sim.nodePhases[n] === 0) { this.signalNodes.delete(n); this.windowSignals.delete(n); this.sig.setActive(n, false); if (this.signals && n < this.signals.length) this.signals[n] = 0; continue; }
       if (this.signals && n < this.signals.length) {
         // 128 | amber << 6 | arms with green/amber
-        let mask = 0;
-        if (this.sigState[n] < 2) for (let a = 0; a < 8; a++) if (sim.armStage[n * 8 + a] === this.sigPhase[n] && a < sim.net.nodes.cols.deg[n]) mask |= 1 << a;
-        this.signals[n] = 128 | (this.sigState[n] === 1 ? 64 : 0) | (mask & 63);
+        const st = this.sig.state(n), mask = (st & 3) < 2 ? this.sig.arms[n * 8 + (st >> 2)] : 0;
+        this.signals[n] = 128 | ((st & 3) === 1 ? 64 : 0) | (mask & 63);
       }
     }
   }
 
-  /** Queue of a stage (sum over its arms). */
-  private stageQueue(n: number, stage: number): number {
+  /** Vehicles waiting near the line on the arms of node `n` in `mask`. */
+  private armsQueue(n: number, mask: number): number {
     let q = 0;
     const deg = this.sim.net.nodes.cols.deg[n];
-    for (let a = 0; a < deg; a++) if (this.sim.armStage[n * 8 + a] === stage) q += this.armQueue(n, a);
+    for (let a = 0; a < deg && a < 8; a++) if (mask & (1 << a)) q += this.armQueue(n, a);
     return q;
   }
 
-  /** Is any bus stopped at red at this node? */
-  private busWaitingAt(n: number): boolean {
+  /** A bus within 40 m of the line on one of the arms in `mask`. */
+  private busNearArms(n: number, mask: number): boolean {
     const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
     for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
-      if (this.stageGreen(x)) continue;
+      if ((mask & (1 << k.arm[x])) === 0) continue;
       const h = this.laneHead[k.from[x]];
       if (h >= 0 && c.line[h] >= 0 && sim.laneLen(k.from[x]) - c.s[h] < 40) return true;
     }
     return false;
   }
 
-  /** Cars on arm `arm` of node `n` have green or amber (pedestrians wait). Only within the window. */
-  carsGo(n: number, arm: number): boolean {
-    return this.windowSignals.has(n) && this.sim.armStage[n * 8 + arm] === this.sigPhase[n] && this.sigState[n] < 2;
+  /** May pedestrians start crossing arm `arm` of node `n`? (lights near the camera; elsewhere they do not wait) */
+  walkOk(n: number, arm: number): boolean {
+    return !this.windowSignals.has(n) || this.sig.walkOk(n, arm);
   }
 
-  /** Vehicles waiting on an arm (near the stop line). */
+  /** A pedestrian waits at the kerb of the crossing over arm `arm` of node `n`: calls the light. */
+  pedCall(n: number, arm: number): void { this.sig.pedCall(n, arm); }
+
+  /** Vehicles waiting on an arm (near the stop line; far ones counted up to 4 per lane). */
   private armQueue(n: number, arm: number): number {
-    const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
+    const sim = this.sim, c = this.veh.cols, sc = sim.net.segs.cols;
+    const seg = sim.armSeg[n * 8 + arm];
+    if (!sim.net.segs.alive[seg]) return 0;
+    const dir = sc.b[seg] === n ? 1 : -1; // lanes that arrive at n
     let q = 0;
-    const seen = new Set<number>();
-    for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
-      if (k.arm[x] !== arm || seen.has(k.from[x])) continue;
-      const lane = k.from[x];
-      seen.add(lane);
-      const L = sim.laneLen(lane);
+    for (let i = 0, m = laneCount(sc.profile[seg], dir); i < m; i++) {
+      const lane = laneId(seg, dir, i), L = sim.laneLen(lane);
       for (let v = this.laneHead[lane]; v >= 0 && L - c.s[v] < 80; v = c.next[v]) q++;
       if (this.laneHead[lane] < 0) q += Math.min(4, this.laneCount[lane]);
     }
@@ -1397,12 +1348,17 @@ export class Traffic {
     this.activeConns.delete(conn);
   }
 
-  /** Rebuilt nodes: signals restart. */
+  /** Rebuilt nodes: a new plan for their lights, which start their cycle again. */
   nodesRebuilt(nodes: number[]): void {
     for (const n of nodes) {
-      if (!this.sim.net.nodes.alive[n] || this.sim.nodePhases[n] === 0) { this.signalNodes.delete(n); continue; }
+      this.sig.rebuild(n);
+      if (!this.sim.net.nodes.alive[n] || this.sim.nodePhases[n] === 0) {
+        this.signalNodes.delete(n);
+        if (this.windowSignals.delete(n) && this.signals && n < this.signals.length) this.signals[n] = 0;
+        continue;
+      }
       this.signalNodes.add(n);
-      this.sigPhase[n] = 0; this.sigState[n] = 0; this.sigTimer[n] = 0; this.sigGreen[n] = 12;
+      if (this.windowSignals.has(n)) this.sig.setActive(n, true);
     }
   }
 
@@ -2152,8 +2108,9 @@ export class Traffic {
     sim.net.nodeIndex.query(this.camX - r, this.camZ - r, this.camX + r, this.camZ + r, (n) => {
       if (sim.nodePhases[n] > 0 && this.signalNodes.has(n)) this.windowSignals.add(n);
     });
-    // those that left the window go back to "unknown" in the drawing
-    if (this.signals) for (const n of old) if (!this.windowSignals.has(n) && n < this.signals.length) this.signals[n] = 0;
+    // those that left the window go back to "unknown" in the drawing and to their timed cycle
+    for (const n of old) if (!this.windowSignals.has(n)) { this.sig.setActive(n, false); if (this.signals && n < this.signals.length) this.signals[n] = 0; }
+    for (const n of this.windowSignals) this.sig.setActive(n, true);
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
       if (c.conn[v] >= 0 || c.dying[v] === 2) continue;
