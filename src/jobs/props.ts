@@ -15,7 +15,7 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from './protocol.ts';
-import { lotParking, buildBuildingParts } from './buildingGen.ts';
+import { inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts } from './buildingGen.ts';
 
 /** Tipos de peça (4 bits; 15 = vaga livre). */
 export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17 } as const;
@@ -444,34 +444,8 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     }
   }
 
-  // quintais: árvores no fundo das casas, arbustos na frente dos prédios
-  for (let i = 0; i < b.count; i++) {
-    const zone = b.zone[i];
-    if (zone !== Zone.Residential && zone !== Zone.Mixed) continue;
-    const r = new Rng((b.seed[i] * 2246822519) >>> 0);
-    const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
-    const W = b.w[i], D = b.d[i];
-    const at = (lx: number, lz: number): [number, number] => [b.x[i] + lx * c + lz * sn, b.z[i] - lx * sn + lz * c];
-    const house = zone === Zone.Residential && b.floors[i] <= 3;
-    if (house && D > 26) {
-      const n = r.int(1, 4);
-      for (let k = 0; k < n; k++) {
-        const [x, z] = at(r.range(-W / 2 + 2.5, W / 2 - 2.5), -D / 2 + r.range(2.2, 3.6));
-        const y = heightAt(heights, x, z);
-        if (y < SEA_LEVEL + 0.3) continue;
-        const pick = r.next();
-        out.add(pick < 0.3 ? PROP.Conifer : pick < 0.65 ? PROP.Oak : PROP.Tree, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.6, 1.0), r.nextU32());
-      }
-    }
-    // arbustos junto à frente
-    const n = house ? r.int(1, 4) : r.int(2, 6);
-    for (let k = 0; k < n; k++) {
-      const [x, z] = at(r.range(-W / 2 + 1, W / 2 - 1), D / 2 - r.range(0.7, 1.4));
-      const y = heightAt(heights, x, z);
-      if (y < SEA_LEVEL + 0.3) continue;
-      out.add(PROP.Bush, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.7, 1.3), r.nextU32());
-    }
-  }
+  // yards: trees at the back of the houses, shrubs along the fronts
+  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.add(k, x, y, z, yaw, v, sc, key));
 
   // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio
   {
@@ -495,10 +469,13 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     }
     for (let n = 0; n < g.nodeCount; n++) if (deg[n] >= 3) mark(g.nx[n], g.nz[n], 22);
     for (let i = 0; i < b.count; i++) {
-      // lote inteiro ocupado (prédio, quintal, muros)
+      // the whole lot is taken (building, yard, walls); a polygon lot only inside its outline
       const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
-      const W2 = b.w[i] / 2 + 0.5, D2 = b.d[i] / 2 + 0.5;
-      for (let a = -W2; a <= W2; a += RES) for (let d = -D2; d <= D2; d += RES) mark(b.x[i] + a * c + d * sn, b.z[i] - a * sn + d * c, 1);
+      const W2 = b.w[i] / 2 + 0.5, D2 = b.d[i] / 2 + 0.5, poly = lotPolygon(b, i);
+      for (let a = -W2; a <= W2; a += RES) for (let d = -D2; d <= D2; d += RES) {
+        if (poly && !inPolygon(poly, a, d, 0.5)) continue;
+        mark(b.x[i] + a * c + d * sn, b.z[i] - a * sn + d * c, 1);
+      }
     }
     const rng = new Rng(hash2(Math.round(x0), Math.round(z0), 5151));
     const free = (x: number, z: number) => {
@@ -547,4 +524,38 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
 function yAt(g: RoadGraph, s: number, len: number, v: number): number {
   const ya = g.ny[g.sa[s]], yb = g.ny[g.sb[s]];
   return ya + (yb - ya) * (len > 0 ? Math.max(0, Math.min(1, v / len)) : 0);
+}
+
+/**
+ * Yard props of each lot: trees at the back of the houses, shrubs along the residential and mixed fronts. Laid in the
+ * building's rectangle (`lotFit`: on a polygon lot, the one inside the outline the player drew).
+ */
+export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => void): void {
+  for (let i = 0; i < b.count; i++) {
+    const zone = b.zone[i];
+    if (zone !== Zone.Residential && zone !== Zone.Mixed) continue;
+    const r = new Rng((b.seed[i] * 2246822519) >>> 0);
+    const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
+    const fit = lotFit(b, i), W = fit.W, D = fit.D;
+    const at = (lx: number, lz: number): [number, number] => [fit.cx + lx * c + lz * sn, fit.cz - lx * sn + lz * c];
+    const house = zone === Zone.Residential && b.floors[i] <= 3;
+    if (house && D > 26) {
+      const n = r.int(1, 4);
+      for (let k = 0; k < n; k++) {
+        const [x, z] = at(r.range(-W / 2 + 2.5, W / 2 - 2.5), -D / 2 + r.range(2.2, 3.6));
+        const y = heightAt(heights, x, z);
+        if (y < SEA_LEVEL + 0.3) continue;
+        const pick = r.next();
+        add(pick < 0.3 ? PROP.Conifer : pick < 0.65 ? PROP.Oak : PROP.Tree, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.6, 1.0), r.nextU32());
+      }
+    }
+    // shrubs along the front
+    const n = house ? r.int(1, 4) : r.int(2, 6);
+    for (let k = 0; k < n; k++) {
+      const [x, z] = at(r.range(-W / 2 + 1, W / 2 - 1), D / 2 - r.range(0.7, 1.4));
+      const y = heightAt(heights, x, z);
+      if (y < SEA_LEVEL + 0.3) continue;
+      add(PROP.Bush, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.7, 1.3), r.nextU32());
+    }
+  }
 }

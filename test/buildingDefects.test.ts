@@ -131,3 +131,85 @@ test('F4: the detail and parts passes write no vertex into a throwaway mesh', as
     assert.equal(written, detail.vertexCount, `the detail pass wrote ${written} vertices for a ${detail.vertexCount}-vertex mesh`);
   } finally { MeshBuilder.prototype.vert = vert; }
 });
+
+/** World point → lot frame (x along the front, z towards the front), as world/lotEdit.ts worldToLot. */
+function toLot(b: BoxColumns, i: number, x: number, z: number): [number, number] {
+  const c = Math.cos(b.rot[i]), s = Math.sin(b.rot[i]), dx = x - b.x[i], dz = z - b.z[i];
+  return [dx * c - dz * s, dx * s + dz * c];
+}
+
+/** Distance from a point to the outside of a polygon (0 inside), in the polygon's frame. */
+function outsideBy(p: Array<[number, number]>, x: number, z: number): number {
+  let inside = false, best = Infinity;
+  for (let k = 0, j = p.length - 1; k < p.length; j = k++) {
+    const [ax, az] = p[j], [bx, bz] = p[k];
+    if ((az > z) !== (bz > z) && x < ax + (z - az) * (bx - ax) / (bz - az)) inside = !inside;
+    const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    best = Math.min(best, Math.hypot(x - ax - t * dx, z - az - t * dz));
+  }
+  return inside ? 0 : best;
+}
+
+test('F6: buildings, yards and walls follow the polygon the player drew', () => {
+  const heights = flatHeights(10);
+  // a 30 × 40 lot with its front right corner cut 12 m (counter-clockwise, lot frame, front = +z)
+  const poly: Array<[number, number]> = [[-15, -20], [15, -20], [15, 8], [3, 20], [-15, 20]];
+  const failures: string[] = [];
+  const kinds: Array<[string, number, number, number]> = [['house', Zone.Residential, 1, 0], ['block', Zone.Residential, 5, 0],
+    ['shops', Zone.Commercial, 4, 0], ['tower', Zone.Commercial, 16, 0], ['warehouse', Zone.Industrial, 2, 0], ['mixed', Zone.Mixed, 6, 0],
+    ['square', Zone.Commercial, 1, Fn.Square], ['empty lot', Zone.Residential, 0, 0]];
+  for (const [name, zone, floors, fn] of kinds) for (const rot of [0, 0.6]) for (const seed of [11, 222, 3333]) {
+    const b = oneBuilding(zone, floors, 30, 40, seed * 7919, seed % 127);
+    b.rot[0] = rot; b.fn[0] = fn; b.shapeN[0] = poly.length;
+    poly.forEach(([x, z], k) => { b.shape[k * 2] = x * 10; b.shape[k * 2 + 1] = z * 10; });
+    const m = buildBuildings(heights, b, 0, 0, 256, 0)!;
+    const p = positions(m);
+    let worst = 0;
+    // only the part the player cut away (inside the lot rectangle, outside the polygon): what overhangs the
+    // rectangle (awnings over the sidewalk, a crown slab over the party wall) is the same on any lot
+    for (const [x, , z] of p) { const [lx, lz] = toLot(b, 0, x, z); if (Math.abs(lx) <= 15 && Math.abs(lz) <= 20) worst = Math.max(worst, outsideBy(poly, lx, lz)); }
+    if (worst > 0.35) failures.push(`${name} rot ${rot} seed ${seed}: reaches ${worst.toFixed(2)} m into the cut corner`);
+    // the lot's ground covers the polygon: points well inside have a face over them low down
+    let bare = 0, tested = 0;
+    for (let lx = -14; lx <= 14; lx += 2) for (let lz = -19; lz <= 19; lz += 2) {
+      if (outsideBy(poly, lx, lz) > 0 || outsideBy(poly.map(([a, c]) => [a * 0.9, c * 0.9] as [number, number]), lx, lz) > 0) continue;
+      tested++;
+      const wxp = b.x[0] + lx * Math.cos(rot) + lz * Math.sin(rot), wzp = b.z[0] - lx * Math.sin(rot) + lz * Math.cos(rot);
+      let covered = false;
+      for (let t = 0; t < m.index.length && !covered; t += 3) {
+        const A = p[m.index[t]], B = p[m.index[t + 1]], C = p[m.index[t + 2]];
+        if (Math.max(A[1], B[1], C[1]) > 10.6) continue;
+        const d1 = (wxp - B[0]) * (A[2] - B[2]) - (A[0] - B[0]) * (wzp - B[2]);
+        const d2 = (wxp - C[0]) * (B[2] - C[2]) - (B[0] - C[0]) * (wzp - C[2]);
+        const d3 = (wxp - A[0]) * (C[2] - A[2]) - (C[0] - A[0]) * (wzp - A[2]);
+        covered = !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+      }
+      if (!covered) bare++;
+    }
+    if (floors > 0 && bare > tested * 0.02) failures.push(`${name} rot ${rot} seed ${seed}: ${bare} of ${tested} points inside the lot have no ground`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('F6: yard trees, shrubs and parked cars stay inside a polygon lot', async () => {
+  const { lotYardProps } = await import('../src/jobs/props.ts');
+  const { lotParking } = await import('../src/jobs/buildingGen.ts');
+  const heights = flatHeights(10);
+  const poly: Array<[number, number]> = [[-15, -20], [15, -20], [15, 8], [3, 20], [-15, 20]];
+  const failures: string[] = [];
+  for (const [zone, floors] of [[Zone.Residential, 1], [Zone.Residential, 2], [Zone.Mixed, 4], [Zone.Commercial, 3]]) for (const rot of [0, 0.6]) for (let seed = 1; seed <= 30; seed++) {
+    const b = oneBuilding(zone, floors, 30, 40, seed * 7919, seed * 4);
+    b.rot[0] = rot; b.shapeN[0] = poly.length;
+    poly.forEach(([x, z], k) => { b.shape[k * 2] = x * 10; b.shape[k * 2 + 1] = z * 10; });
+    lotYardProps(heights, b, (_k, x, _y, z) => {
+      const [lx, lz] = toLot(b, 0, x, z), out = outsideBy(poly, lx, lz);
+      if (out > 0.3) failures.push(`zone ${zone} rot ${rot} seed ${seed}: a yard prop ${out.toFixed(1)} m outside`);
+    });
+    const rows = lotParking(b, 0);
+    for (let k = 0; k + 3 < rows.length; k += 4) for (const t of [0, 1]) {
+      const lx = rows[k] + (rows[k + 2] - rows[k]) * t, lz = rows[k + 1] + (rows[k + 3] - rows[k + 1]) * t, out = outsideBy(poly, lx, lz);
+      if (out > 0.3) failures.push(`zone ${zone} rot ${rot} seed ${seed}: a parking row ends ${out.toFixed(1)} m outside`);
+    }
+  }
+  assert.deepEqual(failures.slice(0, 8), [], `${failures.length} failures`);
+});

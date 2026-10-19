@@ -13,7 +13,7 @@ import { MeshBuilder } from './meshBuilder.ts';
 import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, Pattern, Win, chimneyOf, facadeArch, facadeWindowTable, pickArch, type Arch } from '../world/arch.ts';
 import { cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { CELL_SIZE } from '../config.ts';
-import type { BoxColumns, PackedMesh } from './protocol.ts';
+import { SHAPE_SCALE, SHAPE_STRIDE, type BoxColumns, type PackedMesh } from './protocol.ts';
 import { CATALOG, CIVIC_CATALOG, CIVIC_DESIGNS, CatElem, CatFill, GEAR, decodeDesign, footprint, hasDesign, type CatalogEntry, type Design } from '../world/design.ts';
 import { FIN } from './buildingFinishes.ts';
 
@@ -208,7 +208,7 @@ function awning(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y:
 }
 
 /** Muro reto entre dois pontos locais, acompanhando o chão. */
-function wall(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number, t: number, col: number): void {
+function wall(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number, t: number, col: number, mat: number = BMAT.Fence): void {
   const len = Math.hypot(bx - ax, bz - az);
   const n = Math.max(1, Math.ceil(len / 6));
   const dx = (bx - ax) / len, dz = (bz - az) / len;
@@ -223,15 +223,15 @@ function wall(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: 
     const c0x = mx - dx * half, c0z = mz - dz * half, c1x = mx + dx * half, c1z = mz + dz * half;
     const quadSide = (sx: number, sz: number, ex: number, ez: number, nxL: number, nzL: number) => {
       const NX = nx(g, nxL, nzL), NZ = nz(g, nxL, nzL);
-      const v0 = mb.vert(wx(g, sx, sz), gy - 0.4, wz(g, sx, sz), NX, 0, NZ, col, BMAT.Fence);
-      const v1 = mb.vert(wx(g, ex, ez), gy - 0.4, wz(g, ex, ez), NX, 0, NZ, col, BMAT.Fence);
-      const v2 = mb.vert(wx(g, ex, ez), gy + h, wz(g, ex, ez), NX, 0, NZ, col, BMAT.Fence);
-      const v3 = mb.vert(wx(g, sx, sz), gy + h, wz(g, sx, sz), NX, 0, NZ, col, BMAT.Fence);
+      const v0 = mb.vert(wx(g, sx, sz), gy - 0.4, wz(g, sx, sz), NX, 0, NZ, col, mat);
+      const v1 = mb.vert(wx(g, ex, ez), gy - 0.4, wz(g, ex, ez), NX, 0, NZ, col, mat);
+      const v2 = mb.vert(wx(g, ex, ez), gy + h, wz(g, ex, ez), NX, 0, NZ, col, mat);
+      const v3 = mb.vert(wx(g, sx, sz), gy + h, wz(g, sx, sz), NX, 0, NZ, col, mat);
       mb.quad(v0, v1, v2, v3, NX, 0, NZ);
     };
     quadSide(c0x + px, c0z + pz, c1x + px, c1z + pz, -dz, dx);
     quadSide(c1x - px, c1z - pz, c0x - px, c0z - pz, dz, -dx);
-    const top = [[c0x + px, c0z + pz], [c1x + px, c1z + pz], [c1x - px, c1z - pz], [c0x - px, c0z - pz]].map(([x, z]) => mb.vert(wx(g, x, z), gy + h, wz(g, x, z), 0, 1, 0, col, BMAT.Fence));
+    const top = [[c0x + px, c0z + pz], [c1x + px, c1z + pz], [c1x - px, c1z - pz], [c0x - px, c0z - pz]].map(([x, z]) => mb.vert(wx(g, x, z), gy + h, wz(g, x, z), 0, 1, 0, col, mat));
     mb.quad(top[0], top[1], top[2], top[3], 0, 1, 0);
   }
 }
@@ -241,25 +241,39 @@ function wall(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: 
  * pouco nos fundos e nas esquinas: o fundo recua 0,5 m e cada lote fica num de três níveis (3 cm entre eles, 4 passos
  * da quantização da malha): dois chãos no mesmo plano piscavam um sobre o outro.
  */
-function yardGrid(heights: Float32Array, f: Frame, w: number, d: number) {
-  const NX = Math.max(2, Math.ceil(w / 6)), NZ = Math.max(2, Math.ceil(d / 6));
+/** The relief grid of a lot's ground. */
+interface YardGrid { NX: number; NZ: number; lxOf: (i: number) => number; lzOf: (j: number) => number; hAt: (i: number, j: number) => number; at: (lx: number, lz: number) => number }
+
+function yardGrid(heights: Float32Array, f: Frame, w: number, d: number): YardGrid {
+  // a polygon lot: one grid over the polygon, whatever part of the lot asks
+  if (lotPoly && polyGrid) return polyGrid;
+  let gx0 = -w / 2, gx1 = w / 2, gz0 = -d / 2 + Math.min(0.5, d * 0.05), gz1 = d / 2;
+  if (lotPoly) {
+    gx0 = gz0 = Infinity; gx1 = gz1 = -Infinity;
+    for (const [x, z] of lotPoly) { gx0 = Math.min(gx0, x); gx1 = Math.max(gx1, x); gz0 = Math.min(gz0, z); gz1 = Math.max(gz1, z); }
+    d = gz1 - gz0;
+  }
+  const gw = gx1 - gx0, gd = gz1 - gz0;
+  const NX = Math.max(2, Math.ceil(gw / 6)), NZ = Math.max(2, Math.ceil(d / 6));
   const lift = 0.18 + (hash2(Math.round(wx(f, 0, 0) * 4), Math.round(wz(f, 0, 0) * 4), 7) % 3) * 0.03;
-  const back = Math.min(0.5, d * 0.05);
-  const lxOf = (i: number) => -w / 2 + (w * i) / NX, lzOf = (j: number) => -d / 2 + back + ((d - back) * j) / NZ;
+  const lxOf = (i: number) => gx0 + (gw * i) / NX, lzOf = (j: number) => gz0 + (gd * j) / NZ;
   const hAt = (i: number, j: number) => { const X = wx(f, lxOf(i), lzOf(j)), Z = wz(f, lxOf(i), lzOf(j)); return heightAt(heights, X, Z) + lift; };
   /** Altura do chão do lote no ponto local (pela grade, não pelo relevo: o que fica por cima não cruza o chão). */
   const at = (lx: number, lz: number) => {
-    const fi = Math.max(0, Math.min(NX - 1e-6, (lx + w / 2) / w * NX)), fj = Math.max(0, Math.min(NZ - 1e-6, (lz - (-d / 2 + back)) / (d - back) * NZ));
+    const fi = Math.max(0, Math.min(NX - 1e-6, (lx - gx0) / gw * NX)), fj = Math.max(0, Math.min(NZ - 1e-6, (lz - gz0) / gd * NZ));
     const i = Math.floor(fi), j = Math.floor(fj), ti = fi - i, tj = fj - j;
     // o mesmo triângulo da malha (a diagonal vai de (i, j) a (i + 1, j + 1))
     const h00 = hAt(i, j), h11 = hAt(i + 1, j + 1);
     return ti >= tj ? h00 + (hAt(i + 1, j) - h00) * ti + (h11 - hAt(i + 1, j)) * tj : h00 + (hAt(i, j + 1) - h00) * tj + (h11 - hAt(i, j + 1)) * ti;
   };
-  return { NX, NZ, lxOf, lzOf, hAt, at };
+  const grid = { NX, NZ, lxOf, lzOf, hAt, at };
+  if (lotPoly) polyGrid = grid;
+  return grid;
 }
 
 /** Chão do lote (grama ou piso) acompanhando o relevo. */
 function yard(mb: MeshBuilder, heights: Float32Array, f: Frame, w: number, d: number, col: number, mat: number): void {
+  if (lotPoly) { polyYard(mb, heights, f, lotPoly, col, mat); return; }
   const { NX, NZ, lxOf, lzOf, hAt } = yardGrid(heights, f, w, d);
   const first = mb.v;
   for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
@@ -291,6 +305,194 @@ function walkway(mb: MeshBuilder, heights: Float32Array, f: Frame, W: number, D:
   }
 }
 
+// ------------------------------------------------------------ polygon lots (the outline the player drew)
+
+/**
+ * A lot as the generator builds it: the rectangle the building goes in (centre in the world, front W, depth D, in the
+ * lot's turn; ox, oz = its centre in the lot frame) and, for a polygon lot, the polygon in that rectangle's frame. A
+ * rectangle lot is itself; a polygon lot gets the largest rectangle inside its polygon, preferring the street front.
+ */
+export interface LotFit { cx: number; cz: number; W: number; D: number; ox: number; oz: number; poly: Array<[number, number]> | null }
+
+/** The polygon of a lot in its frame (metres, counter-clockwise), or null for a rectangle lot. */
+export function lotPolygon(b: BoxColumns, i: number): Array<[number, number]> | null {
+  const n = b.shapeN[i];
+  if (n < 3) return null;
+  const pts: Array<[number, number]> = [];
+  for (let k = 0; k < n; k++) pts.push([b.shape[i * SHAPE_STRIDE + k * 2] / SHAPE_SCALE, b.shape[i * SHAPE_STRIDE + k * 2 + 1] / SHAPE_SCALE]);
+  return pts;
+}
+
+export function lotFit(b: BoxColumns, i: number): LotFit {
+  const pts = lotPolygon(b, i);
+  if (!pts) return { cx: b.x[i], cz: b.z[i], W: b.w[i], D: b.d[i], ox: 0, oz: 0, poly: null };
+  const [rx0, rx1, rz0, rz1] = inscribedRect(pts);
+  const ox = (rx0 + rx1) / 2, oz = (rz0 + rz1) / 2, c = Math.cos(b.rot[i]), s = Math.sin(b.rot[i]);
+  return { cx: b.x[i] + ox * c + oz * s, cz: b.z[i] - ox * s + oz * c, W: rx1 - rx0, D: rz1 - rz0, ox, oz, poly: pts.map(([x, z]) => [x - ox, z - oz] as [number, number]) };
+}
+
+/** Whether a point is inside a polygon or within `tol` of its outline. */
+export function inPolygon(p: Array<[number, number]>, x: number, z: number, tol = 0): boolean {
+  let inside = false;
+  for (let k = 0, j = p.length - 1; k < p.length; j = k++) {
+    const [ax, az] = p[j], [bx, bz] = p[k];
+    if ((az > z) !== (bz > z) && x < ax + (z - az) * (bx - ax) / (bz - az)) inside = !inside;
+    if (tol > 0) {
+      const dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz;
+      const t = L > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L)) : 0;
+      if (Math.hypot(x - ax - t * dx, z - az - t * dz) <= tol) return true;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Largest axis-aligned rectangle [x0, x1, z0, z1] inside a polygon (half-metre grid), scored by area and by how close
+ * its front is to the lot's front (a building stands on the street, not 12 m behind a cut corner).
+ */
+function inscribedRect(p: Array<[number, number]>): [number, number, number, number] {
+  const RES = 0.5;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const [x, z] of p) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const nx = Math.max(1, Math.round((x1 - x0) / RES)), nz = Math.max(1, Math.round((z1 - z0) / RES));
+  // corner (i, j): x0 + i·RES, z1 − j·RES (row 0 = the front)
+  const cin = new Uint8Array((nx + 1) * (nz + 1));
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) cin[j * (nx + 1) + i] = inPolygon(p, x0 + i * RES, z1 - j * RES, 0.02) ? 1 : 0;
+  const h = new Int32Array(nx);
+  let best = -1, out: [number, number, number, number] = [x0, x1, z0, z1];
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const a = j * (nx + 1) + i, ok = cin[a] && cin[a + 1] && cin[a + nx + 1] && cin[a + nx + 2];
+      h[i] = ok ? h[i] + 1 : 0;
+    }
+    for (let i = 0; i < nx; i++) {
+      const hh = h[i];
+      if (!hh) continue;
+      let l = i, r = i;
+      while (l > 0 && h[l - 1] >= hh) l--;
+      while (r < nx - 1 && h[r + 1] >= hh) r++;
+      const gap = (j - hh + 1) * RES, score = (r - l + 1) * hh * Math.max(0.05, 1 - 0.03 * gap);
+      if (score > best) { best = score; out = [x0 + l * RES, x0 + (r + 1) * RES, z1 - (j + 1) * RES, z1 - (j - hh + 1) * RES]; }
+    }
+  }
+  return out;
+}
+
+/** The polygon of the lot being generated, in its frame (null = a rectangle lot), and what its walls look like. */
+let lotPoly: Array<[number, number]> | null = null;
+let polyGrid: YardGrid | null = null;
+/** Lot wall styles the generator asked for ([height, thickness, colour]): on the street front and elsewhere. */
+let fenceFront: [number, number, number] | null = null, fenceBack: [number, number, number] | null = null;
+/** The gate the generator put on the front ([x0, x1, z] in the frame), when it stands on the polygon's outline. */
+let gateAt: [number, number, number] | null = null;
+
+/** A wall on the lot's boundary: on a polygon lot only its style is kept, and the walls follow the polygon. */
+function lotWall(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number, t: number, col: number): void {
+  if (!lotPoly) { wall(mb, heights, f, ax, az, bx, bz, h, t, col); return; }
+  const front = Math.abs(az - bz) < 0.01 && az > 0;
+  if (front) fenceFront ??= [h, t, col]; else fenceBack ??= [h, t, col];
+}
+
+/** The lot's gate: on a polygon lot only where it stands on the outline (the wall there leaves its gap). */
+function lotGate(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number): void {
+  if (lotPoly) {
+    const z = (az + bz) / 2, g0 = Math.min(ax, bx), g1 = Math.max(ax, bx);
+    let onEdge = false;
+    for (let k = 0; k < lotPoly.length; k++) {
+      const [px, pz] = lotPoly[k], [qx, qz] = lotPoly[(k + 1) % lotPoly.length];
+      if (Math.abs(pz - z) < 0.3 && Math.abs(qz - z) < 0.3 && Math.min(px, qx) <= g0 + 0.1 && Math.max(px, qx) >= g1 - 0.1) onEdge = true;
+    }
+    if (!onEdge) return;
+    gateAt = [g0, g1, z];
+  }
+  gate(mb, heights, f, ax, az, bx, bz, h);
+}
+
+/** The lot's walls along the polygon: the front style on the edges that face the street, the other elsewhere. */
+function polyWalls(mb: MeshBuilder, heights: Float32Array, f: Frame): void {
+  const p = lotPoly;
+  if (!p || (!fenceFront && !fenceBack)) return;
+  for (let k = 0; k < p.length; k++) {
+    const [ax, az] = p[k], [bx, bz] = p[(k + 1) % p.length];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len < 0.3) continue;
+    // outward normal of a counter-clockwise edge: (dz, −dx) / len
+    const facesStreet = -(bx - ax) / len > 0.5;
+    const st = (facesStreet ? fenceFront ?? fenceBack : fenceBack ?? fenceFront)!;
+    const g = gateAt;
+    if (g && facesStreet && Math.abs(az - g[2]) < 0.3 && Math.abs(bz - g[2]) < 0.3) {
+      // the gate's gap (a front edge runs from right to left, counter-clockwise)
+      const hi = Math.max(ax, bx), lo = Math.min(ax, bx);
+      if (hi - g[1] > 0.2) wall(mb, heights, f, hi, az, g[1], az, st[0], st[1], st[2]);
+      if (g[0] - lo > 0.2) wall(mb, heights, f, g[0], az, lo, az, st[0], st[1], st[2]);
+      continue;
+    }
+    wall(mb, heights, f, ax, az, bx, bz, st[0], st[1], st[2]);
+  }
+}
+
+/** Ear clipping of a simple counter-clockwise polygon: triangles as index triples. */
+function earClip(p: Array<[number, number]>): number[] {
+  const idx = p.map((_, k) => k), out: number[] = [];
+  const cross = (a: number, b: number, c: number) => (p[b][0] - p[a][0]) * (p[c][1] - p[a][1]) - (p[b][1] - p[a][1]) * (p[c][0] - p[a][0]);
+  let guard = 0;
+  while (idx.length > 3 && guard++ < 1000) {
+    let cut = false;
+    for (let k = 0; k < idx.length; k++) {
+      const a = idx[(k + idx.length - 1) % idx.length], b = idx[k], c = idx[(k + 1) % idx.length];
+      if (cross(a, b, c) <= 1e-9) continue;
+      let empty = true;
+      for (const q of idx) {
+        if (q === a || q === b || q === c) continue;
+        if (cross(a, b, q) >= 0 && cross(b, c, q) >= 0 && cross(c, a, q) >= 0) { empty = false; break; }
+      }
+      if (!empty) continue;
+      out.push(a, b, c); idx.splice(k, 1); cut = true; break;
+    }
+    if (!cut) break;
+  }
+  if (idx.length === 3) out.push(idx[0], idx[1], idx[2]);
+  return out;
+}
+
+/** A convex polygon clipped to the half-plane left of a → b (one Sutherland–Hodgman step). */
+function clipLeft(poly: Array<[number, number]>, ax: number, az: number, bx: number, bz: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const side = (q: [number, number]) => (bx - ax) * (q[1] - az) - (bz - az) * (q[0] - ax);
+  for (let k = 0; k < poly.length; k++) {
+    const P = poly[k], Q = poly[(k + 1) % poly.length], sp = side(P), sq = side(Q);
+    if (sp >= 0) out.push(P);
+    if ((sp >= 0) !== (sq >= 0)) { const t = sp / (sp - sq); out.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t]); }
+  }
+  return out;
+}
+
+/**
+ * Lot ground over a polygon, on the same relief grid as the rest of the lot: each triangle of the polygon is cut by
+ * each triangle of the grid, so every piece lies flat on the grid and nothing reaches past the outline.
+ */
+function polyYard(mb: MeshBuilder, heights: Float32Array, f: Frame, p: Array<[number, number]>, col: number, mat: number): void {
+  const g = yardGrid(heights, f, 0, 0);
+  const tris = earClip(p);
+  for (let t = 0; t + 2 < tris.length; t += 3) {
+    const T: Array<[number, number]> = [p[tris[t]], p[tris[t + 1]], p[tris[t + 2]]];
+    const tx0 = Math.min(T[0][0], T[1][0], T[2][0]), tx1 = Math.max(T[0][0], T[1][0], T[2][0]);
+    const tz0 = Math.min(T[0][1], T[1][1], T[2][1]), tz1 = Math.max(T[0][1], T[1][1], T[2][1]);
+    for (let j = 0; j < g.NZ; j++) for (let i = 0; i < g.NX; i++) {
+      const xa = g.lxOf(i), xb = g.lxOf(i + 1), za = g.lzOf(j), zb = g.lzOf(j + 1);
+      if (xb < tx0 || xa > tx1 || zb < tz0 || za > tz1) continue;
+      // the grid's two triangles, (i, j)(i+1, j)(i+1, j+1) and (i, j)(i+1, j+1)(i, j+1), counter-clockwise
+      for (const G of [[[xa, za], [xb, za], [xb, zb]], [[xa, za], [xb, zb], [xa, zb]]] as Array<Array<[number, number]>>) {
+        let piece = T;
+        for (let e = 0; e < 3 && piece.length >= 3; e++) piece = clipLeft(piece, G[e][0], G[e][1], G[(e + 1) % 3][0], G[(e + 1) % 3][1]);
+        if (piece.length < 3) continue;
+        const v = piece.map(([lx, lz]) => mb.vert(wx(f, lx, lz), g.at(lx, lz), wz(f, lx, lz), 0, 1, 0, col, mat));
+        for (let k = 1; k + 1 < v.length; k++) mb.tri(v[0], v[k], v[k + 1], 0, 1, 0);
+      }
+    }
+  }
+}
+
 export function groundRange(heights: Float32Array, f: Frame, w: number, d: number): [number, number] {
   let lo = Infinity, hi = -Infinity;
   for (const [a, b] of [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5], [0, 0]]) {
@@ -307,19 +509,24 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
   const plan = planCells(b);
   for (let i = 0; i < b.count; i++) {
     const rot = b.rot[i];
-    const f: Frame = { cx: b.x[i], cz: b.z[i], c: Math.cos(rot), s: Math.sin(rot), base: 0 };
     const zone = b.zone[i];
     if (lod < 0 && (b.floors[i] === 0 || zone === 0)) continue;
-    if (b.floors[i] === 0) { emptyLot(mb, heights, b.w[i], b.d[i], f); continue; }
-    if (zone === 0) { legacyBox(mb, heights, b, i, f); continue; }
+    if (zone === 0) { legacyBox(mb, heights, b, i, { cx: b.x[i], cz: b.z[i], c: Math.cos(rot), s: Math.sin(rot), base: 0 }); continue; }
+    // the building goes in the lot's rectangle, or in the largest one inside a polygon lot (yard and walls follow it)
+    const fit = lotFit(b, i);
+    const f: Frame = { cx: fit.cx, cz: fit.cz, c: Math.cos(rot), s: Math.sin(rot), base: 0 };
+    lotPoly = fit.poly; polyGrid = null; fenceFront = fenceBack = null; gateAt = null;
+    if (b.floors[i] === 0) { emptyLot(mb, heights, fit.W, fit.D, f); lotPoly = null; continue; }
     const r = new Rng((b.seed[i] ^ (b.style[i] * 2654435761)) >>> 0);
-    const W = b.w[i], D = b.d[i];
+    const W = fit.W, D = fit.D;
+    const rows = lod <= 1 ? lotParking(b, i) : [];
+    for (let k = 0; k < rows.length; k += 2) { rows[k] -= fit.ox; rows[k + 1] -= fit.oz; }
     const [lo, hi] = groundRange(heights, f, W, D);
     f.base = lo - 0.4;
     mb.curBase = f.base;
     const floors = Math.max(1, b.floors[i]);
     const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
-    const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows: lod <= 1 ? lotParking(b, i) : [], pattern: plan.pattern[i], side: plan.side[i] };
+    const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows, pattern: plan.pattern[i], side: plan.side[i] };
     if (lod < 0) {
       // one pass, the outputs this job asks for: the parts (lod -2, part -> partsOut) or the detail layer (lod -1,
       // prism -> windowDetail into the real mesh); the main geometry goes to a builder that keeps nothing
@@ -344,6 +551,8 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
     else if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g);
     else if (zone === Zone.Commercial && floors >= 8) tower(g);
     else block(g);
+    polyWalls(g.mb, heights, f);
+    lotPoly = null;
     detailOut = null;
     applyFinishes(mb, v0, finishTable(arch, b.seed[i], b.fn[i], zone, ds));
   }
@@ -370,7 +579,8 @@ export function lotParking(b: BoxColumns, i: number): number[] {
   const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
   if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) return [];
   if (zone === Zone.Commercial && floors >= 8) return [];
-  const W = b.w[i], D = b.d[i], shop = zone === Zone.Commercial || zone === Zone.Mixed;
+  // in the lot frame: the rows are laid in the building's rectangle (lotFit) and moved by its centre
+  const fit = lotFit(b, i), W = fit.W, D = fit.D, shop = zone === Zone.Commercial || zone === Zone.Mixed;
   const bw = Math.max(8, Math.min(W - (shop ? 0.6 : 3), 40)), bd = Math.max(8, Math.min(D - (shop ? 4 : 7), D > 42 ? 50 : 26));
   const out: number[] = [];
   const xL = -W / 2 + 0.8, xR = W / 2 - 0.8;
@@ -386,6 +596,7 @@ export function lotParking(b: BoxColumns, i: number): number[] {
     const z0 = Math.max(front, back + 0.8) + 0.4, z1 = D / 2 - 1.5;
     if (z1 - z0 >= 7.5) out.push(-W / 2 + 0.7 + 2.5, z0, -W / 2 + 0.7 + 2.5, z1, W / 2 - 0.7 - 2.5, z0, W / 2 - 0.7 - 2.5, z1);
   }
+  for (let k = 0; k < out.length; k += 2) { out[k] += fit.ox; out[k + 1] += fit.oz; }
   return out;
 }
 
@@ -454,6 +665,14 @@ function emptyLot(mb: MeshBuilder, heights: Float32Array, W: number, D: number, 
   mb.curBase = f.base;
   blank(mb);
   const t = 0.25, y1 = hi + 0.3, col = 0xb9b4a8;
+  if (lotPoly) {
+    // the curb along the outline the player drew
+    for (let k = 0; k < lotPoly.length; k++) {
+      const [ax, az] = lotPoly[k], [bx, bz] = lotPoly[(k + 1) % lotPoly.length];
+      if (Math.hypot(bx - ax, bz - az) > 0.3) wall(mb, heights, f, ax, az, bx, bz, 0.3, t, col, BMAT.Plain);
+    }
+    return;
+  }
   prism(mb, f, -W / 2, W / 2, D / 2 - t, D / 2, f.base, y1, col, BMAT.Plain, 50, col, BMAT.Plain);
   prism(mb, f, -W / 2, W / 2, -D / 2, -D / 2 + t, f.base, y1, col, BMAT.Plain, 50, col, BMAT.Plain);
   prism(mb, f, -W / 2, -W / 2 + t, -D / 2, D / 2, f.base, y1, col, BMAT.Plain, 50, col, BMAT.Plain);
@@ -600,15 +819,15 @@ function house(g: Gen): void {
   // caminho do portão até a porta
   if (lod < 2) walkway(mb, heights, f, W, D, gateX + 1.6, D / 2 - 0.25, Math.max(x0 + 0.9, Math.min(x1 - 0.9, gateX + 1.6)), z1 + 0.1, 1.2);
   const fh2 = modern ? 1.8 : 1.0;
-  wall(mb, heights, f, -W / 2, D / 2, gateX, D / 2, fh2, 0.2, fence);
-  wall(mb, heights, f, gateX + 3.2, D / 2, W / 2, D / 2, fh2, 0.2, fence);
-  gate(mb, heights, f, gateX, D / 2 - 0.05, gateX + 3.2, D / 2 - 0.05, Math.max(1.2, fh2));
+  lotWall(mb, heights, f, -W / 2, D / 2, gateX, D / 2, fh2, 0.2, fence);
+  lotWall(mb, heights, f, gateX + 3.2, D / 2, W / 2, D / 2, fh2, 0.2, fence);
+  lotGate(mb, heights, f, gateX, D / 2 - 0.05, gateX + 3.2, D / 2 - 0.05, Math.max(1.2, fh2));
   hillside(g, x0, x1, z0, z1, wallCol, fh, fl, sobrado || modern);
   if (!sobrado) {
-    wall(mb, heights, f, -W / 2, -D / 2, -W / 2, D / 2, 1.8, 0.18, fence);
-    wall(mb, heights, f, W / 2, -D / 2, W / 2, D / 2, 1.8, 0.18, fence);
+    lotWall(mb, heights, f, -W / 2, -D / 2, -W / 2, D / 2, 1.8, 0.18, fence);
+    lotWall(mb, heights, f, W / 2, -D / 2, W / 2, D / 2, 1.8, 0.18, fence);
   }
-  wall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 1.8, 0.18, fence);
+  lotWall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 1.8, 0.18, fence);
 }
 
 /** Prédio de apartamentos ou de uso misto, na gramática do estilo. */
@@ -769,13 +988,13 @@ function block(g: Gen): void {
   if (!shop) {
     const fence = 0x9e9a92;
     if (lod < 2) walkway(mb, heights, f, W, D, 0, D / 2 - 0.25, 0, z1 + 0.1, 2.4);
-    wall(mb, heights, f, -W / 2, D / 2, -1.6, D / 2, 1.2, 0.2, fence);
-    wall(mb, heights, f, 1.6, D / 2, W / 2, D / 2, 1.2, 0.2, fence);
-    gate(mb, heights, f, -1.6, D / 2 - 0.05, 1.6, D / 2 - 0.05, 1.4);
+    lotWall(mb, heights, f, -W / 2, D / 2, -1.6, D / 2, 1.2, 0.2, fence);
+    lotWall(mb, heights, f, 1.6, D / 2, W / 2, D / 2, 1.2, 0.2, fence);
+    lotGate(mb, heights, f, -1.6, D / 2 - 0.05, 1.6, D / 2 - 0.05, 1.4);
     // party walls on the sides and the back
-    wall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 2.0, 0.18, fence);
-    if (corner >= 0) wall(mb, heights, f, -W / 2, -D / 2, -W / 2, D / 2 - 0.2, 2.0, 0.18, fence);
-    if (corner <= 0) wall(mb, heights, f, W / 2, -D / 2, W / 2, D / 2 - 0.2, 2.0, 0.18, fence);
+    lotWall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 2.0, 0.18, fence);
+    if (corner >= 0) lotWall(mb, heights, f, -W / 2, -D / 2, -W / 2, D / 2 - 0.2, 2.0, 0.18, fence);
+    if (corner <= 0) lotWall(mb, heights, f, W / 2, -D / 2, W / 2, D / 2 - 0.2, 2.0, 0.18, fence);
     if (corner) sideGarden(g, corner, x0, x1, z0, bd, fence);
   }
 }
@@ -963,7 +1182,7 @@ function civic(g: Gen, fn: number): void {
       solid(cx - 9, cx + 9, cz - 14, cz + 2, y0, y0 + 0.08, 0x2f7a4a);
       solid(cx - 8.5, cx + 8.5, cz - 6.1, cz - 5.9, y0 + 0.08, y0 + 0.1, 0xf2f2ee);
       for (const [a, b2] of [[cx - 9, cx - 8.9], [cx + 8.9, cx + 9]]) solid(a, b2, cz - 14, cz + 2, y0, y0 + 4, 0x6c7276, BMAT.Fence);
-      wall(mb, heights, f, -W / 2, zf, W / 2, zf, 2.2, 0.2, 0xe8e2d4);
+      lotWall(mb, heights, f, -W / 2, zf, W / 2, zf, 2.2, 0.2, 0xe8e2d4);
       break;
     }
     case Fn.Church: {
@@ -1193,11 +1412,11 @@ function warehouse(mb: MeshBuilder, heights: Float32Array, f: Frame, W: number, 
   prism(mb, f, -bw / 2, -bw / 2 + Math.min(14, bw * 0.4), z1, z1 + 4, f.base, hi + 6.5, 0xe6e2da, BMAT.Wall, 3, 0x8f8b84, BMAT.RoofFlat);
   yard(mb, heights, f, W, D, 0xa7a299, BMAT.Paving);
   const fence = 0x6c7276;
-  wall(mb, heights, f, -W / 2, D / 2, -W / 2 + 6, D / 2, 2.0, 0.1, fence);
-  wall(mb, heights, f, -W / 2 + 14, D / 2, W / 2, D / 2, 2.0, 0.1, fence);
-  wall(mb, heights, f, -W / 2, -D / 2, -W / 2, D / 2, 2.0, 0.1, fence);
-  wall(mb, heights, f, W / 2, -D / 2, W / 2, D / 2, 2.0, 0.1, fence);
-  wall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 2.0, 0.1, fence);
+  lotWall(mb, heights, f, -W / 2, D / 2, -W / 2 + 6, D / 2, 2.0, 0.1, fence);
+  lotWall(mb, heights, f, -W / 2 + 14, D / 2, W / 2, D / 2, 2.0, 0.1, fence);
+  lotWall(mb, heights, f, -W / 2, -D / 2, -W / 2, D / 2, 2.0, 0.1, fence);
+  lotWall(mb, heights, f, W / 2, -D / 2, W / 2, D / 2, 2.0, 0.1, fence);
+  lotWall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 2.0, 0.1, fence);
 }
 
 /** Chaminé de tijolo com anel branco e vermelho no topo (a fumaça sai dela). */
@@ -1300,7 +1519,7 @@ function openLot(g: Gen, fn: number): void {
   const sol = (x0: number, x1: number, z0: number, z1: number, ya: number, yb: number, col: number) => prism(mb, f, x0, x1, z0, z1, ya, yb, col, BMAT.Plain, 50, col, BMAT.Plain);
   if (lod < 2) yard(mb, heights, f, W, D, fn === Fn.Cemetery ? 0x6b8a4a : 0x8a8478, fn === Fn.Cemetery ? BMAT.Grass : BMAT.Paving);
   if (fn === Fn.Cemetery) {
-    for (const [ax, az, bx, bz] of [[-W / 2, D / 2, W / 2, D / 2], [-W / 2, -D / 2, W / 2, -D / 2], [-W / 2, -D / 2, -W / 2, D / 2], [W / 2, -D / 2, W / 2, D / 2]]) wall(mb, heights, f, ax, az, bx, bz, 2.2, 0.3, 0xe8e2d4);
+    for (const [ax, az, bx, bz] of [[-W / 2, D / 2, W / 2, D / 2], [-W / 2, -D / 2, W / 2, -D / 2], [-W / 2, -D / 2, -W / 2, D / 2], [W / 2, -D / 2, W / 2, D / 2]]) lotWall(mb, heights, f, ax, az, bx, bz, 2.2, 0.3, 0xe8e2d4);
     // capela no fundo
     setFac(mb, ArchId.Civic, g.seed, Facade.Punched, 3, 4);
     prism(mb, f, -4, 4, -D / 2 + 2, -D / 2 + 10, f.base, y0 + 5, 0xf4efe4, BMAT.Wall, 3, -1, 0);
