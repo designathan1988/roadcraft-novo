@@ -7,7 +7,8 @@ import * as THREE from 'three/webgpu';
 import { currentU, foamU, waveU } from './scene.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
-import { GRASS_TEX, GRASS_TILE, ROCK_NORMAL, ROCK_TEX, ROCK_TILE, TERRAIN_NOISE, WATER_TEX } from './surfaceBake.ts';
+import { ROCK_TILE, TERRAIN_NOISE, WATER_TEX } from './surfaceBake.ts';
+import { COOKED, LAND, loadCookedSurfaces } from './cookedSurfaces.ts';
 import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
 import {
   HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TAG, MAP_TILES, PLATE_SIZE, SEA_LEVEL, TILE_SIZE,
@@ -35,10 +36,13 @@ const GRID = 32; // squares per side of a patch
 const LEAF = 128; // side of the finest node (m) → 4 m between vertices
 const LEVELS = Math.log2(PLATE_SIZE / LEAF) + 1; // 0..4
 const MAX_NODES = 4096;
+/** Mean luma (0.3, 0.6, 0.1 weights) of the 4.0 grass texture, linear (its last mip, measured from the file). */
+const GRASS_MEAN = 0.0864;
 /** The shadow copy of the terrain: its LOD factor (coarser than the view's), how far round the camera it goes (the
  *  cascades' reach plus a ridge's shadow) and how much it is sunk (the coarse copy must not shadow the fine ground). */
 const SHADOW_LOD = 1.6;
 const SHADOW_SINK = 1.5;
+const SHADOW_GRID = 16;
 const MAX_SHADOW_NODES = 1024;
 /** Water tiles nearer than this (m) use the 8 m grid; farther ones the 32 m grid. */
 const WATER_FINE = 1500;
@@ -118,6 +122,7 @@ export class TerrainRenderer {
 
   constructor(world: World) {
     this.world = world;
+    loadCookedSurfaces();
     this.heightTex = new THREE.DataArrayTexture(world.heights, HEIGHT_TILE_RES, HEIGHT_TILE_RES, MAP_TILES * MAP_TILES);
     this.heightTex.format = THREE.RedFormat;
     this.heightTex.type = THREE.FloatType;
@@ -233,8 +238,17 @@ export class TerrainRenderer {
     this.mesh.add(this.grassMesh);
 
     const sg = new THREE.InstancedBufferGeometry();
-    sg.setAttribute('position', g.attributes.position);
-    sg.setIndex(g.index);
+    // a coarser grid than the view's (16 squares a patch, not 32): a hill's shadow needs no 4 m detail
+    {
+      const SG = SHADOW_GRID, sp = new Float32Array((SG + 1) * (SG + 1) * 3), si = new Uint16Array(SG * SG * 6);
+      for (let j = 0, k = 0; j <= SG; j++) for (let i = 0; i <= SG; i++, k += 3) { sp[k] = i / SG; sp[k + 2] = j / SG; }
+      for (let j = 0, k = 0; j < SG; j++) for (let i = 0; i < SG; i++, k += 6) {
+        const a = j * (SG + 1) + i, b = a + 1, c = a + SG + 1, d = c + 1;
+        si.set([a, c, b, b, c, d], k);
+      }
+      sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+      sg.setIndex(new THREE.BufferAttribute(si, 1));
+    }
     this.shadowInst = new THREE.InstancedBufferAttribute(this.shadowArray, 4);
     this.shadowInst.setUsage(THREE.DynamicDrawUsage);
     sg.setAttribute('node', this.shadowInst);
@@ -374,16 +388,26 @@ export class TerrainRenderer {
     const blend = this.groundBlend(vNormal);
     // the rock texture, triplanar (pow(|n|, 4) weights), read only where rock shows: the derivatives are taken before
     // the branch (a texture read inside it needs them given)
+    // Roadcraft 4.0's land array (terrain-land: granite face on the walls, granite top looking up)
     const triplanar = (tex: THREE.Texture, n: N, p: N, rockW: N): N => {
       const out = vec4(0.5, 0.5, 1, 1).toVar();
       const w3 = pow(abs(n), vec3(4, 4, 4));
       const ws = w3.div(w3.x.add(w3.y).add(w3.z));
       const uvX = p.zy.div(ROCK_TILE), uvY = p.xz.div(ROCK_TILE), uvZ = p.xy.div(ROCK_TILE);
       const dX = [dFdx(uvX), dFdy(uvX)], dY = [dFdx(uvY), dFdy(uvY)], dZ = [dFdx(uvZ), dFdy(uvZ)];
+      const face = int(LAND.GraniteFace), top = int(LAND.GraniteTop);
       If(rockW.greaterThan(0.001), () => {
-        out.assign(texture(tex, uvX).grad(dX[0], dX[1]).mul(ws.x).add(texture(tex, uvY).grad(dY[0], dY[1]).mul(ws.y)).add(texture(tex, uvZ).grad(dZ[0], dZ[1]).mul(ws.z)));
+        out.assign(texture(tex, uvX).depth(face).grad(dX[0], dX[1]).mul(ws.x).add(texture(tex, uvY).depth(top).grad(dY[0], dY[1]).mul(ws.y)).add(texture(tex, uvZ).depth(face).grad(dZ[0], dZ[1]).mul(ws.z)));
       });
       return out;
+    };
+    // the 4.0's grass (terrain-grass), one repeat every 12.8 m, read twice (the second turned and offset) and blended by
+    // a broad noise so it does not tile, with a wide octave for the large patches (4.0 dualScaleNoTile)
+    const grassUv = (p: N): N => p.xz.div(12.8);
+    const noTile = (t: THREE.Texture, uv: N): N => {
+      const k = texture(TERRAIN_NOISE, uv.mul(0.031)).r;
+      const r = vec2(uv.x.mul(0.8660254).sub(uv.y.mul(0.5)), uv.x.mul(0.5).add(uv.y.mul(0.8660254))).add(0.37);
+      return mix(texture(t, uv), texture(t, r), smoothstep(0.35, 0.65, k));
     };
 
     // fine relief (Roadcraft terrainRelief.ts, here analytic): on slopes the normal is bent by a ridged noise, so dirt
@@ -398,9 +422,13 @@ export class TerrainRenderer {
       const h = (o: N) => abs(mx_noise_float(q.add(o)));
       const h0 = h(vec2(0, 0));
       const dx = h(vec2(e, 0)).sub(h0), dz = h(vec2(0, e)).sub(h0);
-      const soil = normalize(n.add(vec3(dx, 0, dz).mul(-2.2).mul(fade)));
+      let soil: N = normalize(n.add(vec3(dx, 0, dz).mul(-2.2).mul(fade)));
+      // the grass's own relief (tufts), on the gentle ground, near
+      const gn = noTile(COOKED['terrain-grass.normal'], grassUv(p)).xyz.mul(2).sub(1);
+      const gFade = clamp(float(1).sub(fwidth(p.x).div(0.6)), 0, 1).mul(float(1).sub(blend.rockW)).mul(float(1).sub(blend.dirtW));
+      soil = normalize(soil.add(vec3(gn.x, 0, gn.y).mul(0.6).mul(gFade)));
       // the rock's own relief where it shows (softened 45 % toward the surface, as 4.0)
-      const rn = triplanar(ROCK_NORMAL, n, p, blend.rockW).xyz.mul(2).sub(1);
+      const rn = triplanar(COOKED['terrain-land.normal'], n, p, blend.rockW).xyz.mul(2).sub(1);
       const bent = normalize(n.add(vec3(rn.x, 0, rn.y).mul(0.55)));
       return normalize(mix(soil, bent, blend.rockW));
     })();
@@ -422,21 +450,26 @@ export class TerrainRenderer {
       const strata = sin(p.y.mul(1.7).add(mid.mul(3))).mul(0.5).add(0.5);
       const rock = mix(sRGBTransferEOTF(vec3(0.43, 0.42, 0.4)), sRGBTransferEOTF(vec3(0.55, 0.52, 0.47)), strata.mul(fadeMid).add(float(1).sub(fadeMid).mul(0.5)));
       const sand = sRGBTransferEOTF(vec3(0.72, 0.66, 0.52));
-      // the lawn a little darker than the biome colours: under ACES they read lime in full sun (Roadcraft: deep green)
-      let c = mix(grassA, grassB, clamp(big.add(mid.mul(0.22).mul(fadeMid)), 0, 1)).mul(0.78);
-      // baked lawn (tufts, soil in the gaps, dry patches; `surfaceBake.ts`) at two scales so it does not repeat; the
-      // mipmap carries the average far away
-      const g1 = texture(GRASS_TEX, p.xz.div(GRASS_TILE)).xyz.mul(2);
-      const g2 = texture(GRASS_TEX, p.xz.div(GRASS_TILE * 4.37).add(0.37)).xyz.mul(2);
-      c = c.mul(g1).mul(mix(vec3(1, 1, 1), g2, 0.45));
-      const speck = clamp(g1.y.mul(0.5), 0, 1);
+      // Roadcraft 4.0's grass texture as it is (its own tones: tufts, soil in the gaps, dry patches), the large patches
+      // from a wide octave (macro × 0.7..1.3 at 0.35), the biome's hue over the default biome's, and a little less
+      // saturated (the player found the green too strong)
+      const gNear = sRGBTransferEOTF(noTile(COOKED['terrain-grass.map'], grassUv(p)).xyz);
+      const gFar = sRGBTransferEOTF(noTile(COOKED['terrain-grass.map'], grassUv(p).mul(0.137).add(0.21)).xyz);
+      const lumaW = vec3(0.3, 0.6, 0.1);
+      const macro = clamp(dot(gFar, lumaW).div(GRASS_MEAN), 0.7, 1.3);
+      const biome = grassA.div(sRGBTransferEOTF(vec3(0x46 / 255, 0x64 / 255, 0x2f / 255)));
+      let c: N = gNear.mul(mix(float(1), macro, 0.35)).mul(biome);
+      c = mix(vec3(dot(c, lumaW)), c, 0.82).mul(mix(float(0.92), float(1.06), clamp(big.add(mid.mul(0.22).mul(fadeMid)), 0, 1)));
+      void grassB;
+      const speck = clamp(dot(gNear, lumaW).div(GRASS_MEAN).mul(0.5), 0, 1);
       void slope;
       // red-brown dirt (4.0's latossolo: tone × (1.22, 0.8, 0.58)), rock from the baked granite tinted by the strata,
       // scree at the rock's fringe
-      const soil = sRGBTransferEOTF(vec3(0.61, 0.4, 0.29)).mul(texture(TERRAIN_NOISE, p.xz.div(13.6)).r.mul(0.35).add(0.82));
-      const dirtC = mix(dirt, soil, 0.6);
+      // the 4.0's dirt (terrain-land layer 8, 13.6 m)
+      const dirtC = sRGBTransferEOTF(texture(COOKED['terrain-land.map'], p.xz.div(13.6)).depth(int(LAND.Dirt)).xyz);
+      void dirt;
       // the baked texture is sRGB: to linear, then tinted by the strata (relative to the granite's mean tone)
-      const rockC = sRGBTransferEOTF(triplanar(ROCK_TEX, n, p, blend.rockW).xyz).mul(rock.div(sRGBTransferEOTF(vec3(0.46, 0.455, 0.44))));
+      const rockC = sRGBTransferEOTF(triplanar(COOKED['terrain-land.map'], n, p, blend.rockW).xyz).mul(rock.div(sRGBTransferEOTF(vec3(0.46, 0.455, 0.44))));
       c = mix(c, dirtC, blend.dirtW);
       c = mix(c, rockC, blend.rockW);
       const scree = mix(rockC.mul(0.7), dirtC.mul(0.8), 0.4).mul(mix(float(0.75), float(1.2), texture(TERRAIN_NOISE, p.xz.mul(1.325 / 8)).b));
@@ -589,7 +622,9 @@ export class TerrainRenderer {
     m.positionNode = position();
     withPrevious(m);
     const grassA = sRGBTransferEOTF(this.grassA), grassB = sRGBTransferEOTF(this.grassB);
-    const base = mix(grassA, grassB, vShade).mul(texture(GRASS_TEX, positionWorld.xz.div(GRASS_TILE)).xyz.mul(2));
+    // the same grass as the ground under it (the 4.0's grass texture), a little lighter or darker per tuft
+    const base = sRGBTransferEOTF(texture(COOKED['terrain-grass.map'], positionWorld.xz.div(12.8)).xyz).mul(grassA.div(sRGBTransferEOTF(vec3(0x46 / 255, 0x64 / 255, 0x2f / 255)))).mul(mix(float(0.85), float(1.15), vShade));
+    void grassB;
     // dark at the root (where it meets the lawn's colour), lighter and drier at the tip
     m.colorNode = vec4(mix(base.mul(0.85), base.mul(vec3(1.25, 1.2, 0.95)), vTip), 1);
     m.normalNode = transformNormalToView(vec3(0, 1, 0));
@@ -707,12 +742,12 @@ export class TerrainRenderer {
       const node = attribute('node', 'vec4');
       const uv = attribute('position', 'vec3').xz;
       const size = node.z, level = node.w;
-      const step = size.div(float(GRID));
+      const step = size.div(float(SHADOW_GRID));
       const xz = node.xy.add(uv.mul(size));
       const dist = length(vec3(xz.x, heightAt(xz), xz.y).sub(cam));
       const range = rangeBase.mul(level.exp2());
       const morph = clamp(dist.sub(range.mul(0.72)).div(range.mul(0.28)), 0, 1);
-      const odd = fract(uv.mul(float(GRID)).mul(0.5)).mul(2);
+      const odd = fract(uv.mul(float(SHADOW_GRID)).mul(0.5)).mul(2);
       const mxz = xz.sub(odd.mul(step).mul(morph));
       return vec3(mxz.x, heightAt(mxz).sub(SHADOW_SINK), mxz.y);
     });

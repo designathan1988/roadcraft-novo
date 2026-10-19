@@ -140,3 +140,11 @@ test('ecology (4.0 port): ground by a lake is wet, a ridge far from water is dry
   assert.ok(at(800, 600, 0) > at(500, 600, 0), `the ridge is drier than the plain (${at(800, 600, 0)} vs ${at(500, 600, 0)})`);
   assert.ok(at(990, 40, 2) > 80, `the cliff is bare (${at(990, 40, 2)})`);
 });
+
+test('terrain (4.0 port): the grass, dirt and rock come from the 4.0 baked surfaces, and the files are there', async () => {
+  const fs = await import('node:fs');
+  const { COOKED } = await import('../src/render/cookedSurfaces.ts');
+  for (const name of Object.keys(COOKED)) assert.ok(fs.existsSync(`public/cooked/surfaces/${name}.ktx2`), `${name}.ktx2 is in public/cooked/surfaces`);
+  const src = fs.readFileSync('src/render/terrain.ts', 'utf8');
+  for (const k of ["COOKED['terrain-grass.map']", "COOKED['terrain-land.map']", "COOKED['terrain-land.normal']", "COOKED['terrain-grass.normal']"]) assert.ok(src.includes(k), `the terrain reads ${k}`);
+});
