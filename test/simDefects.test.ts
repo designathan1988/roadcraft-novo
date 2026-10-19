@@ -791,3 +791,24 @@ test('C28: following a vehicle keeps to that vehicle when a look-alike passes cl
   assert.equal(mod.followMatch(d, 0, fol), false, 'the look-alike matched');
   assert.equal(mod.followMatch(d, 11, fol), true, 'the followed car (braking) did not match');
 });
+
+test('C24: the rear wagons of a train stay on the track through a bend', async () => {
+  const { SimNet, laneId } = await import('../src/sim/lanes.ts');
+  const { PROFILES } = await import('../src/roads/profiles.ts');
+  const T = await import('../src/sim/traffic.ts') as unknown as { backAlong?: (sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array) => void };
+  const rail = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const sim = new SimNet();
+  sim.apply({ t: 'addNode', rec: { id: 0, x: 0, z: 0, y: 10 } });
+  sim.apply({ t: 'addNode', rec: { id: 1, x: 200, z: 0, y: 10 } });
+  sim.apply({ t: 'addNode', rec: { id: 2, x: 300, z: 150, y: 10 } });
+  sim.apply({ t: 'addSeg', rec: { id: 0, a: 0, b: 1, cx: 100, cz: 0, profile: rail, flags: 0, zl: 0, zr: 0 } });
+  sim.apply({ t: 'addSeg', rec: { id: 1, a: 1, b: 2, cx: 250, cz: 75, profile: rail, flags: 0, zl: 0, zr: 0 } });
+  sim.rebuild();
+  assert.ok(typeof T.backAlong === 'function', 'wagon placement is reachable');
+  const front = laneId(1, 1, 0), behind = laneId(0, 1, 0), out = new Float64Array(4), q = new Float64Array(4);
+  // the third wagon's middle, 51 m behind a front 5 m past the bend: on the first segment
+  T.backAlong(sim, front, -1, 5, 51, out);
+  let best = 1e9;
+  for (let s = 0; s <= sim.laneLen(behind); s += 0.5) { sim.lanePoint(behind, s, q); best = Math.min(best, Math.hypot(q[0] - out[0], q[2] - out[2])); }
+  assert.ok(best < 1, `the wagon is ${best.toFixed(1)} m off the track`);
+});

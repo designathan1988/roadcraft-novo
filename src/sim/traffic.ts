@@ -2592,13 +2592,27 @@ export class Traffic {
 }
 
 /** Point `d` metres behind the vehicle's front (continues onto the previous lane along a straight line if needed). */
-function backAlong(sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array): void {
-  if (conn >= 0) {
-    if (s - d >= 0) { sim.connPoint(conn, s - d, out); return; }
-    const from = sim.conns.cols.from[conn];
-    lane = from; s = sim.laneLen(from) + (s - d); d = 0;
-  } else s -= d;
-  if (s >= 0) { sim.lanePoint(lane, s, out); return; }
+/**
+ * Point `d` metres behind the vehicle's front (a wagon): back along the connection and lanes it came by, through the
+ * connections into each lane (a train's rear wagons follow the track round a bend); only past what is known, along a
+ * straight line.
+ */
+export function backAlong(sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array): void {
+  const k = sim.conns.cols;
+  s -= d;
+  for (let guard = 0; guard < 6; guard++) {
+    if (conn >= 0) {
+      if (s >= 0) { sim.connPoint(conn, s, out); return; }
+      lane = k.from[conn]; s += sim.laneLen(lane); conn = -1;
+      continue;
+    }
+    if (s >= 0) { sim.lanePoint(lane, s, out); return; }
+    // the connection that leads into this lane (on rails there is one per lane, except at a switch)
+    let into = -1;
+    for (let x = sim.nodeConn[sim.laneFrom(lane)]; x >= 0; x = k.nextAtNode[x]) if (k.to[x] === lane) { into = x; break; }
+    if (into < 0) break;
+    conn = into; s += k.len[into];
+  }
   sim.lanePoint(lane, 0, out);
   out[0] += Math.sin(out[3]) * s; out[2] += Math.cos(out[3]) * s;
 }
