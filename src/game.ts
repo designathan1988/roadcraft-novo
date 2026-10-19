@@ -1,14 +1,14 @@
-// Junta tudo: mundo, workers, câmera, desenho, ferramentas, salvar e carregar.
-// A página só faz entrada, interface, escolha do que desenhar e desenho.
+// Ties everything together: world, workers, camera, rendering, tools, saving and loading.
+// The page only does input, interface, choosing what to draw, and drawing.
 
 import * as THREE from 'three/webgpu';
 import { CELLS_PER_TILE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
 
-/** Troca o tamanho do mapa: os arrays do mundo são do tamanho dele, então a página recarrega. */
+/** Changes the map size: the world arrays are sized to the map, so the page reloads. */
 const FLASH_COLOR = new THREE.Color(0xdde6ff);
 
 function reloadWithMap(tiles: number, then: string): void {
-  try { localStorage.setItem('cidade.mapa', String(tiles)); } catch { /* sem armazenamento: vai pela URL */ }
+  try { localStorage.setItem('cidade.mapa', String(tiles)); } catch { /* no storage: it goes through the URL */ }
   location.href = `${location.pathname}?mapa=${tiles}&${then}`;
 }
 import { CommandStack } from './core/commands.ts';
@@ -78,10 +78,10 @@ import { packSlot, quarantineSlot, unpackToSlot } from './mapFile.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
 
 const SLOT = 'cidade-1';
-/** Trechos cabíveis no mapa de ocupação (2 sentidos por trecho). */
+/** Segments that fit in the occupancy map (2 directions per segment). */
 export const OCCUPANCY_SEGS = 1 << 17;
 
-/** Estado exposto para a casca (fotos automáticas). */
+/** State exposed to the shell (automated photos). */
 export const status = { value: 'carregando' };
 const debug: { status: string; game: unknown } = { get status() { return status.value; }, game: null };
 (globalThis as { __cidade?: unknown }).__cidade = debug;
@@ -98,9 +98,9 @@ export class Game {
   readonly pool: JobPool;
   readonly commands = new CommandStack();
   readonly hud: Hud;
-  /** As ações dos botões do painel (os roteiros de teste chamam o mesmo que o botão). */
+  /** The panel button actions (test scripts call the same thing the button does). */
   hudActions!: HudActions & FeatureActions;
-  /** Medição (?perf): onde foi o tempo dos quadros lentos. */
+  /** Measurement (?perf): where the time of slow frames went. */
   perfLog: string[] | null = null;
   private parts!: SceneParts;
   private rig: CameraRig;
@@ -138,10 +138,10 @@ export class Game {
   private trafficLook: TrafficLook;
   private occSent = 0;
   private netOps: NetOp[] = [];
-  /** Nós cujas setas ajustadas à mão precisam ser recalculadas. */
+  /** Nodes whose hand-adjusted arrows need to be recomputed. */
   private arrowNodes = new Set<number>();
   private camSent = 0;
-  /** Portas mandadas à simulação: quando, e de onde (a câmera andou ou a cidade cresceu manda de novo). */
+  /** Doors sent to the simulation: when, and from where (the camera moving or the city growing sends them again). */
   private doorsSent = 0;
   private doorsAt = { x: Infinity, z: Infinity, count: -1 };
   private demandSent = 0;
@@ -150,22 +150,22 @@ export class Game {
   private tool: Tool = 'camera';
   private brush: BrushParams = { mode: 'raise', radius: 60, strength: 0.4 };
   private stroke: BrushStroke | GroundStroke | null = null;
-  /** Relevo pronto escolhido e a rocha pintada junto com ele. */
+  /** Chosen landform and the rock painted along with it. */
   private landformMode: BrushMode = 'mesa';
   private rockStroke: GroundStroke | null = null;
-  /** Pincel de elementos do chão. */
+  /** Ground elements brush. */
   private elem = { kind: 30, mode: 'lay' as 'lay' | 'eraseKind' | 'eraseAll', density: 8, size: 7 };
   private elemStroke: ElementStroke | null = null;
   private groundKind: number = Ground.Sand;
   private forestCut = false;
   private forestSpecies = 0;
-  /** Árvores: uma por clique em vez do pincel. */
+  /** Trees: one per click instead of the brush. */
   private forestOne = false;
   private riverWidth = 14;
   private riverPts: Array<[number, number]> = [];
   private pointer = { x: 0, y: 0, inside: false };
   private drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' = 'none';
-  /** Demolir por retângulo: canto onde o arrasto começou. */
+  /** Demolish by rectangle: corner where the drag started. */
   private boxStart: THREE.Vector3 | null = null;
   private roadTool: RoadTool;
   private inspector!: Inspector;
@@ -173,9 +173,9 @@ export class Game {
   private zoneTool: ZoneTool;
   private growth: Growth;
   private selected = -1;
-  /** Lote desenhado à mão: pontos já clicados (null = fora do modo). */
+  /** Hand-drawn lot: points clicked so far (null = not in this mode). */
   private lotPts: Array<[number, number]> | null = null;
-  /** Ferramenta de lote e seus estados (polígono, primeiro lote do juntar, canto arrastado). */
+  /** Lot tool and its states (polygon, first lot of a join, dragged corner). */
   private lotMode: LotMode = 'edit';
   private polyPts: Array<[number, number]> = [];
   private joinFirst = -1;
@@ -189,34 +189,34 @@ export class Game {
   private preview = new RoadPreview();
   private last = 0;
   private busy = false;
-  /** Gerando a cidade: os lotes esperam o relevo assentar. */
+  /** Generating the city: lots wait for the terrain to be conformed. */
   private generating = false;
-  /** Hora do dia e velocidade do relógio (horas de jogo por minuto real). */
+  /** Time of day and clock speed (game hours per real minute). */
   private hour = 10;
   private clockSpeed = 1;
-  /** Céu escolhido e clima ajustado pelo jogador (vão no salvamento). */
+  /** Chosen sky and weather set by the player (both go into the save). */
   private skyMode: SkyMode = 'ciclo';
   private weatherCtl: WeatherCtl | null = null;
   private waterCtl = { waves: 0.3, foam: 0.4, current: 0.5 };
-  /** Nuvens postas pelo jogador e o estado da ferramenta Céu. */
+  /** Clouds placed by the player and the state of the Sky tool. */
   private clouds: Cloud[] = [];
   private cloudView = new CloudPuffs();
   private skyTool: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
   private cloudGrab = -1;
-  /** Ver por dentro: o prédio e o andar mostrados. */
+  /** Inside view: the building and the floor shown. */
   private inside = new InsideView();
   private textSigns!: TextSigns;
   private blast = new Blast();
-  /** Pessoas do criador e força da bomba. */
+  /** People from the creator and the bomb strength. */
   private personSpec = { color: 3, height: 7, walk: false, count: 1 };
   private bombForce = 3;
   private hitKind: 'pistol' | 'bomb' | null = null;
   private insideId = -1;
   private insideFloor = 0;
-  /** Algo mudou desde o último salvamento (salvamento automático a cada 2 min). */
+  /** Something changed since the last save (autosave every 2 min). */
   private unsaved = false;
   private autosaveAt = 0;
-  /** Pausa (Espaço): relógio e simulação parados. */
+  /** Pause (Space): clock and simulation stopped. */
   private paused = false;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -224,7 +224,7 @@ export class Game {
     debug.game = this;
     this.pool = new JobPool({ heights: this.world.heightsSab, ground: this.world.groundSab, water: this.world.waterSab });
     this.rig = new CameraRig(this.world.heights);
-    // a câmera nunca entra num prédio (roadcraft): miolo do lote (70% × 60%) até o topo pelos andares
+    // the camera never enters a building (roadcraft): core of the lot (70% × 60%) up to the top given by the floors
     this.rig.solid = (x, z) => {
       const col = this.world.buildings.cols;
       let top = -Infinity;
@@ -239,7 +239,7 @@ export class Game {
     this.terrain = new TerrainRenderer(this.world);
     this.city = createCity(this.world, this.pool);
     this.cityDetail = createCityDetail(this.world, this.pool, this.city.material);
-    // por trecho: ocupação a→b, b→a, desgaste do asfalto (simulação), livre
+    // per segment: occupancy a→b, b→a, asphalt wear (simulation), free
     this.occupancySab = new SharedArrayBuffer(OCCUPANCY_SEGS * 4);
     this.trafficLook = createTrafficLook(this.occupancySab);
     this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook);
@@ -259,15 +259,15 @@ export class Game {
     };
     this.sim.postMessage({ type: 'init', poses: posesSab, heights: this.world.heightsSab, occupancy: this.occupancySab, signals: this.signalsSab, tickHz: 20 } satisfies ToSim);
     this.vehicles = new VehicleRenderer(this.poses);
-    // perfis feitos no editor: os workers precisam deles antes dos trechos que os usam
+    // profiles made in the editor: the workers need them before the segments that use them
     onProfileAdded(() => {
       const list = customProfiles();
       this.pool.broadcast({ type: 'profiles', list });
       this.sim.postMessage({ type: 'profiles', list } satisfies ToSim);
     });
-    // a simulação espelha a rede: as mudanças vão em lote a cada quadro
+    // the simulation mirrors the network: changes go as a batch every frame
     this.world.roads.listeners.push((op) => this.netOps.push(op));
-    // setas ajustadas à mão: nós a refazer quando o controle ou os trechos mudam
+    // hand-adjusted arrows: nodes to redo when the control or the segments change
     this.world.roads.listeners.push((op) => {
       const arr = this.trafficLook.arrows.image.data as Float32Array;
       if (op.t === 'junction') this.arrowNodes.add(op.id);
@@ -418,7 +418,7 @@ export class Game {
     this.parts = await createScene(this.canvas);
     console.log(`camadas de textura: ${this.parts.maxLayers}, mapa ${MAP_TILES} (${location.search})`);
     if (MAP_TILES * MAP_TILES > this.parts.maxLayers) {
-      // a placa não comporta este tamanho de mapa: volta para o maior que cabe
+      // the GPU cannot hold this map size: fall back to the largest that fits
       const fit = [...MAP_SIZES].reverse().find((t) => t * t <= this.parts.maxLayers) ?? 10;
       reloadWithMap(fit, 'grande');
       return;
@@ -453,7 +453,7 @@ export class Game {
     this.hud.showLoading('Gerando o relevo…');
     await this.generateTerrain();
 
-    // todos os shaders compilados aqui, nunca durante o jogo
+    // all shaders compiled here, never during play
     this.hud.showLoading('Preparando os shaders…');
     const warm = new THREE.Group();
     for (const l of this.layers) warm.add(l.warmupMesh());
@@ -461,21 +461,21 @@ export class Game {
     for (const o of this.blast.warmup()) warm.add(o);
     scene.add(warm);
     for (const m of [this.preview.mesh, this.preview.marker, this.preview.circle]) m.visible = true;
-    this.inside.show(0, 0, 20, 20, 0, -1000, 0, 3.2); // compila os materiais do miolo na carga
+    this.inside.show(0, 0, 20, 20, 0, -1000, 0, 3.2); // compiles the inside-view materials at load
     this.transitView.showPaths = true;
     this.vehicles.warmup();
     this.rig.resize(window.innerWidth, window.innerHeight);
     this.updatePixelScale();
     this.rig.update(0);
     this.terrain.update(this.rig.persp, this.rig.eye);
-    // compute das peças roda uma vez aqui (compila na carga)
+    // the props compute runs once here (compiles at load)
     this.props.bake(renderer);
     if (this.props.enabled) this.props.update(renderer, this.rig.persp, this.rig.eye, performance.now());
-    // opções (qualidade): da última vez, ou pela placa de vídeo; ?simples etc. mandam nas fotos
+    // options (quality): from last time, or by the GPU; ?simples etc. override them for photos
     this.settings = loadSettings(this.parts.isWebGPU);
     if (params.has('simples')) Object.assign(this.settings, { shadows: false, ao: false, bloom: false });
     if (params.has('semsombra')) this.settings.shadows = false;
-    // medições: liga e desliga partes do desenho
+    // measurements: turn parts of the rendering on and off
     if (params.has('semdetalhe')) this.cityDetail.group.visible = false;
     if (params.has('perf')) this.perfLog = [];
     if (params.has('sempedestres')) this.vehicles.hidePeople = true;
@@ -518,7 +518,7 @@ export class Game {
     else if (params.has('cidade')) await this.generatedCity();
     else if (params.has('carregar')) await this.load();
     else if (!params.has('cam') && !params.has('vazio')) {
-      // tela de entrada (fotos automáticas pulam com ?cam, ?teste ou ?cidade)
+      // start screen (automated photos skip it with ?cam, ?teste or ?cidade)
       new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
         newCity: (seed, tiles) => {
           if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
@@ -533,7 +533,7 @@ export class Game {
     status.value = 'pronto';
   }
 
-  /** Números do quadro (fotos automáticas e depuração). */
+  /** Frame numbers (automated photos and debugging). */
   stats(): Record<string, number> {
     const info = this.parts.renderer.info.render as { drawCalls: number; triangles: number };
     return {
@@ -544,7 +544,7 @@ export class Game {
     };
   }
 
-  /** Câmera e hora para fotos automáticas; espera as malhas ficarem prontas. */
+  /** Camera and hour for automated photos; waits for the meshes to be ready. */
   async view(x: number, z: number, yaw: number, pitch: number, dist: number, hour?: number): Promise<void> {
     this.rig.restore(new Float64Array([x, z, yaw * Math.PI / 180, pitch * Math.PI / 180, dist, 0]));
     if (hour !== undefined) { this.hour = hour; this.clockSpeed = 0; }
@@ -552,7 +552,7 @@ export class Game {
     await this.settle(4);
   }
 
-  /** Espera os workers esvaziarem (para fotos e testes). */
+  /** Waits for the workers to drain (for photos and tests). */
   async settle(frames = 20): Promise<void> {
     let quiet = 0;
     while (quiet < frames) {
@@ -561,7 +561,7 @@ export class Game {
     }
   }
 
-  /** Gera o relevo base pela semente, um ladrilho por tarefa. */
+  /** Generates the base terrain from the seed, one tile per job. */
   private generateTerrain(): Promise<void> {
     return new Promise((resolve) => {
       let left = TILE_COUNT;
@@ -570,7 +570,7 @@ export class Game {
           this.world.tileMin[r.tile] = r.min;
           this.world.tileMax[r.tile] = r.max;
           this.world.layerDirty.add(r.tile);
-          // peças (árvores) do ladrilho dependem do relevo
+          // the tile's props (trees) depend on the terrain
           const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
           this.world.dirty.markRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Props);
           if (--left === 0) resolve();
@@ -579,7 +579,7 @@ export class Game {
     });
   }
 
-  // ---------------------------------------------------------------- quadro
+  // ----------------------------------------------------------------- frame
 
   private frame(now: number): void {
     this.health?.frame(now - this.last);
@@ -614,7 +614,7 @@ export class Game {
     this.hud.setMoney(this.world.money, this.world.unlimited);
     this.hud.setCompass(this.rig.yaw);
 
-    // ferramenta sob o cursor
+    // tool under the cursor
     let hit: THREE.Vector3 | null = null;
     if (this.tool !== 'camera' && this.pointer.inside && this.drag !== 'pan' && this.drag !== 'rotate') hit = this.rig.pick(this.ndcX(), this.ndcY());
     const terrainTool = TERRAIN_TOOLS.includes(this.tool) || GROUND_TOOLS.includes(this.tool) || (this.tool === 'sky' && this.skyTool.fog !== 'none');
@@ -639,7 +639,7 @@ export class Game {
     if (this.drag === 'free') this.roadTool.freeMove(hit);
     else if (this.drag === 'row' && this.boxStart) this.itemTool.hoverRow(this.boxStart.x, this.boxStart.z, hit);
     else if (this.drag === 'box' && this.boxStart && hit) {
-      // retângulo do arrasto no chão (vermelho)
+      // drag rectangle on the ground (red)
       const a = this.boxStart, cz = (a.z + hit.z) / 2, H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.8;
       this.preview.marker.visible = false;
       this.preview.show({ x0: (a.x + hit.x) / 2, z0: a.z, cx: (a.x + hit.x) / 2, cz, x1: (a.x + hit.x) / 2, z1: hit.z }, Math.abs(hit.x - a.x) / 2, [0, 1], [H(a.x, a.z), H(hit.x, hit.z)], true, 0xe2564b);
@@ -648,7 +648,7 @@ export class Game {
 
     const pf = this.perfLog, T0 = pf ? performance.now() : 0;
     for (const l of this.layers) l.processDirty();
-    this.world.dirty.drain(Dirty.Terrain); // ninguém além do desenho depende disso ainda
+    this.world.dirty.drain(Dirty.Terrain); // nothing but rendering depends on this yet
     this.processRoadPaint();
     if (this.arrowNodes.size) this.updateArrows();
     const T1 = pf ? performance.now() : 0;
@@ -672,7 +672,7 @@ export class Game {
 
     if (this.post) { this.post.setCamera(cam); this.post.render(); }
     else renderer.render(scene, cam);
-    // medição (?perf): quadros com mais de 30 ms dizem onde o tempo foi
+    // measurement (?perf): frames over 30 ms say where the time went
     if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); }
   }
 
@@ -681,7 +681,7 @@ export class Game {
     this.hud.setTrafficView(trafficOverlayU.value > 0.5);
   }
 
-  /** Viagens concluídas e desistências por minuto (das contagens totais da simulação). */
+  /** Trips completed and given up per minute (from the simulation's running totals). */
   private tripsPerMin = 0;
   private lostPerMin = 0;
   private lastTrips: { t: number; arrived: number; lost: number } | null = null;
@@ -697,7 +697,7 @@ export class Game {
   }
 
   private infoTimer = 0;
-  /** Números da cidade no canto (duas vezes por segundo). */
+  /** City numbers in the corner (twice per second). */
   private updateInfo(now: number): void {
     if (now - this.infoTimer < 500) return;
     this.infoTimer = now;
@@ -709,7 +709,7 @@ export class Game {
     });
   }
 
-  /** Pausa ou continua: o relógio e a simulação (carros, pedestres, ônibus) param juntos. */
+  /** Pauses or resumes: the clock and the simulation (cars, pedestrians, buses) stop together. */
   togglePause(): void {
     this.paused = !this.paused;
     this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
@@ -728,7 +728,7 @@ export class Game {
     this.clockSpeed = speeds[(speeds.indexOf(this.clockSpeed) + 1) % speeds.length];
   }
 
-  /** Manda à simulação as mudanças da rede e a posição da câmera. */
+  /** Sends the network changes and the camera position to the simulation. */
   private syncSim(now: number): void {
     if (this.netOps.length) {
       if (this.transit.lines.length) this.roadsVersion++;
@@ -753,8 +753,8 @@ export class Game {
   }
 
   /**
-   * Portas dos prédios perto da câmera (roadcraft `lotDoors`): o meio da frente do lote, que olha para a via. Os
-   * pedestres que nascem por ali saem delas até a calçada. Só quando a câmera andou 80 m ou a cidade mudou.
+   * Doors of the buildings near the camera (roadcraft `lotDoors`): the middle of the lot's front, facing the road.
+   * Pedestrians spawned there walk out of them to the sidewalk. Only when the camera moved 80 m or the city changed.
    */
   private sendDoors(now: number): void {
     this.doorsSent = now;
@@ -778,7 +778,7 @@ export class Game {
     this.sim.postMessage({ type: 'docks', pts: dk } satisfies ToSim, [dk.buffer]);
   }
 
-  /** Setas das pontas dos trechos nos nós com conexões de faixa ajustadas (só os nós que mudaram). */
+  /** Arrows at segment ends on nodes with adjusted lane connections (only the nodes that changed). */
   private updateArrows(): void {
     const net = this.world.roads, sc = net.segs.cols, arr = this.trafficLook.arrows.image.data as Float32Array;
     let changed = false;
@@ -796,7 +796,7 @@ export class Game {
     if (changed) this.trafficLook.arrows.needsUpdate = true;
   }
 
-  /** Pinta de novo, no worker, os ladrilhos cujas vias mudaram. */
+  /** Repaints, in the worker, the tiles whose roads changed. */
   private processRoadPaint(): void {
     const cells = this.world.dirty.drain(Dirty.RoadPaint);
     if (cells.length === 0) return;
@@ -814,7 +814,7 @@ export class Game {
     }
   }
 
-  // --------------------------------------------------------------- entrada
+  // ----------------------------------------------------------------- input
 
   private ndcX(): number { return (this.pointer.x / this.canvas.clientWidth) * 2 - 1; }
   private ndcY(): number { return -(this.pointer.y / this.canvas.clientHeight) * 2 + 1; }
@@ -859,7 +859,7 @@ export class Game {
         this.drag = 'zone';
         this.zoneTool.begin();
       } else if (e.button === 0) {
-        this.drag = 'click'; // vira arrasto de câmera se mexer
+        this.drag = 'click'; // becomes a camera drag if it moves
       }
       e.preventDefault();
     });
@@ -894,7 +894,7 @@ export class Game {
         const rock = this.rockStroke;
         this.rockStroke = null;
         if (this.stroke.finish()) {
-          // relevo pronto: o terreno e a rocha pintada são um passo só de desfazer
+          // landform: the terrain and the painted rock are a single undo step
           const terr = this.stroke;
           if (rock && rock.finish()) this.commands.push({ label: 'relevo', apply: () => { terr.apply(); rock.apply(); }, invert: () => { rock.invert(); terr.invert(); } });
           else this.commands.push(terr);
@@ -1026,7 +1026,7 @@ export class Game {
     });
   }
 
-  /** Aplica as opções: resolução, detalhe, imagem final (refeita e compilada aqui, nunca no meio do jogo) e tempo. */
+  /** Applies the options: resolution, detail, final image (rebuilt and compiled here, never mid-game) and weather. */
   private async applySettings(s: Settings, compile = true): Promise<void> {
     this.settings = s;
     const { renderer, scene } = this.parts;
@@ -1052,10 +1052,10 @@ export class Game {
     }
   }
 
-  /** Roda a imagem final uma vez com cada câmera (compila os shaders dela na carga). */
+  /** Renders the final image once with each camera (compiles its shaders at load). */
   private warmPost(): void {
     if (!this.post) return;
-    // as duas saídas (dia sem bloom, noite com) compiladas na carga: o anoitecer não trava
+    // both outputs (day without bloom, night with it) compiled at load: dusk does not stall
     for (const night of [true, false]) {
       this.post.bloomOverride = night;
       this.post.setCamera(this.rig.ortho); this.post.render();
@@ -1064,7 +1064,7 @@ export class Game {
     this.post.bloomOverride = null;
   }
 
-  /** Distâncias de detalhe pelo erro de tela: mais pixels, detalhe até mais longe. */
+  /** Detail distances by screen-space error: more pixels, detail reaches farther. */
   private updatePixelScale(): void {
     const res = this.settings ? this.settings.resolution * this.settings.detail : 1;
     const k = Math.min(3, Math.max(0.5, window.innerHeight * window.devicePixelRatio * res / 1080));
@@ -1072,7 +1072,7 @@ export class Game {
     if (this.props) this.props.pixelScale = k;
   }
 
-  /** Desfazer (false) ou refazer (true), com som. */
+  /** Undo (false) or redo (true), with sound. */
   private history(redo: boolean): void {
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
@@ -1108,9 +1108,9 @@ export class Game {
     this.canvas.style.cursor = t === 'camera' ? 'grab' : 'crosshair';
   }
 
-  /** Para roteiros de foto e testes: as mesmas ações das ferramentas. */
+  /** For photo scripts and tests: the same actions as the tools. */
   readonly api = {
-    /** Criador de pessoas (src/render/people/creator.ts): um grupo de 1 a 20 em (x, z), com desfazer; devolve o id (0 antes de carregar). */
+    /** People creator (src/render/people/creator.ts): a group of 1 to 20 at (x, z), with undo; returns the id (0 before loading). */
     people: (x: number, z: number, options: Partial<PersonOptions> = {}) => {
       const c = this.vehicles.people.creator;
       if (!c) return 0;
@@ -1119,7 +1119,7 @@ export class Game {
       this.commands.run(cmd);
       return cmd.id;
     },
-    /** O que a tela do criador oferece (roupas por sexo e idade, cores, modos, objetos); null antes de carregar. */
+    /** What the creator screen offers (clothes by sex and age, colours, modes, objects); null before loading. */
     peopleCatalog: () => this.vehicles.people.catalog(),
     river: (pts: Array<[number, number]>, width = 14) => { this.riverPts = pts.slice(); this.riverWidth = width; this.finishRiver(); },
     paint: (x: number, z: number, r: number, kind: number, mode: 'paint' | 'forest' | 'cut' = 'paint', species = 0) => {
@@ -1128,7 +1128,7 @@ export class Game {
       if (s.finish()) this.commands.push(s);
     },
     item: (x: number, z: number, kind: number, variant = 0) => { this.itemTool.item = kind; this.itemTool.sign = variant; this.itemTool.mode = 'streetscape'; this.itemTool.click({ x, z } as THREE.Vector3, false); },
-    /** Lote desenhado: frente A→B, fundo até C. */
+    /** Drawn lot: front A→B, back out to C. */
     lot: (ax: number, az: number, bx: number, bz: number, cx: number, cz: number, use = 1, floors?: number) => {
       this.lotUse = use;
       this.lotPts = [[ax, az], [bx, bz]];
@@ -1138,10 +1138,10 @@ export class Game {
       return this.selected;
     },
     follow: () => { this.toggleFollow(); return !!this.vehicles.follow; },
-    /** Raio agora (fotos da tempestade). */
+    /** Lightning strike now (storm photos). */
     strike: () => this.weather.strikeNow(this.rig.eye, heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z)),
     biome: (b: number) => this.setBiome(b),
-    /** Via reta de (ax, az) a (bx, bz) com o perfil pelo nome (ou id). */
+    /** Straight road from (ax, az) to (bx, bz) with the profile by name (or id). */
     road: (ax: number, az: number, bx: number, bz: number, profile: string | number = 0, elevation = 0) => {
       const id = typeof profile === 'number' ? profile : PROFILES.findIndex((p) => p.name === profile);
       const a = snap(this.world.roads, ax, az, 10), b = snap(this.world.roads, bx, bz, 10);
@@ -1162,7 +1162,7 @@ export class Game {
       if (c) this.commands.run(c);
     },
     grow: async () => { this.growth.processDirty(); await this.pool.whenIdle(); return this.growth.fillAll(); },
-    /** Edições de via no ponto (x, z): dividir, inverter, duplicar, unir (nó) e mover nó para (tx, tz). */
+    /** Road edits at the point (x, z): split, reverse, duplicate, join (node) and move node to (tx, tz). */
     edit: (what: 'split' | 'reverse' | 'duplicate' | 'join' | 'move', x: number, z: number, tx = 0, tz = 0) => {
       const net = this.world.roads;
       const s = net.nearestSeg(x, z, 10), n = net.nearestNode(x, z, 10);
@@ -1176,10 +1176,10 @@ export class Game {
       this.commands.push(j);
       return 'ok';
     },
-    /** Pacote do salvamento (o que Exportar baixa) e abrir um pacote (o que Abrir arquivo faz). */
+    /** The save package (what Export downloads) and opening a package (what Open file does). */
     packMap: () => packSlot(SLOT),
     openMap: (b: Blob) => this.importMap(b),
-    /** Uma pincelada de terreno (inclusive relevos prontos) em (x, z). */
+    /** One terrain brush stroke (landforms included) at (x, z). */
     terrain: (mode: BrushMode, x: number, z: number, radius = 80, strength = 0.4) => {
       const st = new BrushStroke(this.world), rk = LANDFORM_ROCK[mode];
       const p = { mode, radius, strength };
@@ -1188,14 +1188,14 @@ export class Game {
       if (g && rk !== undefined) g.dab(x, z, radius * 0.95, 'paint', rk, 1, 1);
       if (st.finish()) { if (g?.finish()) this.commands.push({ label: 'relevo', apply: () => { st.apply(); g.apply(); }, invert: () => { g.invert(); st.invert(); } }); else this.commands.push(st); }
     },
-    /** Elementos do chão (tipo 30..40) espalhados num círculo. */
+    /** Ground elements (kind 30..40) scattered in a circle. */
     elements: (kind: number, x: number, z: number, r = 12, density = 20, size = 7) => {
       const st = new ElementStroke(this.world.items);
       for (let i = 0; i < 6; i++) st.dab(x, z, r, kind, density, size, 'lay', 1);
       if (!st.cmd.empty) this.commands.push(st.cmd);
       return this.world.items.size;
     },
-    /** Faixa de pedestres no meio da via em (x, z): 9 zebra, 10 com semáforo. */
+    /** Pedestrian crossing mid-road at (x, z): 9 zebra, 10 with traffic lights. */
     crossing: (x: number, z: number, ctl: number) => {
       const s = this.world.roads.nearestSeg(x, z, 10);
       if (!s) return 'sem via';
@@ -1204,7 +1204,7 @@ export class Game {
       this.commands.push(r);
       return 'ok';
     },
-    /** Retorno no canteiro na via em (x, z). */
+    /** U-turn through the median on the road at (x, z). */
     uturn: (x: number, z: number) => {
       const s = this.world.roads.nearestSeg(x, z, 10);
       if (!s) return 'sem via';
@@ -1213,9 +1213,9 @@ export class Game {
       this.commands.push(r);
       return 'ok';
     },
-    /** Demolir tudo no retângulo. */
+    /** Demolish everything in the rectangle. */
     demolish: (x0: number, z0: number, x1: number, z1: number) => { const r = demolishBox(this.world, x0, z0, x1, z1); if (r) this.commands.push(r.cmd); return r?.count ?? 0; },
-    /** Altura do terreno em (x, z). */
+    /** Terrain height at (x, z). */
     ground: (x: number, z: number) => heightAt(this.world.heights, x, z),
     junction: (x: number, z: number, ctl: number) => { const n = this.world.roads.nearestNode(x, z, 20); if (n >= 0) this.world.roads.setJunction(n, { ctl }); },
     /** Polygon lot from flat corners [x0, z0, x1, z1, …] (the first side is the front); returns its id or the refusal. */
@@ -1244,7 +1244,7 @@ export class Game {
     passTime: (minutes: number) => this.world.advanceClock(minutes),
   };
 
-  /** Rio: mostra o trecho do último ponto até o cursor. */
+  /** River: shows the stretch from the last point to the cursor. */
   private hoverRiver(hit: THREE.Vector3 | null): void {
     const pv = this.preview;
     if (!hit || this.riverPts.length === 0) { pv.hide(); return; }
@@ -1270,14 +1270,14 @@ export class Game {
           : s.cloud === 'remove' ? 'Clique numa nuvem para apagá-la.' : 'Espalhe nuvens ou ponha neblina.');
   }
 
-  /** Troca a lista de nuvens como um comando (desfazer volta a anterior). */
+  /** Replaces the cloud list as a command (undo brings back the previous one). */
   private setClouds(next: Cloud[], label: string): void {
     const before = this.clouds.map((c) => ({ ...c })), after = next.map((c) => ({ ...c }));
     const set = (l: Cloud[]) => { this.clouds = l.map((c) => ({ ...c })); this.cloudView.set(this.clouds); this.unsaved = true; };
     this.commands.run({ label, apply: () => set(after), invert: () => set(before) });
   }
 
-  /** Nuvem cuja projeção no chão está perto de (x, z), ou −1. */
+  /** Cloud whose projection on the ground is near (x, z), or −1. */
   private cloudAt(x: number, z: number): number {
     let best = -1, bd = Infinity;
     this.clouds.forEach((c, i) => { const d = Math.hypot(c.x - x, c.z - z); if (d < c.size && d < bd) { bd = d; best = i; } });
@@ -1313,7 +1313,7 @@ export class Game {
     this.setClouds(this.clouds.map((d, k) => k === i ? { ...c, x: hit.x, z: hit.z, y: ground + base } : d), 'mover nuvem');
   }
 
-  /** Espalha nuvens em volta da câmera (tamanho e base pelas barras, com variação). */
+  /** Scatters clouds around the camera (size and base from the sliders, with variation). */
   private scatterClouds(n: number, variation: number): void {
     const s = this.skyTool, out = this.clouds.slice(0, Math.max(0, MAX_CLOUDS - n));
     const t = this.rig.target;
@@ -1331,7 +1331,7 @@ export class Game {
     waveU.value = w.waves; foamU.value = w.foam; currentU.value = w.current;
   }
 
-  /** Criador de pessoas: parada (item salvo) ou andando (pedestres da simulação com a roupa escolhida). */
+  /** People creator: standing (saved item) or walking (simulation pedestrians in the chosen clothes). */
   /** The people creator screen's choices (src/render/people/creator.ts), used when the cooked people are loaded. */
   private personOptions: Partial<PersonOptions> = {};
 
@@ -1362,7 +1362,7 @@ export class Game {
     this.sim.postMessage({ type: 'hit', x, z, r: 3, one: true } satisfies ToSim);
   }
 
-  /** Bomba: clarão, fogo e fumaça; prédios no raio desabam e viram entulho (um comando); a simulação tira quem estava perto. */
+  /** Bomb: flash, fire and smoke; buildings in the radius collapse into rubble (one command); the simulation removes whoever was near. */
   private bomb(x: number, z: number): void {
     const w = this.world, col = w.buildings.cols;
     const r = 8 + this.bombForce * 6;
@@ -1388,7 +1388,7 @@ export class Game {
         this.particles.burst(col.x[id], gy + 1, col.z[id], 4, 14, 10);
         const rec = w.buildingRec(id);
         j.removeBuilding(id);
-        // entulho: o lote fica vazio e cheio de pedras e cascalho
+        // rubble: the lot is left empty and full of stones and gravel
         j.addBuilding({ x: rec[1], z: rec[2], w: rec[3], d: rec[4], h: 0, rot: rec[6], color: 0, seed: rec[8], zone: rec[9], floors: 0, style: rec[11], fn: 0 });
         const n = Math.min(40, Math.round(rec[3] * rec[4] / 12));
         for (let k = 0; k < n; k++) {
@@ -1411,7 +1411,7 @@ export class Game {
     else if (k === 'bomb' && people + vehicles > 0) this.hud.toast(`Houve vítimas: ${people} ${people === 1 ? 'pessoa' : 'pessoas'} e ${vehicles} ${vehicles === 1 ? 'veículo' : 'veículos'}.`);
   }
 
-  /** Clima do painel: chuva, vento, direção, raios e trovão; null volta ao tempo que muda sozinho (ou à opção). */
+  /** Weather from the panel: rain, wind, direction, lightning and thunder; null goes back to weather that changes by itself (or to the option). */
   private setWeather(w: WeatherCtl | null): void {
     this.weatherCtl = w;
     this.unsaved = true;
@@ -1430,7 +1430,7 @@ export class Game {
     this.ambient.thunderVolume = w.thunder;
   }
 
-  /** Uma árvore da espécie escolhida (mista: carvalho ou cipreste ao acaso). */
+  /** One tree of the chosen species (mixed: oak or cypress at random). */
   private plantTree(x: number, z: number): void {
     const sp = this.forestSpecies === 0 ? (Math.random() < 0.5 ? 1 : 2) : this.forestSpecies;
     const type = sp === 1 ? Item.Tree : sp === 2 ? Item.Conifer : Item.Palm;
@@ -1443,7 +1443,7 @@ export class Game {
     this.world.biome = b;
     this.terrain.setBiome(b);
     this.hud.setBiome(b);
-    // as árvores de todo o mapa mudam de espécie: refaz as peças
+    // the trees of the whole map change species: rebuild the props
     for (let c = 0; c < CELL_COUNT; c++) this.world.dirty.mark(c, Dirty.Props);
   }
 
@@ -1462,7 +1462,7 @@ export class Game {
     this.hud.setView(this.rig.mode);
   }
 
-  // ------------------------------------------------------------- prédios
+  // ----------------------------------------------------------- buildings
 
   private select(id: number): void {
     this.selected = id;
@@ -1482,7 +1482,7 @@ export class Game {
     this.preview.showCircle(col.x[id], y, col.z[id], Math.hypot(col.w[id], col.d[id]) / 2 + 2, true);
   }
 
-  /** Segue o veículo mais perto do centro da tela, ou solta. */
+  /** Follows the vehicle nearest the centre of the screen, or lets go. */
   private toggleFollow(): void {
     if (this.vehicles.follow) { this.vehicles.follow = null; return; }
     const t = this.rig.target;
@@ -1500,10 +1500,10 @@ export class Game {
     this.lineSel = id;
   }
 
-  /** Parada: tira a que estiver perto, ou põe uma nova na calçada mais próxima. */
+  /** Stop: removes the one nearby, or puts a new one on the nearest sidewalk. */
   private clickTransit(hit: THREE.Vector3 | null, shift = false): void {
     if (!hit) return;
-    // Shift+clique numa parada: liga ou desliga o terminal
+    // Shift+click on a stop: turns the terminal on or off
     if (shift) {
       const s = this.transit.stopNear(hit.x, hit.z, 9);
       if (!s) { this.hud.toast('Shift+clique numa parada para torná-la terminal.'); return; }
@@ -1531,7 +1531,7 @@ export class Game {
     const p2 = new Float64Array(2), d2 = new Float64Array(2);
     bez(q, seg[1], p2); bezD(q, seg[1], d2);
     if (rail) {
-      // estação: no eixo do trilho
+      // station: on the track centreline
       const c = this.transit.addStop(this.lineSel, p2[0], p2[1]);
       if (c) this.commands.run(c);
       return;
@@ -1549,7 +1549,7 @@ export class Game {
     if (c) this.commands.run(c);
   }
 
-  /** Linhas para a simulação e para o desenho, quando mudam (ou quando as vias mudam). */
+  /** Lines for the simulation and for rendering, when they change (or when the roads change). */
   private syncTransit(): void {
     const v = this.transit.version * 100000 + this.roadsVersion;
     this.transitView.update(this.transit, this.world.roads, this.world.heights, v);
@@ -1568,17 +1568,17 @@ export class Game {
     }
   }
 
-  /** Retângulo do lote: frente A→B, fundo até a distância do cursor à frente. */
+  /** Lot rectangle: front A→B, depth out to the cursor's distance from the front. */
   private lotRect(c: [number, number]): { x: number; z: number; w: number; d: number; rot: number } | null {
     const [a, b] = this.lotPts!;
     const ex = b[0] - a[0], ez = b[1] - a[1], W = Math.hypot(ex, ez);
     if (W < 6) return null;
-    // normal da frente para o lado do terceiro ponto
+    // normal of the front, toward the side of the third point
     let nx = -ez / W, nz = ex / W;
     let D = (c[0] - a[0]) * nx + (c[1] - a[1]) * nz;
     if (D < 0) { nx = -nx; nz = -nz; D = -D; }
     D = Math.min(120, Math.max(6, D));
-    // frente do prédio (+z local) aponta para a linha A-B: (sen rot, cos rot) = −n
+    // the building front (local +z) points at line A-B: (sin rot, cos rot) = −n
     return { x: (a[0] + b[0]) / 2 + nx * D / 2, z: (a[1] + b[1]) / 2 + nz * D / 2, w: Math.min(160, W), d: D, rot: Math.atan2(-nx, -nz) };
   }
 
@@ -1594,7 +1594,7 @@ export class Game {
     }
     const r = this.lotRect([hit.x, hit.z]);
     if (!r) return;
-    // fita do eixo do lote com a largura da frente: cobre o retângulo
+    // strip along the lot axis with the width of the front: covers the rectangle
     const c = Math.cos(r.rot), s = Math.sin(r.rot), fx = s * r.d / 2, fz = c * r.d / 2;
     this.preview.show({ x0: r.x + fx, z0: r.z + fz, cx: r.x, cz: r.z, x1: r.x - fx, z1: r.z - fz }, r.w / 2, [0, 1], [H(r.x + fx, r.z + fz), H(r.x - fx, r.z - fz)], true, 0x5aa8ff);
   }
@@ -1641,7 +1641,7 @@ export class Game {
     this.hud.setHint(hints[m]);
   }
 
-  /** Contorno de um lote (registro) no chão. */
+  /** Outline of a lot (record) on the ground. */
   private showLot(id: number, color: number): void {
     const col = this.world.buildings.cols;
     const r = { x: col.x[id], z: col.z[id], rot: col.rot[id] };
@@ -1802,7 +1802,7 @@ export class Game {
     if (this.lotExtra) { this.clickLotExtra(hit); return; }
     if (this.lotMode !== 'edit' && this.lotMode !== 'rect') { this.clickLotTool(hit); return; }
     if (this.lotPts) { this.clickLot(hit); return; }
-    // prédio sob o clique?
+    // building under the click?
     const col = this.world.buildings.cols;
     let best = -1, bd = Infinity;
     this.world.buildingIndex.query(hit.x - 40, hit.z - 40, hit.x + 40, hit.z + 40, (id) => {
@@ -1815,7 +1815,7 @@ export class Game {
       }
     });
     if (best >= 0) { if (shift) this.renovate(best); this.select(best); return; }
-    // lote livre: constrói
+    // free lot: build
     const lot = this.growth.lotAt(hit.x, hit.z);
     if (!lot) { this.hud.toast('Clique num prédio ou num lote vazio (zoneie as vias primeiro).'); return; }
     const j = new RoadJournal(this.world, 'construir prédio');
@@ -1824,7 +1824,7 @@ export class Game {
     this.select(id);
   }
 
-  /** Muda andares, estilo (−1 = automático) e função do prédio escolhido. */
+  /** Changes floors, style (−1 = automatic) and function of the selected building. */
   private editSelected(dFloors: number, arch?: number, fn?: number): void {
     const id = this.selected;
     if (id < 0 || !this.world.buildings.alive[id]) return;
@@ -1842,7 +1842,7 @@ export class Game {
     this.select(id);
   }
 
-  /** Ver por dentro: o prédio escolhido, ou o do centro da tela; andar acima e abaixo. */
+  /** Inside view: the selected building, or the one at the centre of the screen; floor up and down. */
   private insideCmd(c: 'toggle' | 'up' | 'down'): void {
     const w = this.world, col = w.buildings.cols;
     if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); return; }
@@ -1861,7 +1861,7 @@ export class Game {
     this.hud.setInside(this.insideFloor);
   }
 
-  /** Criador: põe (ou tira) o projeto no prédio escolhido; andares opcionais (modelo pronto). */
+  /** Creator: puts (or removes) the design on the selected building; optional floors (ready-made model). */
   private applyDesign(d: Design | null, floors?: number): void {
     const id = this.selected;
     if (id < 0 || !this.world.buildings.alive[id]) { this.hud.toast('Selecione um prédio primeiro.'); return; }
@@ -1887,9 +1887,9 @@ export class Game {
     this.select(-1);
   }
 
-  // ------------------------------------------------------- cidade gerada
+  // ------------------------------------------------------ generated city
 
-  /** Esquece a cidade atual (vias, prédios, linhas, histórico). */
+  /** Forgets the current city (roads, buildings, lines, history). */
   private resetCity(): void {
     const w = this.world;
     w.clearBuildings();
@@ -1906,7 +1906,7 @@ export class Game {
     w.money = START_MONEY;
   }
 
-  /** Cidade inteira pela semente: relevo de novo, vias num worker, relevo assentado por ladrilho em paralelo, lotes e prédios. */
+  /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
   async generatedCity(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -1932,7 +1932,7 @@ export class Game {
       try {
         w.roads.addSeg({ a, b, cx: mx, cz: mz, profile, flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
       } catch { continue; }
-      // trecho reto para assentar o relevo, em cada ladrilho que ele toca
+      // straight segment to conform the terrain to, in every tile it touches
       const half = PROFILE_INFO[profile].right + 0.5;
       const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half];
       const r = half + 8;
@@ -1940,7 +1940,7 @@ export class Game {
       const tz0 = tileX(Math.min(nc.z[a], nc.z[b]) - r), tz1 = tileX(Math.max(nc.z[a], nc.z[b]) + r);
       for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) perTile[tileId(tx, tz)].push(...rec);
     }
-    // pontas sem saída com balão de retorno: um disco no assentamento do relevo
+    // dead ends with a turning bulb: a disc when conforming the terrain
     for (const n of ids) {
       if (!bulbAt(w.roads, n)) continue;
       const half = BULB_R + BULB_WALK + 1, r = half + 8;
@@ -1979,9 +1979,9 @@ export class Game {
     this.hud.toast(`Cidade gerada em ${secs} s: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de via.`);
   }
 
-  // ------------------------------------------------------- cidade de teste
+  // ------------------------------------------------------------- test city
 
-  /** Pior caso: enche o mapa de ruas zoneadas e deixa os prédios crescerem em todos os lotes. */
+  /** Worst case: fills the map with zoned streets and lets buildings grow on every lot. */
   private async testCity(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -2001,7 +2001,7 @@ export class Game {
         }, { priority: 1 });
       }
     });
-    // ruas: primeiro todos os nós, depois os trechos (que podem ligar ladrilhos)
+    // streets: all the nodes first, then the segments (which may link tiles)
     const key = new Map<number, number>();
     for (const a of nodes) for (let k = 0; k < a.length; k += 5) {
       key.set(a[k] * 1000 + a[k + 1], w.roads.addNode({ x: a[k + 2], z: a[k + 3], y: a[k + 4] }));
@@ -2013,11 +2013,11 @@ export class Game {
       const mx = (nc.x[na] + nc.x[nb]) / 2, mz = (nc.z[na] + nc.z[nb]) / 2;
       const r = Math.hypot(mx, mz);
       const zone = r < 1300 ? Zone.Commercial : r < 2600 ? Zone.Mixed : mx > 2800 ? Zone.Industrial : Zone.Residential;
-      // trecho horizontal (mesmo j) segue a linha j; vertical, a linha i
+      // a horizontal segment (same j) follows line j; a vertical one, line i
       const profile = a[k + 1] === a[k + 3] ? lineProfile(a[k + 1]) : lineProfile(a[k]);
       w.roads.addSeg({ a: na, b: nb, cx: mx, cz: mz, profile, flags: 0, zl: zone, zr: zone });
     }
-    // lotes nos workers, depois um prédio em cada lote livre
+    // lots in the workers, then a building on every free lot
     this.growth.processDirty();
     await this.pool.whenIdle();
     const n = this.growth.fillAll();
@@ -2031,7 +2031,7 @@ export class Game {
     }
   }
 
-  // --------------------------------------------------- salvar e carregar
+  // -------------------------------------------------- saving and loading
 
   private async save(auto = false): Promise<void> {
     if (this.busy) return;
@@ -2114,7 +2114,7 @@ export class Game {
       this.clouds = ex.clouds ?? []; this.cloudView.set(this.clouds); fogLevel.value = ex.fog ?? 1;
       this.skyMode = extra.sky ?? 'ciclo'; this.hud.setSky(this.skyMode);
       this.setWeather(extra.weather ?? null);
-    } catch { /* salvamento antigo */ }
+    } catch { /* old save */ }
     w.tileInSave.set(meta.tiles);
     let left = TILE_COUNT, corrupt = 0;
     await new Promise<void>((resolve) => {
@@ -2155,14 +2155,14 @@ export class Game {
         }
       }
     });
-    // vias: todos os nós antes dos trechos (trechos ligam ladrilhos)
+    // roads: all nodes before the segments (segments link tiles)
     for (const r of roads) w.roads.loadNodes(r);
     for (const r of roads) w.roads.loadSegs(r);
     // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
     for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
     try {
       for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
-    } catch { /* salvamento sem cruzamentos escolhidos */ }
+    } catch { /* save without chosen junctions */ }
     // old maps: dead ends lying inside another road become junctions
     const repaired = repairDanglingEnds(w);
     if (corrupt) {
@@ -2178,7 +2178,7 @@ export class Game {
     this.hud.toast('Cidade carregada.');
   }
 
-  /** Salva e baixa o mapa inteiro num arquivo .cidade. */
+  /** Saves and downloads the whole map as a .cidade file. */
   private async exportMap(): Promise<void> {
     await this.save();
     const blob = await packSlot(SLOT);
@@ -2191,7 +2191,7 @@ export class Game {
     this.hud.toast(`Mapa exportado (${(blob.size / 1024 / 1024).toFixed(1)} MB).`);
   }
 
-  /** Abre um mapa de arquivo: troca o salvamento por ele e carrega. */
+  /** Opens a map from a file: replaces the save with it and loads. */
   private async importMap(file: Blob): Promise<void> {
     if (this.busy) return;
     try { await unpackToSlot(SLOT, file); } catch (err) { this.hud.toast(`Não abriu: ${(err as Error).message}.`); return; }
@@ -2209,7 +2209,7 @@ export class Game {
     w.tileInSave.fill(0);
     await this.generateTerrain();
     for (let t = 0; t < TILE_COUNT; t++) for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain);
-    // o relevo novo vem da semente: só precisa ser gravado depois de editado
+    // the new terrain comes from the seed: it only needs to be written after being edited
     w.saveDirty.fill(0);
     this.hud.hideLoading();
     this.busy = false;
