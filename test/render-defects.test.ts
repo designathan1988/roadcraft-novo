@@ -671,3 +671,31 @@ test('sky (4.0 port): at street level by day the horizon is a saturated pale blu
   assert.ok(sky.low.value > 0.9, 'the street-level horizon is on');
   assert.ok(fog.b - fog.r > 0.25 && fog.r < 0.65, `the horizon/fog at street level is r ${fog.r.toFixed(2)} g ${fog.g.toFixed(2)} b ${fog.b.toFixed(2)} (white haze before: a8c3e2)`);
 });
+
+test('shadows (4.0 port): low props cast only into the near cascade; the far cascades take the tall casters', async () => {
+  const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
+  const sun = await import('../src/render/sun.ts') as Record<string, unknown>;
+  const { Post } = await import('../src/render/post.ts');
+  const { PROP } = await import('../src/jobs/props.ts');
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs());
+  const smallLayer = sun.SMALL_CASTER_LAYER as number | undefined;
+  assert.equal(typeof smallLayer, 'number', 'a layer for the small casters');
+  const small = PM.propIsSmallCaster as ((k: (typeof kinds)[number]) => boolean) | undefined;
+  assert.ok(small, 'a rule for which props are small');
+  const bench = kinds.find((k) => k.type === PROP.Bench)!, tree = kinds.find((k) => k.type === PROP.Tree)!;
+  assert.equal(small!(bench), true, 'a bench (0.95 m) is a small caster');
+  assert.equal(small!(tree), false, 'a tree is not');
+  const renderer = fakeRenderer();
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), light = new THREE.DirectionalLight();
+  const scene = new THREE.Scene(); scene.add(light);
+  const post = new Post(renderer, scene, camera, light, { shadows: true, ao: false, bloom: false });
+  const csm = post.csm as unknown as { _init(b: unknown): void; lights: Array<{ shadow: THREE.LightShadow }> };
+  csm._init({ camera, renderer });
+  post.setCamera(camera);
+  const mesh = new THREE.Object3D(); mesh.layers.set(smallLayer!);
+  assert.equal(mesh.layers.test(csm.lights[0].shadow.camera.layers), true, 'the near cascade draws the small casters');
+  assert.equal(mesh.layers.test(csm.lights[1].shadow.camera.layers), false, 'the middle cascade does not');
+  assert.equal(mesh.layers.test(csm.lights[2].shadow.camera.layers), false, 'the far cascade does not');
+  const city = new THREE.Object3D();
+  assert.equal(city.layers.test(csm.lights[2].shadow.camera.layers), true, 'the far cascade still draws the city');
+});

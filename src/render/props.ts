@@ -12,7 +12,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, buildPropKinds, propCastsShadow, propCullRadius, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, propCastsShadow, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -20,7 +20,7 @@ import { PAINTS } from './vehicles.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
-import { SHADOW_LENGTH, sunDirection } from './sun.ts';
+import { SHADOW_LENGTH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
 
 const {
   Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
@@ -257,6 +257,8 @@ export class PropRenderer {
       mesh.frustumCulled = false;
       mesh.userData.slot = t * LODS + l;
       mesh.castShadow = propCastsShadow(d, l);
+      // low props: the views and the near cascade only (their shadow is under a texel of the far ones)
+      if (propIsSmallCaster(d)) mesh.layers.set(SMALL_CASTER_LAYER);
       mesh.receiveShadow = true;
       this.group.add(mesh);
       this.slotMesh[t * LODS + l] = mesh;

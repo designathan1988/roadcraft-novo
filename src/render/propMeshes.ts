@@ -6,6 +6,7 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
+import { SMALL_CASTER } from './sun.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
@@ -622,4 +623,12 @@ export function propCastsShadow(k: PropKind, level: number): boolean {
   if (level !== 0 || !g || k.type === PROP.Wire) return false;
   if (!g.boundingBox) g.computeBoundingBox();
   return g.boundingBox!.max.y - Math.max(0, g.boundingBox!.min.y) >= FLAT_PROP;
+}
+
+/** A prop low enough to cast only into the near cascade (sun.ts SMALL_CASTER_LAYER). */
+export function propIsSmallCaster(k: PropKind): boolean {
+  const g = k.lods[0] ?? k.lods[1];
+  if (!g) return true;
+  if (!g.boundingBox) g.computeBoundingBox();
+  return g.boundingBox!.max.y - Math.max(0, g.boundingBox!.min.y) < SMALL_CASTER;
 }
