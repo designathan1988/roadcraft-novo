@@ -1074,12 +1074,18 @@ export function joinAt(world: World, n: number): RoadJournal {
   if (p === q) return j;
   const forward = sc.b[s1] === n;
   if (PROFILE_INFO[sc.profile[s1]].oneWay && forward !== (sc.a[s2] === n)) return j;
+  // the joined segment runs the way s1 does; s2's sides seen that way must hold the same zones
+  const s2Along = forward ? sc.a[s2] === n : sc.b[s2] === n;
+  const zl2 = s2Along ? sc.zl[s2] : sc.zr[s2], zr2 = s2Along ? sc.zr[s2] : sc.zl[s2];
+  if (zl2 !== sc.zl[s1] || zr2 !== sc.zr[s1]) return j;
+  // one segment is straight in height between its nodes: a node off that line would be lost
+  if (Math.abs(nc.y[n] - (nc.y[p] + nc.y[q]) / 2) > 0.3) return j;
   // control point that makes the curve pass through the node at t = 0.5
   const cx = 2 * nc.x[n] - (nc.x[p] + nc.x[q]) / 2, cz = 2 * nc.z[n] - (nc.z[p] + nc.z[q]) / 2;
   const r1 = j.removeSeg(s1); j.removeSeg(s2);
   j.removeNode(n);
   const [a, b] = forward ? [p, q] : [q, p];
-  const joined = j.addSeg({ a, b, cx, cz, profile: r1.profile, flags: r1.flags, zl: forward ? r1.zl : r1.zr, zr: forward ? r1.zr : r1.zl });
+  const joined = j.addSeg({ a, b, cx, cz, profile: r1.profile, flags: r1.flags, zl: r1.zl, zr: r1.zr });
   j.inherit(s1, [joined]); j.inherit(s2, [joined]);
   return j;
 }

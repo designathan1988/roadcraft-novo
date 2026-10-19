@@ -534,3 +534,29 @@ test('D14: a road from one point of a segment to another point of the same segme
     assert.equal(w.roads.nodes.cols.deg[n], 3, `the node at x = ${x} has ${w.roads.nodes.cols.deg[n]} roads`);
   }
 });
+
+test('D15: joining two segments keeps each side\'s zone and refuses what one segment cannot hold', async () => {
+  const { joinAt } = await import('../src/roads/build.ts');
+  const make = (y: number, z2l: number = Zone.Commercial) => {
+    const w = flatWorld(1e9);
+    const net = w.roads;
+    const p = net.addNode({ x: -100, z: 0, y: 10 }), n = net.addNode({ x: 0, z: 0, y }), q = net.addNode({ x: 100, z: 0, y: 10 });
+    // both drawn east to west (q → n → p): residential on the left, commercial on the right
+    net.addSeg({ a: n, b: p, cx: -50, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: Zone.Commercial });
+    net.addSeg({ a: q, b: n, cx: 50, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: z2l });
+    return { w, n };
+  };
+  const { w, n } = make(10);
+  const j = joinAt(w, n);
+  assert.ok(!j.empty, 'the two segments join');
+  const s = w.roads.nearestSeg(0, 0, 2)![0], sc = w.roads.segs.cols, nc = w.roads.nodes.cols;
+  const westward = nc.x[sc.a[s]] > nc.x[sc.b[s]];
+  const left = westward ? sc.zl[s] : sc.zr[s], right = westward ? sc.zr[s] : sc.zl[s];
+  assert.equal(left, Zone.Residential, 'the residential side (left going west) changed');
+  assert.equal(right, Zone.Commercial, 'the commercial side (right going west) changed');
+  // a raised middle node or different zones on the two halves cannot become one straight segment
+  const hump = make(14);
+  assert.ok(joinAt(hump.w, hump.n).empty, 'joining lost the 4 m hump of the middle node');
+  const mixed = make(10, Zone.Industrial);
+  assert.ok(joinAt(mixed.w, mixed.n).empty, 'joining lost the zone of one half');
+});
