@@ -277,13 +277,19 @@ const BUS: Part[] = [
   [1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_L], [-1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_R],
 ];
 /** Bicicleta com o ciclista (1,8 m): rodas finas, quadro, guidão, ciclista curvado e capacete na cor. */
-function bikeModel(): THREE.BufferGeometry {
+export function bikeModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const box = (x: number, y: number, z: number, w: number, h: number, l: number, col: number) => {
     const b = new THREE.BoxGeometry(w, h, l); b.translate(x, y + h / 2, z); parts.push(tagged(b, col));
   };
+  // wheels: tyre and three spokes, marked as wheel parts so the shader rolls them with the distance ridden
   for (const z of [0.55, -0.55]) {
-    const w = new THREE.TorusGeometry(0.33, 0.025, 4, 14); w.rotateY(Math.PI / 2); w.translate(0, 0.35, z); parts.push(tagged(w, TIRE));
+    const w = new THREE.TorusGeometry(0.33, 0.025, 4, 14); w.rotateY(Math.PI / 2); w.translate(0, 0.35, z);
+    parts.push(asWheelPart(tagged(w, TIRE), 0, false, 0, 0.35, z));
+    for (let k = 0; k < 3; k++) {
+      const sp = new THREE.BoxGeometry(0.012, 0.62, 0.012); sp.rotateX(k * Math.PI / 3); sp.translate(0, 0.35, z);
+      parts.push(asWheelPart(tagged(sp, 0x9a9da0), 2, false, 0, 0.35, z));
+    }
   }
   const bar = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, r: number, col: number) => {
     const L = Math.hypot(x1 - x0, y1 - y0, z1 - z0);

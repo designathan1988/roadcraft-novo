@@ -869,3 +869,13 @@ test('C51: a pedestrian hit by a shot or a blast falls out of sight over a momen
   for (let i = 0; i < n; i++) if (out[i * 11 + 9] < 1 && Math.hypot(out[i * 11 + 4] - x, out[i * 11 + 6] - z) < 1.5) fading++;
   assert.equal(fading, 1, 'the person hit vanished at once');
 });
+
+test('C52: the bicycle wheels roll (marked as wheels for the shader, with spokes that show it)', async () => {
+  const mod = await import('../src/render/vehicles.ts') as unknown as { bikeModel?: () => import('three').BufferGeometry };
+  assert.ok(typeof mod.bikeModel === 'function', 'the bicycle model can be checked');
+  const g = mod.bikeModel(), glow = g.getAttribute('glow').array as Float32Array;
+  const parts = new Set<number>();
+  for (let i = 0; i < glow.length; i++) if (glow[i] >= 100) parts.add(glow[i]);
+  assert.ok(parts.size >= 2, `wheel parts in the bicycle: ${[...parts]}`);
+  assert.ok([...parts].some((p) => Math.floor((p - 100) / 2) === 2), 'no spokes: a rolling ring looks still');
+});
