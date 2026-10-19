@@ -354,7 +354,7 @@ export class Game {
       blocks: (b) => { this.roadTool.blocks = b; },
       speed: (n) => this.setSpeed(n),
       orbit: (dx, dy) => this.rig.rotate(dx, dy),
-      turn: (d) => this.rig.turnTo(this.rig.yaw + d * Math.PI / 4),
+      turn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 4), // left (−1) turns as Q does
       tilt: (d) => this.rig.rotate(0, d * 60),
       zoneLayer: (on) => { this.zoneLayer = on; zoneOverlayU.value = on || this.tool === 'zone' ? 1 : 0; },
       simulation: (sim) => { Object.assign(this.settings, sim); saveSettings(this.settings); this.demandSent = 0; },
