@@ -452,3 +452,16 @@ test('E42: a road edit far from every stop does not rebuild the stops; one next 
   sync();
   assert.ok(rebuilds > first, 'a road next to a stop rebuilds them');
 });
+
+test('E38: light rain draws only the drops that show', async () => {
+  const { Weather, rainU } = await import('../src/render/weather.ts');
+  const weather = new Weather();
+  const drops = (weather as unknown as { rain: THREE.Mesh }).rain;
+  const all = (drops.geometry as THREE.InstancedBufferGeometry).instanceCount;
+  weather.fixed = { clouds: 0.9, rain: 0.1 };
+  weather.update(0.016, 1, new THREE.Vector3(0, 50, 0));
+  assert.equal(rainU.value, 0.1);
+  const drawn = (drops.geometry as THREE.InstancedBufferGeometry).instanceCount;
+  assert.ok(drawn <= Math.ceil(all * 0.1) + 1, `rain at 10% draws ${drawn} of ${all} drops`);
+  assert.ok(drawn > 0);
+});

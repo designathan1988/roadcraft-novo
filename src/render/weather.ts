@@ -9,7 +9,7 @@ import { colorOnly } from './post.ts';
 
 const {
   uniform, vec2, vec3, vec4, float, mix, smoothstep, clamp, positionWorld, positionLocal, time, mx_fractal_noise_float,
-  instanceIndex, hash, fract, cameraPosition, normalize, cross, sRGBTransferEOTF, attribute, sin, step,
+  instanceIndex, hash, fract, cameraPosition, normalize, cross, sRGBTransferEOTF, attribute, sin,
 } = T;
 
 /** 0 céu limpo .. 1 encoberto. */
@@ -97,11 +97,11 @@ export class Weather {
     const side = normalize(cross(vec3(0, 1, 0), toCam));
     const wind = vec3(windDirU.x, 0, windDirU.y).mul(positionLocal.y);
     rm.positionNode = center.add(side.mul(positionLocal.x)).add(vec3(0, positionLocal.y, 0)).add(wind.mul(windU.mul(1.4).add(0.1)));
-    // só uma fração das gotas aparece, pela força da chuva
-    const shown = step(hash(id.add(1.1)), rainU);
+    // only the drops the rain's strength asks for are drawn (`sizeRain`): each id has its own place, so the first n
+    // are as spread as all of them
     // gota colada na câmera vira um risco enorme: some perto
     const near = smoothstep(float(3), float(8), cameraPosition.distance(center));
-    rm.colorNode = vec4(0.75, 0.78, 0.82, shown.mul(0.32).mul(near));
+    rm.colorNode = vec4(0.75, 0.78, 0.82, near.mul(0.32));
     rm.fog = true;
     const rain = this.rain = new THREE.Mesh(g, rm);
     rain.frustumCulled = false;
@@ -236,6 +236,7 @@ export class Weather {
       cloudsU.value = this.fixed.clouds; rainU.value = this.fixed.rain; wetU.value = this.fixed.rain > 0 ? 1 : 0;
       this.storm = this.fixed.storm ?? 0;
       windU.value = this.windFixed ?? 0.2 + this.storm * 0.8;
+      this.sizeRain();
       return;
     }
     {
@@ -257,6 +258,14 @@ export class Weather {
     windU.value += ((this.windFixed ?? this.target.wind) - windU.value) * k;
     this.storm += (this.target.storm - this.storm) * k;
     wetU.value = rainU.value > 0.05 ? Math.min(1, wetU.value + dt * 0.05) : Math.max(0, wetU.value - dt * 0.004);
+    this.sizeRain();
+  }
+
+  /** Draws as many drops as the rain shows (all 14,000 were drawn and most of them hidden by the shader). */
+  private sizeRain(): void {
+    const n = Math.ceil(RAIN_DROPS * Math.min(1, Math.max(0, rainU.value)));
+    (this.rain.geometry as THREE.InstancedBufferGeometry).instanceCount = n;
+    this.rain.visible = n > 0 && rainU.value > 0.003;
   }
 }
 
