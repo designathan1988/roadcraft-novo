@@ -674,6 +674,7 @@ export class Game {
     // minimized or hidden: nothing is drawn; the simulation goes on in its worker (the clock does not jump on return)
     if (document.hidden) { this.last = now; return; }
     this.health?.frame(now - this.last);
+    this.adaptDetail(now - this.last);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     const { renderer, scene } = this.parts;
@@ -1283,10 +1284,31 @@ export class Game {
     this.post.bloomOverride = null;
   }
 
+  /**
+   * Detail kept to what the GPU draws in time (screen-space error with a frame-time budget, as the engines that show
+   * whole cities do): every 3 s, the frames of the window over 20 ms (a slower card) raise the pixel error a little,
+   * frames all at the screen's rate bring it back; on a card with room it stays at the full detail.
+   */
+  private frameTimes: number[] = [];
+  private detailAuto = 1;
+  private adaptDetail(ms: number): void {
+    if (ms <= 0 || ms > 250) return;
+    const t = this.frameTimes;
+    t.push(ms);
+    if (t.length < 180) return;
+    t.sort((a, b) => a - b);
+    const p90 = t[Math.floor(t.length * 0.9)];
+    t.length = 0;
+    const before = this.detailAuto;
+    if (p90 > 20) this.detailAuto = Math.max(0.35, this.detailAuto * 0.85);
+    else if (p90 < 17.5) this.detailAuto = Math.min(1, this.detailAuto * 1.1);
+    if (this.detailAuto !== before) this.updatePixelScale();
+  }
+
   /** Detail distances by screen-space error: more pixels, detail reaches farther. */
   private updatePixelScale(): void {
-    const res = this.settings ? this.settings.resolution * this.settings.detail : 1;
-    const k = Math.min(3, Math.max(0.5, window.innerHeight * window.devicePixelRatio * res / 1080));
+    const res = (this.settings ? this.settings.resolution * this.settings.detail : 1) * this.detailAuto;
+    const k = Math.min(3, Math.max(0.3, window.innerHeight * window.devicePixelRatio * res / 1080));
     for (const l of this.layers) l.pixelScale = k;
     if (this.props) this.props.pixelScale = k;
   }
