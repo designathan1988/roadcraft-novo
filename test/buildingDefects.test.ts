@@ -456,3 +456,116 @@ test('F11: yard trees and shrubs stand on the yard, not inside buildings, pools 
   assert.ok(checked > 50, `${checked} plants checked`);
   assert.deepEqual(failures.slice(0, 10), [], `${failures.length} of ${checked} plants inside something`);
 });
+
+/** A network for the lot tests: a curved avenue, a long dead-end street with a bulb and a cross street, all zoned. */
+async function lotNetwork(): Promise<World> {
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10);
+  const net = w.roads, n = (x: number, z: number) => net.addNode({ x, z, y: 10 });
+  const z = (zl: number, zr: number) => ({ flags: 0, zl, zr });
+  // across the border x = 256 between two cells: a tight curved avenue from (100, 60) to (420, 60) bulging to z = 240
+  const a = n(100, 60), b = n(420, 60);
+  net.addSeg({ a, b, cx: 260, cz: 420, profile: 2, ...z(Zone.Commercial, Zone.Residential) });
+  // a straight street along x = 256 (the border) and a long dead end off it
+  const c = n(256, -60), d = n(256, 40);
+  net.addSeg({ a: c, b: d, cx: 256, cz: -10, profile: 0, ...z(Zone.Mixed, Zone.Residential) });
+  const e = n(256, -20), f = n(150, -20);
+  void e; void f;
+  const g = n(330, -140), h = n(330, -40);
+  net.addSeg({ a: g, b: h, cx: 330, cz: -90, profile: 0, ...z(Zone.Residential, Zone.Residential) });
+  return w;
+}
+
+/** Lots of a cell as the game asks for them (growth.ts: the segments within 160 m of the cell). */
+async function lotsOfCell(w: World, cell: number) {
+  const { buildLots } = await import('../src/jobs/lots.ts');
+  const { cellOriginX } = await import('../src/core/grid.ts');
+  const { MAP_CELLS, CELL_SIZE } = await import('../src/config.ts');
+  const x0 = cellOriginX(cell % MAP_CELLS), z0 = cellOriginX((cell / MAP_CELLS) | 0), segs: number[] = [];
+  w.roads.forSegsNear(x0 - 160, z0 - 160, x0 + CELL_SIZE + 160, z0 + CELL_SIZE + 160, (s) => segs.push(s));
+  return buildLots(w.heights, w.roads.gather(segs, []), cell);
+}
+
+/** Corners of a lot as the game takes it (front w along x, depth d along z, turned by rot). */
+function lotCorners(x: number, z: number, w: number, d: number, rot: number, inset: number): Array<[number, number]> {
+  const c = Math.cos(rot), s = Math.sin(rot), hw = w / 2 - inset, hd = d / 2 - inset;
+  return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([lx, lz]) => [x + lx * c + lz * s, z - lx * s + lz * c]);
+}
+
+/** Whether two convex quads overlap (separating axis). */
+function quadsOverlap(p: Array<[number, number]>, q: Array<[number, number]>): boolean {
+  for (const poly of [p, q]) for (let k = 0; k < 4; k++) {
+    const [ax, az] = poly[k], [bx, bz] = poly[(k + 1) % 4], nx = bz - az, nz = ax - bx;
+    const proj = (r: Array<[number, number]>) => r.map(([x, z]) => x * nx + z * nz);
+    const a = proj(p), b = proj(q);
+    if (Math.max(...a) <= Math.min(...b) || Math.max(...b) <= Math.min(...a)) return false;
+  }
+  return true;
+}
+
+test('F12: lots keep off the roads (curves and dead-end bulbs) and off each other', async () => {
+  const { closestT, bez } = await import('../src/roads/geometry.ts');
+  const { PROFILE_INFO } = await import('../src/roads/profiles.ts');
+  const { BULB_R, BULB_WALK, bulbAt } = await import('../src/roads/junction.ts');
+  const { cellId, cellX } = await import('../src/core/grid.ts');
+  const w = await lotNetwork(), net = w.roads, sc = net.segs.cols;
+  const segs: number[] = [];
+  net.forSegsNear(-1e5, -1e5, 1e5, 1e5, (s) => segs.push(s));
+  const failures: string[] = [], all: Array<Array<[number, number]>> = [];
+  for (const cell of [cellId(cellX(100), cellX(100)), cellId(cellX(300), cellX(100)), cellId(cellX(100), cellX(-100)), cellId(cellX(300), cellX(-100))]) {
+    const L = await lotsOfCell(w, cell);
+    for (let i = 0; i < L.count; i++) {
+      const box = lotCorners(L.x[i], L.z[i], L.w[i], L.d[i], L.rot[i], 0.3);
+      all.push(box);
+      // points of the lot (its outline and a grid inside) against every road's asphalt and sidewalk
+      const pts: Array<[number, number]> = [...box];
+      for (let u = 0.1; u < 1; u += 0.2) for (let v = 0.1; v < 1; v += 0.2) pts.push([box[0][0] + (box[1][0] - box[0][0]) * u + (box[3][0] - box[0][0]) * v, box[0][1] + (box[1][1] - box[0][1]) * u + (box[3][1] - box[0][1]) * v]);
+      const q = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 }, p2 = new Float64Array(2);
+      for (const s of segs) {
+        net.quad(s, q);
+        const half = Math.max(PROFILE_INFO[sc.profile[s]].left, PROFILE_INFO[sc.profile[s]].right);
+        for (const [x, z] of pts) { const [, dist] = closestT(q, x, z); if (dist < half - 0.05) { failures.push(`cell ${cell} lot ${i}: ${(half - dist).toFixed(1)} m on road ${s}`); break; } }
+      }
+      for (let n = 0; n < net.nodes.end; n++) {
+        if (!bulbAt(net, n)) continue;
+        const nx = net.nodes.cols.x[n], nz = net.nodes.cols.z[n];
+        for (const [x, z] of pts) if (Math.hypot(x - nx, z - nz) < BULB_R + BULB_WALK - 0.05) { failures.push(`cell ${cell} lot ${i}: on the bulb of node ${n}`); break; }
+      }
+      void bez; void p2;
+    }
+  }
+  for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) if (quadsOverlap(all[i], all[j])) failures.push(`lots ${i} and ${j} overlap`);
+  assert.ok(all.length > 10, `${all.length} lots`);
+  assert.deepEqual(failures.slice(0, 12), [], `${failures.length} failures`);
+});
+
+test('F13: neighbouring cells place the same lots at their border (no overlaps between cells)', async () => {
+  const { cellId, cellX } = await import('../src/core/grid.ts');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10);
+  const net = w.roads, n = (x: number, z: number) => net.addNode({ x, z, y: 10 });
+  const zones = [Zone.Residential, Zone.Commercial, Zone.Mixed];
+  // a street grid of 90 m blocks over the corner of four cells (256, 256), slightly turned, and two long avenues
+  const ids: number[][] = [];
+  for (let j = 0; j < 7; j++) { ids.push([]); for (let i = 0; i < 7; i++) ids[j].push(n(256 - 280 + i * 90 + j * 4, 256 - 280 + j * 90 - i * 4)); }
+  for (let j = 0; j < 7; j++) for (let i = 0; i < 6; i++) {
+    const a = ids[j][i], b = ids[j][i + 1], A = net.nodes.cols;
+    net.addSeg({ a, b, cx: (A.x[a] + A.x[b]) / 2, cz: (A.z[a] + A.z[b]) / 2, profile: (i + j) % 3 === 0 ? 2 : 0, flags: 0, zl: zones[(i + j) % 3], zr: zones[(i * 2 + j) % 3] });
+  }
+  for (let i = 0; i < 7; i++) for (let j = 0; j < 6; j++) {
+    const a = ids[j][i], b = ids[j + 1][i], A = net.nodes.cols;
+    net.addSeg({ a, b, cx: (A.x[a] + A.x[b]) / 2 + 6, cz: (A.z[a] + A.z[b]) / 2, profile: 0, flags: 0, zl: zones[(i + 2 * j) % 3], zr: zones[(i + j + 1) % 3] });
+  }
+  const lots: Array<{ cell: number; box: Array<[number, number]> }> = [];
+  for (const cz of [-1, 0, 1]) for (const cx of [-1, 0, 1]) {
+    const cell = cellId(cellX(256 + 128 * (2 * cx - 1) + 1), cellX(256 + 128 * (2 * cz - 1) + 1));
+    const L = await lotsOfCell(w, cell);
+    for (let i = 0; i < L.count; i++) lots.push({ cell, box: lotCorners(L.x[i], L.z[i], L.w[i], L.d[i], L.rot[i], 0.3) });
+  }
+  const failures: string[] = [];
+  for (let i = 0; i < lots.length; i++) for (let j = i + 1; j < lots.length; j++) {
+    if (lots[i].cell !== lots[j].cell && quadsOverlap(lots[i].box, lots[j].box)) failures.push(`cell ${lots[i].cell} and cell ${lots[j].cell} overlap at (${lots[i].box[0][0].toFixed(0)}, ${lots[i].box[0][1].toFixed(0)})`);
+  }
+  assert.ok(lots.length > 100, `${lots.length} lots`);
+  assert.deepEqual(failures.slice(0, 10), [], `${failures.length} overlaps between cells`);
+});
