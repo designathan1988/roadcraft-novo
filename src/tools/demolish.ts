@@ -3,7 +3,8 @@
 
 import type { Command } from '../core/commands.ts';
 import { RoadJournal } from '../roads/build.ts';
-import { ItemsCommand, MAX_RUN } from '../world/items.ts';
+import { Item, ItemsCommand, MAX_RUN } from '../world/items.ts';
+import { signRuleCommand } from '../roads/signRule.ts';
 import { lotAt } from '../world/lotEdit.ts';
 import type { World } from '../world/world.ts';
 
@@ -20,19 +21,39 @@ export function targetAt(world: World, x: number, z: number): Target {
   return null;
 }
 
+/**
+ * Removes items (already applied). A Stop or Give-way sign is a rule (`roads/signRule.ts`): taking it away gives its
+ * junction arm back to the automatic choice, in the same command.
+ */
+function removeItems(world: World, label: string, ids: number[]): Command {
+  const items = new ItemsCommand(world.items, label);
+  const rules: Command[] = [];
+  const c = world.items.t.cols;
+  for (const id of ids) {
+    if (!world.items.t.alive[id]) continue;
+    if (c.type[id] === Item.Sign) {
+      const r = signRuleCommand(world, c.x0[id], c.z0[id], c.variant[id], false);
+      if (typeof r !== 'string') { r.apply(); rules.push(r); }
+    }
+    items.remove(id);
+  }
+  if (!rules.length) return items;
+  return {
+    label,
+    apply: () => { items.apply(); for (const r of rules) r.apply(); },
+    invert: () => { for (let i = rules.length - 1; i >= 0; i--) rules[i].invert(); items.invert(); },
+  };
+}
+
 /** Joins a roads/buildings journal and an items one into a single command. */
-function both(label: string, j: RoadJournal, items: ItemsCommand | null): Command {
+function both(label: string, j: RoadJournal, items: Command | null): Command {
   if (!items) return j;
   return { label, apply: () => { j.apply(); items.apply(); }, invert: () => { items.invert(); j.invert(); } };
 }
 
 /** Demolishes the target (already applied; the command comes back to be recorded). */
 export function demolishTarget(world: World, t: NonNullable<Target>): { cmd: Command; charge: number } {
-  if (t.kind === 'item') {
-    const c = new ItemsCommand(world.items, 'remover item');
-    c.remove(t.id);
-    return { cmd: c, charge: 0 };
-  }
+  if (t.kind === 'item') return { cmd: removeItems(world, 'remover item', [t.id]), charge: 0 };
   const j = new RoadJournal(world, t.kind === 'building' ? 'demolir prédio' : 'demolir via');
   if (t.kind === 'building') j.removeBuilding(t.id);
   else removeSegAndOrphans(world, j, t.id);
@@ -61,7 +82,6 @@ export function demolishBox(world: World, x0: number, z0: number, x1: number, z1
   for (const id of blds) j.removeBuilding(id);
   for (const s of segs) if (net.segs.alive[s]) removeSegAndOrphans(world, j, s);
   j.settle();
-  let items: ItemsCommand | null = null;
-  if (its.length) { items = new ItemsCommand(world.items, 'demolir área'); for (const i of its) items.remove(i); }
+  const items = its.length ? removeItems(world, 'demolir área', its) : null;
   return { cmd: both('demolir área', j, items), count: segs.length + blds.length + its.length, charge: j.charge };
 }

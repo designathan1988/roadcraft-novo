@@ -741,3 +741,28 @@ test('D23: the zone brush never zones rails, highways or ramps', async () => {
   for (let s = 0; s < street.roads.segs.end; s++) if (street.roads.segs.alive[s] && (sc.zl[s] || sc.zr[s])) zoned++;
   assert.ok(zoned > 0, 'a street is still zoned');
 });
+
+test('D24: demolishing a Stop sign takes its rule away; undo puts both back', async () => {
+  const { signRuleCommand, SIGN_STOP } = await import('../src/roads/signRule.ts');
+  const { ItemsCommand, Item } = await import('../src/world/items.ts');
+  const { demolishTarget, demolishBox } = await import('../src/tools/demolish.ts');
+  for (const how of ['click', 'box'] as const) {
+    const w = flatWorld(1e9);
+    road(w, -150, 0, 150, 0);
+    road(w, 0, -150, 0, 150);
+    const c = w.roads.nearestNode(0, 0, 1);
+    // a Stop sign on the east arm's sidewalk, 12 m out, put the way the streetscape tool does
+    const put = new ItemsCommand(w.items, 'sign');
+    const id = put.add([12, 6, 0, 0, Item.Sign, SIGN_STOP]);
+    const rule = signRuleCommand(w, 12, 6, SIGN_STOP, true);
+    assert.ok(typeof rule !== 'string');
+    rule.apply();
+    assert.ok(w.roads.junctions.get(c)?.legs?.some(([, r]) => r === Rule.Stop), 'the sign made a stop rule');
+    const cmd = how === 'click' ? demolishTarget(w, { kind: 'item', id }).cmd : demolishBox(w, 8, 2, 16, 10)!.cmd;
+    assert.equal(w.items.t.alive[id], 0);
+    assert.ok(!w.roads.junctions.get(c)?.legs?.some(([, r]) => r === Rule.Stop), `demolishing the sign (${how}) left its stop rule`);
+    cmd.invert();
+    assert.equal(w.items.t.alive[id], 1);
+    assert.ok(w.roads.junctions.get(c)?.legs?.some(([, r]) => r === Rule.Stop), 'undo brought the sign back without its rule');
+  }
+});
