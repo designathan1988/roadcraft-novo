@@ -538,7 +538,8 @@ export class TerrainRenderer {
     for (let rz = 0; rz < roots; rz++) {
       for (let rx = 0; rx < roots; rx++) {
         const x = rx * PLATE_SIZE - MAP_HALF, z = rz * PLATE_SIZE - MAP_HALF;
-        if (!this.select(x, z, PLATE_SIZE, top)) this.add(x, z, PLATE_SIZE, top);
+        // a root beyond the coarsest band (16-24 km maps) is drawn whole, but only when in view
+        if (!this.select(x, z, PLATE_SIZE, top) && this.frustum.intersectsBox(this.bounds(x, z, PLATE_SIZE))) this.add(x, z, PLATE_SIZE, top);
       }
     }
     this.geometry.instanceCount = this.count;
