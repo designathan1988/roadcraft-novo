@@ -274,8 +274,15 @@ export class CellLayer {
   }
 
   private tileKeep(): number {
-    const limit = this.opt.plate ? this.opt.plate * 1.25 : (this.opt.far || 1e9);
-    return limit * this.pixelScale;
+    return this.opt.plate ? this.opt.plate * 1.25 * this.pixelScale : (this.opt.far ? this.farLimit() : 1e9);
+  }
+
+  /**
+   * How far the layer draws (`far`): farther at high resolutions (more pixels per metre), never nearer than at
+   * 1080p (a road network cut at 2.7 km below 1080p read as a hole). The same limit keeps and draws the tiles.
+   */
+  private farLimit(): number {
+    return (this.opt.far ?? 0) * Math.max(1, this.pixelScale);
   }
 
   private evictDist(): number {
@@ -350,7 +357,7 @@ export class CellLayer {
     if (tx >= MAP_TILES || tz >= MAP_TILES) return;
     const t = tileId(tx, tz);
     const ox = tileOriginX(tx), oz = tileOriginX(tz);
-    if (this.opt.far && this.distTo(ox, oz, TILE_SIZE) > this.opt.far) return;
+    if (this.opt.far && this.distTo(ox, oz, TILE_SIZE) > this.farLimit()) return;
     const levels = this.cells.length;
     if (this.tileCellsReady[t]) {
       for (let j = 0; j < CELLS_PER_TILE; j++) {

@@ -127,3 +127,31 @@ test('E9: a plate the camera came close to leaves the GPU once its tiles cover i
   for (let i = 0; i < 3; i++) layer.update(camera, eye);
   assert.ok(L.plates[centre].mesh === null, 'the plate under the camera was let go');
 });
+
+test('E13: the road layer keeps and draws its tiles to the same distance at every resolution', async () => {
+  const { MAP_TILES, TILE_SIZE } = await import('../src/config.ts');
+  for (const pixelScale of [0.5, 2]) {
+    const w = new World();
+    const src = farSource();
+    // the road layer's own options (render/roads.ts)
+    const layer = new CellLayer(src, w.dirty, Dirty.Roads, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2200, margin: 80, shadows: false, far: 5500, detail: 600, budget: 192e6 });
+    layer.pixelScale = pixelScale;
+    const L = inside(layer);
+    const { camera, eye } = cornerCamera();
+    for (let i = 0; i < 3; i++) layer.update(camera, eye);
+    const drawn = new Set(layer.group.children);
+    const limit = 5500 * Math.max(1, pixelScale);
+    const kept: number[] = [], shown: number[] = [];
+    for (let t = 0; t < MAP_TILES * MAP_TILES; t++) {
+      const x = -MAP_TILES * TILE_SIZE / 2 + (t % MAP_TILES) * TILE_SIZE, z = -MAP_TILES * TILE_SIZE / 2 + Math.floor(t / MAP_TILES) * TILE_SIZE;
+      const d = Math.hypot(Math.max(0, x - eye.x), Math.max(0, z - eye.z));
+      if (d < 1600) continue;
+      const m = L.tiles[t].mesh;
+      if (m) kept.push(d);
+      if (m && drawn.has(m)) shown.push(d);
+    }
+    const farKept = Math.max(...kept), farShown = Math.max(...shown);
+    assert.ok(farShown > limit - 1500, `pixel scale ${pixelScale}: roads drawn only to ${(farShown / 1000).toFixed(1)} km (limit ${limit / 1000} km)`);
+    assert.ok(farKept < limit * 1.2, `pixel scale ${pixelScale}: tiles kept to ${(farKept / 1000).toFixed(1)} km but drawn to ${(farShown / 1000).toFixed(1)} km`);
+  }
+});
