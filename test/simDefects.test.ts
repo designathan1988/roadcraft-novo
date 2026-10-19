@@ -682,3 +682,17 @@ test('C35: a car that changes lane in its last step before the junction goes on 
   }
   void T;
 });
+
+test('C37: two trucks never back into the same dock, two cars never take the same bay', async () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const k = sim.conns.cols, conn = someConn(sim), lane = k.from[conn];
+  const T = inner(tr), c = tr.veh.cols, p = new Float64Array(4);
+  sim.lanePoint(lane, 20, p);
+  tr.setDocks(new Float32Array([p[0] + 12, p[2] + 12, 0]));
+  const a = place(tr, lane, 20, k.to[conn], true), b = place(tr, lane, 12, k.to[conn], true);
+  c.kind[a] = c.kind[b] = 2; c.len[a] = c.len[b] = 9.5;
+  assert.equal(T.tryDock(a, lane), true, 'the first truck docks');
+  assert.equal(T.tryDock(b, lane), false, 'a second truck backed into the same dock');
+});

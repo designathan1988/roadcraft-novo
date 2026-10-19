@@ -106,6 +106,8 @@ const vehSchema = {
   tIn: Float64Array, s0: Float32Array,
   // the micro step it last moved in (one move per step, even after passing from a connection to a lane)
   moved: Uint32Array,
+  // the dock or bay it has reserved (Traffic.spots key; 0 = none)
+  spot: Float64Array,
 };
 
 /** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
@@ -313,6 +315,7 @@ export class Traffic {
     this.segWear.fill(0);
     this.parkers.clear();
     this.mvs.clear();
+    this.spots.clear();
   }
 
   /** New segment (the id may belong to a demolished one): fresh asphalt. */
@@ -509,6 +512,23 @@ export class Traffic {
   }
 
   /** Bay beside the right lane: drive into it along a Reeds-Shepp path; those behind wait while it is in the lane. */
+  /** Docks and bays taken (near the camera): key (a dock by its place, a bay by lane and 7 m slot) → vehicle. */
+  private spots = new Map<number, number>();
+
+  /** Takes the dock or bay `key` for `v`; false if another vehicle holds it. */
+  private reserve(v: number, key: number): boolean {
+    const c = this.veh.cols, holder = this.spots.get(key);
+    if (holder !== undefined && holder !== v && this.veh.alive[holder] && c.spot[holder] === key) return false;
+    this.spots.set(key, v); c.spot[v] = key;
+    return true;
+  }
+
+  private releaseSpot(v: number): void {
+    const c = this.veh.cols, key = c.spot[v];
+    if (key !== 0 && this.spots.get(key) === v) this.spots.delete(key);
+    c.spot[v] = 0;
+  }
+
   private tryParkManoeuvre(v: number, lane: number): boolean {
     const c = this.veh.cols, sim = this.sim;
     if (laneIdx(lane) !== 0) return false;
@@ -516,12 +536,13 @@ export class Traffic {
     if (Number.isNaN(pu)) return false;
     const len = c.len[v], bayFront = c.s[v] + len + 3;
     if (bayFront > sim.laneLen(lane) - 4) return false;
+    if (!this.reserve(v, -(lane * 4096 + Math.floor(bayFront / 7)) - 1)) return false;
     const du = (pu - sim.laneU(lane)) * laneDir(lane);
     const a = this.mvA, b = this.mvB;
     this.centrePose(lane, c.s[v], len, 0, a);
     this.centrePose(lane, bayFront, len, du, b);
     const m = this.mvs.start(v, MKind.Park, a[0], a[2], a[3], b[0], b[2], b[3], a[1], 5, 12);
-    if (m < 0) return false;
+    if (m < 0) { this.releaseSpot(v); return false; }
     c.mv[v] = m; c.ms[v] = bayFront; c.dying[v] = 3; c.dwell[v] = 0; c.pk[v] = 0;
     return true;
   }
@@ -532,12 +553,20 @@ export class Traffic {
     if (!d.length) return false;
     const a = this.mvA;
     this.centrePose(lane, c.s[v], len, 0, a);
+    // the nearest free dock within 70 m
     let best = -1, bd = 70;
-    for (let k = 0; k + 2 < d.length; k += 3) { const dist = Math.hypot(d[k] - a[0], d[k + 1] - a[2]); if (dist < bd) { bd = dist; best = k; } }
-    if (best < 0) return false;
+    const keyOf = (k: number) => (Math.round(d[k]) + 20000) * 40000 + Math.round(d[k + 1]) + 20000 + 1;
+    for (let k = 0; k + 2 < d.length; k += 3) {
+      const dist = Math.hypot(d[k] - a[0], d[k + 1] - a[2]);
+      if (dist >= bd) continue;
+      const holder = this.spots.get(keyOf(k));
+      if (holder !== undefined && holder !== v && this.veh.alive[holder] && c.spot[holder] === keyOf(k)) continue;
+      bd = dist; best = k;
+    }
+    if (best < 0 || !this.reserve(v, keyOf(best))) return false;
     const yaw = d[best + 2], bx = d[best] + Math.sin(yaw) * len / 2, bz = d[best + 1] + Math.cos(yaw) * len / 2;
     const m = this.mvs.start(v, MKind.Dock, a[0], a[2], a[3], bx, bz, yaw, a[1], 9, 45);
-    if (m < 0) return false;
+    if (m < 0) { this.releaseSpot(v); return false; }
     c.mv[v] = m; c.ms[v] = -1; c.dying[v] = 3; c.dwell[v] = 0;
     this.docked++;
     return true;
@@ -1035,7 +1064,7 @@ export class Traffic {
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
     c.v[v] = 0;
     c.line[v] = -1; c.stopI[v] = 0; c.dwell[v] = 0; c.load[v] = 0; c.served[v] = 0; c.wait[v] = 0;
-    c.held[v] = 0; c.why[v] = End.Arrived; c.ml[v] = -1; c.mnext[v] = -1; c.mprev[v] = -1;
+    c.held[v] = 0; c.why[v] = End.Arrived; c.ml[v] = -1; c.mnext[v] = -1; c.mprev[v] = -1; c.spot[v] = 0;
   }
 
   /** The trip will not reach its destination: the vehicle fades out and is counted as lost. */
@@ -1073,6 +1102,7 @@ export class Traffic {
   private despawn(v: number): void {
     const c = this.veh.cols;
     this.mesoUnlink(v);
+    if (c.spot[v] !== 0) this.releaseSpot(v);
     if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); }
     this.wagonPrev.delete(v);
     if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }

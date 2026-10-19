@@ -10,6 +10,9 @@ import { PROFILES } from '../src/roads/profiles.ts';
 import { Zone } from '../src/roads/zones.ts';
 import type { NetOp } from '../src/roads/network.ts';
 
+/** Warehouse loading docks next to the streets (as the page sends them: point, heading facing the street). */
+const DOCKS = [[-200, -100, Math.PI / 2], [60, 200, Math.PI], [200, 40, -Math.PI / 2], [-100, 60, 0]];
+
 /** A grid of streets with kerbside parking, zoned (trips start and end there). */
 function parkingGrid(n = 4, step = 160): SimNet {
   const w = new World();
@@ -28,6 +31,9 @@ function parkingGrid(n = 4, step = 160): SimNet {
     buildRoad(w, p, a, b, prof);
   }
   for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { w.roads.setZone(s, 0, Zone.Residential); w.roads.setZone(s, 1, Zone.Commercial); }
+  // the warehouses with docks (the test's docks) stand on industrial streets: trucks carry goods to industry
+  const sc = w.roads.segs.cols;
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && DOCKS.some(([x, z]) => Math.hypot(sc.mx[s] - x, sc.mz[s] - z) < 120)) { w.roads.setZone(s, 0, Zone.Industrial); w.roads.setZone(s, 1, Zone.Industrial); }
   const sim = new SimNet();
   const enc = encodeOps(ops);
   for (let i = 0; i < ops.length; i++) sim.apply(decodeOp(enc, i));
@@ -45,7 +51,7 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
   tr.onDropOff = () => { drops++; };
   // docas de galpão junto às ruas (como a página manda: ponto, rumo de frente para a rua)
   const docks: number[] = [];
-  for (const [x, z, yaw] of [[-200, -100, Math.PI / 2], [60, 200, Math.PI], [200, 40, -Math.PI / 2], [-100, 60, 0]]) docks.push(x, z, yaw);
+  for (const [x, z, yaw] of DOCKS) docks.push(x, z, yaw);
   tr.setDocks(new Float32Array(docks));
   const data = new Float32Array(11 * 20000);
   const c = tr.veh.cols, mc = tr.mvs.t.cols;
