@@ -53,16 +53,19 @@ const START_GAP = 0.7;
  */
 const STARTS = 1 << 17;
 /**
- * Near the camera people see each other (roadcraft agents/walk.ts): within NEAR_R m of it, every step, each walker
- * looks SEE m ahead, keeps BODY m between centres from whoever is in its way (holding its pace behind someone slower,
- * standing or crossing its path), and steps up to SIDESTEP m aside to pass them or to let someone coming the other
- * way by. Held longer than MAX_HOLD s, it steps aside and goes on (nobody waits for good on someone who waits on them).
+ * Near the camera people walk as roadcraft 4.0's walkers (sim/agents/walk.ts, SUMO's striping): within NEAR_R m of it,
+ * every step. Stripe width, body, shoulders, look ahead, the gap kept and its headway, acceleration and braking, the
+ * stripe's hold and switch gain, the lateral penalty and share, the step aside and the jam: walk.ts:23-65.
  */
-const NEAR_R = 160, SEE = 2.4, BODY = 0.6, SIDESTEP = 0.7, MAX_HOLD = 8;
-/** Closer than this (m, centre to centre) two people are one inside the other: one of them holds. */
+const NEAR_R = 160;
+const STRIPE = 0.65, BODY_R = 0.27, SHOULDERS = 0.5, LOOK = 8, MOVING = 0.1, KEEP = 0.45, HEADWAY = 0.5;
+const PED_ACCEL = 1.2, PED_BRAKE = 2.5, SWITCH_GAIN = 1.2, AIM_HOLD = 0.6, HELD_SWITCH = 0.5;
+const LATERAL_PENALTY = 1 / STRIPE, LATERAL_SHARE = 0.4, SIDESTEP_RATE = 0.45;
+const JAM_AFTER = 20, JAM_AFTER_CROSSING = 10, JAM_SHARE = 0.25, ONCOMING_CONFLICT = 50;
+/** Closer than this (m, centre to centre) two walkers are one inside the other: they move apart across their ways. */
 const CLOSE = 0.5;
-/** Grid of the near walkers (`seeEachOther`): cell size (m) and hash slots. */
-const NEAR_CELL = 2, NEAR_SLOTS = 1 << 14;
+/** Grid of the near walkers (`seeEachOther`): cell size (m, the look ahead, walk.ts:96) and hash slots. */
+const NEAR_CELL = LOOK, NEAR_SLOTS = 1 << 14;
 /** Share of trips made by bicycle when there is a bike lane nearby (roadcraft `vehicles/cycleLane.ts`). */
 const BIKE_SHARE = 0.1;
 /** Segments a cyclist rides (a wander along the bike lanes, no router). */
@@ -104,6 +107,8 @@ const schema = {
   enter: Float32Array,
   // near the camera (`seeEachOther`): the step aside (m, + = right), where it is heading, and how long it has held its pace
   lat: Float32Array, latT: Float32Array, hold: Float32Array,
+  // its speed now (near the camera), and when it last chose its stripe
+  vNow: Float32Array, aimAt: Float64Array,
   // and the share of its pace it walked in the last step (1 = free)
   pace: Float32Array,
 };
@@ -134,6 +139,8 @@ export class Peds {
   private windowNodes: number[] = [];
   /** Traffic light: may pedestrians start crossing arm `arm` of node `n` now? (provided by traffic) */
   walkOk: (n: number, arm: number) => boolean = () => true;
+  /** Is a vehicle on the crosswalk over arm `arm` of node `n`, or about to drive over it? (provided by traffic) */
+  carsOn: (n: number, arm: number) => boolean = () => false;
   /** A pedestrian waits at the kerb of the crossing over arm `arm` of node `n` (presses the button). */
   onWait: (n: number, arm: number) => void = () => {};
   /** Who last started each stretch (a hash of its start and end) and when: `spaced`. */
@@ -236,6 +243,23 @@ export class Peds {
     this.heapT[i] = lt; this.heapP[i] = lp;
   }
 
+  /**
+   * Is anyone walking a crossing over one of node `n`'s arms in `mask` within `r` m of (x, z)? A vehicle waits only
+   * for those on the part of the zebra it drives over (roadcraft intersections/crossingSpans.ts).
+   */
+  crossingNear(n: number, mask: number, x: number, z: number, r: number): boolean {
+    const c = this.t.cols;
+    for (let p = this.head[n]; p >= 0; p = c.next[p]) {
+      if (c.mode[p] !== 1) continue;
+      const w = c.wIdx[p] - 1;
+      const cross = w >= 0 ? this.ways[p * WAYS * 4 + w * 4 + 3] : 0;
+      if (cross <= 0 || (mask & (1 << (cross - 1))) === 0) continue;
+      const q = this.posShown(p);
+      if (Math.abs(q[0] - x) < r && Math.abs(q[2] - z) < r && Math.hypot(q[0] - x, q[2] - z) < r) return true;
+    }
+    return false;
+  }
+
   /** Is anyone on the node's crosswalk right now (walking the crossing leg)? */
   crossing(n: number): boolean { return this.crossingArms(n, 0xff); }
 
@@ -243,7 +267,8 @@ export class Peds {
   crossingArms(n: number, mask: number): boolean {
     const c = this.t.cols;
     for (let p = this.head[n]; p >= 0; p = c.next[p]) {
-      if (c.mode[p] !== 1 && c.mode[p] !== 2) continue;
+      // walking the crossing line (standing, it is at a kerb: waiting to start one, or done with the last)
+      if (c.mode[p] !== 1) continue;
       const w = c.wIdx[p] - 1;
       const cross = w >= 0 ? this.ways[p * WAYS * 4 + w * 4 + 3] : 0;
       if (cross > 0 && (mask & (1 << (cross - 1))) !== 0) return true;
@@ -396,7 +421,7 @@ export class Peds {
     c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = side;
     c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0; c.tx[p] = NaN; c.tz[p] = NaN;
-    c.bike[p] = 0; c.lat[p] = c.latT[p] = c.hold[p] = 0; c.pace[p] = 1;
+    c.bike[p] = 0; c.lat[p] = c.latT[p] = c.hold[p] = 0; c.pace[p] = 1; c.vNow[p] = c.speed[p]; c.aimAt[p] = -1e9;
     c.seg[p] = s;
     c.enter[p] = Math.max(0, Math.min(0.98, (towardB ? dA - r0 : r1 - dA) / Math.max(0.5, r1 - r0)));
     // straight line from the door to the sidewalk
@@ -450,7 +475,7 @@ export class Peds {
     c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = 1;
     c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0;
-    c.bike[p] = 1; c.enter[p] = 0; c.lat[p] = c.latT[p] = c.hold[p] = 0; c.pace[p] = 1;
+    c.bike[p] = 1; c.enter[p] = 0; c.lat[p] = c.latT[p] = c.hold[p] = 0; c.pace[p] = 1; c.vNow[p] = c.speed[p]; c.aimAt[p] = -1e9;
     if (!this.startSidewalk(p, this.rng.next())) { this.kill(p); return false; }
     return true;
   }
@@ -492,7 +517,7 @@ export class Peds {
     c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = this.rng.next() < 0.5 ? 1 : -1;
     c.tLine[p] = li; c.tFrom[p] = from; c.tTo[p] = to; c.tx[p] = NaN; c.tz[p] = NaN;
-    c.bike[p] = 0; c.enter[p] = 0; c.lat[p] = c.latT[p] = c.hold[p] = 0; c.pace[p] = 1;
+    c.bike[p] = 0; c.enter[p] = 0; c.lat[p] = c.latT[p] = c.hold[p] = 0; c.pace[p] = 1; c.vNow[p] = c.speed[p]; c.aimAt[p] = -1e9;
     // `frac` > 0: starts part-way along the first segment, so the city starts out full
     if (!this.startSidewalk(p, frac)) { this.kill(p); return -1; }
     return p;
@@ -764,6 +789,14 @@ export class Peds {
       this.schedule(p, this.time + 1);
       return true;
     }
+    // a vehicle on the crosswalk or about to drive over it: waits for it to pass (looked at again in half a second)
+    if (cross > 0 && this.carsOn(this.wayNode[p], cross - 1)) {
+      if (c.mode[p] !== 2) this.standToCross(p, o);
+      c.mode[p] = 2;
+      c.t0[p] = this.time; c.dur[p] = 0.5;
+      this.schedule(p, this.time + 0.5);
+      return true;
+    }
     const [x0, y0, z0, yaw0] = this.posNow(p);
     // the same stretch from the same spot at the same pace as someone just before: a moment's gap first
     if (!this.spaced(p, this.stretchKey(p, x0, z0, this.ways[o], this.ways[o + 2]))) return true;
@@ -914,6 +947,29 @@ export class Peds {
   private nearHead = new Int32Array(NEAR_SLOTS).fill(-1);
   private nearKey = new Int32Array(NEAR_SLOTS);
   private nearNodes: number[] = [];
+  // the others a walker sees (`seeEachOther`): along, across, coming the other way
+  private othAlong = new Float32Array(512); private othLat = new Float32Array(512); private othOn = new Uint8Array(512);
+  private othR = new Float32Array(512);
+  // the vehicles near the camera (`setBodies`): x, z, yaw, half length, half width each; by cell
+  private bodies: Float32Array<ArrayBufferLike> = new Float32Array(0);
+  private bodyN = 0;
+  private bodyNext = new Int32Array(0);
+  private bodyHead = new Int32Array(NEAR_SLOTS).fill(-1);
+  private bodyKey = new Int32Array(NEAR_SLOTS);
+
+  /** The vehicles near the camera this step (traffic `writeBodies`): solid to the walkers. */
+  setBodies(b: Float32Array, n: number): void {
+    this.bodies = b; this.bodyN = n;
+    if (this.bodyNext.length < n) this.bodyNext = new Int32Array(Math.max(1024, n * 2));
+  }
+
+  private bodySlot(ix: number, iz: number): number {
+    const key = (ix & 0xffff) | ((iz & 0xffff) << 16);
+    let h = (Math.imul(key, 2654435761) >>> 0) & (NEAR_SLOTS - 1);
+    while (this.bodyHead[h] >= 0 && this.bodyKey[h] !== key) h = (h + 1) & (NEAR_SLOTS - 1);
+    this.bodyKey[h] = key;
+    return h;
+  }
 
   private nearSlot(ix: number, iz: number): number {
     const key = (ix & 0xffff) | ((iz & 0xffff) << 16);
@@ -924,10 +980,13 @@ export class Peds {
   }
 
   /**
-   * People near the camera see each other (roadcraft agents/walk.ts, peds/sidewalk.ts): someone in the way within
-   * SEE m ahead holds the walker's pace (its stretch's start moves later by the step: `posNow` stands still, the end
-   * event moves with it), someone slower ahead or coming the other way makes it step aside. Only the people in the
-   * lists of the nodes within NEAR_R of the camera, through a grid of 2 m cells: work by what is near, never the city.
+   * People near the camera walk as roadcraft 4.0's walkers do (sim/agents/walk.ts `stepWalkers`, SUMO's striping
+   * model), each step: the others within LOOK ahead in its own frame (how far along, how far across, coming the other
+   * way or not, through a grid of cells: only who is near); the stripe across its way with the most room ahead, keeping
+   * right (walk.ts:1736-1762); its speed the room ahead in that stripe less the gap kept, over the headway, eased by
+   * its acceleration and braking (walk.ts:1837-1840); a step aside towards the stripe, faster the slower it walks
+   * (walk.ts:1846-1858); held too long, it is let through slowly (walk.ts:1816-1836). Its progress along the stretch is
+   * the event model's (\`t0\` moved later by what it did not walk, the end event with it); its place across is \`lat\`.
    */
   private seeEachOther(dt: number): void {
     const c = this.t.cols, net = this.sim.net;
@@ -945,8 +1004,7 @@ export class Peds {
         if (Math.abs(q[0] - this.camX) > NEAR_R || Math.abs(q[2] - this.camZ) > NEAR_R) continue;
         this.nearP[n] = p; this.nearX[n] = q[0]; this.nearZ[n] = q[2];
         this.nearHx[n] = Math.sin(q[3]); this.nearHz[n] = Math.cos(q[3]);
-        // walking at what the people ahead left it in the last step, or standing (waiting, or held)
-        this.nearV[n] = (c.mode[p] === 0 || c.mode[p] === 1) && c.hold[p] === 0 ? c.speed[p] * c.pace[p] : 0;
+        this.nearV[n] = c.mode[p] === 0 || c.mode[p] === 1 ? c.vNow[p] : 0;
         n++;
       }
     }
@@ -955,67 +1013,109 @@ export class Peds {
       const h = this.nearSlot(Math.floor(this.nearX[i] / NEAR_CELL), Math.floor(this.nearZ[i] / NEAR_CELL));
       this.nearNext[i] = this.nearHead[h]; this.nearHead[h] = i;
     }
+    const oa = this.othAlong, ol = this.othLat, oo = this.othOn, or = this.othR;
+    // the vehicles near, by cell (`setBodies`)
+    this.bodyHead.fill(-1);
+    for (let b = 0; b < this.bodyN; b++) {
+      const h = this.bodySlot(Math.floor(this.bodies[b * 5] / NEAR_CELL), Math.floor(this.bodies[b * 5 + 1] / NEAR_CELL));
+      this.bodyNext[b] = this.bodyHead[h]; this.bodyHead[h] = b;
+    }
     for (let i = 0; i < n; i++) {
-      const p = this.nearP[i], vi = (c.mode[p] === 0 || c.mode[p] === 1) ? c.speed[p] : 0;
-      if (vi === 0) { c.hold[p] = 0; continue; }
-      const xi = this.nearX[i], zi = this.nearZ[i], hx = this.nearHx[i], hz = this.nearHz[i];
-      // cross: paths crossing (it waits at most MAX_HOLD); behind someone slower, held or standing it walks at their pace
-      // or stops behind them, as long as it takes (a queue)
-      // free: the share of its pace it walks at (1 = nothing in the way)
-      let free = 1, cross = false, back = false, side = 0;
-      const cx = Math.floor(xi / NEAR_CELL), cz = Math.floor(zi / NEAR_CELL);
-      for (let gz = cz - 1; gz <= cz + 1; gz++) for (let gx = cx - 1; gx <= cx + 1; gx++) {
+      const p = this.nearP[i], walking = c.mode[p] === 0 || c.mode[p] === 1;
+      if (!walking) { c.vNow[p] = 0; c.hold[p] = 0; continue; }
+      const xi = this.nearX[i], zi = this.nearZ[i], hx = this.nearHx[i], hz = this.nearHz[i], d = c.lat[p];
+      // on the carriageway, crossing: those standing at the far kerb waiting for their own crossing step back for it
+      // (roadcraft waits a step back from the kerb, walk.ts:75 KERB_BACK): it does not stop on the zebra for them
+      const crossingNow = c.mode[p] === 1 && c.wIdx[p] > 0 && this.ways[p * WAYS * 4 + (c.wIdx[p] - 1) * 4 + 3] > 0;
+      // the others in its frame (walk.ts:1470-1481): along its heading, and across (+ = right), as stripes see them
+      let m = 0;
+      const cx = Math.floor(xi / NEAR_CELL), cz = Math.floor(zi / NEAR_CELL), cells = Math.ceil(LOOK / NEAR_CELL);
+      for (let gz = cz - cells; gz <= cz + cells; gz++) for (let gx = cx - cells; gx <= cx + cells; gx++) {
         const key = (gx & 0xffff) | ((gz & 0xffff) << 16);
         let h = (Math.imul(key, 2654435761) >>> 0) & (NEAR_SLOTS - 1);
         while (this.nearHead[h] >= 0 && this.nearKey[h] !== key) h = (h + 1) & (NEAR_SLOTS - 1);
         for (let j = this.nearHead[h]; j >= 0; j = this.nearNext[j]) {
           if (j === i) continue;
+          if (crossingNow && c.mode[this.nearP[j]] === 2) continue;
           const dx = this.nearX[j] - xi, dz = this.nearZ[j] - zi;
-          const ahead = dx * hx + dz * hz;
-          // across: + = to the walker's right (right of heading (hx, hz) is (−hz, hx))
-          const across = -dx * hz + dz * hx;
-          if (Math.abs(across) > BODY || ahead > SEE || ahead <= 0) continue;
-          const vj = this.nearV[j], same = hx * this.nearHx[j] + hz * this.nearHz[j];
-          if (same < -0.5) { side = 1; continue; } // facing it: both step to their right and pass
-          if (same > 0.5) {
-            // going the same way: as fast or faster, keep the gap; slower, held or standing in line, wait behind it
-            // and step aside to pass
-            // the pace eases down over the last 0.8 m before the gap kept (no stop-and-go), to the pace of the one ahead
-            const stop = vj > 0 ? BODY : BODY + 0.2, room = Math.max(0, Math.min(1, (ahead - stop) / 0.8));
-            free = Math.min(free, vj > 0 && ahead > stop ? Math.max(room, Math.min(1, vj / vi)) : room);
-            if (!(vj > 0 && vj >= vi - 0.05)) side = across > 0 ? -1 : 1;
-            // right behind it, closer than a body (it came round a corner into the line): a step back
-            if (ahead < CLOSE && Math.abs(across) < 0.4) back = true;
-            continue;
-          }
-          if (vj > 0) {
-            // paths crossing: whoever reaches the meeting point later gives way (by id when even); the times along each
-            // heading to where the two lines meet, the same sum seen from either side
-            const det = hx * this.nearHz[j] - hz * this.nearHx[j];
-            if (Math.abs(det) > 1e-3 && ahead < SEE) {
-              const ti = (dx * this.nearHz[j] - dz * this.nearHx[j]) / det / vi;
-              const tj = (dx * hz - dz * hx) / det / vj;
-              if (ti > tj + 0.05 || (Math.abs(ti - tj) <= 0.05 && this.nearP[j] < p)) cross = true;
-            }
-            continue;
-          }
-          // standing across its way: step round them (holding a moment if right in front)
-          if (ahead < BODY) cross = true;
-          side = across > 0 ? -1 : 1;
+          const along = dx * hx + dz * hz;
+          if (along <= 0 || along > LOOK) continue;
+          if (m >= oa.length) break;
+          // facing it and moving: coming the other way (walk.ts:1477-1478)
+          const facing = hx * this.nearHx[j] + hz * this.nearHz[j] < -0.3;
+          oa[m] = along; ol[m] = d + (-dx * hz + dz * hx); oo[m] = facing && this.nearV[j] > MOVING ? 1 : 0; or[m] = SHOULDERS - BODY_R;
+          m++;
         }
       }
-      // crossing someone's path: it slows to let them by and edges aside (stopping dead jammed whole corners)
-      if (cross && c.hold[p] < MAX_HOLD) { free = Math.min(free, 0.2); if (!side) side = 1; }
-      // its stretch's start moves later by the part of the step it did not walk (a step back when right on someone)
-      c.t0[p] = Math.min(this.time, c.t0[p] + dt * (1 - free) + (back ? dt * 0.4 : 0));
-      c.pace[p] = free;
-      if (free < 0.05) c.hold[p] += dt; else c.hold[p] = 0;
-      c.latT[p] = side * SIDESTEP;
-    }
-    // the step aside eases towards where it is heading (0.6 m/s), back to its track when nothing is in the way
-    for (let i = 0; i < n; i++) {
-      const p = this.nearP[i], d = c.latT[p] - c.lat[p];
-      c.lat[p] += Math.max(-0.6 * dt, Math.min(0.6 * dt, d));
+      // the vehicles: kept off as three discs along each body (walk.ts:111-119, 1705-1724)
+      const bd = this.bodies;
+      for (let gz = cz - 1; gz <= cz + 1; gz++) for (let gx = cx - 1; gx <= cx + 1; gx++) {
+        const key = (gx & 0xffff) | ((gz & 0xffff) << 16);
+        let h = (Math.imul(key, 2654435761) >>> 0) & (NEAR_SLOTS - 1);
+        while (this.bodyHead[h] >= 0 && this.bodyKey[h] !== key) h = (h + 1) & (NEAR_SLOTS - 1);
+        for (let b = this.bodyHead[h]; b >= 0; b = this.bodyNext[b]) {
+          const o = b * 5, fx = Math.sin(bd[o + 2]), fz = Math.cos(bd[o + 2]), rad = bd[o + 4], reachB = Math.max(0, bd[o + 3] - rad);
+          // inside its body already (it came to them): they walk on out of its way, not held inside it (walk.ts:1710-1713)
+          let inside = false;
+          for (let q = -1; q <= 1 && !inside; q++) if (Math.hypot(bd[o] + fx * reachB * q - xi, bd[o + 1] + fz * reachB * q - zi) < rad) inside = true;
+          if (inside) continue;
+          for (let q = -1; q <= 1 && m < oa.length; q++) {
+            const rx = bd[o] + fx * reachB * q - xi, rz = bd[o + 1] + fz * reachB * q - zi;
+            const along = rx * hx + rz * hz - rad + BODY_R;
+            if (along + 2 * rad <= 0 || along > LOOK) continue;
+            oa[m] = Math.max(0.01, along); ol[m] = d + (-rx * hz + rz * hx); oo[m] = 0; or[m] = rad;
+            m++;
+          }
+        }
+      }
+      // free distance ahead in the stripe centred c (walk.ts:1484-1493): someone coming the other way meets it halfway
+      const free = (cc: number): number => {
+        let gap = LOOK;
+        for (let k = 0; k < m; k++) {
+          if (Math.abs(ol[k] - cc) >= BODY_R + or[k]) continue;
+          const g = oo[k] ? oa[k] / 2 : oa[k];
+          if (g < gap) gap = g;
+        }
+        return gap;
+      };
+      // the room across: the sidewalk's width on a sidewalk (its body inside it), a crosswalk's half elsewhere
+      const [lo, hi] = this.latRoom(p);
+      // the stripe (walk.ts:1736-1762): most room ahead, a metre less for each stripe away from where it is, kept to
+      // the right (here + is right), a stripe just taken kept a moment
+      const right = hi - Math.min(hi - lo, STRIPE * 0.5);
+      const lateral = c.hold[p] === 0 && free(d) > 0.05 ? LATERAL_PENALTY : 0;
+      const gain = c.hold[p] > HELD_SWITCH ? SWITCH_GAIN / 4 : SWITCH_GAIN;
+      // somebody coming the other way in the leftmost stripe: that stripe is theirs (walk.ts:1741-1749, 1507-1509)
+      const leftmost = lo + STRIPE, wide = hi - lo > STRIPE;
+      let oncomingLeft = false;
+      for (let k = 0; k < m && !oncomingLeft; k++) if (oo[k] && ol[k] - SHOULDERS < leftmost && ol[k] + SHOULDERS > lo) oncomingLeft = true;
+      const reserve = (cc: number) => (oncomingLeft && wide && cc < leftmost - 1e-6 ? ONCOMING_CONFLICT : 0);
+      let aim = Math.max(lo, Math.min(hi, c.latT[p]));
+      let best = free(aim) - (right - aim) * 0.15 - Math.abs(aim - d) * lateral + gain - reserve(aim) / 2;
+      for (let cc = lo; cc <= hi + 1e-6; cc += STRIPE / 2) {
+        const score = free(cc) - (right - cc) * 0.15 - Math.abs(cc - d) * Math.max(lateral, 0.2) - reserve(cc);
+        if (score > best) { best = score; aim = cc; }
+      }
+      if (Math.abs(aim - c.latT[p]) > 1e-6 && (this.time - c.aimAt[p] >= AIM_HOLD || free(c.latT[p]) < KEEP || c.hold[p] > HELD_SWITCH)) { c.latT[p] = aim; c.aimAt[p] = this.time; }
+      // the speed (walk.ts:1816-1840): the room ahead in its stripe over the headway; held too long, through slowly
+      const pace = c.speed[p];
+      let want = pace;
+      const jam = c.hold[p] > (c.mode[p] === 1 ? JAM_AFTER_CROSSING : JAM_AFTER);
+      if (jam) want *= JAM_SHARE;
+      else want = Math.min(want, Math.max(0, (free(d) - KEEP) / HEADWAY));
+      const v0 = c.vNow[p];
+      const v = want > v0 ? Math.min(want, v0 + PED_ACCEL * dt) : Math.max(want, v0 - PED_BRAKE * dt);
+      c.vNow[p] = v;
+      c.hold[p] = v < 0.1 ? c.hold[p] + dt : 0;
+      // its stretch: it walked v of its pace (the start moves later by the rest of the step)
+      c.t0[p] += dt * (1 - v / pace);
+      c.pace[p] = v / pace;
+      // across, towards its stripe: with the walk (0.4 of the speed, walk.ts:1349) and, slow, a step aside (walk.ts:1848)
+      const aside = c.latT[p] - d;
+      if (Math.abs(aside) > 0.02 && free(c.latT[p]) > KEEP) {
+        const rate = LATERAL_SHARE * v + SIDESTEP_RATE * Math.max(0, 1 - v / (0.6 * pace));
+        c.lat[p] = d + Math.max(-rate * dt, Math.min(rate * dt, aside));
+      }
     }
     // two walkers closer than CLOSE (side by side at the end of a queue, one catching another at a corner) move apart
     // across their own ways, half each, at most 1.2 m/s (those standing do not move: the walker takes it all)
@@ -1060,6 +1160,19 @@ export class Peds {
     c.lat[p] = Math.max(lo, Math.min(hi, c.lat[p] + d));
     // it keeps that step aside while they are close (easing back to its track only once clear)
     c.latT[p] = c.lat[p];
+  }
+
+
+  /** The room across person \`p\`'s way for its body (+ = right of its track): the sidewalk, or ±0.9 m on a line. */
+  private latRoom(p: number): [number, number] {
+    const c = this.t.cols;
+    if (c.mode[p] !== 0) return [-0.9, 0.9];
+    const prof = this.sim.net.segs.cols.profile[c.seg[p]], [u] = this.sideU(prof, c.side[p]);
+    let half = 1.5;
+    for (const e of PROFILE_INFO[prof].edges) if (e.strip.kind === 'sidewalk' && u >= e.u0 && u <= e.u1) half = (e.u1 - e.u0) / 2;
+    // the track is already this far right of the middle
+    const k = this.trackOff(p, prof, u), room = Math.max(0, half - BODY_R);
+    return [-room - k, room - k];
   }
 
   private growNear(): void {

@@ -62,6 +62,9 @@ const peds = new Peds(sim);
 peds.walkOk = (n, arm) => traffic.walkOk(n, arm);
 peds.onWait = (n, arm) => traffic.pedCall(n, arm);
 traffic.pedCrossing = (n) => peds.crossing(n);
+traffic.pedCrossingArms = (n, mask) => peds.crossingArms(n, mask);
+traffic.pedCrossingNear = (n, mask, x, z, r) => peds.crossingNear(n, mask, x, z, r);
+peds.carsOn = (n, arm) => traffic.carsOnCrossing(n, arm);
 traffic.sig.pedsOn = (n, mask) => peds.crossingArms(n, mask);
 // buses and pedestrians: bus riders walk to the stop, wait, ride and get off on foot
 peds.pickTrip = () => traffic.pickTrip();
@@ -134,6 +137,8 @@ function stepInner(): void {
   if (rebuilt.length) traffic.nodesRebuilt(rebuilt);
   for (let k = 0; k < speed; k++) {
     traffic.step(dt);
+    // the vehicles near the camera are solid to the walkers there
+    peds.setBodies(traffic.bodyBuf, traffic.writeBodies(traffic.camX, traffic.camZ, 180));
     peds.step(dt);
     tick++;
   }

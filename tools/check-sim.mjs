@@ -198,7 +198,7 @@ const MOTION_CHECK = `
   const f1 = (x) => x.toFixed(1);
   // vehicles
   const stall = new Map(), box = new Map(), offLane = new Map(), seenV = new Set(), movedV = new Set();
-  let worstStall = 0, stallEx = '', worstBox = 0, boxEx = '', offEx = '', overlaps = 0, overlapEx = '';
+  let worstWait = 0, waitEx = '', worstStall = 0, stallEx = '', worstBox = 0, boxEx = '', offEx = '', overlaps = 0, overlapEx = '';
   const clashes = new Set(); let clashEx = '';
   const corners = (v, o) => {
     const x = v[o + 2], z = v[o + 3], y = v[o + 4], L = v[o + 5] / 2, H = W[v[o + 1]] / 2;
@@ -228,6 +228,8 @@ const MOTION_CHECK = `
       const st = still && !why && conn < 0 ? (stall.get(id) || 0) + dt : 0;
       stall.set(id, st);
       if (st > worstStall) { worstStall = st; stallEx = 'vehicle ' + id + ' (kind ' + v[o + 1] + ') at ' + f1(v[o + 2]) + ',' + f1(v[o + 3]) + ' to the line ' + f1(v[o + 12]) + ' m, flags ' + fl; }
+      // waiting at its line not for a red: a junction that never lets it go (roadcraft invariants.ts greenBlocked)
+      if (conn < 0 && !(fl & RED) && v[o + 13] > worstWait) { worstWait = v[o + 13]; waitEx = 'vehicle ' + id + ' at ' + f1(v[o + 2]) + ',' + f1(v[o + 3]) + ' waiting ' + f1(v[o + 13]) + ' s at its line, flags ' + fl; }
       const bx = still && conn >= 0 ? (box.get(id) || 0) + dt : 0;
       box.set(id, bx);
       if (bx > worstBox) { worstBox = bx; boxEx = 'vehicle ' + id + ' (kind ' + v[o + 1] + ') at ' + f1(v[o + 2]) + ',' + f1(v[o + 3]) + ' on connection ' + conn; }
@@ -324,6 +326,7 @@ const MOTION_CHECK = `
   console.log('CHECK INFO ' + name + ': ' + seenV.size + ' vehicles (' + movedV.size + ' moved over 2 m), people by mode now (sidewalk, line, waiting, standing, leaving) ' + modes.join('/') + ', ' + moved + ' of ' + walkers + ' people seen for 4 s moved over 1 m');
   check(name + ': vehicles there', seenV.size > 0, 'none');
   check(name + ': no vehicle stands without a reason (red, queue, bay, stop, give way) for over 5 s', worstStall <= 5, f1(worstStall) + ' s: ' + stallEx);
+  check(name + ': no vehicle waits at its line over 30 s but for a red', worstWait <= 30, f1(worstWait) + ' s: ' + waitEx);
   check(name + ': no vehicle stands inside the junction for over 10 s', worstBox <= 10, f1(worstBox) + ' s: ' + boxEx);
   check(name + ': vehicles keep to their lane', !offEx, offEx);
   check(name + ': vehicle bodies never overlap', overlaps === 0, overlaps + ' times; ' + overlapEx);

@@ -111,6 +111,8 @@ const vehSchema = {
   tIn: Float64Array, s0: Float32Array,
   // the micro step it last moved in (one move per step, even after passing from a connection to a lane)
   moved: Uint32Array,
+  // over the stop line with the way open: it goes through the junction without asking again (1)
+  pass: Uint8Array,
   // the dock or bay it has reserved (Traffic.spots key; 0 = none)
   spot: Float64Array,
   // the driver (sim/drivers.ts): aggression, comfort figures, gap acceptance, politeness, patience
@@ -154,6 +156,18 @@ const STOP_CELL = 600, STOP_CELLS = Math.ceil(MAP_SIZE / STOP_CELL);
 
 /** Dock index cell (m) and cells per side; a truck turns into a yard whose dock is this near its centre (m). */
 const DOCK_CELL = 64, DOCK_CELLS = Math.ceil(MAP_SIZE / DOCK_CELL), YARD_REACH = 28;
+
+/** Length of the crosswalk and its stop line at the end of a lane (m, as painted: jobs/roadMesh.ts CROSSWALK). */
+const CROSSWALK = 4.2;
+/** Seconds a vehicle stands at its line giving way to people stepping onto the zebra before it is its turn (roadcraft
+ *  sim/crossings/permission.ts:106). */
+const PED_COURTESY = 8;
+/** A walker steps off in front of an approaching vehicle only with this many seconds to spare (params.ts PED.criticalGap). */
+const PED_CRITICAL_GAP = 4;
+/** Half widths of the vehicle kinds (car, bus, truck, motorbike, train), m. */
+const BODY_HALF_W = [0.9, 1.27, 1.25, 0.4, 1.5];
+/** How near a walker on a zebra to where a vehicle's lane crosses it holds the vehicle (m): crossingSpans.ts:24, :29. */
+const SPAN_REACH = 2.55 / 2 + 0.9 + 0.6;
 
 /** Numbers per vehicle in `Traffic.inspect`, and why a vehicle there may stand still (bits). */
 export const INSPECT_STRIDE = 18;
@@ -205,6 +219,9 @@ export class Traffic {
   mesoHead = new Int32Array((1 << 14) * 16).fill(-1);
   mesoTail = new Int32Array((1 << 14) * 16).fill(-1);
   connHead = new Int32Array(1 << 14).fill(-1);
+  /** Per connection: the vehicle that claimed it at its stop line (`pass`), and when. */
+  private connPass = new Int32Array(1 << 14).fill(-1);
+  private connPassT = new Float64Array(1 << 14);
   /** Whoever waits too long at a yield claims the turn (tenths of a second of the simulation clock). */
   private connClaim = new Int32Array(1 << 14).fill(-100);
   connTail = new Int32Array(1 << 14).fill(-1);
@@ -274,7 +291,22 @@ export class Traffic {
   private laneVelT = new Float64Array((1 << 14) * 16);
 
   /** The vehicle starts lane c.lane[v] at position `s`. */
-  private enterLane(v: number, s: number): void { const c = this.veh.cols; c.tIn[v] = this.time; c.s0[v] = Math.max(0, s); }
+  private enterLane(v: number, s: number): void { const c = this.veh.cols; c.tIn[v] = this.time; c.s0[v] = Math.max(0, s); c.pass[v] = 0; }
+
+  /**
+   * How far before the end of `lane` its stop line is (m): at a junction with crosswalks (three arms or more, not a
+   * roundabout) and at a mid-block crossing, the crosswalk and the line take the last CROSSWALK m (as painted,
+   * jobs/roadMesh.ts); elsewhere 0.
+   */
+  private stopBack(lane: number): number {
+    const sim = this.sim, n = sim.laneTo(lane), deg = sim.net.nodes.cols.deg[n], seg = laneSeg(lane);
+    // no crosswalk on a roundabout's ring nor across a railway
+    if ((sim.net.segs.cols.flags[seg] & SegFlag.Ring) !== 0 || PROFILE_INFO[sim.net.segs.cols.profile[seg]].rail) return 0;
+    const ctl = sim.nodeCtl[n];
+    if (ctl === Ctl.Crossing) return 0; // a level crossing has its barrier, not a zebra
+    if (deg >= 3) return CROSSWALK;
+    return deg === 2 && (ctl === Ctl.Zebra || ctl === Ctl.PedSignal) ? CROSSWALK : 0;
+  }
 
   /** The vehicle finishes `lane`: its speed on it goes into the lane's and the city's figures. */
   private leaveLane(v: number, lane: number): void {
@@ -360,6 +392,10 @@ export class Traffic {
 
   /** Is someone walking on the node's crosswalk? (from the pedestrians) */
   pedCrossing: (n: number) => boolean = () => false;
+  /** Is someone walking a crossing over one of node `n`'s arms in `mask` (bit per arm)? (from the pedestrians) */
+  pedCrossingArms: (n: number, mask: number) => boolean = () => false;
+  /** Is someone walking a crossing over an arm of `n` in `mask` within `r` m of (x, z)? (from the pedestrians) */
+  pedCrossingNear: (n: number, mask: number, x: number, z: number, r: number) => boolean = () => false;
 
   /** Vehicles that went through each node (micro and meso), for the junction flow. */
   nodePass = new Uint32Array(1 << 14);
@@ -440,6 +476,8 @@ export class Traffic {
     });
     sim.conns.onGrow((cap) => {
       this.connHead = grow(this.connHead, cap, -1);
+      this.connPass = grow(this.connPass, cap, -1);
+      this.connPassT = grow(this.connPassT, cap, 0);
       this.connTail = grow(this.connTail, cap, -1);
       this.connClaim = grow(this.connClaim, cap, -100);
     });
@@ -1347,6 +1385,97 @@ export class Traffic {
 
   // ------------------------------------------------------------ junctions
 
+  /**
+   * Is a vehicle on the crosswalk over arm `arm` of node `n`, or about to drive over it (over its stop line with the
+   * way open, or coming at speed within 3 m of it, on a connection leaving by that arm, or still crossing it on the
+   * way out)? The pedestrians ask before stepping off the kerb (roadcraft crossings/permission). Near the camera only:
+   * the first vehicle of each lane and the connections of the node.
+   */
+  carsOnCrossing(n: number, arm: number): boolean {
+    const sim = this.sim, sc = sim.net.segs.cols, c = this.veh.cols, k = sim.conns.cols;
+    if (arm >= 8 || !sim.net.nodes.alive[n]) return false;
+    const seg = sim.armSeg[n * 8 + arm];
+    if (!sim.net.segs.alive[seg] || (sc.a[seg] !== n && sc.b[seg] !== n)) return false;
+    const back = CROSSWALK, inDir = sc.b[seg] === n ? 1 : -1, p = sc.profile[seg];
+    for (const dir of [1, -1]) for (let i = 0, m = laneCount(p, dir); i < m; i++) {
+      const lane = laneId(seg, dir, i);
+      if (dir === inDir) {
+        const h = this.laneHead[lane];
+        if (h < 0) continue;
+        const toLine = sim.laneLen(lane) - c.s[h] - back;
+        if (c.pass[h] || toLine < 0 || (toLine < 3 && c.v[h] > 0.5)) return true;
+        // its turn (roadcraft permission.ts:105-126, PED_COURTESY): standing at the line this long, with the way open
+        // to it but for the people stepping off in front of it, it goes next
+        if (toLine < 4 && this.courtesyOwed(h)) return true;
+      } else {
+        const t = this.laneTail[lane];
+        if (t >= 0 && c.s[t] - c.len[t] < back) return true;
+      }
+    }
+    for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
+      if (laneSeg(k.to[x]) !== seg) continue;
+      if (this.connHead[x] >= 0) return true;
+      // a car turning into this arm that has waited its share at its line (permission.ts:90-103), or coming to turn
+      // into it too soon to stop for someone stepping off (the critical gap, permission.ts:113-133)
+      const h = this.laneHead[k.from[x]];
+      if (h < 0 || c.exitC[h] !== x) continue;
+      const toLine = sim.laneLen(k.from[x]) - c.s[h] - this.stopBack(k.from[x]);
+      if ((toLine < 4 && this.courtesyOwed(h)) || (c.v[h] > 0.5 && toLine / c.v[h] < PED_CRITICAL_GAP)) return true;
+    }
+    return false;
+  }
+
+  /** Vehicle `v` at its line has stood PED_COURTESY s and its light, if any, is green: the people let it go. */
+  private courtesyOwed(v: number): boolean {
+    const c = this.veh.cols, conn = c.exitC[v];
+    if (conn < 0 || c.v[v] > 0.5 || c.wait[v] <= PED_COURTESY) return false;
+    return this.sim.nodePhases[this.sim.conns.cols.node[conn]] === 0 || this.stageGreen(conn);
+  }
+
+  /**
+   * For a vehicle over its stop line (committed at the line with the way open): the level crossing's barrier is up
+   * and nobody is on a connection crossing its own (roadcraft intersections/admission.ts: claims are held until the
+   * vehicle has gone through).
+   */
+  private boxClear(conn: number): boolean {
+    const sim = this.sim, n = sim.conns.cols.node[conn];
+    if (sim.nodeCtl[n] === Ctl.Crossing && this.crossingDown(n) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(sim.conns.cols.from[conn])]].rail) return false;
+    const list = sim.conflicts.get(conn);
+    if (list) for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      if (this.connHead[d] >= 0) return false;
+      // another one over its line for a crossing connection since before this one: it goes first
+      if (this.passHolder(d) >= 0 && (this.connPassT[d] < this.connPassT[conn] || (this.connPassT[d] === this.connPassT[conn] && this.connPass[d] < this.connPass[conn]))) return false;
+    }
+    return true;
+  }
+
+  /** The vehicle over its stop line that has claimed connection `d` and not yet entered it, or −1. */
+  private passHolder(d: number): number {
+    const u = this.connPass[d], c = this.veh.cols;
+    return u >= 0 && this.veh.alive[u] && c.pass[u] && c.conn[u] < 0 && c.exitC[u] === d ? u : -1;
+  }
+
+  /**
+   * People on the part of a zebra connection `conn` drives over (roadcraft crossingSpans.ts: within the heavy body's
+   * half width and 0.9 m of its path, :24, and the walker's 0.6 m, :29): where its lane in crosses the zebra of the arm
+   * it comes from, and where its lane out crosses the one of the arm it leaves by.
+   */
+  private pedsInWay(conn: number, ahead = 0, entry = true): boolean {
+    const sim = this.sim, k = sim.conns.cols, n = k.node[conn], p = this.tmp2;
+    const from = k.from[conn], to = k.to[conn];
+    sim.lanePoint(from, Math.max(0, sim.laneLen(from) - CROSSWALK / 2), p);
+    if (entry && this.pedCrossingNear(n, 1 << k.arm[conn], p[0], p[2], SPAN_REACH + ahead)) return true;
+    sim.lanePoint(to, Math.min(sim.laneLen(to), CROSSWALK / 2), p);
+    return this.pedCrossingNear(n, 1 << this.exitArm(conn), p[0], p[2], SPAN_REACH + ahead);
+  }
+
+  /** The arm of its node that connection `conn` leaves by. */
+  private exitArm(conn: number): number {
+    const sim = this.sim, to = sim.conns.cols.to[conn];
+    return sim.segArm[laneSeg(to) * 2 + (laneDir(to) > 0 ? 0 : 1)];
+  }
+
   /** Is the signal stage open for the connection's arm? */
   private stageGreen(conn: number, amberToo = false): boolean {
     const k = this.sim.conns.cols;
@@ -1533,10 +1662,19 @@ export class Traffic {
     } else if (sim.nodeRing[n]) return this.gateOpen(conn);
     // zebra: give way to whoever is crossing (the pedestrian only appears near the camera)
     else if (sim.nodeCtl[n] === Ctl.Zebra) return !this.pedCrossing(n);
+    // people on the crosswalks it drives over, the arm it comes from and the arm it leaves by: it waits for them
+    // (roadcraft crossings/permission; at a light, those still crossing as it turns green and those walking beside it
+    // when it turns)
+    // (and those who will be on it before it is across: a couple of seconds' walk more, crossingSpans.ts crossingReachedFirst)
+    // (a vehicle too close to stop comfortably goes on: those on foot wait for it, permission.ts:131)
+    if (sim.net.nodes.cols.deg[n] >= 3 && toEnd > (c.v[v] * c.v[v]) / (2 * 3) && this.pedsInWay(conn, 2.8)) return false;
     else if (sim.armRule[n * 8 + k.arm[conn]] === Rule.Stop && c.wait[v] < 1.2) return false; // stop sign: halt before going on
     // right of way: wait for those who go first (at a signal, only the permitted conflict, such as a left turn)
     const list = sim.conflicts.get(conn);
     if (!list) return true;
+    // someone over its line for a crossing connection holds it: wait for it to go through (not at a level crossing:
+    // a car there waits for the barrier, the train does not wait for the car)
+    if (sim.nodeCtl[n] !== Ctl.Crossing) for (let i = 0; i < list.length; i++) if (this.passHolder(list[i]) >= 0) return false;
     const stuck = c.wait[v] > 8; // nobody stays stuck forever: after 12 s only those already in the junction are respected
     const now = Math.round(this.time * 10);
     // and claims the turn: those on the priority road who can still stop comfortably let it through
@@ -1884,8 +2022,9 @@ export class Traffic {
         }
       }
       if (lead < 0) {
-        const toEnd = L - c.s[v];
-        if (toEnd < 6 && c.v[v] < 0.5) c.wait[v] += dt;
+        // the stop line is before the crosswalk (roadcraft): the last metres of the lane are the zebra, kept clear
+        const toEnd = L - c.s[v], back = this.stopBack(lane), toLine = toEnd - back;
+        if (toLine < 6 && c.v[v] < 0.5) c.wait[v] += dt;
         // exit blocked for a while: the driver detours via another free exit of this lane
         if (conn >= 0 && c.wait[v] > 6 && c.lcCool[v] <= 0 && !this.exitRoom(conn, v)) {
           c.lcCool[v] = 5;
@@ -1893,14 +2032,34 @@ export class Traffic {
           if (alt >= 0) conn = alt;
         }
         // waiting for the full exit for a long time: reserve its next free spot (the longest waiter wins)
-        if (conn >= 0 && toEnd < 6 && c.wait[v] > STARVE_SECONDS) {
+        if (conn >= 0 && toLine < 6 && c.wait[v] > STARVE_SECONDS) {
           const to = sim.conns.cols.to[conn], cl = this.exitClaim[to];
           if (cl === v || cl < 0 || this.time - this.exitClaimT[to] >= 1 || !this.veh.alive[cl] || c.wait[cl] < c.wait[v]) { this.exitClaim[to] = v; this.exitClaimT[to] = this.time; }
         }
         // jammed junction (nobody through for 20 s and this one waiting 20 s): one at a time, with the box clear
-        if (conn >= 0 && toEnd < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
-        if (conn < 0 || !(release || this.gateFor(conn, v, toEnd))) { gap = Math.min(gap, toEnd - 1); vl = 0; }
-        else { const [g2, v2] = this.aheadThrough(conn); if (toEnd + g2 < gap) { gap = toEnd + g2; vl = v2; } } // (does not override the bus stop)
+        if (conn >= 0 && toLine < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
+        // over the stop line with the way open, it goes on through (it is not left standing on the zebra); short of it
+        // it stops at the line (on it already, at the end of the lane)
+        let open = c.pass[v] === 1;
+        if (!open) {
+          open = conn >= 0 && (release || this.gateFor(conn, v, Math.max(0, toLine)));
+          // at the line it goes only into a clear box (nobody crossing its way inside, the barrier up): what it crosses
+          // over after the line, it does not stop on
+          if (open && !release && toLine < 0.3 && !this.boxClear(conn)) open = false;
+          // (just over it when the way closed: still at the line, it has stopped there; well over it, at the end)
+          if (!open) { gap = Math.min(gap, toLine > -1 ? Math.max(0, toLine - 0.3) : toEnd - 1); vl = 0; }
+          else if (toLine < 0.3) {
+            c.pass[v] = 1;
+            // the connection is its own from here (roadcraft claims.ts grantAll at admission): crossing ones wait for it
+            this.connPass[conn] = v; this.connPassT[conn] = this.time;
+            if (sim.nodePhases[sim.laneTo(lane)] > 0 && !this.stageGreen(conn, true)) this.ranRed++;
+          }
+        }
+        // over the line, the light no longer stops it; a barrier coming down, someone in the box or somebody stepping
+        // into its way on the zebra ahead (the one it leaves by: it is over its own already) still does (roadcraft
+        // admission.ts stoppedForWalker)
+        if (open && c.pass[v] && conn >= 0 && (!this.boxClear(conn) || this.pedsInWay(conn, 0, false))) { gap = Math.min(gap, toEnd - 1); vl = 0; }
+        else if (open && conn >= 0) { const [g2, v2] = this.aheadThrough(conn); if (toEnd + g2 < gap) { gap = toEnd + g2; vl = v2; } } // (does not override the bus stop)
         // bus and train: a stop just past the node already counts for braking (a fast train cannot stop in 20 m)
         const sg = this.stopAhead(v, conn);
         if (sg >= 0 && toEnd + sg < gap) { gap = toEnd + sg; vl = 0; }
@@ -1936,7 +2095,7 @@ export class Traffic {
       // lane with no exit at all (the turn was from another lane and the change failed): stop at the line and change
       // lanes when there is room (`escapeLane`), instead of disappearing
       if (conn < 0) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
-      if (!release && !this.gateFor(conn, v, 0)) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
+      if (!release && (c.pass[v] ? !this.boxClear(conn) : !this.gateFor(conn, v, 0))) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
       // enter the connection
       this.leaveLane(v, lane);
       this.unlink(v);
@@ -1946,8 +2105,8 @@ export class Traffic {
       c.held[v] = 0;
       const k = sim.conns.cols;
       // an invariant kept as a count (roadcraft invariants.ts): nobody enters a junction on red (amber is a go for
-      // whoever cannot stop)
-      if (sim.nodePhases[k.node[conn]] > 0 && !this.stageGreen(conn, true)) this.ranRed++;
+      // whoever cannot stop); one that crossed the stop line with the way open was counted there
+      if (!c.pass[v] && sim.nodePhases[k.node[conn]] > 0 && !this.stageGreen(conn, true)) this.ranRed++;
       if (release) { this.released++; this.releaseAt[k.node[conn]] = this.time + RELEASE_EVERY; this.nodePass[k.node[conn]]++; this.advisor.pass[k.node[conn] * 8 + k.arm[conn]]++; }
       else this.admit(k.node[conn], k.arm[conn]);
       this.insert(v, true, conn);
@@ -2830,6 +2989,28 @@ export class Traffic {
     }
     return n;
   }
+
+  /**
+   * The bodies of the vehicles within `r` m of (x, z), for the walkers to keep off (roadcraft walk.ts CarZone): x, z,
+   * yaw, half length, half width each into `bodyBuf` (grown when full). Only the micro window. Returns how many.
+   */
+  writeBodies(x: number, z: number, r: number): number {
+    const c = this.veh.cols, p = this.tmp;
+    let n = 0;
+    for (let i = 0; i < this.microN; i++) {
+      const v = this.micro[i];
+      if (c.kind[v] === 4) continue;
+      this.centreOf(v, p);
+      if (Math.abs(p[0] - x) > r || Math.abs(p[2] - z) > r) continue;
+      if ((n + 1) * 5 > this.bodyBuf.length) { const b = new Float32Array(this.bodyBuf.length * 2); b.set(this.bodyBuf); this.bodyBuf = b; }
+      const o = n * 5;
+      this.bodyBuf[o] = p[0]; this.bodyBuf[o + 1] = p[2]; this.bodyBuf[o + 2] = p[3];
+      this.bodyBuf[o + 3] = c.len[v] / 2; this.bodyBuf[o + 4] = BODY_HALF_W[c.kind[v]] ?? 0.9;
+      n++;
+    }
+    return n;
+  }
+  bodyBuf = new Float32Array(5 * 1024);
 
   /**
    * Front of vehicle `v` on its lane or connection (x, y, z, yaw into `p`), mid lane change if one is under way.
