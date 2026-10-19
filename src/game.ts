@@ -14,6 +14,7 @@ function reloadWithMap(tiles: number, then: string): void {
 import { CommandStack } from './core/commands.ts';
 import { CELL_COUNT, Dirty, TILE_COUNT, cellId, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
 import { JobPool } from './jobs/pool.ts';
+import { wallsHeight } from './jobs/buildingGen.ts';
 import { packTileHeights } from './jobs/storage.ts';
 import { SEG_REC, SHAPE_SCALE, SHAPE_STRIDE, boxTransfer, roadGraphTransfer, type BoxColumns, type JobResults, type RoadSave } from './jobs/protocol.ts';
 import { CameraRig } from './render/cameraRig.ts';
@@ -53,7 +54,7 @@ import { installKeys } from './ui/keys.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
-import { InsideView } from './render/inside.ts';
+import { InsideView, insideTarget } from './render/inside.ts';
 import { Blast } from './render/blast.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
@@ -238,7 +239,7 @@ export class Game {
         const dx = x - col.x[id], dz = z - col.z[id];
         const s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
         const lx = dx * c - dz * s, lz = dx * s + dz * c;
-        if (Math.abs(lx) <= col.w[id] * 0.35 && Math.abs(lz) <= col.d[id] * 0.3) top = Math.max(top, heightAt(this.world.heights, col.x[id], col.z[id]) + 1.5 + col.floors[id] * 3.2);
+        if (Math.abs(lx) <= col.w[id] * 0.35 && Math.abs(lz) <= col.d[id] * 0.3) top = Math.max(top, heightAt(this.world.heights, col.x[id], col.z[id]) + 1.5 + wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id]));
       });
       return top;
     };
@@ -481,7 +482,7 @@ export class Game {
     for (const o of this.blast.warmup()) warm.add(o);
     scene.add(warm);
     for (const m of [this.preview.mesh, this.preview.marker, this.preview.circle]) m.visible = true;
-    this.inside.show(0, 0, 20, 20, 0, -1000, 0, 3.2); // compiles the inside-view materials at load
+    this.inside.warm(); // compiles the inside-view materials at load
     this.transitView.showPaths = true;
     this.vehicles.warmup();
     this.rig.resize(window.innerWidth, window.innerHeight);
@@ -621,6 +622,11 @@ export class Game {
     const { renderer, scene } = this.parts;
 
     this.rig.update(dt);
+    // inside view: gone with its building (demolished, undone, another city), laid out again when it is edited
+    if (this.insideId >= 0) {
+      this.inside.follow(this.world);
+      if (!this.inside.on) { this.insideId = -1; this.hud.setInside(-1); }
+    }
     const cam = this.rig.camera;
     if (this.skyMode === 'dia') this.hour = 12;
     else if (this.skyMode === 'noite') this.hour = 22;
@@ -1434,7 +1440,7 @@ export class Game {
       const rubble = new ItemsCommand(w.items, 'entulho');
       for (const id of doomed) {
         const gy = heightAt(w.heights, col.x[id], col.z[id]);
-        this.blast.collapse(col.x[id], gy, col.z[id], col.w[id], col.d[id], Math.max(3, col.floors[id] * 3.2), col.rot[id]);
+        this.blast.collapse(col.x[id], gy, col.z[id], col.w[id], col.d[id], Math.max(3, wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id])), col.rot[id]);
         this.particles.burst(col.x[id], gy + 1, col.z[id], 4, 14, 10);
         const rec = w.buildingRec(id);
         j.removeBuilding(id);
@@ -1898,17 +1904,18 @@ export class Game {
     const w = this.world, col = w.buildings.cols;
     if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); return; }
     if (c === 'toggle') {
-      const id = this.selected >= 0 ? this.selected : lotAt(w, this.rig.target.x, this.rig.target.z);
+      // the selected building when it is in view; otherwise the one at the centre of the screen; otherwise the
+      // selected one, and the camera goes to it
+      const { id, go } = insideTarget(w, this.selected, this.rig.target.x, this.rig.target.z, this.rig.dist);
+      if (go) { const s = this.rig.state(); s[0] = col.x[id]; s[1] = col.z[id]; this.rig.restore(s); }
       if (id < 0 || col.floors[id] === 0) { this.hud.toast('Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.'); return; }
       this.insideId = id;
       this.insideFloor = 0;
     } else if (!this.inside.on) return;
     else this.insideFloor += c === 'up' ? 1 : -1;
-    const id = this.insideId;
-    if (!w.buildings.alive[id]) { this.inside.hide(); return; }
-    this.insideFloor = Math.max(0, Math.min(col.floors[id] - 1, this.insideFloor));
-    const base = heightAt(w.heights, col.x[id], col.z[id]) + 0.2;
-    this.inside.show(col.x[id], col.z[id], col.w[id], col.d[id], col.rot[id], base, this.insideFloor, 3.2);
+    // the storeys, the footprint and the floor height of that building as the generator lays it out
+    if (!this.inside.showBuilding(w, this.insideId, Math.max(0, this.insideFloor))) { this.insideId = -1; this.hud.setInside(-1); return; }
+    this.insideFloor = this.inside.plan!.floor;
     this.hud.setInside(this.insideFloor);
   }
 
