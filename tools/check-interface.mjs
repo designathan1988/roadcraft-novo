@@ -243,6 +243,20 @@ export const SCENARIOS = {
     check('the repair notice is still shown', /reparado|repaired/i.test(shown), 'toasts: ' + shown);
     check('and so is "City loaded"', /carregada|loaded/i.test(shown), 'toasts: ' + shown);
   `,
+  // B41: the builder's tabs (Models, Facade, Roof, Parts, Colours) light up when the buildings session mounts them
+  'B41-builder-tabs': `
+    const can = typeof hud.registerBuilderTab === 'function';
+    check('the interface offers a mount point for builder tabs', can, 'hud.registerBuilderTab is ' + typeof hud.registerBuilderTab);
+    if (can) hud.registerBuilderTab('facade', (box, b) => { const p = document.createElement('p'); p.className = 'probe-facade'; p.textContent = 'facade of ' + (b ? b.floors : 'none'); box.append(p); });
+    click('[data-cat=build]'); await frames(2);
+    const facade = byText('.v2-tab', '^Fachada|^Facade'), roof = byText('.v2-tab', '^Telhado|^Roof');
+    check('a mounted tab is enabled', facade && !facade.disabled, 'facade tab ' + (facade ? (facade.disabled ? 'disabled' : 'enabled') : 'missing'));
+    check('a tab nobody mounted stays "being built"', roof && roof.disabled, 'roof tab ' + (roof && roof.disabled));
+    if (facade && !facade.disabled) { click(facade); await frames(2); }
+    check('its click shows the mounted content', !!Q('.probe-facade'), 'no content');
+    click(byText('.v2-tab', '^Editar|^Edit')); await frames(2);
+    check('Edit goes back to the building panel', !Q('.probe-facade'), 'content still shown');
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

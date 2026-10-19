@@ -80,6 +80,11 @@ const SIGNS: Array<[number, string]> = [[4, 'sign.type.stop'], [1, 'sign.type.yi
   [7, 'sign.type.pedestrian'], [8, 'sign.type.school'], [9, 'sign.type.direction'], [2, 'sign.type.street'], [10, 'sign.type.info'], [3, 'sign.type.oneWay']];
 const CLOTHES = ['#c8ccd0', '#2f4f7a', '#b8382e', '#e8e4dc', '#3d3d3d', '#7a8f4f', '#d9a441', '#6a4c93', '#e07a5f', '#3d8f8f', '#f2cc8f', '#81b29a', '#9c6644', '#264653', '#e9c46a', '#f4a261'];
 
+/** The builder's tabs another area fills (the buildings session, through Hud.registerBuilderTab). */
+export type BuilderTab = 'models' | 'facade' | 'roof' | 'parts' | 'paint';
+/** What a builder tab draws: into `box` (the tool options), for the building picked (null: none). */
+export type BuilderTabRender = (box: HTMLElement, building: BuildingInfo | null) => void;
+
 export type LandTab = 'relief' | 'ground' | 'nature' | 'sky' | 'street' | 'people';
 export type TransitTab = 'stop' | 'terminal' | 'trainTrack' | 'trainStation' | 'metroTrack' | 'metroStation';
 
@@ -127,6 +132,8 @@ export class ShellState {
   people: PersonOptions = { ...DEFAULT_PERSON_OPTIONS, count: 1, mode: 'stand' };
   bomb = 3;
   landTab: LandTab = 'relief';
+  /** The builder tab open in the Build drawer (null: Edit or Draw). */
+  buildTab: BuilderTab | null = null;
   transitTab: TransitTab = 'stop';
 }
 
@@ -152,6 +159,8 @@ export interface DrawerHost {
   /** Inside view: on, and the floor shown (−1: off). */
   insideFloor(): number;
   roadKeys(): string;
+  /** Builder tabs mounted by the buildings session. */
+  builderTabs: ReadonlyMap<BuilderTab, BuilderTabRender>;
 }
 
 /** What a render fills. */
@@ -297,16 +306,23 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
 // ------------------------------------------------------------------ build
 export function renderBuild(h: DrawerHost, p: DrawerParts): void {
   const s = h.s, a = h.a, b = h.building();
-  const editing = s.lotMode === 'edit';
+  const bt = h.builderTabs.has(s.buildTab as BuilderTab) ? s.buildTab : null;
+  const editing = s.lotMode === 'edit' && !bt;
+  // a builder tab: lit when the buildings session mounted it, "being built" otherwise
+  const builder = (id: BuilderTab): (() => void) | null => (h.builderTabs.has(id) ? () => { s.buildTab = id; if (s.lotMode !== 'edit') { s.lotMode = 'edit'; a.lotMode('edit'); } h.render(); } : null);
   const tabs: Array<[string, string, (() => void) | null, boolean]> = [
-    ['builder.category.models', 'models', null, false],
-    ['ui.build.edit', 'mass', () => { s.lotMode = 'edit'; a.lotMode('edit'); h.render(); }, editing],
-    ['builder.category.draw', 'draw', () => { s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, s.lotMode === 'rect' || s.lotMode === 'poly'],
-    ['builder.category.facade', 'face', null, false], ['builder.category.roof', 'roof', null, false], ['builder.category.parts', 'components', null, false],
-    ['builder.category.interior', 'interiorView', () => a.inside('toggle'), h.insideFloor() >= 0], ['builder.category.paint', 'paint', null, false],
+    ['builder.category.models', 'models', builder('models'), bt === 'models'],
+    ['ui.build.edit', 'mass', () => { s.buildTab = null; s.lotMode = 'edit'; a.lotMode('edit'); h.render(); }, editing],
+    ['builder.category.draw', 'draw', () => { s.buildTab = null; s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, !bt && (s.lotMode === 'rect' || s.lotMode === 'poly')],
+    ['builder.category.facade', 'face', builder('facade'), bt === 'facade'], ['builder.category.roof', 'roof', builder('roof'), bt === 'roof'],
+    ['builder.category.parts', 'components', builder('parts'), bt === 'parts'],
+    ['builder.category.interior', 'interiorView', () => a.inside('toggle'), h.insideFloor() >= 0], ['builder.category.paint', 'paint', builder('paint'), bt === 'paint'],
   ];
   for (const [key, icon, run, on] of tabs) p.tabs.append(tab(t(key), on, run ?? (() => undefined), svg(icon, 18), run ? undefined : t('ui.soon.buildings')));
-  if (editing) {
+  if (bt) {
+    h.builderTabs.get(bt)!(p.options, b);
+    if (!b) p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
+  } else if (editing) {
     if (b) {
       p.options.append(el('div', 'v2-pop-title', `${b.fn ? loose(FN_NAMES[b.fn]) : t(`zone.name.${b.zone}`)} · ${plural('ui.floors', b.floors)}`));
       // the address under the title (the decay has its own row below, with Renovate)

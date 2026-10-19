@@ -15,7 +15,7 @@ import { AboutBox } from './about.ts';
 import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
 import {
   CATS, ShellState, categoriesOf, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
-  type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
+  type BuilderTab, type BuilderTabRender, type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
 } from './drawers.ts';
 
 declare const __BUILD__: string;
@@ -262,6 +262,7 @@ export class Hud {
   private lineNow = 0;
   private picked: BuildingInfo | null = null;
   private peopleShown = false;
+  private builderTabs = new Map<BuilderTab, BuilderTabRender>();
   private host: DrawerHost;
   private fileIn: HTMLInputElement;
 
@@ -406,6 +407,7 @@ export class Hud {
       lines: () => ({ rows: self.rows, current: self.lineNow }),
       building: () => self.picked,
       insideFloor: () => self.insideFloor,
+      builderTabs: this.builderTabs,
       roadKeys: () => { const k = a.settings(); return `${keyName(k.roadUp)} / ${keyName(k.roadDown)}`; },
     };
     this.setSky('ciclo');
@@ -692,6 +694,15 @@ export class Hud {
     this.s.lotMode = m;
     if (this.open && (this.cat === 'build' || this.cat === 'zones')) this.render();
   }
+  /**
+   * Mount point for the buildings session: the Build drawer's tab `id` (Models, Facade, Roof, Parts, Colours) turns
+   * on and, when open, `render` fills the tool options for the building picked. Until then the tab says "being built".
+   */
+  registerBuilderTab(id: BuilderTab, render: BuilderTabRender): void {
+    this.builderTabs.set(id, render);
+    if (this.open && this.cat === 'build') this.render();
+  }
+
   /** The building picked with the Build tool (null: none). */
   setBuilding(b: BuildingInfo | null): void {
     this.picked = b;
