@@ -1,6 +1,6 @@
-// Nuvens do jogador: cada nuvem (x, z, altura da base, tamanho, densidade) vira um cacho de
-// bolhas viradas para a câmera. A lista é pequena (até 24) e vai numa textura; as bolhas
-// existem só no shader (posição pelo índice), como a chuva e as partículas.
+// Player's clouds: each cloud (x, z, base height, size, density) becomes a cluster of
+// camera-facing puffs. The list is small (up to 24) and goes in a texture; the puffs
+// exist only in the shader (position from the index), like the rain and the particles.
 
 import * as THREE from 'three/webgpu';
 import { T } from './tsl.ts';
@@ -40,12 +40,12 @@ export class CloudPuffs {
     const a = textureLoad(this.tex, ivec2(int(c), int(0)));
     const b = textureLoad(this.tex, ivec2(int(c), int(1)));
     const h0 = hash(id).sub(0.5), h1 = hash(id.add(0.31)), h2 = hash(id.add(0.77)).sub(0.5);
-    // cacho achatado: largo na horizontal, base plana, topo em domo
+    // flattened cluster: wide horizontally, flat base, domed top
     const r = a.w;
-    // domo: as bolhas do meio sobem mais (topo arredondado), as da borda ficam baixas
+    // dome: the middle puffs rise higher (rounded top), the edge ones stay low
     const rad = vec3(h0, 0, h2).length().mul(2);
     const off = vec3(h0.mul(r).mul(1.3), h1.sqrt().mul(r).mul(0.75).mul(float(1).sub(rad.mul(0.45))), h2.mul(r).mul(1.1));
-    // as bolhas mudam devagar de forma (a nuvem fica onde o jogador pôs)
+    // the puffs slowly change shape (the cloud stays where the player put it)
     const wobble = vec3(mx_noise_float(vec3(id.mul(0.1), time.mul(windU.mul(0.05).add(0.02)), 0)).mul(r).mul(0.08), 0, 0);
     const center = a.xyz.add(off).add(wobble);
     const size = r.mul(float(0.28).add(hash(id.add(1.7)).mul(0.22)));
@@ -57,11 +57,11 @@ export class CloudPuffs {
     const n = mx_noise_float(vec3(uv().mul(2.3), id.mul(0.17).add(time.mul(0.02)))).mul(0.3);
     const disc = smoothstep(float(1), float(0.2), d.add(n));
     const day = float(1).sub(nightU);
-    // topo claro, base sombreada; à noite azulada escura; o relâmpago acende
-    // topo branco ao sol, base acinzentada (pela altura da bolha no cacho e pela parte de baixo do disco)
+    // light top, shaded base; dark bluish at night; the lightning lights it up
+    // white top in the sun, greyish base (by the puff's height in the cluster and by the lower part of the disc)
     const shade = mix(float(0.72), float(1.05), clamp(off.y.div(r.mul(0.75)), 0, 1)).mul(mix(float(0.88), float(1.04), uv().y));
     const col = mix(vec3(0.1, 0.11, 0.15), vec3(0.98, 0.98, 1), day).mul(shade).add(vec3(0.9, 0.92, 1).mul(flashU.mul(2)));
-    // perto da câmera a bolha some (não vira um borrão na tela)
+    // near the camera the puff fades out (it does not become a smear on the screen)
     const near = smoothstep(r.mul(0.3), r.mul(1.2), cameraPosition.distance(center));
     m.colorNode = vec4(sRGBTransferEOTF(clamp(col, 0, 1)), disc.mul(b.x).mul(0.85).mul(near));
     m.fog = true;
@@ -71,7 +71,7 @@ export class CloudPuffs {
     this.mesh.visible = false;
   }
 
-  /** Troca a lista de nuvens (só quando o jogador mexe). */
+  /** Replaces the cloud list (only when the player changes it). */
   set(clouds: Cloud[]): void {
     const d = this.data;
     d.fill(0);

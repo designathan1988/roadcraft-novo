@@ -1,6 +1,6 @@
-// Tempo: nuvens (uma camada de ruído no céu), chuva (riscos instanciados em
-// volta da câmera, animados só no shader), chão molhado, estrelas e lua à
-// noite. O estado muda devagar sozinho; tudo vem de poucos uniformes.
+// Weather: clouds (a noise layer in the sky), rain (instanced streaks around
+// the camera, animated only in the shader), wet ground, stars and moon at
+// night. The state changes slowly on its own; everything comes from a few uniforms.
 
 import * as THREE from 'three/webgpu';
 import { T, type Node } from './tsl.ts';
@@ -12,17 +12,17 @@ const {
   instanceIndex, hash, fract, cameraPosition, normalize, cross, sRGBTransferEOTF, attribute, sin, step, cameraProjectionMatrix,
 } = T;
 
-/** 0 céu limpo .. 1 encoberto. */
+/** 0 clear sky .. 1 overcast. */
 export const cloudsU = uniform(0.25);
-/** 0 seco .. 1 chuva forte. */
+/** 0 dry .. 1 heavy rain. */
 export const rainU = uniform(0);
-/** Chão molhado (sobe com a chuva, seca devagar). */
+/** Wet ground (rises with the rain, dries slowly). */
 export const wetU = uniform(0);
-/** 0 calmo .. 1 vendaval (chuva inclinada, árvores balançando). */
+/** 0 calm .. 1 gale (slanted rain, swaying trees). */
 export const windU = uniform(0.2);
-/** Para onde o vento sopra (x, z), para a chuva inclinar. */
+/** Where the wind blows to (x, z), so the rain slants. */
 export const windDirU = uniform(new THREE.Vector2(0.91, 0.41));
-/** Clarão do relâmpago (0..1, cai em décimos de segundo). */
+/** Lightning flash (0..1, falls off in tenths of a second). */
 export const flashU = uniform(0);
 /** How far the cloud layer has drifted with the wind (m, x and z): the clouds and their shadows move together. */
 export const cloudDriftU = uniform(new THREE.Vector2(0, 0));
@@ -36,7 +36,7 @@ export function layerCover(xz: Node): Node {
 }
 
 const RAIN_DROPS = 14000;
-/** Raio: 40 trechos, cada um com 4 triângulos (borda, miolo, borda: o miolo brilha, as bordas são o halo). */
+/** Bolt: 40 pieces, each with 4 triangles (edge, core, edge: the core glows, the edges are the halo). */
 /** Room for the channel (128 pieces) and up to 6 branches (32 each), 12 vertices per piece. */
 const BOLT_SEGS = 128 + 6 * 32;
 const BOLT_VERTS = BOLT_SEGS * 12;
@@ -63,9 +63,9 @@ export const CLOUD_Y = 2200;
 export class Weather {
   readonly group = new THREE.Group();
   private rng = Math.random;
-  /** Alvos que o tempo persegue devagar. */
+  /** Targets the weather slowly chases. */
   private target = { clouds: 0.25, rain: 0, wind: 0.2, storm: 0 };
-  /** Tempestade atual (0..1): relâmpagos e vento forte. */
+  /** Current storm (0..1): lightning and strong wind. */
   storm = 0;
   private strikeIn = 6;
   private flashT = 1;
@@ -73,30 +73,30 @@ export class Weather {
   private clouds: THREE.Mesh;
   private rain: THREE.Mesh;
   private skirt: THREE.Mesh;
-  /** Cor da neblina (linear), copiada a cada quadro. */
+  /** Fog colour (linear), copied every frame. */
   private horizonU = uniform(new THREE.Color(0xb9cbdc));
   private boltPos: THREE.BufferAttribute;
-  /** Direção para onde a câmera olha (ângulo no plano, como atan2(z, x)). */
+  /** Direction the camera looks at (angle on the plane, as atan2(z, x)). */
   viewAngle = 0;
-  /** Raio caiu: distância até a câmera (para o trovão). */
+  /** A bolt struck: distance to the camera (for the thunder). */
   onStrike: ((dist: number) => void) | null = null;
   private timer = 0;
   private eyeU = uniform(new THREE.Vector3());
-  /** Raios por minuto escolhidos pelo jogador (0 = os da tempestade, sozinhos). */
+  /** Bolts per minute chosen by the player (0 = the storm's own, on their own). */
   lightningRate = 0;
-  /** Vento escolhido pelo jogador (0..1), ou null para o do tempo. */
+  /** Wind chosen by the player (0..1), or null for the weather's. */
   windFixed: number | null = null;
-  /** Fixo pela opção (null = muda sozinho). */
+  /** Fixed by the option (null = changes on its own). */
   fixed: { clouds: number; rain: number; storm?: number } | null = null;
 
   constructor() {
-    // nuvens: plano alto, ruído que anda com o vento
+    // clouds: high plane, noise that moves with the wind
     const cm = colorOnly(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide }));
     // the layer drifts with the wind (`cloudDriftU`, Roadcraft 4.0: drift += wind × dt), its shadows with it
     const a = layerCover(positionWorld.xz);
     const day = float(1).sub(nightU);
     const light = mix(vec3(0.12, 0.13, 0.16), vec3(0.96, 0.96, 0.97), day).mul(mix(float(1), float(0.62), rainU));
-    // câmera subindo para perto da camada (vista geral de mapas grandes): as nuvens somem
+    // camera rising close to the layer (overview of large maps): the clouds fade out
     const below = float(1).sub(smoothstep(float(CLOUD_Y - 1000), float(CLOUD_Y - 250), cameraPosition.y));
     cm.colorNode = vec4(sRGBTransferEOTF(light).add(vec3(0.9, 0.92, 1).mul(flashU.mul(3))), clamp(a.mul(mix(float(0.85), float(1), rainU)).mul(below), 0, 0.97));
     cm.fog = true;
@@ -106,7 +106,7 @@ export class Weather {
     clouds.renderOrder = -10;
     this.group.add(clouds);
 
-    // chuva: riscos finos, posição pelo índice; caem e dão a volta numa caixa que segue a câmera
+    // rain: thin streaks, position from the index; they fall and wrap around in a box that follows the camera
     const g = new THREE.InstancedBufferGeometry();
     const quad = new THREE.PlaneGeometry(0.018, 0.9);
     g.index = quad.index;
@@ -115,7 +115,7 @@ export class Weather {
     const rm = colorOnly(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false }));
     const id = instanceIndex.toFloat();
     const hx = hash(id), hz = hash(id.add(7.31)), hy = hash(id.add(3.17));
-    // cada gota fica parada no mundo (caindo) e dá a volta numa caixa em torno da câmera
+    // each drop stays fixed in the world (falling) and wraps around in a box around the camera
     const base = vec3(hx, hy, hz).mul(RAIN_BOX).sub(vec3(0, time.mul(9), 0));
     const center = this.eyeU.add(fract(base.sub(this.eyeU).div(RAIN_BOX)).sub(0.5).mul(RAIN_BOX));
     const toCam = normalize(cameraPosition.sub(center));
@@ -124,7 +124,7 @@ export class Weather {
     rm.positionNode = center.add(side.mul(positionLocal.x)).add(vec3(0, positionLocal.y, 0)).add(wind.mul(windU.mul(1.4).add(0.1)));
     // only the drops the rain's strength asks for are drawn (`sizeRain`): each id has its own place, so the first n
     // are as spread as all of them
-    // gota colada na câmera vira um risco enorme: some perto
+    // a drop stuck to the camera becomes a huge streak: it fades out up close
     const near = smoothstep(float(3), float(8), cameraPosition.distance(center));
     // isometric (the game centres the box on what is looked at): the box covers a close view; a wider view would show
     // it as a block of rain in the middle (the drops are under a pixel there anyway), so the rain fades out
@@ -138,7 +138,7 @@ export class Weather {
     rain.renderOrder = 20;
     this.group.add(rain);
 
-    // estrelas: quadradinhos virados para a câmera numa esfera enorme
+    // stars: small camera-facing squares on a huge sphere
     const sg = new THREE.InstancedBufferGeometry();
     const sq = new THREE.PlaneGeometry(1, 1);
     sg.index = sq.index;
@@ -169,8 +169,8 @@ export class Weather {
     stars.renderOrder = -900;
     this.group.add(stars);
 
-    // saia do horizonte: com céu encoberto, a faixa entre a borda das nuvens e o horizonte
-    // fica da cor da neblina (senão aparece o céu claro por baixo da camada de nuvens)
+    // horizon skirt: with an overcast sky, the band between the cloud edge and the horizon
+    // takes the fog colour (otherwise the bright sky shows under the cloud layer)
     const hm = colorOnly(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.BackSide }));
     hm.colorNode = vec4(this.horizonU, smoothstep(float(0.45), float(0.9), cloudsU).mul(0.97));
     hm.fog = false;
@@ -179,20 +179,20 @@ export class Weather {
     this.skirt.renderOrder = -950;
     this.group.add(this.skirt);
 
-    // raio: fita em zigue-zague refeita a cada descarga (64 trechos), brilho acima de 1 para o bloom pegar
+    // bolt: zigzag ribbon rebuilt on every strike (64 pieces), brightness above 1 so the bloom catches it
     const bg = new THREE.BufferGeometry();
     this.boltPos = new THREE.BufferAttribute(new Float32Array(BOLT_VERTS * 3), 3);
     this.boltPos.setUsage(THREE.DynamicDrawUsage);
     bg.setAttribute('position', this.boltPos);
-    // miolo (1) e borda (0) de cada vértice: o mesmo padrão em todos os trechos
+    // core (1) and edge (0) of each vertex: the same pattern in every piece
     const core = new Float32Array(BOLT_VERTS);
     const pattern = [0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1];
     for (let i = 0; i < BOLT_VERTS; i++) core[i] = pattern[i % 12];
     bg.setAttribute('core', new THREE.BufferAttribute(core, 1));
     const bm = colorOnly(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide }));
     const glow = attribute('core', 'float');
-    // miolo branco acima de 1 (o bloom faz o resto); bordas azuladas que somem: halo largo o bastante para não
-    // sumir na suavização temporal, que dilui linhas de um pixel que duram poucos quadros
+    // white core above 1 (the bloom does the rest); bluish edges that fade: a halo wide enough not to
+    // vanish in the temporal smoothing, which dilutes one-pixel lines that last only a few frames
     bm.colorNode = vec4(mix(vec3(1.2, 1.4, 2.4), vec3(6, 6.2, 7), glow.mul(glow)).mul(flashU), clamp(flashU.mul(1.5), 0, 1).mul(glow.mul(glow).mul(0.85).add(0.15)));
     bm.fog = false;
     this.bolt = new THREE.Mesh(bg, bm);
@@ -202,18 +202,18 @@ export class Weather {
     this.group.add(this.bolt);
   }
 
-  /** Monta o raio de uma nuvem até o chão perto de (x, z), em fita virada para a câmera. */
+  /** Builds the bolt from a cloud down to the ground near (x, z), as a camera-facing ribbon. */
   private strike(eye: THREE.Vector3, ground: number, front = false, at: [number, number] | null = null): void {
-    // metade das descargas cai à frente da câmera (as outras só se ouvem); ou onde o jogador clicou
+    // half the strikes land in front of the camera (the others are only heard); or where the player clicked
     const a = at ? Math.atan2(at[1] - eye.z, at[0] - eye.x) : front || this.rng() < 0.5 ? this.viewAngle + (this.rng() - 0.5) * 1.2 : this.rng() * Math.PI * 2;
     const d = at ? Math.hypot(at[0] - eye.x, at[1] - eye.z) : 700 + this.rng() * 3300;
     const x = at ? at[0] : eye.x + Math.cos(a) * d, z = at ? at[1] : eye.z + Math.sin(a) * d;
     const top = ground + 1300 + this.rng() * 500;
     const p = this.boltPos.array as Float32Array;
-    // lado da fita: perpendicular à direção da câmera
+    // ribbon side: perpendicular to the camera direction
     const sx = -Math.sin(a), sz = Math.cos(a);
     const top0: [number, number, number] = [x + (this.rng() - 0.5) * (at ? 120 : 300), top, z + (this.rng() - 0.5) * (at ? 120 : 300)];
-    // halo mais largo de longe (alguns pixels na tela até a 4 km)
+    // wider halo from afar (a few pixels on screen even at 4 km)
     const width = 6 + d * 0.004;
     // Roadcraft 4.0's branching bolt (lightning.ts): the channel by midpoint displacement, 7 generations (128 pieces),
     // kick 0.2 × length halved each generation; 3-6 branches leave it 10-70 % down, ~30° off its axis, reaching
@@ -235,7 +235,7 @@ export class Weather {
     let k = 0;
     for (const { a: A, b: B, w0, w1 } of pieces) {
       if (k + 36 > p.length) break;
-      // esquerda-miolo e miolo-direita (padrão de miolo/borda no atributo 'core')
+      // left-core and core-right (core/edge pattern in the 'core' attribute)
       const L0 = [A[0] - sx * w0, A[1], A[2] - sz * w0], C0 = A, R0 = [A[0] + sx * w0, A[1], A[2] + sz * w0];
       const L1 = [B[0] - sx * w1, B[1], B[2] - sz * w1], C1 = B, R1 = [B[0] + sx * w1, B[1], B[2] + sz * w1];
       p.set([...L0, ...C0, ...C1, ...L0, ...C1, ...L1, ...C0, ...R0, ...R1, ...C0, ...R1, ...C1], k); k += 36;
@@ -248,14 +248,14 @@ export class Weather {
     this.onStrike?.(Math.hypot(x - eye.x, z - eye.z, ground - eye.y));
   }
 
-  /** Força uma descarga (api e fotos). */
+  /** Forces a strike (api and photos). */
   strikeNow(eye: THREE.Vector3, ground: number): void { this.strike(eye, ground, true); }
 
-  /** Raio no ponto (x, z) do chão (clique do jogador). */
+  /** Bolt at the ground point (x, z) (player's click). */
   strikeAt(eye: THREE.Vector3, x: number, z: number, ground: number): void { this.strike(eye, ground, false, [x, z]); }
 
   /**
-   * Muda o tempo devagar; molha e seca o chão. `eye`: where the rain box is centred (the eye; in the isometric view,
+   * Changes the weather slowly; wets and dries the ground. `eye`: where the rain box is centred (the eye; in the isometric view,
    * the point looked at).
    */
   update(dt: number, gameDt: number, eye: THREE.Vector3, ground = 0, fog?: THREE.Color): void {
@@ -263,12 +263,12 @@ export class Weather {
     // the cloud layer drifts along the wind: 3 m/s in calm air, 15 m/s in a gale
     const drift = cloudDriftU.value as THREE.Vector2, wd = windDirU.value as THREE.Vector2, speed = 3 + 12 * windU.value;
     drift.set(drift.x + wd.x * speed * dt, drift.y + wd.y * speed * dt);
-    // sem chuva, os riscos nem são desenhados; acima da camada, as nuvens também não
+    // without rain, the streaks are not even drawn; above the layer, neither are the clouds
     this.rain.visible = rainU.value > 0.003;
     this.clouds.visible = eye.y < CLOUD_Y - 250;
     this.skirt.position.set(eye.x, 0, eye.z);
     if (fog) (this.horizonU.value as THREE.Color).copy(fog);
-    // clarão: pisca duas vezes e some
+    // flash: blinks twice and fades
     this.flashT += dt;
     const f = this.flashT;
     flashU.value = f < 0.08 ? 1 : f < 0.14 ? 0.25 : f < 0.22 ? 0.85 : Math.max(0, 0.85 - (f - 0.22) * 4);
@@ -281,7 +281,7 @@ export class Weather {
       }
     }
     if (this.fixed) {
-      // tempo fixo (opção ou foto): já chega pronto
+      // fixed weather (option or photo): it arrives already settled
       cloudsU.value = this.fixed.clouds; rainU.value = this.fixed.rain; wetU.value = this.fixed.rain > 0 ? 1 : 0;
       this.storm = this.fixed.storm ?? 0;
       windU.value = this.windFixed ?? 0.2 + this.storm * 0.8;
@@ -291,7 +291,7 @@ export class Weather {
     {
       this.timer -= gameDt;
       if (this.timer <= 0) {
-        // a cada 1 a 3 horas de jogo, um tempo novo
+        // every 1 to 3 game hours, new weather
         this.timer = 3600 * (1 + this.rng() * 2);
         const r = this.rng();
         const w = this.rng();
@@ -318,7 +318,7 @@ export class Weather {
   }
 }
 
-/** Vias e calçadas molhadas: mais escuras e mais lisas. */
+/** Wet roads and sidewalks: darker and smoother. */
 export function wetLook(color: Node, rough: Node): [Node, Node] {
   return [color.mul(mix(float(1), float(0.62), wetU)), mix(rough, float(0.22), wetU.mul(0.8))];
 }

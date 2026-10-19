@@ -1,6 +1,6 @@
-// Malhas das peças (perto, meio, longe), montadas uma vez na carga a partir de
-// primitivas. Cor por vértice; o canal alfa diz o acabamento:
-// 0 liso, 1 folhagem, 2 vidro de luminária, 3/4/5 lâmpadas vermelha/amarela/verde, 6 casca, 7 metal.
+// Prop meshes (near, mid, far), built once at load from
+// primitives. Colour per vertex; the alpha channel holds the finish:
+// 0 plain, 1 foliage, 2 lamp glass, 3/4/5 red/yellow/green lamps, 6 bark, 7 metal.
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -10,17 +10,17 @@ import { SMALL_CASTER } from './sun.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
-/** Faces por variante: Sign0 … Sign0 + 15. */
+/** Faces per variant: Sign0 … Sign0 + 15. */
 export const FACE_LAST = PMAT.Sign0 + 15;
-/** Partes de placa: acabamento Sign0 + variante (o shader some com as das outras variantes). */
+/** Sign parts: finish Sign0 + variant (the shader hides those of the other variants). */
 export const SIGN_PARTS = 4;
 
 export interface PropDef {
-  /** Malha por nível (null = não desenha). */
+  /** Mesh per level (null = not drawn). */
   lods: Array<THREE.BufferGeometry | null>;
-  /** Fim de cada nível (m, a 1080p). */
+  /** End of each level (m, at 1080p). */
   dist: [number, number, number];
-  /** Raio para o recorte. */
+  /** Radius for culling. */
   radius: number;
   /** Other models of the type, drawn for the variants MODELS maps to them (index 1, 2…). */
   alts?: PropDef[];
@@ -82,11 +82,11 @@ const CONCRETE = 0xb4b0a8;
 
 function lamp(double: boolean): PropDef {
   const arms = double ? [1, -1] : [1];
-  // na calçada: poste de concreto da rede elétrica com cruzeta (fios ao longo da via) e braço da luminária
+  // on the sidewalk: concrete utility pole with crossarm (wires along the road) and the lamp arm
   const utility = double ? [] : [
     part(cyl(0.17, 0.1, WIRE_Y + 0.4, 8), CONCRETE, PMAT.Plain),
     part(box(1.7, 0.12, 0.12), CONCRETE, PMAT.Plain, 0, WIRE_Y - 0.06, 0),
-    part(box(0.5, 0.5, 0.5), 0x5c6064, PMAT.Metal, 0, 6.6, -0.32), // transformador pequeno
+    part(box(0.5, 0.5, 0.5), 0x5c6064, PMAT.Metal, 0, 6.6, -0.32), // small transformer
   ];
   const near = merge([
     ...(double ? [part(cyl(0.12, 0.08, 8.2, 8), POLE, PMAT.Metal), part(cyl(0.2, 0.2, 0.5, 8), POLE, PMAT.Metal)] : utility),
@@ -133,7 +133,7 @@ function signalHead(x: number, y: number, z: number, big: boolean, detail = true
 }
 
 function signal(): PropDef {
-  // poste na esquina, braço sobre a via (para −x local), focos olhando para +z
+  // pole at the corner, arm over the road (towards local −x), lights facing +z
   const near = merge([
     part(cyl(0.13, 0.1, 5.8, 8), 0x3a3e42, PMAT.Metal),
     part(box(3.6, 0.12, 0.12), 0x3a3e42, PMAT.Metal, -1.8, 5.5, 0),
@@ -164,7 +164,7 @@ function bin(): PropDef {
   return { lods: [near, null, null], dist: [130, 0, 0], radius: 0.8 };
 }
 
-/** Vão de fios: três cabos de 0 a 1 em z (o shader estica até o próximo poste e faz a barriga). */
+/** Wire span: three cables from 0 to 1 in z (the shader stretches it to the next pole and makes the sag). */
 function wire(): PropDef {
   const strand = (x: number, y: number) => {
     const g = new THREE.BoxGeometry(0.035, 0.035, 1, 1, 1, 12).translate(x, y, 0.5);
@@ -284,7 +284,7 @@ function sign(): PropDef {
   return { lods: [merge(parts), null, null], dist: [140, 0, 0], radius: 1.5 };
 }
 
-/** Poste de rede elétrica sem luminária (linhas desenhadas pelo jogador). */
+/** Utility pole without a lamp (lines drawn by the player). */
 function pole(): PropDef {
   const near = merge([
     part(cyl(0.17, 0.1, WIRE_Y + 0.4, 8), CONCRETE, PMAT.Plain),
@@ -295,86 +295,86 @@ function pole(): PropDef {
   return { lods: [near, mid, null], dist: [220, 750, 0], radius: 5 };
 }
 
-/** Mobiliário de calçada: todas as variantes na mesma malha (o shader mostra só a da instância). */
+/** Sidewalk furniture: all variants in the same mesh (the shader shows only the instance's). */
 function furniture(): PropDef {
   const v = (k: number) => PMAT.Sign0 + k;
   const parts = [
-    // hidrante vermelho
+    // red hydrant
     part(cyl(0.16, 0.14, 0.62, 10), 0xc0261d, v(FURN.Hydrant)),
     part(ball(0.15, 1), 0xc0261d, v(FURN.Hydrant), 0, 0.64, 0),
     part(cyl(0.07, 0.07, 0.42, 6).rotateZ(Math.PI / 2), 0xa31f18, v(FURN.Hydrant), 0.21, 0.42, 0),
-    // caixa de correio amarela
+    // yellow postbox
     part(cyl(0.06, 0.06, 0.8, 6), 0x5a5f63, v(FURN.Postbox)),
     part(box(0.48, 0.62, 0.38), 0xf2c21a, v(FURN.Postbox), 0, 0.8, 0),
     part(box(0.3, 0.04, 0.02), 0x1f4f9a, v(FURN.Postbox), 0, 1.25, 0.2),
-    // orelhão: concha laranja num poste
+    // payphone: orange shell on a post
     part(cyl(0.06, 0.06, 1.9, 6), 0x5a5f63, v(FURN.Phone)),
     part(ball(0.62, 1), 0xe46a1c, v(FURN.Phone), 0, 1.95, 0.12, 1, 1.15, 0.85),
     part(box(0.22, 0.32, 0.12), 0x2a2d30, v(FURN.Phone), 0, 1.45, 0.3),
-    // boca de lobo: grelha no meio-fio
+    // storm drain: grate at the kerb
     part(box(0.9, 0.06, 0.5), 0x3c3f42, v(FURN.Drain), 0, -0.04, 0),
-    // frade (balizador) de concreto
+    // concrete bollard
     part(cyl(0.16, 0.13, 0.75, 10), 0xb4b0a8, v(FURN.Bollard)),
-    // floreira
+    // planter
     part(box(1.0, 0.5, 1.0), 0x9d8f7c, v(FURN.Planter)),
     part(ball(0.55, 1), 0x4f7a34, v(FURN.Planter), 0, 0.65, 0, 1, 0.7, 1),
-    // ---- peças de fachada dos prédios (sessão prédios): origem no pé da parede, +z para fora
-    // ar-condicionado de parede (condensadora com grade e mãos-francesas)
+    // ---- building facade pieces (buildings session): origin at the foot of the wall, +z outwards
+    // wall air conditioner (condenser with grille and brackets)
     part(box(0.8, 0.55, 0.3), 0xe4e4e0, v(FURN.WallAc), 0, 0.04, 0.17),
     part(box(0.36, 0.36, 0.02), 0x8d9296, v(FURN.WallAc), 0.14, 0.13, 0.33),
     part(box(0.04, 0.04, 0.34), 0x8a8e92, v(FURN.WallAc), -0.3, 0, 0.17),
     part(box(0.04, 0.04, 0.34), 0x8a8e92, v(FURN.WallAc), 0.3, 0, 0.17),
-    // condensadora de telhado (caixa com ventilador em cima)
+    // rooftop condenser (box with a fan on top)
     part(box(1.2, 0.9, 0.9), 0xd4d4d0, v(FURN.RoofAc), 0, 0, 0),
     part(box(1.22, 0.5, 0.92), 0xbfc1c0, v(FURN.RoofAc), 0, 0.15, 0),
     part(cyl(0.34, 0.34, 0.06, 14), 0x3c3f42, v(FURN.RoofAc), 0, 0.9, 0),
     part(box(0.05, 0.12, 0.7), 0x8a8e92, v(FURN.RoofAc), 0, 0.92, 0),
-    // vaso de barro com planta
+    // clay pot with a plant
     part(cyl(0.16, 0.22, 0.38, 10), 0xa65a3c, v(FURN.Vase)),
     part(ball(0.3, 1), 0x4f7a34, v(FURN.Vase), 0, 0.62, 0, 1, 0.9, 1),
-    // varal de chão com roupa (ao longo da parede)
+    // standing clothesline with clothes (along the wall)
     part(box(0.03, 1.4, 0.03), 0xc9ccce, v(FURN.Clothesline), -0.9, 0, 0),
     part(box(0.03, 1.4, 0.03), 0xc9ccce, v(FURN.Clothesline), 0.9, 0, 0),
     ...[-0.12, 0, 0.12].map((z) => part(box(1.8, 0.015, 0.015), 0xd8dadc, v(FURN.Clothesline), 0, 1.38, z)),
     part(box(0.42, 0.55, 0.02), 0xf2f2ee, v(FURN.Clothesline), -0.5, 0.83, 0),
     part(box(0.36, 0.45, 0.02), 0x3d6aa0, v(FURN.Clothesline), 0.05, 0.93, 0.12),
     part(box(0.3, 0.6, 0.02), 0xc8402c, v(FURN.Clothesline), 0.55, 0.78, -0.12),
-    // antena parabólica
+    // satellite dish
     part(box(0.05, 0.75, 0.05), 0x8a8e92, v(FURN.Dish), 0, 0, 0),
     part(ball(0.38, 1), 0xe8e8e4, v(FURN.Dish), 0, 0.85, 0.12, 1, 1, 0.22),
     part(box(0.03, 0.03, 0.35), 0x8a8e92, v(FURN.Dish), 0, 0.85, 0.3),
-    // exaustor eólico (cano e turbina)
+    // wind-driven roof vent (pipe and turbine)
     part(cyl(0.12, 0.12, 0.6, 8), 0xa9adb0, v(FURN.Vent)),
     part(ball(0.22, 1), 0xc9ccce, v(FURN.Vent), 0, 0.72, 0, 1, 0.75, 1),
-    // cadeira de plástico
+    // plastic chair
     part(box(0.45, 0.05, 0.45), 0xf2f2ee, v(FURN.Chair), 0, 0.42, 0),
     part(box(0.45, 0.45, 0.04), 0xf2f2ee, v(FURN.Chair), 0, 0.47, -0.21),
     ...[[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]].map(([x, z]) => part(box(0.035, 0.42, 0.035), 0xe6e6e2, v(FURN.Chair), x, 0, z)),
-    // caixa d'água de fibra (azul) com tampa
+    // fibreglass water tank (blue) with lid
     part(cyl(0.62, 0.72, 0.85, 14), 0x2f6fb5, v(FURN.Tank)),
     part(cyl(0.64, 0.64, 0.07, 14), 0x285e98, v(FURN.Tank), 0, 0.85, 0),
   ];
   return { lods: [merge(parts), null, null], dist: [140, 0, 0], radius: 1.5 };
 }
 
-/** Muros, cercas, sebes, defensas e gradis: peça de z = 0 a 1 (o shader estica até o comprimento e inclina no desnível). */
+/** Walls, fences, hedges, guardrails and railings: piece from z = 0 to 1 (the shader stretches it to length and tilts it on slopes). */
 function barrier(): PropDef {
   const v = (k: number) => PMAT.Sign0 + k;
   const near = merge([
-    // cerca de madeira: mourão no começo, três tábuas
+    // wooden fence: post at the start, three boards
     part(box(0.12, 1.3, 0.12), 0x7a5a3a, v(BARRIER.Fence), 0, 0, 0.06),
     part(box(0.05, 0.12, 1), 0x8a6844, v(BARRIER.Fence), 0, 0.35, 0.5),
     part(box(0.05, 0.12, 1), 0x8a6844, v(BARRIER.Fence), 0, 0.7, 0.5),
     part(box(0.05, 0.12, 1), 0x8a6844, v(BARRIER.Fence), 0, 1.05, 0.5),
-    // muro de alvenaria rebocado
+    // rendered masonry wall
     part(box(0.22, 1.9, 1), 0xd8d0c2, v(BARRIER.Wall), 0, 0, 0.5),
     part(box(0.3, 0.08, 1), 0xb8b0a2, v(BARRIER.Wall), 0, 1.9, 0.5),
-    // sebe
+    // hedge
     part(box(0.8, 1.3, 1), 0x3f6a2e, v(BARRIER.Hedge), 0, 0, 0.5),
-    // defensa metálica (guard-rail)
+    // metal crash barrier (guard-rail)
     part(box(0.1, 0.75, 0.1), 0x8a8e92, v(BARRIER.Guardrail), 0, 0, 0.05),
     part(box(0.06, 0.32, 1), 0xb8bcc0, v(BARRIER.Guardrail), 0.06, 0.42, 0.5),
-    // gradil urbano
+    // urban railing
     part(box(0.05, 1.1, 0.05), 0x2c3034, v(BARRIER.Railing), 0, 0, 0.03),
     part(box(0.04, 0.05, 1), 0x2c3034, v(BARRIER.Railing), 0, 1.05, 0.5),
     part(box(0.04, 0.05, 1), 0x2c3034, v(BARRIER.Railing), 0, 0.15, 0.5),
@@ -390,16 +390,16 @@ function barrier(): PropDef {
   return { lods: [near, mid, null], dist: [180, 700, 0], radius: 4 };
 }
 
-/** Malhas de perto das árvores, para fotografar os impostores (na ordem das colunas do atlas). */
+/** Near meshes of the trees, to photograph the impostors (in the order of the atlas columns). */
 export function impostorSources(defs: PropDef[]): THREE.BufferGeometry[] {
   return [defs[PROP.Tree].lods[0]!, defs[PROP.Conifer].lods[0]!, defs[PROP.Oak].lods[0]!, defs[PROP.Palm].lods[0]!,
     defs[PROP.Tree].alts![0].lods[0]!, defs[PROP.Oak].alts![0].lods[0]!];
 }
 
-/** Carro estacionado: mesmas proporções dos carros da rua; a pintura vem da variante. */
+/** Parked car: same proportions as the street cars; the paint comes from the variant. */
 function parkedCar(): PropDef {
   const P = 0xffffff, GL = 0x1a2430, TI = 0x161616;
-  // o mesmo perfil dos carros da rua (render/vehicles.ts carModel): capô, para-brisa, teto, porta-malas
+  // the same profile as the street cars (render/vehicles.ts carModel): bonnet, windscreen, roof, boot
   const profile = (pts: Array<[number, number]>, width: number) => {
     const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y))), { depth: width, bevelEnabled: false, curveSegments: 1 });
     g.deleteAttribute('uv');
@@ -415,7 +415,7 @@ function parkedCar(): PropDef {
   return { lods: [near, mid, null], dist: [200, 650, 0], radius: 3 };
 }
 
-/** Elementos do chão: as 11 variantes na mesma malha (o shader mostra só a da instância), um tufo de ~1,5 m. */
+/** Ground elements: the 11 variants in the same mesh (the shader shows only the instance's), a ~1.5 m clump. */
 function ground(): PropDef {
   const v = (k: number) => PMAT.Sign0 + k;
   const parts: THREE.BufferGeometry[] = [];
@@ -441,7 +441,7 @@ function ground(): PropDef {
     parts.push(part(cyl(0.03, 0.025, 0.12, 5), 0xece3d0, v(10), x, 0, z));
     parts.push(part(cone(0.1, 0.08, 7), [0xc0392b, 0xb5835a][i % 2], v(10), x, 0.11, z));
   });
-  // 11: palmeira (tronco curvo em gomos e leque de folhas)
+  // 11: palm (curved segmented trunk and a fan of fronds)
   for (let k = 0; k < 7; k++) parts.push(part(cyl(0.2 - k * 0.012, 0.19 - k * 0.012, 1.15, 6), 0x8a6f4d, v(11), k * 0.07, k * 1.1, 0));
   for (let k = 0; k < 8; k++) {
     const a = k / 8 * Math.PI * 2;
@@ -450,7 +450,7 @@ function ground(): PropDef {
   return { lods: [merge(parts), null, null], dist: [260, 0, 0], radius: 6 };
 }
 
-/** Pessoa do criador: roupa pintada pela variante (paleta dos veículos), pele, cabelo e calça fixos. */
+/** Creator's person: clothes painted by the variant (vehicle palette), fixed skin, hair and trousers. */
 function person(): PropDef {
   const SKIN = 0xc68a62, HAIR = 0x2a1d14, PANTS = 0x2f3b48, SHOE = 0x1b1b1b;
   const near = merge([
@@ -467,7 +467,7 @@ function person(): PropDef {
   return { lods: [near, mid, null], dist: [90, 260, 0], radius: 1 };
 }
 
-/** Todas as peças, na ordem dos tipos. */
+/** All props, in type order. */
 export function buildPropDefs(): PropDef[] {
   const defs: PropDef[] = [];
   defs[PROP.Tree] = { ...tree(), alts: [ipe('yellow', 4)] };
