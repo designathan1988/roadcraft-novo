@@ -1,9 +1,9 @@
-// Gerador da cidade inteira pela semente (worker). Centros em terreno plano
-// perto do rio; avenidas radiais e um anel em volta do centro principal; via
-// expressa atravessando o mapa; ruas locais em grade por bairro (orientação de
-// cada centro), cortadas por água e encosta forte. Tudo vira um grafo planar:
-// cruzamentos achados por grade de baldes, nós próximos fundidos. Zonas pela
-// distância aos centros e às avenidas. A página só insere o resultado.
+// Generator of the whole city from the seed (worker). Centres on flat ground
+// near the river; radial avenues and a ring round the main centre; an
+// expressway across the map; local streets in a grid per district (each centre's
+// orientation), cut by water and steep slopes. Everything becomes a planar graph:
+// crossings found through a grid of buckets, nearby nodes merged. Zones by the
+// distance to the centres and avenues. The page only inserts the result.
 
 import { MAP_HALF, SEA_LEVEL } from '../config.ts';
 import { Rng, fbm } from '../core/rng.ts';
@@ -15,11 +15,11 @@ import { blockLines, districtField, districtLevels, simplifyLine, traceStreets, 
 export const GEN = { Local: 1, Avenue: 3, AvenueBike: 4, Expressway: 5 } as const;
 
 export interface CityRoads {
-  /** x, z, y por nó. */
+  /** x, z, y per node. */
   nodes: Float32Array;
-  /** a, b, perfil, zona esquerda, zona direita por trecho. */
+  /** a, b, profile, left zone, right zone per segment. */
   segs: Int32Array;
-  /** Centros (x, z, raio). */
+  /** Centres (x, z, radius). */
   centers: Float32Array;
 }
 
@@ -47,14 +47,14 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
   };
   const inside = (x: number, z: number, m = 380) => Math.max(Math.abs(x), Math.abs(z)) < MAP_HALF - m;
 
-  // ---------------------------------------------------------------- centros
+  // ---------------------------------------------------------------- centres
   const pick = (cx: number, cz: number, rad: number, avoid: Center[], minD: number): [number, number] | null => {
     let best: [number, number] | null = null, bs = Infinity;
     for (let k = 0; k < 400; k++) {
       const x = cx + rng.range(-rad, rad), z = cz + rng.range(-rad, rad);
       if (!inside(x, z, 1500) || !land(x, z)) continue;
       if (avoid.some((c) => Math.hypot(c.x - x, c.z - z) < minD)) continue;
-      // plano e perto (mas não dentro) do rio
+      // flat and near (but not in) the river
       let s = 0;
       for (const [dx, dz] of [[0, 0], [200, 0], [-200, 0], [0, 200], [0, -200]]) s += slope(x + dx, z + dz);
       let water = 1e9;
@@ -74,7 +74,7 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     const p = pick(c0[0] + Math.cos(a) * 3800, c0[1] + Math.sin(a) * 3800, 1600, centers, 3000);
     if (p) centers.push({ x: p[0], z: p[1], r: 2200, angle: rng.range(-0.8, 0.8), bx: 118, bz: 100 });
   }
-  // mapas maiores: mais bairros-satélite em volta, na proporção da área a mais
+  // bigger maps: more satellite districts around, in proportion to the extra area
   const extra = Math.round(2 * ((MAP_HALF * MAP_HALF) / (5120 * 5120) - 1));
   for (let i = 0, tries = 0; i < extra && tries < extra * 4; tries++) {
     const a = rng.range(0, Math.PI * 2), d = rng.range(5500, MAP_HALF - 1800);
@@ -84,9 +84,9 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     i++;
   }
 
-  // ---------------------------------------------------------------- linhas
+  // ---------------------------------------------------------------- lines
   const polys: Poly[] = [];
-  /** Marcha uma linha por pontos; água vira ponte (curta) ou corta; encosta forte corta. */
+  /** Marches a line through points; water becomes a (short) bridge or a cut; a steep slope cuts. */
   const march = (pts: Array<[number, number]>, profile: number, allowBridge: boolean, maxGrade: number) => {
     let cur: number[] = [];
     let lastLand: [number, number] | null = null;
@@ -99,7 +99,7 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
         if (!allowBridge || !lastLand) { flush(); lastLand = null; continue; }
         wet += Math.hypot(x - (pts[i - 1]?.[0] ?? x), z - (pts[i - 1]?.[1] ?? z));
         if (wet > 320) { flush(); lastLand = null; wet = 0; }
-        continue; // ponte: o próximo ponto em terra liga direto
+        continue; // bridge: the next point on land links straight to it
       }
       if (lastLand && wet === 0) {
         const g = Math.abs(H(x, z) - H(lastLand[0], lastLand[1])) / Math.max(1, Math.hypot(x - lastLand[0], z - lastLand[1]));
@@ -112,10 +112,10 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     flush();
   };
 
-  // via expressa: ao longo do rio, deslocada para um lado, de borda a borda
+  // expressway: along the river, moved to one side, from edge to edge
   const side = rng.next() < 0.5 ? 1 : -1;
   const riverZ = (x: number) => {
-    // procura a água mais perto da linha z = c0.z
+    // looks for the water nearest the line z = c0.z
     let best = c0[1], bd = Infinity;
     for (let z = -MAP_HALF; z < MAP_HALF; z += 40) if (!land(x, z)) { const d = Math.abs(z - c0[1]); if (d < bd) { bd = d; best = z; } }
     return bd < Infinity ? best : NaN;
@@ -126,18 +126,18 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     for (let x = -MAP_HALF + 400; x <= MAP_HALF - 400; x += 160) {
       const rz = riverZ(x);
       const target = Number.isFinite(rz) ? rz + side * 1700 : lastZ;
-      lastZ += Math.max(-60, Math.min(60, target - lastZ)); // curva suave
+      lastZ += Math.max(-60, Math.min(60, target - lastZ)); // soft curve
       pts.push([x, lastZ]);
     }
     march(pts, GEN.Expressway, true, MAX_ART_GRADE);
-    // e uma norte-sul cruzando o rio, ao lado do centro
+    // and a north-south one across the river, beside the centre
     const pts2: Array<[number, number]> = [];
     const x0 = c0[0] + rng.range(1100, 1500) * (rng.next() < 0.5 ? 1 : -1);
     for (let z = -MAP_HALF + 400; z <= MAP_HALF - 400; z += 160) pts2.push([x0 + 200 * Math.sin(z / 1700), z]);
     march(pts2, GEN.Expressway, true, MAX_ART_GRADE);
   }
 
-  // avenidas radiais e anel do centro principal
+  // radial avenues and the main centre's ring
   centers.forEach((c, ci) => {
     const rays = ci === 0 ? 8 : 5;
     for (let k = 0; k < rays; k++) {
@@ -151,7 +151,7 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
       }
       march(pts, ci === 0 && k % 2 === 0 ? GEN.AvenueBike : GEN.Avenue, ci === 0, MAX_ART_GRADE);
     }
-    // anel pequeno em volta da praça central: as radiais nascem nele (sem nó com braços demais)
+    // a small ring round the central square: the radials start on it (no node with too many arms)
     for (const rr of ci === 0 ? [150, 850, 2100] : [150, 700]) {
       const pts: Array<[number, number]> = [];
       const n = Math.max(12, Math.ceil((Math.PI * 2 * rr) / 110));
@@ -164,14 +164,14 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     }
   });
 
-  // estradas entre bairros: cada satélite liga ao centro mais perto já posto
+  // roads between districts: each satellite links to the nearest centre already placed
   for (let i = 1; i < centers.length; i++) {
     const c = centers[i];
     let j = 0, bd = Infinity;
     for (let k = 0; k < i; k++) { const d = Math.hypot(centers[k].x - c.x, centers[k].z - c.z); if (d < bd) { bd = d; j = k; } }
     const o = centers[j];
     const L = Math.hypot(o.x - c.x, o.z - c.z);
-    if (L < c.r + o.r * 0.9) continue; // as radiais já se cruzam
+    if (L < c.r + o.r * 0.9) continue; // the radials already cross
     const pts: Array<[number, number]> = [];
     const nx = -(o.z - c.z) / L, nz = (o.x - c.x) / L, bow = rng.range(-0.08, 0.08) * L;
     for (let d = 150; d <= L - 150; d += 120) {
@@ -181,7 +181,7 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     march(pts, GEN.Avenue, true, MAX_ART_GRADE);
   }
 
-  // ruas locais: grade de cada centro, só na área dele (o centro "mais forte" ganha)
+  // local streets: each centre's grid, only in its own area (the "strongest" centre wins)
   const owner = (x: number, z: number): number => {
     let best = -1, bs = Infinity;
     centers.forEach((c, i) => { const s = Math.hypot(x - c.x, z - c.z) / c.r; if (s < bs) { bs = s; best = i; } });
@@ -199,7 +199,7 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
       const step = dirU ? c.bz : c.bx;
       const along = dirU ? c.bx : c.bz;
       for (let off = -R; off <= R; off += step) {
-        // ruas mais ralas longe do centro
+        // sparser streets far from the centre
         const keepP = 1 - Math.max(0, Math.abs(off) / R - 0.55) * 1.6;
         if (rng.next() > keepP) continue;
         const pts: Array<[number, number]> = [];
@@ -247,10 +247,10 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
   }
 }
 
-// ---------------------------------------------------------------- grafo planar
+// ---------------------------------------------------------------- planar graph
 
 function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) => number, seed: number): CityRoads {
-  // pedaços retos
+  // straight pieces
   const sx0: number[] = [], sz0: number[] = [], sx1: number[] = [], sz1: number[] = [], sp: number[] = [];
   for (const p of polys) {
     for (let i = 0; i + 3 < p.pts.length; i += 2) {
@@ -258,7 +258,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     }
   }
   const n = sp.length;
-  // cruzamentos por baldes de 96 m
+  // crossings by 96 m buckets
   const B = 96;
   const buckets = new Map<number, number[]>();
   const key = (i: number, j: number) => (i + 2000) * 4096 + (j + 2000);
@@ -272,7 +272,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       l.push(s);
     }
   }
-  // rua local colada e quase paralela a uma avenida/expressa: sai (evita vias sobrepostas)
+  // a local street hugging and nearly parallel to an avenue/expressway goes (no overlapping roads)
   const dead = new Uint8Array(n);
   for (const list of buckets.values()) {
     for (const s of list) {
@@ -307,7 +307,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       if (u > 1e-6 && u < 1 - 1e-6 && v > 1e-6 && v < 1 - 1e-6) { cuts[s].push(u); cuts[t].push(v); }
     }
   }
-  // nós com fusão por grade de hash
+  // nodes merged through a hash grid
   const nx: number[] = [], nz: number[] = [];
   const grid = new Map<number, number[]>();
   const nodeAt = (x: number, z: number): number => {
@@ -324,7 +324,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     l.push(id);
     return id;
   };
-  const edges = new Map<number, number>(); // par de nós → perfil (o mais forte)
+  const edges = new Map<number, number>(); // node pair → profile (the strongest)
   const rank = (p: number) => (p === GEN.Expressway ? 3 : p === GEN.AvenueBike ? 2 : p === GEN.Avenue ? 1 : 0);
   for (let s = 0; s < n; s++) {
     const c = cuts[s].sort((a, b) => a - b);
@@ -339,7 +339,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       prev = id;
     }
   }
-  // trechos curtos demais viram um nó só (união por raiz)
+  // segments too short become a single node (union by root)
   const root = nx.map((_, i) => i);
   const find = (i: number): number => { while (root[i] !== i) { root[i] = root[root[i]]; i = root[i]; } return i; };
   for (const k of edges.keys()) {
@@ -354,7 +354,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     const old = merged.get(kk);
     if (old === undefined || rank(p) > rank(old)) merged.set(kk, p);
   }
-  // no máximo 8 ligações por nó (fica com as mais fortes)
+  // at most 8 links per node (the strongest stay)
   const deg = new Int32Array(nx.length);
   const sorted = [...merged.entries()].sort((x, y) => rank(y[1]) - rank(x[1]));
   edges.clear();
@@ -364,7 +364,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     deg[a]++; deg[b]++;
     edges.set(k, p);
   }
-  // pedaços soltos (componentes pequenos) saem
+  // loose pieces (small components) go
   {
     const adj = new Map<number, number[]>();
     for (const k of edges.keys()) {
@@ -389,7 +389,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     }
     for (const k of [...edges.keys()]) if (size[comp.get(Math.floor(k / 1e6))!] < 30) edges.delete(k);
   }
-  // distância à expressa (para a indústria)
+  // distance to the expressway (for industry)
   const expNodes: number[] = [];
   for (const [k, p] of edges) if (p === GEN.Expressway) expNodes.push(Math.floor(k / 1e6));
   const nearExp = (x: number, z: number) => {
@@ -397,13 +397,13 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
     for (const id of expNodes) { const d = Math.abs(nx[id] - x) + Math.abs(nz[id] - z); if (d < best) best = d; }
     return best;
   };
-  // alturas dos nós: relevo suavizado; nó na água (ponte) fica na média dos vizinhos
+  // node heights: smoothed terrain; a node in the water (bridge) at the average of its neighbours
   const ny = nx.map((x, i) => {
     let h = 0;
     for (const [dx, dz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]]) h += H(x + dx, nz[i] + dz);
     return Math.max(SEA_LEVEL + 1.5, h / 5);
   });
-  // zonas pela distância aos centros, às avenidas e à expressa
+  // zones by the distance to the centres, the avenues and the expressway
   const nearCenter = (x: number, z: number) => {
     let best = Infinity;
     for (const c of centers) best = Math.min(best, Math.hypot(x - c.x, z - c.z) / c.r);
@@ -411,7 +411,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
   };
   const zr = new Rng(seed * 31 + 7);
   const segs: number[] = [];
-  // variedade do catálogo por bairro (ruído largo: a rua inteira fica igual)
+  // catalogue variety by district (broad noise: a whole street stays the same)
   const P = (name: string) => { const i = PROFILES.findIndex((p) => p.name === name); return i < 0 ? 0 : i; };
   const V = {
     wide: P('Calçadas largas'), park: 1, urban: P('Rua urbana'), cobble: P('Rua de paralelepípedo'), green: P('Rua com canteiro central'),
@@ -421,8 +421,8 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
   const variant = (profile: number, zone: number, d: number, x: number, z: number): number => {
     const n = fbm(x / 650, z / 650, seed + 313, 2), m = fbm(x / 1400, z / 1400, seed + 919, 2);
     if (profile === GEN.Local) {
-      // centro comercial: calçadão de 30 km/h só em parte das ruas (com ele em toda rua o centro não passava de
-      // 13 km/h no pico); o resto, rua urbana de 50 km/h ou com estacionamento
+      // commercial centre: 30 km/h wide-pavement streets in part of the streets only (with it on every street the
+      // centre did not pass 13 km/h at the peak); the rest, 50 km/h urban streets or with parking
       if (zone === Zone.Commercial) return n > 0.45 ? V.wide : n > 0.1 ? V.urban : V.park;
       if (zone === Zone.Industrial) return V.concrete;
       if (zone === Zone.Mixed) return n > 0.25 ? V.bike : n < -0.25 ? V.green : V.park;
@@ -463,7 +463,7 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       from = to;
     }
   }
-  // só os nós usados, com índices novos
+  // only the nodes in use, with new indices
   const remap = new Int32Array(nx.length).fill(-1);
   const out: number[] = [];
   for (let i = 0; i < segs.length; i += 5) {
