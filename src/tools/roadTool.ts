@@ -3,7 +3,7 @@
 
 import type * as THREE from 'three/webgpu';
 import type { CommandStack } from '../core/commands.ts';
-import { RoadJournal, buildRoad, buildRoundabout, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
+import { RoadJournal, buildRoad, buildRoundabout, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
 import { bez, type Quad } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { SegFlag } from '../roads/flags.ts';
@@ -148,7 +148,7 @@ export class RoadTool {
     if (this.mode === 'roundabout') {
       const a = snap(net, hit.x, hit.z, 14);
       pv.hide();
-      pv.showCircle(a.x, this.anchorY(a), a.z, this.ringRadius, true);
+      pv.showCircle(a.x, this.anchorY(a), a.z, this.ringRadius, !roundaboutRefusal(this.world, a.x, a.z, this.ringRadius));
       pv.showMarker(a.x, this.anchorY(a), a.z, 1.2, a.node >= 0 ? 'node' : a.seg >= 0 ? 'seg' : 'free');
       return;
     }
@@ -210,8 +210,9 @@ export class RoadTool {
     }
     if (this.mode === 'roundabout') {
       const a = snap(net, hit.x, hit.z, 14);
-      const j = buildRoundabout(this.world, a.x, a.z, this.ringRadius);
-      if (!j) this.hud.toast('Já existe uma rotatória aqui.');
+      const why = roundaboutRefusal(this.world, a.x, a.z, this.ringRadius);
+      const j = why ? null : buildRoundabout(this.world, a.x, a.z, this.ringRadius);
+      if (!j) this.hud.toast(why || 'Já existe uma rotatória aqui.');
       else this.commit(j);
       return;
     }

@@ -13,6 +13,8 @@ export const ENGINE_PT: Record<string, string> = {
   'history.redoFailed': 'Não foi possível refazer "{label}": {message}. Nada mudou; o passo continua lá para refazer.',
   'tool.failed': 'A ferramenta não conseguiu terminar: {message}.',
   'road.reason.fullNode': 'um nó ali ficaria com mais de {max} vias',
+  'road.ring.exists': 'Já existe uma rotatória aqui.',
+  'road.ring.water': 'A rotatória não cabe aqui: o anel passaria sobre a água.',
   'ui.stats.tip': '{residents} moradores · {jobs} empregos · {buildings} prédios · {speed} km/h de média perto daqui',
   'ui.cat.roads': 'Vias',
   'ui.cat.zones': 'Zoneamento e lotes',

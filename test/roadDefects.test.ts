@@ -4,7 +4,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
-import { RoadJournal, buildRoad, buildRoundabout, demolishSeg, planRoad, snap } from '../src/roads/build.ts';
+import { RoadJournal, buildRoad, buildRoundabout, bulbAt, demolishSeg, planRoad, roundaboutRefusal, snap } from '../src/roads/build.ts';
+import { heightIndex, sampleCoord } from '../src/world/heights.ts';
+import { HEIGHT_MAP_RES } from '../src/config.ts';
 import { CommandStack, type Command } from '../src/core/commands.ts';
 import { demolishBox } from '../src/tools/demolish.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
@@ -229,4 +231,48 @@ test('D5: a tall tower under a low bridge is still in the way', () => {
   w.roads.addNode({ x: -120, z: 0, y: 26 }); w.roads.addNode({ x: 120, z: 0, y: 26 });
   road(w, -120, 0, 120, 0, 0, 16);
   assert.equal(w.buildings.alive[tower], 0, 'a 20-floor tower cannot stand under a deck 16 m up');
+});
+
+/** Terrain height at the nearest sample. */
+function ground(w: World, x: number, z: number): number { return w.heights[heightIndex(Math.round(sampleCoord(x)), Math.round(sampleCoord(z)))]; }
+
+test('D6: the turning bulb of a dead end never pulls the terrain up to a bridge or down to a tunnel', () => {
+  const w = flatWorld(1e9);
+  // a dead end that ends 14 m above the ground: the end of a viaduct
+  w.roads.addNode({ x: 100, z: 0, y: 24 });
+  road(w, -100, 0, 100, 0);
+  for (const [dx, dz] of [[0, 0], [6, 0], [0, 8], [-8, 4]]) {
+    const g = ground(w, 100 + dx, dz);
+    assert.ok(g < 11, `the ground at the viaduct end (${100 + dx}, ${dz}) rose to ${g.toFixed(2)} m`);
+  }
+  // a dead end 12 m down: the end of a tunnel
+  w.roads.addNode({ x: 500, z: 300, y: -2 });
+  road(w, 300, 300, 500, 300);
+  for (const [dx, dz] of [[0, 0], [6, 0], [0, 8]]) {
+    const g = ground(w, 500 + dx, 300 + dz);
+    assert.ok(g > 9, `the ground over the tunnel end (${500 + dx}, ${300 + dz}) sank to ${g.toFixed(2)} m`);
+  }
+});
+
+test('D6: rail lines have no turning bulb; streets keep theirs', () => {
+  const w = flatWorld(1e9);
+  const rail = PROFILE_INFO.findIndex((p) => p.rail && p.oneWay);
+  road(w, -100, 0, 100, 0, rail);
+  assert.equal(bulbAt(w.roads, w.roads.nearestNode(100, 0, 1)), false, 'a rail dead end got a turning bulb');
+  const street = flatWorld(1e9);
+  road(street, -100, 0, 100, 0, 0);
+  assert.equal(bulbAt(street.roads, street.roads.nearestNode(100, 0, 1)), true, 'a local street dead end keeps its bulb');
+});
+
+test('D6: a roundabout never fills the sea', () => {
+  const w = flatWorld(1e9);
+  // sea west of x = 0
+  for (let gz = 0; gz < HEIGHT_MAP_RES; gz++) for (let gx = 0; gx < Math.round(sampleCoord(0)); gx++) w.heights[heightIndex(gx, gz)] = -4;
+  road(w, 0, 0, 200, 0);
+  const at = [[-10, 0], [-20, 6], [-6, -12]];
+  const j = buildRoundabout(w, 10, 0, 22);
+  if (j) assert.ok(j.settle());
+  for (const [x, z] of at) assert.ok(ground(w, x, z) < 0, `the sea bed at ${x}, ${z} rose to ${ground(w, x, z).toFixed(2)}`);
+  assert.notEqual(roundaboutRefusal(w, 10, 0, 22), '', 'the tool says why it cannot go there');
+  assert.equal(roundaboutRefusal(w, 120, 0, 22), '', 'on dry land it can');
 });

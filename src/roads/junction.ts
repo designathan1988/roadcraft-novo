@@ -73,6 +73,8 @@ function bulbClear(net: RoadNetwork, n: number): boolean {
   const nc = net.nodes.cols;
   const sc = net.segs.cols;
   const s = net.segsOf(n, [])[0];
+  // trains do not turn round at the end of the line
+  if (PROFILE_INFO[sc.profile[s]].rail) return false;
   if (bulbRetreat(armOf(net.quad(s), sc.profile[s], sc.a[s] === n ? 0 : 1), sc.len[s]) <= 0) return false;
   const x = nc.x[n], z = nc.z[n], reach = BULB_R + BULB_WALK + 3;
   let clear = true;

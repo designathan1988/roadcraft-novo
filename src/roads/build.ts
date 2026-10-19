@@ -706,8 +706,30 @@ export function changeProfiles(world: World, segs: number[], profile: number): R
  * Roundabout: cuts the roads inside the circle, connects the ends to the ring and closes the
  * ring in arcs (counter-clockwise traffic seen from above).
  */
+/**
+ * Why a roundabout cannot go at (cx, cz), or '' when it can (the tool shows it and the preview turns red): another
+ * roundabout in the circle, or water under the ring (a roundabout never fills the sea or a river).
+ */
+export function roundaboutRefusal(world: World, cx: number, cz: number, radius: number): string {
+  const net = world.roads, p = new Float64Array(2);
+  let ring = false;
+  net.forSegsNear(cx - radius, cz - radius, cx + radius, cz + radius, (s) => {
+    if (ring || !(net.segs.cols.flags[s] & SegFlag.Ring)) return;
+    const q = net.quad(s);
+    for (let k = 0; k <= 16 && !ring; k++) { bez(q, k / 16, p); if (Math.hypot(p[0] - cx, p[1] - cz) < radius) ring = true; }
+  });
+  if (ring) return text('road.ring.exists');
+  const half = PROFILE_INFO[RING_PROFILE].right;
+  for (const r of [radius - half, radius, radius + half]) for (let k = 0; k < 48; k++) {
+    const a = (k / 48) * Math.PI * 2;
+    if (heightAt(world.heights, cx + Math.cos(a) * r, cz + Math.sin(a) * r) < SEA_LEVEL + 0.3) return text('road.ring.water');
+  }
+  return '';
+}
+
 export function buildRoundabout(world: World, cx: number, cz: number, radius: number): RoadJournal | null {
   const net = world.roads;
+  if (roundaboutRefusal(world, cx, cz, radius)) return null;
   const j = new RoadJournal(world, 'rotatória');
   const y = smoothGround(world.heights, cx, cz);
   const cut = radius;
@@ -840,8 +862,11 @@ function conformDisc(j: RoadJournal, world: World, cx: number, cz: number, r: nu
     const d = Math.hypot(worldOfSample(gx) - cx, worldOfSample(gz) - cz);
     if (d > r) continue;
     const k = heightIndex(gx, gz);
+    // as under a road: water is never filled, and a disc high above or deep below the ground leaves it alone
+    const gap = y - 0.06 - h[k];
+    if (h[k] < SEA_LEVEL + 0.3 || gap > ROAD_TUNING.economy.bridgeFrom || gap < -ROAD_TUNING.economy.tunnelFrom) continue;
     const w = d < r - 6 ? 1 : 1 - smooth((d - (r - 6)) / 6);
-    const v = h[k] + (y - 0.06 - h[k]) * w;
+    const v = h[k] + gap * w;
     idx.push(k); before.push(h[k]); after.push(v);
   }
   if (idx.length) j.terrain(new Int32Array(idx), new Float32Array(before), new Float32Array(after), [cx - r, cz - r, cx + r, cz + r]);
