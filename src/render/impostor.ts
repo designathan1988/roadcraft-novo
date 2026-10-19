@@ -11,7 +11,7 @@ const { vec2, vec3, vec4, float, abs, normalize, attribute, normalWorld, step, c
 export const IMP_G = 8;
 const SIZE = 128;
 /** Types with an impostor, in the order of the atlas columns (mixed, cypress, oak, palm). */
-export const IMP_TYPES = 4;
+export const IMP_TYPES = 6;
 /** Centre height and radius of each photographed tree (m, scale 1): measured from its mesh (`impostorFrames`). */
 export const IMP_FRAME: Array<{ cy: number; r: number }> = Array.from({ length: IMP_TYPES }, () => ({ cy: 4, r: 5 }));
 /** Finish id of the tree cards (PMAT.LeafCard). */

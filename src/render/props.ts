@@ -302,10 +302,7 @@ export class PropRenderer {
       const yaw = float(w.bitAnd(uint(4095))).mul(Math.PI * 2 / 4096);
       const variant = float(w.shiftRight(uint(12)).bitAnd(uint(15)));
       const scale = float(w.shiftRight(uint(16)).bitAnd(uint(63))).div(42).add(0.5);
-      // ipê (like roadcraft's flowering trees): part of the variant-3 trees in flower, yellow, purple or pink
-      const isTreeT = step(abs(float(keyRaw.bitAnd(uint(31))).sub(PROP.Tree)), float(0.5));
-      const fh = hash(floor(inst.x).add(floor(inst.z).mul(157)));
-      flowerN = (isTreeT.mul(step(abs(variant.sub(3)), float(0.5))).mul(step(fh, float(0.3))).mul(floor(fh.mul(10)).add(1)));
+      // (the ipê is a model of its own now, its yellow or pink crown in the mesh: no tree is tinted into flower)
       const c = cos(yaw), s = sin(yaw);
       // wire: scale = span length (m), variant = height difference; z goes from 0 to 1 along the span
       const isWire = step(abs(pcol.w.mul(255).sub(PMAT.Wire)), float(0.5));

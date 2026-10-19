@@ -18,6 +18,11 @@ const FROND = tone(0x3e6026, 0x7fa448);
 const BARK = tone(0x4a3c2f, 0x7d6853);
 const PALM_BARK = tone(0x5a4c3e, 0x948268);
 const SHRUB = tone(0x223d1b, 0x4a6e32);
+const HEDGE = tone(0x1f3618, 0x42602c);
+// Roadcraft 4.0's blooms (lowPolyTrees.ts): the ipê's yellow and pink crowns, the flowering bush's tones
+const BLOOM_YELLOW = tone(0xb8892a, 0xe6bd4c);
+const BLOOM_PINK = tone(0x9a5078, 0xd88ab0);
+const FLOWERS = [tone(0xb9b2a4, 0xe8e2d6), tone(0x9c4a68, 0xd0759a), tone(0x8e2f2f, 0xc4524c)];
 const HEART_SHRINK = 0.62;
 
 function random(seed: number): () => number {
@@ -46,6 +51,8 @@ function noise3(x: number, y: number, z: number, seed: number): number {
 }
 
 type Occlusion = (p: THREE.Vector3) => number;
+/** A tone chosen by position (the ipê's bloom over its green under-crown, a bush's flowers). */
+type ToneAt = (p: THREE.Vector3) => Tone;
 const OPEN: Occlusion = () => 1;
 const crownShade = (bottom: number, top: number, radius: number): Occlusion => (p) => {
   const h = Math.min(1, Math.max(0, (p.y - bottom) / Math.max(1e-6, top - bottom)));
@@ -67,16 +74,17 @@ class Builder {
     this.pos.push(x, y, z); this.nrm.push(nx, ny, nz); this.col.push(r, g, b, mat / 255); this.ext.push(u, v, cx, cy);
   }
 
-  tri(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, t: Tone, mat: number, occ: Occlusion = OPEN, jitter = 0.15): void {
+  tri(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, tt: Tone | ToneAt, mat: number, occ: Occlusion = OPEN, jitter = 0.15): void {
     this.n.subVectors(b, a).cross(this.e.subVectors(c, a)).normalize();
     this.c.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+    const t = typeof tt === 'function' ? tt(this.c) : tt;
     const k = Math.min(1, Math.max(0, 0.42 + 0.45 * this.n.y + (this.rng() - 0.5) * jitter));
     const l = occ(this.c);
     const r = (t.dark.r + (t.lit.r - t.dark.r) * k) * l, g = (t.dark.g + (t.lit.g - t.dark.g) * k) * l, bl = (t.dark.b + (t.lit.b - t.dark.b) * k) * l;
     for (const p of [a, b, c]) this.vert(p.x, p.y, p.z, this.n.x, this.n.y, this.n.z, r, g, bl, mat);
   }
 
-  add(geo: THREE.BufferGeometry, m: THREE.Matrix4, t: Tone, mat: number, occ: Occlusion = OPEN, jitter = 0.15): void {
+  add(geo: THREE.BufferGeometry, m: THREE.Matrix4, t: Tone | ToneAt, mat: number, occ: Occlusion = OPEN, jitter = 0.15): void {
     const g = geo.index ? geo.toNonIndexed() : geo.clone();
     g.applyMatrix4(m);
     const p = g.getAttribute('position');
@@ -87,7 +95,7 @@ class Builder {
   }
 
   /** A lumpy crown mass; its heart drawn shrunk and in shade, every third vertex a place for a card. */
-  mass(at: THREE.Vector3, radius: number, squash: THREE.Vector3, t: Tone, seed: number, rough: number, occ: Occlusion, detail = 1): void {
+  mass(at: THREE.Vector3, radius: number, squash: THREE.Vector3, t: Tone | ToneAt, seed: number, rough: number, occ: Occlusion, detail = 1, floor = -Infinity): void {
     const solid = new THREE.IcosahedronGeometry(1, detail);
     const position = solid.getAttribute('position');
     const p = new THREE.Vector3();
@@ -97,10 +105,12 @@ class Builder {
       const big = noise3(p.x * 1.1 + seed * 3.1, p.y * 1.1, p.z * 1.1, seed);
       const small = noise3(p.x * 2.6, p.y * 2.6 + seed * 1.7, p.z * 2.6, seed + 17);
       p.multiplyScalar(radius * (1 + big * rough + small * rough * 0.3)).multiply(squash).add(at);
+      // a floor flattens what hangs below it (a bush sits on the ground)
+      if (p.y < floor) p.y = floor + (p.y - floor) * 0.2;
       position.setXYZ(i, p.x, p.y, p.z);
       if (i % 3 === 0) {
         const n = p.clone().sub(at).normalize();
-        this.leaves.push({ p: p.clone(), n, tone: t, height: Math.min(1, Math.max(0, (p.y - (at.y - top)) / Math.max(1e-6, 2 * top))) });
+        this.leaves.push({ p: p.clone(), n, tone: typeof t === 'function' ? t(p) : t, height: Math.min(1, Math.max(0, (p.y - (at.y - top)) / Math.max(1e-6, 2 * top))) });
       }
     }
     const shrink = new THREE.Matrix4().makeTranslation(at.x, at.y, at.z).multiply(new THREE.Matrix4().makeScale(HEART_SHRINK, HEART_SHRINK, HEART_SHRINK))
@@ -309,4 +319,36 @@ export function buildLeafAtlas(): THREE.Texture {
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.anisotropy = 4;
   return t;
+}
+
+/**
+ * The ipê (Roadcraft 4.0 `lowPolyTrees.ts`): four limbs under a wide, flat crown that blooms above a green
+ * under-crown, in yellow or pink (~9 m).
+ */
+export function ipeTree(lod: TreeLod, bloom: 'yellow' | 'pink', seed = 61): THREE.BufferGeometry {
+  const b = new Builder(seed);
+  const top = new THREE.Vector3((b.rng() - 0.5) * 0.03, 0.44, (b.rng() - 0.5) * 0.03);
+  trunk(b, top, 0.058, 0.036, BARK);
+  if (lod === 0) limbs(b, new THREE.Vector3(top.x, top.y - 0.05, top.z), 4, 0.2, 0.14, 0.022);
+  const flowers = bloom === 'yellow' ? BLOOM_YELLOW : BLOOM_PINK;
+  const toneAt: ToneAt = (p) => (p.y < 0.52 ? LEAF : flowers);
+  b.mass(new THREE.Vector3(top.x, 0.62, top.z), 0.2, new THREE.Vector3(1.25, 0.65, 1.25), toneAt, seed, 0.22, crownShade(0.36, 0.86, 0.3), lod === 0 ? 1 : 0);
+  return b.finish(...cards(lod, 54, 0.46), 9);
+}
+
+/** A flowering bush: a wide, low mass on the ground, flowers on its top (~1.5 m). */
+export function floweringBush(lod: TreeLod, seed = 67): THREE.BufferGeometry {
+  const b = new Builder(seed);
+  const rng = random(seed + 3);
+  const flower = FLOWERS[seed % FLOWERS.length];
+  const toneAt: ToneAt = (p) => (p.y > 0.5 && rng() < 0.3 ? flower : SHRUB);
+  b.mass(new THREE.Vector3(0, 0.42, 0), 0.36, new THREE.Vector3(1.5, 1, 1.3), toneAt, seed, 0.25, crownShade(0, 0.8, 0.55), lod === 0 ? 1 : 0, 0);
+  return b.finish(...cards(lod, 16, 0.62), 1.5);
+}
+
+/** A hedge: a long, smooth, dark mass (~1.3 m tall, 2.5 × 1 m across). */
+export function hedge(lod: TreeLod, seed = 71): THREE.BufferGeometry {
+  const b = new Builder(seed);
+  b.mass(new THREE.Vector3(0, 0.46, 0), 0.4, new THREE.Vector3(2, 1, 0.8), HEDGE, seed, 0.08, crownShade(0, 0.9, 0.8), lod === 0 ? 1 : 0, 0);
+  return b.finish(...cards(lod, 20, 0.56), 1.3);
 }

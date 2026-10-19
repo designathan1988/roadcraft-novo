@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
-import { cypressTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
+import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
 /** Faces por variante: Sign0 … Sign0 + 15. */
@@ -21,6 +21,8 @@ export interface PropDef {
   dist: [number, number, number];
   /** Raio para o recorte. */
   radius: number;
+  /** Other models of the type, drawn for the variants MODELS maps to them (index 1, 2…). */
+  alts?: PropDef[];
 }
 
 const m4 = new THREE.Matrix4();
@@ -63,8 +65,17 @@ const oak = () => cardTree(oakTree, 2, 7);
 const palm = () => cardTree(palmTree, 3, 7);
 
 function bush(): PropDef {
-  return { lods: [shrub(0), shrub(1), null], dist: [130, 420, 0], radius: 1.6 };
+  return {
+    lods: [shrub(0), shrub(1), null], dist: [130, 420, 0], radius: 1.6,
+    alts: [
+      { lods: [floweringBush(0), floweringBush(1), null], dist: [130, 420, 0], radius: 1.6 },
+      { lods: [hedge(0), hedge(1), null], dist: [150, 480, 0], radius: 2 },
+    ],
+  };
 }
+
+/** The ipê of Roadcraft 4.0: impostor columns 4 (yellow) and 5 (pink). */
+const ipe = (bloom: 'yellow' | 'pink', column: number): PropDef => cardTree((lod) => ipeTree(lod, bloom), column, 8);
 
 const CONCRETE = 0xb4b0a8;
 
@@ -380,7 +391,8 @@ function barrier(): PropDef {
 
 /** Malhas de perto das árvores, para fotografar os impostores (na ordem das colunas do atlas). */
 export function impostorSources(defs: PropDef[]): THREE.BufferGeometry[] {
-  return [defs[PROP.Tree].lods[0]!, defs[PROP.Conifer].lods[0]!, defs[PROP.Oak].lods[0]!, defs[PROP.Palm].lods[0]!];
+  return [defs[PROP.Tree].lods[0]!, defs[PROP.Conifer].lods[0]!, defs[PROP.Oak].lods[0]!, defs[PROP.Palm].lods[0]!,
+    defs[PROP.Tree].alts![0].lods[0]!, defs[PROP.Oak].alts![0].lods[0]!];
 }
 
 /** Carro estacionado: mesmas proporções dos carros da rua; a pintura vem da variante. */
@@ -457,7 +469,7 @@ function person(): PropDef {
 /** Todas as peças, na ordem dos tipos. */
 export function buildPropDefs(): PropDef[] {
   const defs: PropDef[] = [];
-  defs[PROP.Tree] = tree();
+  defs[PROP.Tree] = { ...tree(), alts: [ipe('yellow', 4)] };
   defs[PROP.Conifer] = conifer();
   defs[PROP.Bush] = bush();
   defs[PROP.Lamp] = lamp(false);
@@ -473,7 +485,7 @@ export function buildPropDefs(): PropDef[] {
   defs[PROP.Pole] = pole();
   defs[PROP.Ground] = ground();
   defs[PROP.Person] = person();
-  defs[PROP.Oak] = oak();
+  defs[PROP.Oak] = { ...oak(), alts: [ipe('pink', 5)] };
   defs[PROP.Palm] = palm();
   if (defs.length !== PROP_TYPES) throw new Error('tipos de peça');
   return defs;
@@ -505,12 +517,22 @@ const SPLIT: Record<number, number[]> = {
   [PROP.Sign]: Array.from({ length: VARIANTS }, (_, v) => (v === SIGN.Name ? 1 : 0)),
 };
 
+/**
+ * Types whose variants are other models (PropDef.alts): variant → model (0 = the type's own). The generator gives trees
+ * and bushes variants 0..3: tree 3 is the yellow ipê, oak 3 the pink ipê, bush 2 the flowering bush, bush 3 the hedge.
+ */
+const MODELS: Record<number, number[]> = {
+  [PROP.Tree]: Array.from({ length: VARIANTS }, (_, v) => (v === 3 ? 1 : 0)),
+  [PROP.Oak]: Array.from({ length: VARIANTS }, (_, v) => (v === 3 ? 1 : 0)),
+  [PROP.Bush]: Array.from({ length: VARIANTS }, (_, v) => (v === 2 ? 1 : v === 3 ? 2 : 0)),
+};
+
 /** Kind of each (type, variant): index = type × VARIANTS + variant. The same table on the CPU and in the cull pass. */
 export function propKindTable(): { kindOf: Uint32Array; count: number } {
   const kindOf = new Uint32Array(PROP_TYPES * VARIANTS);
   let k = 0;
   for (let t = 0; t < PROP_TYPES; t++) {
-    const split = SPLIT[t];
+    const split = SPLIT[t] ?? MODELS[t];
     const subs = split ? Math.max(...split) + 1 : 1;
     for (let v = 0; v < VARIANTS; v++) kindOf[t * VARIANTS + v] = k + (split ? split[v] : 0);
     k += subs;
@@ -574,6 +596,10 @@ export function buildPropKinds(defs: PropDef[]): { kinds: PropKind[]; kindOf: Ui
   const kinds: PropKind[] = [];
   defs.forEach((d, type) => {
     const split = SPLIT[type];
+    if (MODELS[type]) {
+      for (const m of [d, ...(d.alts ?? [])]) kinds.push({ type, lods: m.lods, dist: m.dist, radius: reachOf(m.lods) });
+      return;
+    }
     if (!split) { kinds.push({ type, lods: d.lods, dist: d.dist, radius: reachOf(d.lods) }); return; }
     const subs = Math.max(...split) + 1;
     for (let s = 0; s < subs; s++) {
