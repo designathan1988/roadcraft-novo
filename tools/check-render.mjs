@@ -55,6 +55,22 @@ const SCENARIOS = {
     const again = (await drawCounts())[slot * 5 + 1];
     check('the same trees are drawn the next frames', again === shown, 'frame after: ' + again + ', before: ' + shown);
   `,
+  // E28: equipment on top of a 60-floor tower is drawn when the camera is high above it
+  'rooftop-props': `
+    await g.view(0, 0, 0, 80, 330, 11);
+    await frames(10);
+    const ground = w.tileMax[Math.floor(10 / 2) * 10 + 5];
+    // condensers (furniture variant 9) on a roof 200 m up, under the camera
+    const roof = [];
+    for (let i = 0; i < 20; i++) roof.push({ x: (i % 5) * 3, z: Math.floor(i / 5) * 3, y: ground + 200, type: 11, variant: 9 });
+    putProps(roof);
+    await frames(8);
+    const kind = P.kindOf[11 * 16 + 9], mesh = P.slotMesh[kind * 3];
+    const eye = g.rig.eye.y - ground;
+    check('rooftop condensers 200 m up are drawn with the eye ' + Math.round(eye) + ' m up', mesh && mesh.visible, 'their draw is switched off');
+    const d = await drawCounts();
+    check('the cull pass keeps them', d[(kind * 3) * 5 + 1] >= 20, 'count ' + d[(kind * 3) * 5 + 1]);
+  `,
 };
 
 const pick = process.argv.slice(2);

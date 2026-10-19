@@ -12,7 +12,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, buildPropKinds, propCastsShadow, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, propCastsShadow, propCullRadius, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -53,6 +53,8 @@ export class PropRenderer {
   private kindNearDue = true;
   /** Instances per kind of each cell that holds props. */
   private cellKinds = new Map<number, Uint32Array>();
+  /** Highest point any held prop of a cell reaches (rooftop equipment on towers), −∞ without props. */
+  private cellTop = new Float32Array(CELL_COUNT).fill(-Infinity);
   private kindOf: Uint32Array;
   private data = new Float32Array(CAP * 4);
   private extra = new Uint32Array(CAP).fill(PROP_FREE);
@@ -527,11 +529,15 @@ export class PropRenderer {
   private countKinds(c: number, p: PropColumns): void {
     this.forgetKinds(c);
     const n = new Uint32Array(KINDS);
+    let top = -Infinity;
     for (let i = 0; i < p.count; i++) {
       const type = p.extra[i] & 31;
       if (type >= PROP_TYPES) continue;
-      n[this.kindOf[type * VARIANTS + ((p.data[i * 4 + 3] >>> 12) & 15)]]++;
+      const k = this.kindOf[type * VARIANTS + ((p.data[i * 4 + 3] >>> 12) & 15)];
+      n[k]++;
+      top = Math.max(top, p.data[i * 4 + 1] + propCullRadius(this.kinds[k], p.data[i * 4 + 3]));
     }
+    this.cellTop[c] = top;
     this.cellKinds.set(c, n);
     this.kindNearDue = true;
   }
@@ -554,6 +560,7 @@ export class PropRenderer {
     const n = this.cellKinds.get(c);
     if (!n) return;
     this.cellKinds.delete(c);
+    this.cellTop[c] = -Infinity;
     this.kindNearDue = true;
   }
 
@@ -686,8 +693,13 @@ export class PropRenderer {
     const w = this.world;
     const tx = Math.min(MAP_TILES - 1, Math.max(0, tileX(camPos.x))), tz = Math.min(MAP_TILES - 1, Math.max(0, tileX(camPos.z)));
     let top = -Infinity;
-    for (let j = Math.max(0, tz - 1); j <= Math.min(MAP_TILES - 1, tz + 1); j++) for (let i = Math.max(0, tx - 1); i <= Math.min(MAP_TILES - 1, tx + 1); i++) top = Math.max(top, w.tileMax[tileId(i, j)]);
-    const nearest = Math.min(TILE_SIZE, camPos.y - top - 60);
+    for (let j = Math.max(0, tz - 1); j <= Math.min(MAP_TILES - 1, tz + 1); j++) for (let i = Math.max(0, tx - 1); i <= Math.min(MAP_TILES - 1, tx + 1); i++) top = Math.max(top, w.tileMax[tileId(i, j)] + 60);
+    // and the highest prop held in those tiles (equipment on a 60-floor roof is 200 m up, not 60)
+    const per = TILE_SIZE / CELL_SIZE;
+    for (let cz = Math.max(0, (tz - 1) * per); cz < Math.min(MAP_CELLS, (tz + 2) * per); cz++) {
+      for (let cx = Math.max(0, (tx - 1) * per); cx < Math.min(MAP_CELLS, (tx + 2) * per); cx++) top = Math.max(top, this.cellTop[cz * MAP_CELLS + cx]);
+    }
+    const nearest = Math.min(TILE_SIZE, camPos.y - top);
     for (let k = 0; k < DRAWS; k++) { const m = this.slotMesh[k]; if (m) m.visible = this.distArr[k] > nearest; }
     this.usedU.value = this.blocks.highBlock * BLOCK;
     renderer.compute(this.reset);
