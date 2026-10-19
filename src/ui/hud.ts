@@ -493,6 +493,8 @@ export class Hud {
   // ================================================================ popovers
   private toggle(id: PopId, anchor: HTMLElement): void {
     if (this.popId === id) { this.closePop(); return; }
+    // another menu open: it closes (and its button goes out) first
+    if (this.popId) this.closePop();
     this.popId = id;
     this.popAnchor = anchor;
     this.fillPop(id);
