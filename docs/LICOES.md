@@ -73,7 +73,8 @@ O relatório é sobre o código abandonado; 90 % dele não se aplica a este moto
 pode repeti-los no motor novo, e cada um foi visto lá linha a linha:
 1. **Cache de sombra invalidado pela matriz da câmera** em vez de pelo conjunto de projetores; vegetação que balança
    tratada como "sempre em movimento" mesmo sem vento; um efeito (`fx.busy`) forçando redesenho total por 12-50 s
-   depois de acabar. Aqui: cascata só redesenha quando um projetor dela mudou; vento zero = estático.
+   depois de acabar. A meta aqui: cascata só redesenha quando um projetor dela mudou; vento zero = estático. **Ainda não
+   feito:** as 3 cascatas são redesenhadas todo quadro (E19) e as árvores balançam com vento zero (E29) (lista de defeitos `DEFEITOS-roadcraft-novo.md`, 2026-10-19).
 2. **Peças pequenas instanciadas uma a uma** (caixas de 4-24 vértices, um `InstancedMesh` por tipo × banda × trecho,
    ~28 materiais; veículos com centenas de lotes por estilo × peça × nível; multidão com um material por classe ×
    item × nível). Medido pelo jogador: 2,6 ms instanciadas contra 0,6 ms unidas. Aqui: peça pequena vai unida na
@@ -84,10 +85,12 @@ pode repeti-los no motor novo, e cada um foi visto lá linha a linha:
    MSAA 8× em RGBA16F com SMAA por cima, ruído de desgaste com 40-48 `sin` por pixel, vidro e terreno desenhados
    antes do que os cobre (sem early-Z), passes de tela cheia não fundidos, névoa em raymarch de 36 passos. Aqui:
    opacos baratos primeiro, vidro e água por último; ruído assado em textura; um passe de saída.
-5. **LOD recalculado todo quadro sem dirty flag** (olho, frustum, escala iguais → devia pular). Aqui: `CellLayer`
-   compara antes de refazer.
+5. **LOD recalculado todo quadro sem dirty flag** (olho, frustum, escala iguais → devia pular). A meta aqui: `CellLayer`
+   compara antes de refazer. **Ainda não feito:** todas as placas e ladrilhos são visitados a cada quadro nas 3
+   camadas (E3) (lista de defeitos `DEFEITOS-roadcraft-novo.md`, 2026-10-19).
 6. **Laço de quadro em taxa cheia parado e minimizado** (40-124 quadros/s sem nada se mover; 4-16 ms/quadro com a
-   janela minimizada no Electron). Aqui: desenha quando algo visível muda; minimizado não desenha.
+   janela minimizada no Electron). A meta aqui: desenha quando algo visível muda; minimizado não desenha. **Ainda não feito:** o jogo desenha todo quadro,
+   parado ou minimizado (E20) (lista de defeitos `DEFEITOS-roadcraft-novo.md`, 2026-10-19). O som já para com a janela escondida (B55).
 7. **Invalidação errada refazendo o mapa** (uma pincelada de terreno zerava a região e refazia tudo; um bloco de via
    reconstruía 15 tiles vizinhos; a folha de placas repintada inteira; desgaste re-assando a célula inteira). Aqui:
    teste de escala por contagem: uma edição custa o mesmo numa cidade de N e de 4N.

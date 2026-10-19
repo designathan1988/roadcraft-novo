@@ -31,8 +31,9 @@ Atualizado: 2026-10-18, 22h35.
   `npm run package:web` (zip de 22,5 MB, ainda exige Node), `fotos:pacote`/`fotos:navegador`. Visto no teste:
   na vista cidade os prédios longe são caixas lisas de cor chapada (devolvido à sessão de prédios).
 - 22h35: funcionalidades completas (`957a471`): transporte com passageiros, nós impossíveis contados, roteiros em
-  modo livre (correção das 10 falhas), pose com id de aparência. Em `main`: tsc limpo, 102 testes,
-  **`verificar.mjs` 146/146**, budget ok. Frentes novas: funcionalidades → escala 16/20/24 km (`docs/ESCALA.md`);
+  modo livre (correção das 10 falhas), pose com id de aparência (**falso pronto**: o id nunca é lido, só 16 pedestres
+  diferentes; defeito C20 da lista de 2026-10-19). Em `main`: tsc limpo, 102 testes,
+  **`verificar.mjs` 146/146**, budget ok (o 146/146 não pega os defeitos críticos da lista de 2026-10-19: G1). Frentes novas: funcionalidades → escala 16/20/24 km (`docs/ESCALA.md`);
   ex-pessoas → zip sem Node e teste de jogador no `.exe` (`docs/DEFEITOS.md`); interface → ligar ações novas,
   nós impossíveis, painel de linhas, textos nos dicionários; vias → cancela e placas de nome.
 
@@ -53,6 +54,11 @@ Atualizado: 2026-10-18, 22h35.
   lockfile). Num worktree novo: `cmd /c mklink /J node_modules C:\Users\Jonathan\Documents\Projects\roadcraft-novo\node_modules`.
 - `npx tsc` · `npm test` · `npx vite build` · `node tools/fotos.mjs [pasta]` (Electron com a GPU, 4 vistas fixas
   na cidade gerada de 10 km; abrir cada PNG com Read) · `node tools/verificar.mjs` (146 verificações no jogo).
+- Conferências no jogo com pasta de usuário própria (nunca o save do jogador), cada uma sai com código 1 se algo
+  falha: `node tools/check-save.mjs` (salvar, falhar, carregar, fechar e reabrir) · `node tools/check-user-data.mjs`
+  (as execuções de teste não tocam a pasta do jogo) · `node tools/check-interface.mjs [cenário…]` (um cenário por
+  defeito da interface, clicando os botões e apertando as teclas de verdade). Todas sobre `dist/` (`npx vite build`
+  antes). `node tools/textos.mjs` confere os dois dicionários.
 - Nunca o navegador embutido do app. Playwright só com `channel: 'chrome'`.
 
 ## Frentes abertas (uma sessão por frente, cada uma num worktree e nos seus arquivos; quem integra em `main` lê o

@@ -6,22 +6,28 @@ seus dicionários (`data/textos-roadcraft/pt-BR.ts`, 1.760 linhas: cada chave é
 que o motor chegou. Estado aqui: ✅ existe e foi visto · 🟡 existe, mas abaixo do Roadcraft · ❌ falta.
 Quem termina um item põe ✅, o commit e o nome da foto.
 
-## 1. Interface (a do Roadcraft, não a do motor) — ✅ (ramo da interface, commits 9c833c2…; fotos `test-results/interface/*.png` e `test-results/nome/*.png` por `node tools/fotos-interface.mjs`). Ainda 🟡: aviso de nós impossíveis na barra (o motor não conta), abas Modelos/Fachada/Telhado/Peças/Cores do construtor (sessão de prédios).
+## 1. Interface (a do Roadcraft, não a do motor) — ✅ (ramo da interface, commits 9c833c2…; fotos `test-results/interface/*.png` e `test-results/nome/*.png` por `node tools/fotos-interface.mjs`). Correções de 2026-10-19 (ramo `area/interface`, roteiro `node tools/check-interface.mjs`): aviso de nós impossíveis na barra ✅ (B40); abas do construtor com ponto de encaixe `Hud.registerBuilderTab` ✅, o conteúdo é da sessão de prédios (🟡 até lá); bloco "IMPOSSÍVEL DE CONSTRUIR" no inspetor de nó 🟡 (`ui/inspector.ts`, outra sessão).
 - Dock de baixo com 7 categorias e teclas: Vias (1), Zonas (Z), Construir (H), Paisagem (T), Transporte (O),
   Demolir (B), Informação (I); gaveta de cada uma com abas e opções; dicas de ferramenta; dicas para toque.
 - Barra de cima: céu (dia, noite, ciclo), relógio, dinheiro, aviso de nós impossíveis, contagens, velocidade
   (pausa, 1×, 2×, 4×), Interior, Camadas, Simulação, Câmera, desfazer, refazer, Ajuda, Menu. A contagem dos nós
-  impossíveis existe na lógica ✅ (`roads/impossible.ts`, `hudActions.impossibleNodes/impossibleAngle/impossibleList`;
-  foto `nos-impossiveis.png`: 36 na cidade gerada de 10 km, o mostrado com 17°): falta a interface ligar.
-- Menu: novo, abrir, salvar mapa; Gráficos; Idioma (pt-BR, en); Pintura regional; Sobre.
+  impossíveis existe na lógica ✅ (`roads/impossible.ts`) e na barra ✅ (commit do B40: o aviso vermelho com a contagem;
+  o clique leva a câmera a cada nó e abre o inspetor; foto `test-results/interface-b/nos-impossiveis.png`, 36 a 38 na
+  cidade gerada de 10 km).
+- Menu: novo, tela inicial (semente e tamanho do mapa ✅ B43), gerar, abrir, salvar, exportar; Gráficos; Idioma (pt-BR, en);
+  Pintura regional; Sobre. Teclas do 4.0 ✅: Ctrl+O, Ctrl+D, Home, Shift+Q/E, F8 (desenvolvedor); a ajuda (F1) é lida da
+  tabela de teclas (`ui/keys.ts`).
 - Painéis: inspetor de via, de nó e de cruzamento (`ui/roads/*`), catálogo de vias com cartões desenhados, editor de
   seção transversal (Streetmix), painel de conectores de faixa, painel do cruzamento, workspace do construtor
-  (`ui/builder/*`), painel de gráficos, saúde (F9), bússola, ajuda.
-- Visual: `src/ui/v2/shell.css` e `src/ui/app.css` do Roadcraft; textos dos dois dicionários.
+  (`ui/builder/*`), painel de gráficos, saúde (F9, só para desenvolvedor: `?dev`; abas Saúde, Mudanças, Estado), bússola,
+  ajuda.
+- Visual: `src/ui/v2/shell.css` e `src/ui/app.css` do Roadcraft. Textos nos dois dicionários: 🟡 — a interface e
+  `game.ts` ✅ (teste `test/texts.test.ts` reprova frase solta); `src/tools`, `src/world`, `src/roads` ainda escrevem
+  em português (as chaves `tools.*`/`refuse.*` já estão nos dicionários; a troca no código é das sessões donas).
 
 ## 2. Vias — ✅ quase tudo no motor; conferir contra o catálogo e o editor do Roadcraft
 - Traçado reto, curva, livre, quarteirões, rotatória; encaixe 90/45/15° e grade; altura (ponte, viaduto, túnel,
-  corte com talude ou muro); recusas com motivo; prévia com custo e trechos.
+  corte com talude ou muro); recusas com motivo; prévia com trechos (🟡 a prévia **não** mostra o custo: defeito D39).
 - Catálogo: 31 modelos em Ruas, Avenidas, Rodovias, Especiais, Trilhos, Meus modelos; editor de seção faixa a
   faixa com validação; materiais da pista (asfalto, concreto, paralelepípedo, bloquete, pedra portuguesa, grama).
 - Edições: melhorar (Shift = rua inteira), conta-gotas, mover nó, dividir, unir, inverter, duplicar, zebra e
@@ -48,11 +54,11 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 - Demanda baixa/normal/pico; % de tráfego e pessoas; pausa e velocidades; mapa de congestionamento; métricas;
   seguir veículo; pedestres nas calçadas e saindo das portas; bicicletas.
 - Ônibus (pontos, terminais, linhas), trem e metrô (trilhos, estações, linhas). ✅ como o Roadcraft: linha de
-  ônibus vai e volta (as paradas da volta do outro lado da rua, as pontas terminais; `hudActions.lineLoop(true)`
-  deixa circular), cor da linha e ± veículos como comandos (`hudActions.lineColor`, `buses`), passageiros de
-  verdade (pedestres andam até a parada, esperam, embarcam e descem a pé; demanda por parada), trem em laço
-  próprio com cancela: a passagem de nível fecha com o trem a 160 m e nenhum carro entra (estado no buffer de
-  sinais: 128 | braços de trilho; o desenho da cancela é da sessão de vias). Foto `transporte-cancela.png`.
+  ônibus vai e volta (as paradas da volta do outro lado da rua, as pontas terminais), circular e cor da linha com
+  botões no painel de transporte ✅ (só desde o B39; antes não havia botão), ± veículos; passageiros 🟡 (esperam e
+  embarcam, mas **não** andam até a parada nem descem a pé: somem e aparecem no cruzamento, defeito C25); trem em
+  laço próprio com cancela 🟡 (fecha com o trem a 160 m, mas **só perto da câmera**, defeito C32; o desenho da
+  cancela é da sessão de vias). Foto `transporte-cancela.png`.
 
 ## 4. Zonas, lotes e crescimento — ✅ no motor
 - Zonas R/C/I/misto × densidade; pincel, quadra inteira, tirar; lotes propostos ao longo das vias.
