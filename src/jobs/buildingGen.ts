@@ -161,7 +161,7 @@ function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
     const fc = mb.curFac, kind = fc[2] & 3;
     if (opensWindows(fc, wallMat)) {
       windowDetail(detailOut, f, x0, x1, z0, z1, y0, y1, mb.curBase, (fc[2] & 4) !== 0, colW, (fc[2] >> 3) / 10 + 2.5, fc[0], fc[1], skip);
-    } else if (fc[3] > 0 && kind === Facade.Curtain) curtainFins(detailOut, f, x0, x1, z0, z1, y0, y1, colW * 2);
+    } else if (fc[3] > 0 && kind === Facade.Curtain) curtainFins(detailOut, f, x0, x1, z0, z1, y0, y1, colW, skip, mb.curBase, (fc[2] >> 3) / 10 + 2.5, CURTAIN_MULLIONS[(fc[1] + fc[0] * 256) % 4]);
     return;
   }
   const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]]; // frente, direita, fundo, esquerda
@@ -1306,18 +1306,25 @@ function windowDetailWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx:
 }
 
 /** Vidro inteiriço: montantes verticais (aletas de alumínio) entre os painéis, na altura toda da parede. */
-function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, span: number): void {
+function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, colW: number,
+  skip: number, base: number, fh: number, col: number): void {
+  // 4.0 curtain (facadeKit.ts:235-247): a fin 14 cm wide, 20 cm proud, at every bay's edge (the shader's mullions), a
+  // transom half as proud at every slab, in the mullions' colour
   blank(mb);
   const corners: Array<[number, number]> = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
   const normals: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
   for (let k = 0; k < 4; k++) {
+    if (skip & (1 << k)) continue;
     const [ax, az] = corners[k], [bx, bz] = corners[(k + 1) & 3];
     const len = Math.hypot(bx - ax, bz - az);
-    const n = Math.max(1, Math.round(len / span)), cw = len / n;
-    const dx = (bx - ax) / len, dz = (bz - az) / len;
-    for (let c = 1; c < n; c++) ledge(mb, f, ax, az, dx, dz, normals[k][0], normals[k][1], c * cw - 0.05, c * cw + 0.05, y0, y1, 0.22, 0x9aa3a8);
+    const n = Math.max(1, Math.round(len / colW)), cw = len / n;
+    const dx = (bx - ax) / len, dz = (bz - az) / len, [nl, ml] = normals[k];
+    for (let c = 1; c < n; c++) ledge(mb, f, ax, az, dx, dz, nl, ml, c * cw - 0.07, c * cw + 0.07, y0, y1, 0.2, col, LEDGE_JAMB | 2);
+    for (let y = base + Math.ceil((y0 - base) / fh + 1e-3) * fh; y < y1 - 0.1; y += fh) ledge(mb, f, ax, az, dx, dz, nl, ml, 0, len, y - 0.04, y + 0.04, 0.1, col, LEDGE_SILL);
   }
 }
+/** The 4.0 curtain walls' mullion colours (signature.ts:150-152), by the facade's seed as render/city.ts picks them. */
+const CURTAIN_MULLIONS = [0xd5dadd, 0x5a6168, 0xe8efee, 0xcfd6d3];
 
 /** Faces de uma peça saliente: 1 frente, 2 topo, 4 base, 8 pontas. */
 const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4, LEDGE_JAMB = 1 | 8;

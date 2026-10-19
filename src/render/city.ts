@@ -156,6 +156,11 @@ function band(lo: Node, hi: Node, x: Node, w: Node): Node {
 
 /** Window and trim per style, for the shader. */
 const ARCH_WIN = T.uniformArray(facadeWindowTable().map(([a, b, c, d]) => new THREE.Vector4(a, b, c, d)), 'vec4');
+/** 4.0 curtain wall colours (signature.ts:150-152), linear: per palette glass at the head, glass at the sill, mullion, spandrel (blue, dark, teal, green). */
+const CURTAINS = T.uniformArray([
+  0x9fc0d6, 0x5f8099, 0xd5dadd, 0x6c7f8c, 0x4b5a66, 0x222b33, 0x5a6168, 0x1b2127,
+  0x7fc2c4, 0x2f6f73, 0xe8efee, 0x2b5557, 0x8fb3ae, 0x557a76, 0xcfd6d3, 0x5d736f,
+].map((h) => { const c = new THREE.Color(h).convertSRGBToLinear(); return new THREE.Vector4(c.r, c.g, c.b, 1); }), 'vec4');
 /** The 4.0 plinth's stone (PLINTH_MATERIAL 0x7f786d), linear. */
 const PLINTH_RGB = new THREE.Color(0x7f786d).convertSRGBToLinear().toArray();
 const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a.trim).convertSRGBToLinear(); return new THREE.Vector4(c.r, c.g, c.b, 1); }), 'vec4');
@@ -231,7 +236,13 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const shutW = min(ww.sub(0.02), float(1).sub(ww.mul(2)).mul(0.45));
   const shutter = max(band(ww.sub(shutW), ww.sub(0.01), fx, wu), band(float(1).sub(ww).add(0.01), float(1).sub(ww).add(shutW), fx, wu))
     .mul(band(wLow, wHigh, fy, wy)).mul(hasShutters).mul(step(float(0.25), rnd2));
-  const curtainGlass = band(float(0.02), float(0.98), fract(fuv.x), fwidth(fuv.x).add(1e-4)).mul(band(float(0.24), float(0.98), fy, wy));
+  // 4.0 curtain wall (signature.ts:149-156, facadeKit.ts:235-247): a mullion at every bay's edge, the spandrel panel
+  // at the foot of each storey (18 %) under a transom, the glass graded from light at the head to dark at the sill
+  const cfx = fract(fuv.x), cw = fwidth(fuv.x).add(1e-4);
+  const curtainGlass = band(float(0.03), float(0.97), cfx, cw).mul(band(float(0.205), float(0.985), fy, wy));
+  const ck = int(mod(seed, 4)).mul(4);
+  const cGlassA = CURTAINS.element(ck).xyz, cGlassB = CURTAINS.element(ck.add(1)).xyz, cMull = CURTAINS.element(ck.add(2)).xyz, cSpand = CURTAINS.element(ck.add(3)).xyz;
+  const cMullAmt = float(1).sub(band(float(0.03), float(0.97), cfx, cw).mul(band(float(0.016), float(0.977), fy, wy).mul(float(1).sub(band(float(0.18), float(0.205), fy, wy)))));
   let win: Node = select(kind.lessThan(0.5), punched, select(kind.lessThan(1.5), curtainGlass, select(kind.lessThan(2.5), houseWin, strip)));
   // the shop window and the sign above it
   const shopWin = band(float(0.05), float(0.95), fx, wu).mul(band(float(0.05), float(0.76), fy, wy));
@@ -316,7 +327,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const cosV = clamp(dot(V.negate(), n), 0, 1);
   const F = float(0.04).add(float(0.96).mul(pow(float(1).sub(cosV), 5)));
   const skyRefl = mix(vec3(0.34, 0.4, 0.46), vec3(0.62, 0.7, 0.78), clamp(V.y.negate().add(0.3), 0, 1)).mul(float(1).sub(night.mul(0.92)));
-  const glassTint = select(isCurtain.greaterThan(0.5), base.mul(0.35), vec3(0.03, 0.04, 0.05));
+  const glassTint = select(isCurtain.greaterThan(0.5), mix(cGlassB, cGlassA, clamp(fy.sub(0.2).div(0.78), 0, 1)).mul(0.45), vec3(0.03, 0.04, 0.05));
   const refl = max(F, 0.2);
 
   // far: the facade's average before the window has few pixels (the fine pattern shimmered with TRAA)
@@ -329,7 +340,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const insideAmt = mix(mix(vec3(0.07, 0.065, 0.06), vec3(1.0, 0.88, 0.64).mul(avgLit).mul(0.42), night), inside, max(detail, isGlass));
 
   // curtain wall spandrels: opaque, the glass colour darkened
-  const wallC = select(isCurtain.greaterThan(0.5), base.mul(0.55), base);
+  const wallC = select(isCurtain.greaterThan(0.5), mix(cSpand, cMull, cMullAmt.mul(detail)), base);
   const signC = mix(vec3(0.85, 0.2, 0.15), vec3(0.15, 0.4, 0.85), rnd).mul(mix(float(1), float(0.6), step(float(0.5), rnd2)));
   // surround and shutters (only where there is a real window, not on the curtain wall)
   const archMask = bayOn.mul(hasWin).mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(step(float(0), yy)).mul(float(1).sub(inShop)).mul(detail);

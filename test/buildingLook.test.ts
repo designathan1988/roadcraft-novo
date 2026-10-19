@@ -219,3 +219,17 @@ test('janela 1b: every pane has the 4.0 frame in front of it (border, mullion, t
   assert.ok(checked > 50, `${checked} panes`);
   assert.deepEqual(missing, []);
 });
+
+test('vidro 1c: curtain walls stand the 4.0 fins and transoms, in the mullion colour of a 4.0 palette', () => {
+  const w = new World();
+  w.heights.fill(10);
+  const b = emptyBoxes(12);
+  // towers of every style: the glass style (Envidraçado) comes up among them
+  for (let i = 0; i < 12; i++) { b.x[i] = 30 + (i % 4) * 60; b.z[i] = 40 + Math.floor(i / 4) * 70; b.w[i] = 30; b.d[i] = 34; b.zone[i] = Zone.Commercial; b.floors[i] = 20; b.seed[i] = 300 + i * 977; b.style[i] = i * 11; }
+  b.count = 12;
+  const md = buildBuildings(w.heights, b, 0, 0, 256, -1)!;
+  const mull = new Set([0xd5dadd, 0x5a6168, 0xe8efee, 0xcfd6d3]);
+  let fins = 0;
+  for (let i = 0; i < md.vertexCount; i++) if (mull.has((md.color[i * 4] << 16) | (md.color[i * 4 + 1] << 8) | md.color[i * 4 + 2])) fins++;
+  assert.ok(fins > 500, `${fins} fin and transom vertices in the 4.0 mullion colours`);
+});
