@@ -1172,6 +1172,11 @@ export class Traffic {
       conn = sim.connToward(lane, ns, bus);
     }
     if (conn < 0) { this.lose(v); this.finish(v); return; }
+    // a level crossing with the barrier down, or someone on the zebra: wait (the far model obeys them too)
+    const ctl = sim.nodeCtl[node];
+    if ((ctl === Ctl.Crossing && this.crossingDown(node) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(lane)]].rail) || (ctl === Ctl.Zebra && this.pedCrossing(node))) {
+      this.schedule(v, this.time + 1); return;
+    }
     // the light: red for this arm, wait for its next green (the far model obeys the lights too)
     if (sim.nodePhases[node] > 0) {
       const arm = sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)];
@@ -1368,10 +1373,19 @@ export class Traffic {
     this.lines.forEach((ln, li) => {
       if (!ln.mode) return;
       for (const v of this.busSets[li]) {
-        if (!this.veh.alive[v] || !c.micro[v]) continue;
+        if (!this.veh.alive[v]) continue;
         if (c.conn[v] >= 0) { const n = sim.conns.cols.node[c.conn[v]]; if (sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1); }
         if (c.lane[v] < 0) continue;
-        let d = sim.laneLen(c.lane[v]) - c.s[v];
+        // a far train has no position on its lane: where it should be by now, from when it entered and when it leaves
+        let s = c.s[v];
+        if (!c.micro[v]) {
+          const L = sim.laneLen(c.lane[v]), span = c.tExit[v] - c.tIn[v];
+          s = span > 0 ? L * Math.min(1, Math.max(0, (this.time - c.tIn[v]) / span)) : L;
+          // its tail is still on the crossing it just went through
+          const back = c.rIdx[v] > 0 ? this.routeAt(v, c.rIdx[v] - 1) : -1;
+          if (back >= 0 && s < c.len[v] && sim.nodeCtl[back] === Ctl.Crossing) this.crossingClosed.set(back, this.time + 1);
+        }
+        let d = sim.laneLen(c.lane[v]) - s;
         for (let k = c.rIdx[v]; k < c.rLen[v] && d < Traffic.CROSSING_REACH; k++) {
           const n = this.routeAt(v, k);
           if (n >= 0 && n < sim.nodeCtl.length && sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1);

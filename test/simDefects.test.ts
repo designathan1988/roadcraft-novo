@@ -571,3 +571,52 @@ test('C31: a car dropping someone off ends its trip (counted) and starts another
   assert.ok(far.kerb > 5, `drop-offs far from the camera: ${far.kerb} (before: only near the camera)`);
   assert.ok(near.kerb <= near.arrived, `near: ${near.kerb} drop-offs but ${near.arrived} trips ended`);
 });
+
+test('C32: level crossing barriers close for trains far from the camera too, and far cars wait at them', async () => {
+  const { World } = await import('../src/world/world.ts');
+  const { planRoad, buildRoad, snap } = await import('../src/roads/build.ts');
+  const { PROFILES } = await import('../src/roads/profiles.ts');
+  const { SimNet, laneId } = await import('../src/sim/lanes.ts');
+  const { Ctl } = await import('../src/roads/control.ts');
+  const { recordOps, mirror } = await import('./simCity.ts');
+  const railId = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.unlimited = true;
+  const ops = recordOps(w);
+  const build = (ax: number, az: number, bx: number, bz: number, prof: number) => {
+    const a = snap(w.roads, ax, az, 8), b = snap(w.roads, bx, bz, 8);
+    buildRoad(w, planRoad(w, a, null, b, prof, 0), a, b, prof);
+  };
+  build(-600, 0, 600, 0, railId); build(0, -400, 0, 400, 0);
+  const sim = new SimNet(); mirror(sim, ops); sim.rebuild(); sim.removedSegs.length = 0;
+  const tr = traffic(sim, 8000, 8000);
+  tr.density = 0;
+  tr.setLines([{ id: 1, color: 3, buses: 1, stops: [-500, 0, 400, 0], mode: 1 }]);
+  let x = -1;
+  for (let n = 0; n < sim.net.nodes.end; n++) if (sim.net.nodes.alive[n] && sim.nodeCtl[n] === Ctl.Crossing) x = n;
+  assert.ok(x >= 0, 'a level crossing');
+  let closed = 0, carWaited = false;
+  const sc = sim.net.segs.cols;
+  for (let i = 0; i < 20 * 300; i++) {
+    tr.step(0.05);
+    if (tr.crossingDown(x)) {
+      closed++;
+      if (closed === 1) {
+        // a far car arrives at the crossing on the road while the barrier is down
+        const road = sim.net.segsOf(x, []).find((s) => sc.profile[s] === 0)!;
+        const lane = laneId(road, sc.b[road] === x ? 1 : -1, 0);
+        const T = inner(tr), c = tr.veh.cols, v = tr.veh.alloc();
+        T.initVehicle(v); c.len[v] = 4.4;
+        const other = sim.net.segsOf(x, []).find((s) => s !== road && sc.profile[s] === 0)!;
+        const far = sc.a[other] === x ? sc.b[other] : sc.a[other];
+        tr.routes[v * 96] = sim.laneFrom(lane); tr.routes[v * 96 + 1] = x; tr.routes[v * 96 + 2] = far;
+        c.rLen[v] = 3; c.rIdx[v] = 1; c.dest[v] = far; c.lane[v] = lane; c.s[v] = sim.laneLen(lane);
+        T.setLaneCount(lane, 1);
+        T.mesoAdvance(v);
+        carWaited = c.lane[v] === lane;
+      }
+    }
+  }
+  assert.ok(closed > 0, 'the barrier never closed for a train away from the camera');
+  assert.ok(carWaited, 'a far car crossed the rails with the barrier down');
+});
