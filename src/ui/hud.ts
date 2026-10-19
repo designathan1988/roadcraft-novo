@@ -512,6 +512,7 @@ export class Hud {
     const signature = `${this.cat}|${this.current}|${this.s.landTab}|${this.s.transitTab}`;
     const scroll = p.strip.scrollLeft;
     p.tabs.replaceChildren(); p.options.replaceChildren(); p.strip.replaceChildren(); p.tools.replaceChildren();
+    p.note = undefined;
     const show = this.open && this.cat !== null && this.cat !== 'info';
     if (show) {
       if (this.cat !== 'roads' && this.cat !== 'transit') this.catalog.visible = false;
@@ -525,6 +526,9 @@ export class Hud {
       }
       if (this.cat === 'transit' && this.current === 'road') { this.catalog.visible = false; }
     } else this.catalog.visible = false;
+    // the tool's note: the drawer's description; a paragraph only in an empty strip (Roadcraft 4.0 v2/shell.ts:1882-1884)
+    if (p.note) this.drawer.setAttribute('aria-description', p.note); else this.drawer.removeAttribute('aria-description');
+    if (p.note && p.strip.childElementCount === 0) p.strip.append(el('p', 'v2-note', p.note));
     this.drawer.hidden = !show || (p.tabs.childElementCount === 0 && p.strip.childElementCount === 0);
     this.toolOptions.hidden = !show || p.options.childElementCount === 0;
     p.strip.classList.toggle('two-rows', p.strip.querySelectorAll('.v2-card').length > 10);

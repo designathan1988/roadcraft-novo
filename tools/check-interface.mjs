@@ -615,7 +615,9 @@ export const SCENARIOS = {
   // the side with more, lots help, water rows only for the river, cloud variation, weather ranges, sign text only for
   // signs with words, street help notes, transit empty state, blocks and roundabout as in 4.0
   'drawers-4.0': `
-    const note = () => (Q('.v2-strip .v2-note') || {}).textContent || '';
+    // what a tool does is the drawer's description (shell.ts:1115-1117); written in the strip only when it is empty
+    const note = () => Q('.v2-drawer').getAttribute('aria-description') || '';
+    const shown = () => (Q('.v2-strip .v2-note') || {}).textContent || '';
     click('[data-cat=roads]'); await frames(2);
     click(byText('.v2-tab', '^Mover|^Move')); await frames(2);
     check('Move says what to do', /Arraste um nó|Drag a node/.test(note()), 'note: ' + note());
@@ -633,6 +635,7 @@ export const SCENARIOS = {
     check('the slider sets the radius', g.roadTool.ringRadius === 40, 'radius ' + g.roadTool.ringRadius);
     click('[data-cat=zones]'); await frames(2); click(byText('.v2-tab', 'Lotes|Lots')); await frames(2);
     check('Lots has its help note', /Crie lotes|Create lots|lot/i.test(note()), 'note: ' + note());
+    check('with cards in the strip the note is not written there', shown() === '', 'paragraph: ' + shown());
     check('the delete card has its short name', !!byText('.v2-card', '^Apagar lotes|^Delete lots'), 'cards: ' + QA('.v2-card').map((c) => c.textContent).join(', '));
     click('[data-cat=landscape]'); await frames(2);
     const water = () => QA('.v2-toolopts .v2-range').some((e) => /Ondas|Waves/.test(e.getAttribute('aria-label')));
@@ -653,6 +656,9 @@ export const SCENARIOS = {
     check('street items have their help note', note().length > 20, 'note: ' + note());
     click(byText('.v2-card', '^Muro|^Wall')); await frames(2);
     check('walls have their help note', /muros|walls/i.test(note()), 'note: ' + note());
+    check('and it is not a paragraph beside the cards', shown() === '', 'paragraph: ' + shown());
+    click('[data-cat=demolish]'); await frames(2);
+    check('an empty strip writes the note (demolish)', shown().length > 10 && shown() === note(), 'paragraph: ' + shown() + ' / ' + note());
     click('[data-cat=transit]'); await frames(2);
     check('no lines yet: the empty state says what to do', /Nenhuma linha|No lines/.test(Q('.v2-strip').textContent), 'strip: ' + Q('.v2-strip').textContent.slice(0, 120));
   `,

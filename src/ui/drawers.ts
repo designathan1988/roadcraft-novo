@@ -170,7 +170,14 @@ export interface DrawerHost {
 }
 
 /** What a render fills. */
-export interface DrawerParts { tabs: HTMLElement; options: HTMLElement; strip: HTMLElement; tools: HTMLElement }
+export interface DrawerParts {
+  tabs: HTMLElement; options: HTMLElement; strip: HTMLElement; tools: HTMLElement;
+  /** What the tool does: the drawer's description, written in the strip only when it is empty (Roadcraft 4.0). */
+  note?: string;
+}
+
+/** What a tool does: in the drawer's tooltip, never as a paragraph beside cards (Roadcraft 4.0 v2/shell.ts:1115-1117). */
+function note(p: DrawerParts, text: string): void { p.note = text; }
 
 const SOON = (): string => t('ui.soon');
 
@@ -231,7 +238,7 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
   }
   // a mode with nothing to pick says what to do (Roadcraft 4.0)
   const help: Partial<Record<Tool, string>> = { move: 'hint.move', split: 'hint.split', inspect: 'hint.control', roundabout: 'hint.roundabout' };
-  if (help[cur]) p.strip.append(el('p', 'v2-note', t(help[cur]!)));
+  if (help[cur]) note(p, t(help[cur]!));
 }
 
 /** Segmented buttons (cut sides, furniture). */
@@ -297,7 +304,7 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
   const lots = section(p.strip, t('zone.lots'));
   const LOTS: Array<[LotMode | 'curve', string, string]> = [['rect', 'zone.lot.shape.rect', 'plus'], ['poly', 'zone.lot.shape.polygon', 'lotPolygon'], ['corner', 'zone.lot.edit', 'lotEdit'],
     ['curve', 'zone.lot.curve', 'lotCurve'], ['front', 'zone.lot.front', 'lotFront'], ['split', 'zone.lot.split', 'split'], ['join', 'zone.lot.join', 'join'], ['delete', 'zone.lot.delete.short', 'lotDelete']];
-  p.strip.append(el('p', 'v2-note', t('zone.lots.help')));
+  note(p, t('zone.lots.help'));
   for (const [mode, key, icon] of LOTS) {
     const on = mode === 'curve' ? s.lotExtra === 'curve' : s.lotExtra === null && s.lotMode === mode;
     const c = card(t(key), on, () => {
@@ -342,7 +349,7 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
   for (const [key, icon, run, on] of tabs) p.tabs.append(tab(t(key), on, run ?? (() => undefined), svg(icon, 18), run ? undefined : t('ui.soon.buildings')));
   if (bt) {
     h.builderTabs.get(bt)!(p.options, b);
-    if (!b) p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
+    if (!b) note(p, t('v2.build.selectToEdit'));
   } else if (editing) {
     if (b) {
       p.options.append(el('div', 'v2-pop-title', `${b.fn ? loose(FN_NAMES[b.fn]) : t(`zone.name.${b.zone}`)} · ${plural('ui.floors', b.floors)}`));
@@ -365,7 +372,7 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
         p.options.append(orow(t('ui.build.decay'), el('span', 'v2-stepper-value v2-decay', `${Math.round(decay * 100)}%`), renovate));
       }
     } else {
-      p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
+      note(p, t('v2.build.selectToEdit'));
       p.options.append(subhead(t('ui.build.next')));
       p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { s.nextArch = Number(v); a.style(s.nextArch); })));
       p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { s.nextFn = Number(v); a.buildingFn(s.nextFn); })));
@@ -529,7 +536,7 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
       })))));
     }
     // what the tool does (Roadcraft 4.0)
-    p.strip.append(el('p', 'v2-note', t(cur === 'barrier' ? (s.barrier === Item.PoleLine ? (s.itemRemove ? 'help.tool.poleRemove' : 'help.tool.pole') : 'help.tool.barrier') : 'help.tool.streetscape')));
+    note(p, t(cur === 'barrier' ? (s.barrier === Item.PoleLine ? (s.itemRemove ? 'help.tool.poleRemove' : 'help.tool.pole') : 'help.tool.barrier') : 'help.tool.streetscape'));
   } else {
     renderPeople(h, p, CLOTHES);
   }
@@ -604,7 +611,7 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
   }
   // no line yet: what to do first, and no empty section (Roadcraft 4.0)
   if (!rows.length) items.parentElement?.remove();
-  p.strip.append(el('p', 'v2-note', rows.length ? t(`ui.transit.help.${now}`) : t('transit.noLines')));
+  note(p, rows.length ? t(`ui.transit.help.${now}`) : t('transit.noLines'));
   // a track is drawn like a road: snapping, height and cut sides
   if (now === 'trainTrack' || now === 'metroTrack') p.options.append(snapRow(h), ...heightRows(h));
   // the chosen line: its colour, and for buses whether it runs out and back or as a ring
@@ -636,5 +643,5 @@ export function renderDemolish(h: DrawerHost, p: DrawerParts): void {
     p.tabs.append(tab(t(key), cur === tool, () => { if (cur !== tool) h.pick(tool); }, svg(icon, 18)));
   }
   if (cur === 'bomb') p.options.append(orow(t('strike.force'), stepper(t('strike.force'), String(s.bomb), (d) => { s.bomb = bombStep(s.bomb, d); a.bombForce(s.bomb); return String(s.bomb); })));
-  p.strip.append(el('p', 'v2-note', t(cur === 'bulldoze' ? 'help.tool.bulldoze' : cur === 'pistol' ? 'help.strike.shoot' : 'help.strike.strike')));
+  note(p, t(cur === 'bulldoze' ? 'help.tool.bulldoze' : cur === 'pistol' ? 'help.strike.shoot' : 'help.strike.strike'));
 }
