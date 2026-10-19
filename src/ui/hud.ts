@@ -271,6 +271,7 @@ export class Hud {
   private rows: LineRow[] = [];
   private rowsKey = '';
   private rowsNums = '';
+  private stripSignature = '';
   private lineNow = 0;
   private picked: BuildingInfo | null = null;
   private peopleShown = false;
@@ -380,6 +381,8 @@ export class Hud {
     const body = el('div', 'v2-drawer-body');
     const strip = el('div', 'v2-strip');
     body.append(strip);
+    // a row that scrolls sideways fades at the side with more in it (Roadcraft 4.0; the look is in shell.css)
+    strip.addEventListener('scroll', (e) => { if (e.target instanceof HTMLElement) fadeEdges(e.target); }, { passive: true, capture: true });
     strip.addEventListener('wheel', (e) => {
       if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { strip.scrollLeft += e.deltaY; e.preventDefault(); }
       e.stopPropagation();
@@ -469,6 +472,9 @@ export class Hud {
   private render(): void {
     for (const [id, b] of this.catButtons) b.classList.toggle('on', this.open && id === this.cat);
     const p = this.parts;
+    // the same panel rebuilt (a pick in it): the strip keeps its scroll (Roadcraft 4.0)
+    const signature = `${this.cat}|${this.current}|${this.s.landTab}|${this.s.transitTab}`;
+    const scroll = p.strip.scrollLeft;
     p.tabs.replaceChildren(); p.options.replaceChildren(); p.strip.replaceChildren(); p.tools.replaceChildren();
     const show = this.open && this.cat !== null && this.cat !== 'info';
     if (show) {
@@ -486,6 +492,9 @@ export class Hud {
     this.drawer.hidden = !show || (p.tabs.childElementCount === 0 && p.strip.childElementCount === 0);
     this.toolOptions.hidden = !show || p.options.childElementCount === 0;
     p.strip.classList.toggle('two-rows', p.strip.querySelectorAll('.v2-card').length > 10);
+    if (signature === this.stripSignature) p.strip.scrollLeft = scroll;
+    this.stripSignature = signature;
+    fadeEdges(p.strip);
     this.root.dataset.tool = this.current;
     this.fitDrawer();
     this.tipCheck();
@@ -873,6 +882,14 @@ export class Hud {
 
   /** The decimal notation of the interface (for panels of other areas). */
   static dec(n: number, d = 1): string { return fmtDec(n, d); }
+}
+
+/** Marks a sideways-scrolling row with the side that has more (data-more: left, right, both). */
+function fadeEdges(box: HTMLElement): void {
+  const more = box.scrollWidth - box.clientWidth;
+  const left = more > 1 && box.scrollLeft > 1, right = more > 1 && box.scrollLeft < more - 1;
+  const v = left && right ? 'both' : left ? 'left' : right ? 'right' : '';
+  if ((box.dataset.more ?? '') !== v) { if (v) box.dataset.more = v; else delete box.dataset.more; }
 }
 
 /** A key code as the player reads it. */

@@ -606,6 +606,62 @@ export const SCENARIOS = {
     const tr = QA('.v2-pop .v2-range').find((e) => /Tráfego|Traffic/.test(e.getAttribute('aria-label')));
     check('simulation sliders run 0-300 %', tr && tr.min === '0' && tr.max === '300', 'range ' + (tr && tr.min + '-' + tr.max));
   `,
+  // The 4.0 drawers (ui/v2/shell.ts): help notes where there is nothing to pick, the strip keeps its scroll and fades at
+  // the side with more, lots help, water rows only for the river, cloud variation, weather ranges, sign text only for
+  // signs with words, street help notes, transit empty state, blocks and roundabout as in 4.0
+  'drawers-4.0': `
+    const note = () => (Q('.v2-strip .v2-note') || {}).textContent || '';
+    click('[data-cat=roads]'); await frames(2);
+    click(byText('.v2-tab', '^Mover|^Move')); await frames(2);
+    check('Move says what to do', /Arraste um nó|Drag a node/.test(note()), 'note: ' + note());
+    click(byText('.v2-tab', '^Controle|^Control')); await frames(2);
+    check('Control says what to do', /cruzamento|junction/i.test(note()), 'note: ' + note());
+    click(byText('.v2-tab', '^Desenhar|^Draw')); await frames(2);
+    click(byText('.v2-choice', 'Quarteir|Blocks')); await frames(2);
+    const ang = byText('.v2-toolopts .v2-stepper .v2-icon', 'Giro.*[+]$|Rotation.*[+]$');
+    for (let k = 0; k < 7; k++) { click(ang); await frames(1); }
+    check('blocks turn past 90° in 15° steps', g.roadTool.blocks.angle === 105, 'angle ' + g.roadTool.blocks.angle);
+    click(byText('.v2-tab', 'Rotatória|Roundabout')); await frames(2);
+    const ring = QA('.v2-toolopts .v2-range').find((e) => /Raio|Radius/.test(e.getAttribute('aria-label')));
+    check('roundabout radius is a slider', !!ring, 'no slider');
+    if (ring) { ring.value = '40'; ring.dispatchEvent(new Event('input', { bubbles: true })); await frames(1); }
+    check('the slider sets the radius', g.roadTool.ringRadius === 40, 'radius ' + g.roadTool.ringRadius);
+    click('[data-cat=zones]'); await frames(2); click(byText('.v2-tab', 'Lotes|Lots')); await frames(2);
+    check('Lots has its help note', /Crie lotes|Create lots|lot/i.test(note()), 'note: ' + note());
+    check('the delete card has its short name', !!byText('.v2-card', '^Apagar lotes|^Delete lots'), 'cards: ' + QA('.v2-card').map((c) => c.textContent).join(', '));
+    click('[data-cat=landscape]'); await frames(2);
+    const water = () => QA('.v2-toolopts .v2-range').some((e) => /Ondas|Waves/.test(e.getAttribute('aria-label')));
+    check('no water rows with the raise brush', !water(), 'water rows shown');
+    click(byText('.v2-card', '^Rio|^River')); await frames(2);
+    check('water rows with the river', water(), 'no water rows');
+    click(byText('.v2-tab', 'Céu|Sky')); await frames(2);
+    check('clouds have the variation slider', QA('.v2-toolopts .v2-range').some((e) => /Variação|Variation/.test(e.getAttribute('aria-label'))), 'no variation');
+    click(byText('.v2-card', '^Clima|^Weather')); await frames(2);
+    const r = (re) => QA('.v2-toolopts .v2-range').find((e) => re.test(e.getAttribute('aria-label')));
+    check('weather ranges as 4.0 (wind 30, direction step 5, lightning 30)', r(/^Vento|^Wind/).max === '30' && r(/Direção|direction/i).step === '5' && r(/Raios|Lightning/).max === '30', 'wind ' + r(/^Vento|^Wind/).max + ', dir step ' + r(/Direção|direction/i).step + ', lightning ' + r(/Raios|Lightning/).max);
+    click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
+    click(byText('.v2-card', '^Placa|^Sign')); await frames(2);
+    const sel = Q('.v2-toolopts select');
+    sel.value = '4'; sel.dispatchEvent(new Event('change')); await frames(2);
+    check('a Stop sign has no text box', !Q('.v2-toolopts .v2-search'), 'text box shown');
+    const sel2 = Q('.v2-toolopts select'); sel2.value = '0'; sel2.dispatchEvent(new Event('change')); await frames(2);
+    check('a speed sign has its text box', !!Q('.v2-toolopts .v2-search'), 'no text box');
+    check('street items have their help note', note().length > 20, 'note: ' + note());
+    click(byText('.v2-card', '^Muro|^Wall')); await frames(2);
+    check('walls have their help note', /muros|walls/i.test(note()), 'note: ' + note());
+    click('[data-cat=transit]'); await frames(2);
+    check('no lines yet: the empty state says what to do', /Nenhuma linha|No lines/.test(Q('.v2-strip').textContent), 'strip: ' + Q('.v2-strip').textContent.slice(0, 120));
+  `,
+  // The strip of a narrow screen: it fades at the side with more and keeps its scroll across a pick (Roadcraft 4.0)
+  'strip-scroll-narrow': { width: 1000, query: '?vazio&hora=11&workers=3', script: `
+    click('[data-cat=landscape]'); await frames(2);
+    click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
+    const strip = Q('.v2-strip');
+    strip.scrollLeft = 120; strip.dispatchEvent(new Event('scroll')); await frames(2);
+    check('a long strip fades at the side with more', !!strip.dataset.more, 'no fade; scroll ' + strip.scrollWidth + ' / ' + strip.clientWidth);
+    click(QA('.v2-strip .v2-card')[16]); await frames(2);
+    check('the strip keeps its scroll after a pick', Q('.v2-strip').scrollLeft > 60, 'scroll ' + Q('.v2-strip').scrollLeft);
+  ` },
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
@@ -636,12 +692,13 @@ async function main() {
     const checks = [];
     for (const body of Array.isArray(bodies) ? bodies : [bodies]) {
       const query = typeof body === 'object' ? body.query : '?vazio&hora=11&workers=3';
+    const width = typeof body === 'object' && body.width ? String(body.width) : '1600';
       const code = typeof body === 'object' ? body.script : body;
       const script = `(async()=>{${PRELUDE}\ntry {${code}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
       const lines = await new Promise((resolve) => {
         const out = [];
         const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), query, script],
-          { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '300' } });
+          { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '300', CIDADE_W: width } });
         p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
         p.on('exit', () => resolve(out));
       });

@@ -121,6 +121,7 @@ export class ShellState {
   skyTool: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
   fogAll = 100;
   cloudCount = 8;
+  cloudVariation = 50;
   weather: WeatherCtl & { manual: boolean } = { rain: 0, wind: 4, dir: 65, lightning: 0, thunder: 1, manual: false };
   water = { waves: 0.3, foam: 0.4, current: 0.5 };
   item: number = Item.Tree;
@@ -201,8 +202,9 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
           stepper(t('palette.blocks.cols'), `${b.cols}`, (d) => { b.cols = Math.max(1, Math.min(12, b.cols + d)); send(); return `${b.cols}`; }),
           stepper(t('palette.blocks.rows'), `${b.rows}`, (d) => { b.rows = Math.max(1, Math.min(12, b.rows + d)); send(); return `${b.rows}`; })),
         orow(t('v2.blocks.measure'),
-          stepper(t('palette.blocks.size'), `${b.size} m`, (d) => { b.size = Math.max(40, Math.min(300, b.size + d * 10)); send(); return `${b.size} m`; }),
-          stepper(t('palette.blocks.angle'), `${b.angle}°`, (d) => { b.angle = Math.max(-90, Math.min(90, b.angle + d * 15)); send(); return `${b.angle}°`; })));
+          stepper(t('palette.blocks.size'), `${b.size} m`, (d) => { b.size = Math.max(30, Math.min(300, b.size + d * 10)); send(); return `${b.size} m`; }),
+          // any heading in 15° steps (Roadcraft 4.0), kept within ±180°
+          stepper(t('palette.blocks.angle'), `${b.angle}°`, (d) => { b.angle = ((b.angle + d * 15 + 180) % 360 + 360) % 360 - 180; send(); return `${b.angle}°`; })));
     }
     p.options.append(snapRow(h));
   }
@@ -222,9 +224,12 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
     p.strip.append(h.catalog.el);
   } else h.catalog.visible = false;
   if (cur === 'roundabout') {
-    // the game answers with the radius (Hud.setRing writes s.ring)
-    p.options.append(orow(t('v2.roundabout.radius'), stepper(t('v2.roundabout.radius'), `${s.ring} m`, (d) => { a.ring(d > 0 ? 1.2 : 1 / 1.2); return `${s.ring} m`; })));
+    // a slider, as Roadcraft 4.0 (the engine's roundabouts are 14 to 60 m); the game answers with the radius (Hud.setRing)
+    p.options.append(range(t('v2.roundabout.radius'), 14, 60, 2, s.ring, (v) => `${v} m`, (v) => a.ring(v / s.ring)));
   }
+  // a mode with nothing to pick says what to do (Roadcraft 4.0)
+  const help: Partial<Record<Tool, string>> = { move: 'hint.move', split: 'hint.split', inspect: 'hint.control', roundabout: 'hint.roundabout' };
+  if (help[cur]) p.strip.append(el('p', 'v2-note', t(help[cur]!)));
 }
 
 /** Segmented buttons (cut sides, furniture). */
@@ -289,7 +294,8 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
   }
   const lots = section(p.strip, t('zone.lots'));
   const LOTS: Array<[LotMode | 'curve', string, string]> = [['rect', 'zone.lot.shape.rect', 'plus'], ['poly', 'zone.lot.shape.polygon', 'lotPolygon'], ['corner', 'zone.lot.edit', 'lotEdit'],
-    ['curve', 'zone.lot.curve', 'lotCurve'], ['front', 'zone.lot.front', 'lotFront'], ['split', 'zone.lot.split', 'split'], ['join', 'zone.lot.join', 'join'], ['delete', 'zone.lot.delete', 'lotDelete']];
+    ['curve', 'zone.lot.curve', 'lotCurve'], ['front', 'zone.lot.front', 'lotFront'], ['split', 'zone.lot.split', 'split'], ['join', 'zone.lot.join', 'join'], ['delete', 'zone.lot.delete.short', 'lotDelete']];
+  p.strip.append(el('p', 'v2-note', t('zone.lots.help')));
   for (const [mode, key, icon] of LOTS) {
     const on = mode === 'curve' ? s.lotExtra === 'curve' : s.lotExtra === null && s.lotMode === mode;
     const c = card(t(key), on, () => {
@@ -420,8 +426,9 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     }
     if (cur === 'river') p.options.append(range(t('ui.river.width'), 6, 60, 1, s.riverWidth, (v) => `${v} m`, (v) => { s.riverWidth = v; a.riverWidth(v); }));
     else p.options.append(radius(), strength());
+    // the water of every river: its rows with the river brush only (Roadcraft 4.0)
     const w = s.water, send = (): void => a.water({ ...w });
-    p.options.append(subhead(t('water.title')),
+    if (cur === 'river') p.options.append(subhead(t('water.title')),
       range(t('water.waves'), 0, 100, 1, Math.round(w.waves * 100), (v) => `${v}%`, (v) => { w.waves = v / 100; send(); }),
       range(t('water.foam'), 0, 100, 1, Math.round(w.foam * 100), (v) => `${v}%`, (v) => { w.foam = v / 100; send(); }),
       range(t('water.current'), 0, 3, 0.1, w.current, (v) => `${fmtDec(v)} m/s`, (v) => { w.current = v; send(); }));
@@ -468,7 +475,8 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
       range(t('cloud.density'), 10, 100, 1, Math.round(st.density * 100), (v) => `${v}%`, (v) => { st.density = v / 100; sendSky(); }),
       subhead(t('cloud.spread')),
       range(t('cloud.count'), 1, 24, 1, s.cloudCount, (v) => String(v), (v) => { s.cloudCount = v; }),
-      orow(t('v2.row.sky'), button('v2-act', t('cloud.scatter'), () => a.scatterClouds(s.cloudCount, 0.5), svg('scatter', 16)),
+      range(t('cloud.variation'), 0, 100, 5, s.cloudVariation, (v) => `${v}%`, (v) => { s.cloudVariation = v; }, t('v2.s.variation')),
+      orow(t('v2.row.sky'), button('v2-act', t('cloud.scatter'), () => a.scatterClouds(s.cloudCount, s.cloudVariation / 100), svg('scatter', 16)),
         button('v2-act danger', t('cloud.clear'), () => a.clearClouds(), svg('trash', 16))));
     } else if (fogOn) {
       p.options.append(orow(t('v2.row.brush'), choices([
@@ -493,10 +501,10 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
       };
       p.options.append(orow(t('ui.weather.mode'), mode),
       range(t('weather.rain'), 0, 100, 1, Math.round(w.rain * 100), (v) => `${v}%`, (v) => { w.rain = v / 100; manual(); }),
-      range(t('weather.wind'), 0, 25, 1, w.wind, (v) => `${v} m/s`, (v) => { w.wind = v; manual(); }),
-      range(t('weather.windDirection'), 0, 359, 1, w.dir, (v) => `${v}°`, (v) => { w.dir = v; manual(); }, t('v2.s.direction')),
+      range(t('weather.wind'), 0, 30, 1, w.wind, (v) => `${v} m/s`, (v) => { w.wind = v; manual(); }),
+      range(t('weather.windDirection'), 0, 355, 5, w.dir, (v) => `${v}°`, (v) => { w.dir = v; manual(); }, t('v2.s.direction')),
       subhead(t('weather.storm')),
-      range(t('weather.lightning'), 0, 12, 1, w.lightning, (v) => String(v), (v) => { w.lightning = v; manual(); }, t('v2.s.lightning')),
+      range(t('weather.lightning'), 0, 30, 1, w.lightning, (v) => String(v), (v) => { w.lightning = v; manual(); }, t('v2.s.lightning')),
       range(t('weather.thunder'), 0, 100, 1, Math.round(w.thunder * 100), (v) => `${v}%`, (v) => { w.thunder = v / 100; manual(); }, t('v2.s.thunder')));
     }
   } else if (now === 'street') {
@@ -510,13 +518,16 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     poles.append(card(t('pole.mode.remove'), poleOn && s.itemRemove, () => { s.itemRemove = true; a.itemRemove(true); s.barrier = Item.PoleLine; a.barrierKind(Item.PoleLine); h.pick('barrier'); h.render(); }, svg('pole_remove', 30)));
     if (cur === 'streetscape' && s.item === Item.Sign) {
       p.options.append(orow(t('v2.row.sign'), select(t('sign.type'), SIGNS.map(([k, key]) => [k, t(key)] as const), s.sign, (v) => { s.sign = Number(v); a.signType(s.sign); h.render(); })));
-      p.options.append(orow(t('v2.row.text'), textInput(t(s.sign === 2 ? 'sign.street.placeholder' : s.sign === 0 ? 'sign.text.speed' : 'sign.text'), s.signText, (v) => { s.signText = v; a.signText(v); })));
+      // words only on the signs that carry them: speed, street name, direction, information (Roadcraft 4.0)
+      if ([0, 2, 9, 10].includes(s.sign)) p.options.append(orow(t('v2.row.text'), textInput(t(s.sign === 2 ? 'sign.street.placeholder' : s.sign === 0 ? 'sign.text.speed' : 'sign.text'), s.signText, (v) => { s.signText = v; a.signText(v); })));
     }
     if (cur === 'barrier' && s.barrier === Item.PoleLine && !s.itemRemove) {
       p.options.append(orow(t('v2.row.lights'), choices((['none', 'alternate', 'all'] as const).map((m, i) => ({
         label: `${t('pole.lamps')}: ${t(`pole.lamps.${m}`)}`, on: s.poleLights === i, run: () => { s.poleLights = i; a.poleLights(i); h.render(); }, icon: svg(`pl_${m}`, 18),
       })))));
     }
+    // what the tool does (Roadcraft 4.0)
+    p.strip.append(el('p', 'v2-note', t(cur === 'barrier' ? (s.barrier === Item.PoleLine ? (s.itemRemove ? 'help.tool.poleRemove' : 'help.tool.pole') : 'help.tool.barrier') : 'help.tool.streetscape')));
   } else {
     renderPeople(h, p, CLOTHES);
   }
@@ -588,7 +599,9 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
       button('v2-icon danger', t('transit.remove'), () => { pickLine(); a.deleteLine(); }, svg('demolish', 14)));
     items.append(row);
   }
-  p.strip.append(el('p', 'v2-note', t(`ui.transit.help.${now}`)));
+  // no line yet: what to do first, and no empty section (Roadcraft 4.0)
+  if (!rows.length) items.parentElement?.remove();
+  p.strip.append(el('p', 'v2-note', rows.length ? t(`ui.transit.help.${now}`) : t('transit.noLines')));
   // a track is drawn like a road: snapping, height and cut sides
   if (now === 'trainTrack' || now === 'metroTrack') p.options.append(snapRow(h), ...heightRows(h));
   // the chosen line: its colour, and for buses whether it runs out and back or as a ring
