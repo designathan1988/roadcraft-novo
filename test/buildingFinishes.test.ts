@@ -69,7 +69,7 @@ test('peças de fachada: mesmo sorteio da malha, determinísticas, variantes 8..
     b.x[i] = 40 + i * 50; b.z[i] = 60; b.w[i] = 24; b.d[i] = 34; b.zone[i] = zone; b.floors[i] = floors; b.seed[i] = 911 + i * 77; b.style[i] = 10 + i * 30;
   });
   b.count = 4;
-  const run = () => { const out: number[] = []; buildBuildingParts(w.heights, b, (v, x, y, z, yaw, s) => out.push(v, x, y, z, yaw, s)); return out; };
+  const run = () => { const out: number[] = []; buildBuildingParts(w.heights, b, (v, x, y, z, yaw, s, kind) => { if (kind === undefined) out.push(v, x, y, z, yaw, s); }); return out; };
   const a = run(), c = run();
   assert.deepEqual(a, c);
   assert.ok(a.length / 6 > 5, `${a.length / 6} peças`);

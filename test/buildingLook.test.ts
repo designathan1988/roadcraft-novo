@@ -212,6 +212,9 @@ test('janela 1b: every pane has the 4.0 frame in front of it (border, mullion, t
     const ys = [g.a[1], g.b[1], g.c[1]], y0 = Math.min(...ys), y1 = Math.max(...ys);
     if (y1 - y0 < 1) continue;
     const ty = y0 + (y1 - y0) * 0.68, c: V3 = [(g.a[0] + g.b[0] + g.c[0]) / 3, ty, (g.a[2] + g.b[2] + g.c[2]) / 3];
+    // a pane cut by the wall's top (no head bar) has its transom where the whole window would have it: not checked
+    const near = (q: V3) => Math.abs(Math.abs(dot(g.n, q) - g.d) - 0.06) < 0.012 && Math.hypot(q[0] - c[0], q[2] - c[2]) < 2;
+    if (!frames.some((q) => Math.abs(q[1] - y1) < 0.01 && near(q))) continue;
     checked++;
     const hit = frames.some((p) => Math.abs(p[1] - ty) < 0.02 * (y1 - y0) + 0.008 && Math.abs(Math.abs(dot(g.n, p) - g.d) - 0.06) < 0.012 && Math.hypot(p[0] - c[0], p[2] - c[2]) < 2);
     if (!hit && missing.length < 5) missing.push(`pane at ${c.map((v) => v.toFixed(1)).join(', ')} without its transom`);
@@ -248,4 +251,22 @@ test('sacada 5: balconies are the 4.0 ones (gourmet slab in the wall x 0.92 with
   }
   assert.ok(gourmet + concrete > 100, `${gourmet} gourmet and ${concrete} balcony slab vertices`);
   assert.ok(p.length > 0);
+});
+
+test('praça: no box trees and no lawn on vertical faces (the lawn is laid by world x, z: stripes)', async () => {
+  const { Fn } = await import('../src/world/arch.ts');
+  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const w = new World();
+  w.heights.fill(10);
+  for (const fn of [Fn.Square, Fn.Park]) for (let seed = 1; seed <= 6; seed++) {
+    const b = emptyBoxes(1);
+    b.x[0] = 128; b.z[0] = 128; b.w[0] = 40; b.d[0] = 44; b.zone[0] = Zone.Residential; b.floors[0] = 1; b.seed[0] = seed * 911; b.fn[0] = fn; b.count = 1;
+    const m = buildBuildings(w.heights, b, 0, 0, 256, 0)!;
+    let walls = 0;
+    for (const t of triangles(m, positions(m))) if (Math.abs(t.n[1]) < 0.5 && (m.color[m.index[t.t] * 4 + 3] & 15) === BMAT.Grass) walls++;
+    assert.equal(walls, 0, `fn ${fn} seed ${seed}: ${walls} lawn triangles standing up`);
+    let trees = 0;
+    buildBuildingParts(w.heights, b, (_v, _x, _y, _z, _yaw, _s, kind) => { if (kind === 0) trees++; });
+    if (fn === Fn.Park) assert.ok(trees > 0, 'the park has its trees from the pool');
+  }
 });
