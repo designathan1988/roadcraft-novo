@@ -366,10 +366,10 @@ export const SCENARIOS = {
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
     const before = g.settings.roadUp ?? 'PageUp';
     click(QA('.v2-dialog .v2-btn').find((b) => /Page|Up/.test(b.textContent))); await frames(1);
-    click(byText('.v2-dialog button', '^Fechar$|^Close$')); await frames(2);
+    click([...g.optionsPanel.root.querySelectorAll('button')].find((b) => /^(Fechar|Close)$/.test(b.textContent))); await frames(2);
     const mode = g.rig.mode;
     key('KeyV'); await frames(2);
-    check('the next key goes to the game (V changes the view)', g.rig.mode !== mode, 'view stayed ' + mode);
+    check('the next key goes to the game (V changes the view)', g.rig.mode !== mode, 'view stayed ' + mode + ', focus ' + (document.activeElement && document.activeElement.tagName) + ', options open ' + g.optionsPanel.isOpen);
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
     const shown = QA('.v2-dialog .v2-btn').find((b) => /Page|Up|Numpad/.test(b.textContent));
     check('the dialog shows the road key unchanged', shown && /Page Up/.test(shown.textContent), 'shows ' + (shown && shown.textContent));

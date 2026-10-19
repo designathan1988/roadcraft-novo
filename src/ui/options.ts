@@ -85,7 +85,9 @@ export class OptionsPanel {
   /** The game's options when the dialog opened. */
   private opened: Settings = {} as Settings;
   open(): void { this.opened = { ...this.current() }; this.root.classList.remove('hidden'); this.render({ ...this.opened }); }
-  close(): void { this.root.classList.add('hidden'); }
+  close(): void { this.root.classList.add('hidden'); this.stopCapture(); }
+  /** A road key being captured (click on the key, then the key): closing the dialog drops it. */
+  private stopCapture = (): void => undefined;
   get isOpen(): boolean { return !this.root.classList.contains('hidden'); }
 
   /** `s`: a copy of the game's options, taken when the dialog opens (Close leaves the game's options untouched). */
@@ -146,14 +148,16 @@ export class OptionsPanel {
         b.textContent = keyName(get());
         b.addEventListener('click', () => {
           b.textContent = t('roadKeys.press');
+          this.stopCapture();
           const on = (ev: KeyboardEvent): void => {
             ev.preventDefault(); ev.stopPropagation();
-            window.removeEventListener('keydown', on, true);
+            this.stopCapture();
             if (ev.code === 'Escape') { b.textContent = keyName(get()); return; }
             if (RESERVED.has(ev.code)) { b.textContent = t('roadKeys.reserved', { key: keyName(ev.code) }); setTimeout(() => { b.textContent = keyName(get()); }, 1600); return; }
             set(ev.code); b.textContent = keyName(ev.code);
           };
           window.addEventListener('keydown', on, true);
+          this.stopCapture = () => { window.removeEventListener('keydown', on, true); this.stopCapture = () => undefined; };
         });
         return b;
       };
