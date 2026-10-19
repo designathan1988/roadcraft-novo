@@ -75,10 +75,12 @@ const handlers: { [K in JobKind]: Handler<K> } = {
   },
   saveMeta: async (p) => [{ bytes: await storage.saveMeta(p.slot, p.meta) }, []],
   loadTile: async (p) => {
-    let t: Awaited<ReturnType<typeof storage.loadTile>>;
-    // an unreadable tile is reported (the page puts the save in quarantine), never thrown away silently
-    try { t = await storage.loadTile(p.slot, p.tile); } catch { return [{ tile: p.tile, found: false, corrupt: true, min: 0, max: 0, boxes: null, roads: null }, []]; }
-    if (!t) return [{ tile: p.tile, found: false, min: 0, max: 0, boxes: null, roads: null }, []];
+    // the storage failing to read throws (the job fails: the page stops the opening and touches nothing); a file that
+    // is there but cannot be decoded is reported as damaged (the page puts the save in quarantine)
+    const z = await storage.readTile(p.slot, p.tile);
+    if (!z) return [{ tile: p.tile, found: false, min: 0, max: 0, boxes: null, roads: null }, []];
+    let t: Awaited<ReturnType<typeof storage.unpackTile>>;
+    try { t = await storage.unpackTile(z); } catch { return [{ tile: p.tile, found: false, corrupt: true, min: 0, max: 0, boxes: null, roads: null }, []]; }
     const mm = storage.unpackTileHeights(H(), p.tile, t.heights);
     let hasWater = false;
     if (t.ground && ground && t.ground.length === WATER_TILE_RES * WATER_TILE_RES) ground.set(t.ground, p.tile * t.ground.length);

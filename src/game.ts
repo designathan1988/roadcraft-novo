@@ -2190,7 +2190,8 @@ export class Game {
       } catch { /* old save */ }
       w.tileInSave.set(meta.tiles);
       let corrupt = 0, missing = 0;
-      await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
+      // every tile ends before the opening goes on or gives up (a tile still arriving would land in the next opening)
+      const tiles = await Promise.allSettled(Array.from({ length: TILE_COUNT }, async (_, t) => {
         if (meta.tiles[t]) {
           const r = await this.pool.run('loadTile', { slot: SLOT, tile: t }, { key: `terrain:${t}`, priority: 0 });
           if (r.corrupt || !r.found) {
@@ -2214,6 +2215,9 @@ export class Game {
         w.layerDirty.add(t);
         for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
       }));
+      // a tile the storage failed to read: the opening stops (nothing is called damaged, nothing is touched)
+      const failed = tiles.find((r) => r.status === 'rejected');
+      if (failed) throw (failed as PromiseRejectedResult).reason;
       // roads: all nodes before the segments (segments link tiles)
       for (const r of roads) w.roads.loadNodes(r);
       for (const r of roads) w.roads.loadSegs(r);

@@ -204,6 +204,29 @@ const SCENARIOS = {
     check('the lost tile comes back from the seed', Math.abs(h - seed) < 0.05, 'height ' + h + ', seed ' + seed + ', the city on screen had ' + onScreen);
     check('the player is told that part of the map was lost', toasts.some((m) => /pedaço|pedaços/.test(m)), 'toasts: ' + toasts.join(' | '));
   `,
+  // A16: a storage that fails is not "no save found", and a tile that cannot be read because the storage failed is not
+  // "damaged": the opening stops, nothing is quarantined or rewritten, and once the storage works the save opens
+  'storage-error': `
+    road(1500, 1500, 1700, 1500);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    const before = await files.snapshot(), folders = (await files.folders()).length;
+    let heal = await failStorage(/^(meta|current|manifest|cidade-1$)/);
+    toasts.length = 0;
+    let r = await within(g.load(), 30000);
+    heal();
+    check('a storage failure is not reported as no save', r === 'returned' && toasts.length > 0 && !toasts.some((m) => /Nenhum salvamento|No save/.test(m)), 'load() ' + r + ', toasts: ' + toasts.join(' | '));
+    const file = await tileFile(tileOf(1600, 1500));
+    heal = await failStorage({ test: (n) => n === file });
+    toasts.length = 0;
+    r = await within(g.load(), 30000);
+    heal();
+    check('the opening returns', r === 'returned' && !g.busy, 'load() ' + r);
+    check('a tile the storage failed to read is not called damaged or lost', !toasts.some((m) => /ilegíve|pedaço|quarentena/.test(m)), 'toasts: ' + toasts.join(' | '));
+    check('nothing went to quarantine', (await files.folders()).length === folders, 'folders ' + folders + ' → ' + (await files.folders()));
+    check('the save files are untouched', sameFiles(before, await files.snapshot()), 'files changed');
+    r = await within(g.load(), 30000);
+    check('once the storage works the save opens with its road', r === 'returned' && !g.busy && !g.saveBlocked && roadAt(1600, 1500), 'load() ' + r + ' blocked=' + g.saveBlocked + ' road=' + roadAt(1600, 1500));
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);

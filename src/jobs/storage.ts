@@ -141,13 +141,18 @@ async function decompress(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(s).arrayBuffer());
 }
 
+/** The storage says the entry is not there (anything else it throws is a failure of the storage itself). */
+const notThere = (err: unknown) => { const n = (err as { name?: string })?.name; return n === 'NotFoundError' || n === 'TypeMismatchError'; };
+
+/** The save folder; null when it does not exist. Throws when the storage fails (never reported as "no save"). */
 async function slotDir(slot: string, create: boolean): Promise<FileSystemDirectoryHandle | null> {
   try {
     const root = await navigator.storage.getDirectory();
     const saves = await root.getDirectoryHandle('saves', { create });
     return await saves.getDirectoryHandle(slot, { create });
-  } catch {
-    return null;
+  } catch (err) {
+    if (notThere(err)) return null;
+    throw new Error(`the save storage failed: ${(err as Error)?.message ?? String(err)}`);
   }
 }
 
@@ -158,12 +163,14 @@ async function writeFile(dir: FileSystemDirectoryHandle, name: string, data: Uin
   await w.close();
 }
 
+/** The file's bytes; null when it does not exist. Throws when the storage fails to read it. */
 async function readFile(dir: FileSystemDirectoryHandle, name: string): Promise<Uint8Array | null> {
   try {
     const fh = await dir.getFileHandle(name);
     return new Uint8Array(await (await fh.getFile()).arrayBuffer());
-  } catch {
-    return null;
+  } catch (err) {
+    if (notThere(err)) return null;
+    throw new Error(`the save storage failed to read ${name}: ${(err as Error)?.message ?? String(err)}`);
   }
 }
 
@@ -177,11 +184,14 @@ export async function saveTile(slot: string, tile: number, heights: Uint16Array,
   return z.byteLength;
 }
 
-export async function loadTile(slot: string, tile: number) {
+/** A tile file's compressed bytes; null when it does not exist. Throws when the storage fails. */
+export async function readTile(slot: string, tile: number): Promise<Uint8Array | null> {
   const dir = await slotDir(slot, false);
-  if (!dir) return null;
-  const z = await readFile(dir, tileName(tile));
-  if (!z) return null;
+  return dir ? readFile(dir, tileName(tile)) : null;
+}
+
+/** Decodes a tile file's bytes. Throws when they are not a tile (a damaged file). */
+export async function unpackTile(z: Uint8Array) {
   return decodeTile(await decompress(z));
 }
 
