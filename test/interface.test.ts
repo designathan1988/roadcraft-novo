@@ -156,3 +156,11 @@ test('camera readouts: zoom in % and centre X · Y as Roadcraft 4.0', async () =
   assert.equal(centreText(1234.4, -567.6, (v) => String(Math.round(v))), 'X 1234 · Y 568');
   assert.equal(centreText(0, 0.3, (v) => String(Math.round(v))), 'X 0 · Y 0');
 });
+
+// Roadcraft 4.0 world/transit.ts:134-138 and v2/transitLine.ts: a line is named by its mode and its number among the
+// lines of that mode, in the order they were made: buses 1, 2…, trains T1…, metro M1…
+test('transit lines are named as Roadcraft 4.0', async () => {
+  const { lineName } = await import('../src/ui/transitNames.ts');
+  const rows = [{ id: 1, mode: 0 }, { id: 2, mode: 2 }, { id: 5, mode: 0 }, { id: 7, mode: 1 }, { id: 9, mode: 2 }];
+  assert.deepEqual(rows.map((l) => lineName(rows, l)), ['1', 'M1', '2', 'T1', 'M2']);
+});

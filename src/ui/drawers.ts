@@ -16,6 +16,7 @@ import { button, card, choices, dropdown, el, orow, range, soon, stepper, subhea
 import { svg } from './icons.ts';
 import { fmtDec, fmtInt, loose, plural, t } from './i18n.ts';
 import { BOMB_START, bombStep } from './strike.ts';
+import { lineName } from './transitNames.ts';
 
 export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
 
@@ -588,7 +589,8 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
     row.dataset.line = String(l.id);
     const sw = el('i');
     sw.style.background = hex(PAINTS[l.color & 15]);
-    const name = el('b', '', t('ui.transit.line', { n: l.id }));
+    // its own name, as Roadcraft 4.0 (v2/transitLine.ts:10-11): 1, 2… for buses, T1… trains, M1… metro
+    const name = el('b', '', lineName(rows, l));
     const info = el('span', 'v2-transit-info', lineInfo(l));
     const count = el('span', 'v2-transit-count', String(l.buses));
     count.title = t('transit.vehicles');
@@ -617,7 +619,7 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
       b.addEventListener('click', (e) => { e.stopPropagation(); a.lineColor?.(c); });
       sws.append(b);
     }
-    p.options.append(el('div', 'v2-pop-title', t('ui.transit.line', { n: line.id })), orow(t('ui.transit.colour'), sws));
+    p.options.append(el('div', 'v2-pop-title', t('ui.transit.line', { n: lineName(rows, line) })), orow(t('ui.transit.colour'), sws));
   }
   if (line && line.mode === 0 && a.lineLoop) {
     p.options.append(orow(t('ui.transit.route'), choices([
