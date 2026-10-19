@@ -373,6 +373,11 @@ export function landTabOf(tool: Tool, item: number): LandTab {
 
 export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
   const s = h.s, a = h.a, cur = h.tool();
+  // water, weather and haze as the map on screen has them (an opened map brings its own)
+  const env = a.environment();
+  s.water = env.water;
+  s.fogAll = Math.round(env.fog * 100);
+  if (env.weather) s.weather = { ...env.weather, manual: true }; else s.weather.manual = false;
   const now = landTabOf(cur, s.item);
   s.landTab = now;
   // an item or a barrier picked places it: Remove poles is left

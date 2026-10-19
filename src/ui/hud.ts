@@ -176,6 +176,8 @@ export interface HudActions extends OptionalActions {
   terminal(on: boolean): void;
   /** The F9 panel. */
   health(): void;
+  /** Water, weather set by hand (null: automatic) and overall haze (0..2) of the map on screen (saved with it). */
+  environment(): { water: { waves: number; foam: number; current: number }; weather: WeatherCtl | null; fog: number };
   /** Street item clicks remove (on) or place (off). */
   itemRemove(on: boolean): void;
   /** Camera distance to its target (m) and the target on the map. */

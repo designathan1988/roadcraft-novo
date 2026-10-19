@@ -373,6 +373,7 @@ export class Game {
       itemRemove: (on) => { this.itemRemove = on; },
       cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
       health: () => this.health.toggle(),
+      environment: () => ({ water: { ...this.waterCtl }, weather: this.weatherCtl ? { ...this.weatherCtl } : null, fog: fogLevel.value }),
       showImpossible: () => {
         // the next one after the last visited (the set is small: only the nodes under 25°)
         const ids = [...this.world.impossible.nodes.keys()];
