@@ -500,3 +500,29 @@ test('E40: an explosion keeps its smoke and fire when the area is full of emitte
   for (let i = 0; i < p.count; i++) if (d[i * 4 + 3] % 16 === Puff.Fire && Math.abs(d[i * 4] - 150) < 0.01) fire = true;
   assert.ok(fire, `the explosion's fire is one of the ${p.count} emitters`);
 });
+
+/** A stand-in for the page's document: canvases that draw nothing (sign textures in Node). */
+function fakeDocument(): void {
+  const ctx = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? () => ({ width: 10 }) : () => {}), set: () => true });
+  (globalThis as { document?: unknown }).document ??= { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
+}
+
+test('E8: a sign whose text changed, or that left the area, frees its texture', async () => {
+  fakeDocument();
+  const { TextSigns, signKey } = await import('../src/render/textSigns.ts');
+  const { Item } = await import('../src/world/items.ts');
+  const w = new World();
+  w.items.add([0, 0, 0, 0, Item.Sign, 1]);
+  const texts = new Map([[signKey(0, 0), 'Padaria']]);
+  const signs = new TextSigns(w, texts);
+  signs.update(new THREE.Vector3(0, 10, 0));
+  const cache = (signs as unknown as { cache: Map<string, THREE.MeshBasicNodeMaterial> }).cache;
+  const first = [...cache.values()][0];
+  let freed = 0;
+  first.map!.addEventListener('dispose', () => freed++);
+  texts.set(signKey(0, 0), 'Farmácia');
+  signs.version++;
+  signs.update(new THREE.Vector3(0, 10, 0));
+  assert.equal(cache.size, 1, `${cache.size} sign textures kept for 1 sign`);
+  assert.equal(freed, 1, 'the old text\'s texture was freed');
+});

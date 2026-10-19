@@ -8,6 +8,8 @@ import { Item } from '../world/items.ts';
 import { heightAt } from '../world/heights.ts';
 
 const RADIUS = 450;
+/** The material compiled at load stays (it is the one warmup() shows). */
+const WARMUP_KEY = 's|Rua';
 
 /** A sign's position key (ids change on load; the position does not). */
 export const signKey = (x: number, z: number) => `${Math.round(x * 10)},${Math.round(z * 10)}`;
@@ -25,8 +27,12 @@ export class TextSigns {
 
   constructor(world: World, texts: Map<string, string>) { this.world = world; this.texts = texts; }
 
+  /** Keys used in the last rebuild (the others are freed). */
+  private used = new Set<string>();
+
   private material(text: string, street: boolean): THREE.MeshBasicNodeMaterial {
     const key = `${street ? 's' : 'i'}|${text}`;
+    this.used.add(key);
     let m = this.cache.get(key);
     if (m) return m;
     const c = document.createElement('canvas');
@@ -54,6 +60,7 @@ export class TextSigns {
     this.lastVer = this.version; this.lastX = eye.x; this.lastZ = eye.z;
     // the plane and the materials are shared; the meshes are made again, so each old one is disposed
     for (const c of [...this.group.children]) { this.group.remove(c); (c as THREE.Mesh).dispose(); }
+    this.used.clear();
     const it = this.world.items, c = it.t.cols;
     it.index.query(eye.x - RADIUS, eye.z - RADIUS, eye.x + RADIUS, eye.z + RADIUS, (i) => {
       if (c.type[i] !== Item.Sign) return;
@@ -70,6 +77,14 @@ export class TextSigns {
         this.group.add(m);
       }
     });
+    // texts no longer shown (changed, or the sign left the area): their canvas texture and material go (they used
+    // to stay for the whole session)
+    for (const [key, m] of this.cache) {
+      if (this.used.has(key) || key === WARMUP_KEY) continue;
+      m.map?.dispose();
+      m.dispose();
+      this.cache.delete(key);
+    }
   }
 
   /** A sample material (compiles at load). */
