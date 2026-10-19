@@ -38,7 +38,8 @@ const MAX_ART_GRADE = 0.08;
  * first generator), or one of Roadcraft 4.0's (grid, organic, radial, mixed: streets along a tensor field; blocks:
  * a straight grid of 120 × 72 m blocks). The arterials, the water and slope rules and the zones are the same for all.
  */
-export function generateCity(seed: number, style: CityStyle = 'classic'): CityRoads {
+/** `medium`: one town round the map's middle (Roadcraft 2.0 and 4.0's medium city, about 4 km across), not the whole map. */
+export function generateCity(seed: number, style: CityStyle = 'classic', medium = false): CityRoads {
   const rng = new Rng(seed * 7919 + 13);
   const H = (x: number, z: number) => baseHeight(x, z, seed);
   const land = (x: number, z: number) => { const h = H(x, z); return h > SEA_LEVEL + 1.2 && waterLevelAt(x, z, seed) < h - 1.2; };
@@ -46,7 +47,8 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     const d = 12;
     return Math.hypot(H(x + d, z) - H(x - d, z), H(x, z + d) - H(x, z - d)) / (2 * d);
   };
-  const inside = (x: number, z: number, m = 380) => Math.max(Math.abs(x), Math.abs(z)) < MAP_HALF - m;
+  let town: [number, number] | null = null;
+  const inside = (x: number, z: number, m = 380) => Math.max(Math.abs(x), Math.abs(z)) < MAP_HALF - m && (!town || Math.hypot(x - town[0], z - town[1]) < 2100);
 
   // ---------------------------------------------------------------- centres
   const pick = (cx: number, cz: number, rad: number, avoid: Center[], minD: number): [number, number] | null => {
@@ -69,14 +71,15 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
   };
   const centers: Center[] = [];
   const c0 = pick(0, 0, 2200, [], 0) ?? [0, 1500];
-  centers.push({ x: c0[0], z: c0[1], r: 3600, angle: rng.range(-0.4, 0.4), bx: 104, bz: 92 });
-  for (let i = 0; i < 2; i++) {
+  centers.push({ x: c0[0], z: c0[1], r: medium ? 800 : 3600, angle: rng.range(-0.4, 0.4), bx: 104, bz: 92 });
+  if (medium) town = c0;
+  for (let i = 0; i < (medium ? 0 : 2); i++) {
     const a = rng.range(0, Math.PI * 2);
     const p = pick(c0[0] + Math.cos(a) * 3800, c0[1] + Math.sin(a) * 3800, 1600, centers, 3000);
     if (p) centers.push({ x: p[0], z: p[1], r: 2200, angle: rng.range(-0.8, 0.8), bx: 118, bz: 100 });
   }
   // bigger maps: more satellite districts around, in proportion to the extra area
-  const extra = Math.round(2 * ((MAP_HALF * MAP_HALF) / (5120 * 5120) - 1));
+  const extra = medium ? 0 : Math.round(2 * ((MAP_HALF * MAP_HALF) / (5120 * 5120) - 1));
   for (let i = 0, tries = 0; i < extra && tries < extra * 4; tries++) {
     const a = rng.range(0, Math.PI * 2), d = rng.range(5500, MAP_HALF - 1800);
     const p = pick(c0[0] + Math.cos(a) * d, c0[1] + Math.sin(a) * d, 1800, centers, 4200);
@@ -113,6 +116,8 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     flush();
   };
 
+  // the medium town (Roadcraft 2.0's): only its straight block grid, no expressway, radials or rings
+  if (!medium) {
   // expressway: along the river, moved to one side, from edge to edge
   const side = rng.next() < 0.5 ? 1 : -1;
   const riverZ = (x: number) => {
@@ -182,8 +187,11 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
     march(pts, GEN.Avenue, true, MAX_ART_GRADE);
   }
 
+  }
+
   // local streets: each centre's grid, only in its own area (the "strongest" centre wins)
   const owner = (x: number, z: number): number => {
+    if (medium) return 0; // one town, one square grid (Roadcraft 2.0 plan.ts blockGrid)
     let best = -1, bs = Infinity;
     centers.forEach((c, i) => { const s = Math.hypot(x - c.x, z - c.z) / c.r; if (s < bs) { bs = s; best = i; } });
     return bs < 1.12 ? best : -1;
@@ -225,9 +233,9 @@ export function generateCity(seed: number, style: CityStyle = 'classic'): CityRo
   function fieldStreets(c: Center, ci: number): void {
     const R = c.r * 1.12;
     const insideP = (p: P2): boolean => {
-      const d = Math.hypot(p.x - c.x, p.z - c.z);
+      const d = medium ? Math.max(Math.abs(p.x - c.x), Math.abs(p.z - c.z)) : Math.hypot(p.x - c.x, p.z - c.z);
       if (d > R || !inside(p.x, p.z) || !land(p.x, p.z) || owner(p.x, p.z) !== ci) return false;
-      if (d > c.r * 0.7 && fbm(p.x / 900, p.z / 900, seed + 51, 2) < -0.25) return false;
+      if (!medium && d > c.r * 0.7 && fbm(p.x / 900, p.z / 900, seed + 51, 2) < -0.25) return false;
       return slope(p.x, p.z) < MAX_LOCAL_GRADE * 1.6;
     };
     const lay = (level: number, points: P2[]) => {

@@ -48,7 +48,7 @@ export const PRESETS: Record<Preset, Omit<Settings, 'preset' | 'weather'>> = {
 const KEY = 'cidade.opcoes';
 
 export function defaultSettings(webgpu: boolean): Settings {
-  return { preset: webgpu ? 'alto' : 'baixo', ...PRESETS[webgpu ? 'alto' : 'baixo'], weather: 'auto' };
+  return { preset: webgpu ? 'alto' : 'baixo', ...PRESETS[webgpu ? 'alto' : 'baixo'], weather: 'limpo' };
 }
 
 export function loadSettings(webgpu: boolean): Settings {
@@ -58,6 +58,8 @@ export function loadSettings(webgpu: boolean): Settings {
     if (raw) Object.assign(base, JSON.parse(raw));
   } catch { /* no storage: defaults */ }
   if (!webgpu) Object.assign(base, PRESETS.baixo, { preset: 'baixo' }); // compatibility mode: always Low
+  // clear weather by default (the player, 2026-10-19): 'auto' brought rain; rain only when the player picks it
+  if (base.weather === 'auto') base.weather = 'limpo';
   return base;
 }
 

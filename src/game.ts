@@ -80,6 +80,7 @@ import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParam
 import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
+import { FLAT_BIT } from './jobs/terrainGen.ts';
 import { MapFileError, QUARANTINE_UNREADABLE_TILES, keepPreviousCity, packSlot, previousCities, quarantineSlot, readPackage, restorePrevious, savedIn, type SaveActions } from './mapFile.ts';
 import { KeptFileMissing, SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation, type Opened } from './saveFiles.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
@@ -601,12 +602,12 @@ export class Game {
     this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
-    else if (params.has('cidade')) await this.generatedCity((CITY_STYLES as readonly string[]).includes(params.get('estilo') ?? '') ? params.get('estilo') as CityStyle : 'classic');
+    else if (params.has('cidade')) await this.generatedCity((CITY_STYLES as readonly string[]).includes(params.get('estilo') ?? '') ? params.get('estilo') as CityStyle : 'classic', params.has('media'));
     else if (params.has('carregar')) await this.load();
-    else if (!params.has('cam') && !params.has('vazio')) {
-      // start screen (automated photos skip it with ?cam, ?teste or ?cidade)
-      this.showStart();
-    }
+    else if (params.has('inicio')) this.showStart();
+    // straight into a medium town of straight streets, blocks and lots (Roadcraft 2.0's start): the start screen stays
+    // on the menu (and ?inicio)
+    else if (!params.has('cam') && !params.has('vazio')) await this.generatedCity('blocks', true);
     await this.settle();
     this.homeView ??= this.rig.state();
     status.value = 'pronto';
@@ -2278,9 +2279,11 @@ export class Game {
   /** How the generator lays each district's local streets (`jobs/cityField.ts`; ?estilo= in the address, or api). */
   cityStyle: CityStyle = 'classic';
 
-  async generatedCity(style: CityStyle = this.cityStyle): Promise<void> {
+  async generatedCity(style: CityStyle = this.cityStyle, medium = false): Promise<void> {
     if (this.busy) return;
     this.busy = true;
+    // the medium town is laid on a level plain (Roadcraft 2.0's flat map); the whole map keeps its relief
+    this.world.seed = (medium ? this.world.seed | FLAT_BIT : this.world.seed & ~FLAT_BIT) >>> 0;
     const t0 = performance.now();
     const phase = (name: string) => console.log(`fase: ${name} ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     this.hud.showLoading(t('game.loading.city'));
@@ -2290,7 +2293,7 @@ export class Game {
       this.generating = true;
       await this.generateTerrain();
       phase('relevo');
-      const city = await this.pool.run('cityGen', { seed: w.seed, style }, { priority: 0 });
+      const city = await this.pool.run('cityGen', { seed: w.seed, style, medium }, { priority: 0 });
       phase('malha viária');
       this.hud.showLoading(t('game.loading.roads'));
       const ids: number[] = [];

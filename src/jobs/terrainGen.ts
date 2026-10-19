@@ -252,8 +252,17 @@ function lakesNear(x: number, z: number, seed: number): Lake[] {
   return out;
 }
 
+/**
+ * A level plain (Roadcraft 2.0's RELIEF_FLAT, world/terrain.ts:207): the seed's top bit says so, and the save keeps the
+ * seed, so the map keeps the land it was made on. Its height, no river, no lake.
+ */
+export const FLAT_BIT = 0x80000000;
+export const FLAT_Y = 20;
+export const isFlat = (seed: number): boolean => (seed & FLAT_BIT) !== 0;
+
 /** Ground height at (x, z): the land (with the lakes' basins), cut by the river's bed. */
 export function baseHeight(x: number, z: number, seed: number): number {
+  if (isFlat(seed)) return FLAT_Y;
   let h = land(x, z, seed);
   const r = riverAt(x, z, seed);
   // the bed: from the land down to the floor by the bed's section (4.0 world/terrain.ts:272-277), never raised
@@ -263,6 +272,7 @@ export function baseHeight(x: number, z: number, seed: number): number {
 
 /** The water's level at the water-grid sample (gx, gz) (river or lake), or NO_WATER. */
 function waterAtSample(gx: number, gz: number, seed: number): number {
+  if (isFlat(seed)) return NO_WATER;
   const x = gx * WATER_SPACING - MAP_HALF, z = gz * WATER_SPACING - MAP_HALF;
   const r = riverAt(x, z, seed);
   // the river's water reaches a sample past the bed's edge (the bank hides it; the shader fades the rim)

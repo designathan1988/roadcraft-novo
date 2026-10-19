@@ -80,7 +80,7 @@ export interface JobPayloads {
   roadPaint: { graph: RoadGraph; tile: number };
   lots: { graph: RoadGraph; cell: number };
   props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number; parts40?: boolean };
-  cityGen: { seed: number; style?: CityStyle };
+  cityGen: { seed: number; style?: CityStyle; medium?: boolean };
   conform: { tile: number; segs: Float32Array };
   /**
    * A tile's save file made from the page's snapshot (the page writes it). ground and water: the tile's painted ground
