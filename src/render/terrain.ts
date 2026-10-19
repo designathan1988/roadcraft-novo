@@ -464,7 +464,6 @@ export class TerrainRenderer {
       // rock in strata: bands by height broken by noise (Roadcraft's cliff walls)
       const strata = sin(p.y.mul(1.7).add(mid.mul(3))).mul(0.5).add(0.5);
       const rock = mix(sRGBTransferEOTF(vec3(0.43, 0.42, 0.4)), sRGBTransferEOTF(vec3(0.55, 0.52, 0.47)), strata.mul(fadeMid).add(float(1).sub(fadeMid).mul(0.5)));
-      const sand = sRGBTransferEOTF(vec3(0.72, 0.66, 0.52));
       // Roadcraft 4.0's grass texture as it is (its own tones: tufts, soil in the gaps, dry patches), the large patches
       // from a wide octave (macro × 0.7..1.3 at 0.35), the biome's hue over the default biome's, and a little less
       // saturated (the player found the green too strong)
@@ -504,7 +503,6 @@ export class TerrainRenderer {
         c = mix(c, c.mul(vec3(0.55, 0.72, 0.55)), eco.y.mul(0.85).mul(smoothstep(float(SEA_LEVEL + 0.4), float(SEA_LEVEL + 2.5), p.y)));
         c = mix(c, dirt, eco.z.mul(0.4).mul(float(1).sub(blend.rockW)));
       }
-      c = mix(c, sand, smoothstep(float(SEA_LEVEL + 2.5), float(SEA_LEVEL + 0.5), p.y));
       // painted ground: 4 neighbouring samples, each its own kind, blended (edge broken by noise)
       {
         const f = p.xz.add(float(MAP_HALF)).div(float(WATER_SPACING)).sub(0.5).add(mid.mul(0.3).mul(fadeMid));
@@ -523,19 +521,42 @@ export class TerrainRenderer {
         const top = mix(tint(g00), tint(g10), t.x), bot = mix(tint(g01), tint(g11), t.x);
         c = mix(top, bot, t.y);
       }
-      // under and beside the water (Roadcraft 4.0): a wet band from 0.56 m over the level down to it (darker), and the
-      // bed under it, gravel turning to silt by 4.8 m deep (the water is see-through now)
+      // the shore, as Roadcraft 4.0's (terrain.ts:987-1010), measured from the water beside it, not from the sea
+      // level: a beach 1-2.4 m up on gentle banks, a cut of damp earth 2-4 m up on steep ones (both wandering by up to
+      // 1.2 m and 2 m), the bed under the water (gravel and pebbles turning to silt by 4.8 m deep), wet ground darker
+      // from 0.56 m over the line down. Its colours are 4.0's linear ones.
       {
         const gw = p.xz.add(float(MAP_HALF)).div(float(WATER_SPACING));
         const wx = int(floor(gw.x.add(0.5))), wz = int(floor(gw.y.add(0.5)));
-        const wl = max(max(this.loadWater(wx.sub(1), wz.sub(1)), this.loadWater(wx, wz.sub(1))), max(this.loadWater(wx.sub(1), wz), this.loadWater(wx, wz)));
-        // the sea is not in the level texture: under sea level the sea is the water
-        const lvl = max(wl, float(SEA_LEVEL));
-        const has = max(step(float(NO_WATER + 1), wl), step(p.y, float(SEA_LEVEL + 0.56)));
-        const dz = p.y.sub(lvl);
-        c = c.mul(mix(float(1), float(0.6), smoothstep(0.56, -0.08, dz).mul(has)));
-        const bed = mix(sRGBTransferEOTF(vec3(0.34, 0.3, 0.22)), sRGBTransferEOTF(vec3(0.18, 0.17, 0.12)), smoothstep(-0.8, -4.8, dz));
-        c = mix(c, bed, smoothstep(0, -0.8, dz).mul(has));
+        const w00 = this.loadWater(wx.sub(1), wz.sub(1)), w10 = this.loadWater(wx, wz.sub(1)), w01 = this.loadWater(wx.sub(1), wz), w11 = this.loadWater(wx, wz);
+        const wl = max(max(w00, w10), max(w01, w11));
+        // how much of the ground round here has water (4.0's terrainShoreCover): the 4 samples, bilinear
+        const tw = fract(gw.sub(0.5));
+        const hw = (v: N) => step(float(NO_WATER + 1), v);
+        const riverCover = mix(mix(hw(w00), hw(w10), tw.x), mix(hw(w01), hw(w11), tw.x), tw.y);
+        // the sea is not in the level texture: by the sea, the sea is the water
+        const bySea = step(wl, float(NO_WATER + 1)).mul(step(p.y, float(SEA_LEVEL + 4.8)));
+        const lvl = select(wl.greaterThan(float(NO_WATER + 1)), wl, float(SEA_LEVEL));
+        const cover = max(riverCover, bySea);
+        const above = p.y.sub(lvl);
+        const wander = texture(TERRAIN_NOISE, p.xz.div(37 * 8)).g;
+        const slopeDeg = T.acos(clamp(n.y, 0, 1)).mul(57.29578);
+        const gentle = float(1).sub(smoothstep(24, 40, slopeDeg));
+        const shoreFade = smoothstep(0.15, 0.85, cover.add(wander.sub(0.5).mul(0.3)));
+        const sandLuma = dot(dirtC, vec3(0.3, 0.6, 0.1));
+        const sand = vec3(0.42, 0.36, 0.23).mul(sandLuma.mul(1.4).add(0.82));
+        const beach = float(1).sub(smoothstep(wander.mul(1.2).add(1), wander.mul(1.2).add(2.4), above)).mul(gentle).mul(shoreFade);
+        c = mix(c, sand, beach.mul(float(1).sub(blend.rockW.mul(0.6))));
+        const bank = float(1).sub(smoothstep(wander.mul(2).add(2), wander.mul(2).add(4), above)).mul(float(1).sub(gentle)).mul(shoreFade);
+        c = mix(c, dirtC.mul(vec3(0.78, 0.72, 0.62)), bank.mul(float(1).sub(blend.rockW)));
+        const wetCover = smoothstep(0.03, 0.35, cover);
+        const pebble = texture(COOKED['terrain-land.map'], p.xz.mul(1.325)).depth(int(LAND.Dirt)).x;
+        const stones = texture(COOKED['terrain-land.map'], p.xz.mul(0.525).add(0.4)).depth(int(LAND.Dirt)).y;
+        const gravel = vec3(0.34, 0.3, 0.22).mul(mix(float(0.62), float(1.3), pebble)).mul(mix(float(0.85), float(1.12), stones));
+        const silt = vec3(0.18, 0.17, 0.12).mul(sandLuma.add(0.85));
+        const bedC = mix(gravel, silt, smoothstep(-0.8, -4.8, above));
+        c = mix(c, bedC, smoothstep(0, -0.8, above).mul(wetCover).mul(0.9));
+        c = c.mul(mix(float(1), float(0.6), float(1).sub(smoothstep(-0.08, 0.56, above)).mul(wetCover)));
       }
       // roads painted on the ground (seen where the road mesh does not reach)
       const tileF = clamp(floor(p.xz.add(float(MAP_HALF)).div(float(TILE_SIZE))), 0, float(MAP_TILES - 1));
@@ -685,7 +706,8 @@ export class TerrainRenderer {
       const gx = wet(loadW(ix.sub(2), iz.sub(1)).max(loadW(ix.sub(2), iz))).sub(wet(loadW(ix.add(1), iz.sub(1)).max(loadW(ix.add(1), iz))));
       const gz = wet(loadW(ix.sub(1), iz.sub(2)).max(loadW(ix, iz.sub(2)))).sub(wet(loadW(ix.sub(1), iz.add(1)).max(loadW(ix, iz.add(1)))));
       const grad = vec2(gx, gz).div(float(WATER_SPACING * 3));
-      const run = smoothstep(0.0003, 0.004, length(grad));
+      // the generated river falls 0.3 m/km (jobs/terrainGen.ts MIN_FALL): that is a full current; a lake is flat
+      const run = smoothstep(0.00005, 0.00025, length(grad));
       vW.assign(vec4(w, normalize(grad.add(vec2(1e-7, 0))), run));
       // no displacement: 4.0's waves are in the normals only (water.ts:297-298, :346-350)
       // at the mouth (level at the sea's) the river's surface drops under the sea plane, so the two never cross
@@ -746,6 +768,13 @@ export class TerrainRenderer {
     m.roughnessNode = mix(float(0.15), float(0.72), foam);
     m.metalnessNode = float(0);
     if (!sea) m.maskNode = p.y.greaterThan(float(-1500));
+    else {
+      // no sea under a river or lake standing above it (their beds go under the sea level: it showed through their water)
+      const g = p.xz.add(float(MAP_HALF)).div(float(WATER_SPACING));
+      const ix = int(floor(g.x.add(0.5))), iz = int(floor(g.y.add(0.5)));
+      const w = max(max(loadW(ix.sub(1), iz.sub(1)), loadW(ix, iz.sub(1))), max(loadW(ix.sub(1), iz), loadW(ix, iz)));
+      m.maskNode = w.lessThan(float(SEA_LEVEL + 0.6));
+    }
     return m;
   }
 
