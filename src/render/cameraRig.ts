@@ -323,7 +323,8 @@ export class CameraRig {
    */
   private updatePull(dt: number): void {
     let want = Infinity;
-    if (this.solid && this.mode !== 'iso' && this.dist < 320) {
+    // only at street level (the eye under the roofs): from above the camera never jumps in front of a tower
+    if (this.solid && this.mode !== 'iso' && this.dist < 320 && this.dist * Math.sin(this.drawPitch) < 25) {
       const cp = Math.cos(this.drawPitch), sp = Math.sin(this.drawPitch);
       const ux = Math.sin(this.yaw) * cp, uy = sp, uz = Math.cos(this.yaw) * cp;
       const lookY = this.y + Math.min(EYE, this.dist * 0.3);
@@ -342,7 +343,7 @@ export class CameraRig {
     if (!Number.isFinite(want) && !Number.isFinite(this.pull)) return;
     const cur = Number.isFinite(this.pull) ? this.pull : this.dist;
     const goal = Number.isFinite(want) ? want : this.dist;
-    const tau = goal < cur ? 0.08 : 0.35;
+    const tau = 0.3;
     const next = cur + (goal - cur) * (1 - Math.exp(-dt / tau));
     this.pull = !Number.isFinite(want) && next > this.dist - 0.05 ? Infinity : next;
   }

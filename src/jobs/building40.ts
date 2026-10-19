@@ -8,7 +8,7 @@ import { Rng } from '../r40/core/rng.ts';
 import { madeToMeasure } from '../r40/world/buildings/procedural.ts';
 import { furnishLot, lotKind, planLot } from '../r40/world/growth/lotPlan.ts';
 import { emitChunk, letGoEmitted } from '../r40/render/buildings/buildingMesh.ts';
-import { CELL_DETAIL, PLATE_DETAIL, TILE_DETAIL, emitMassing } from '../r40/render/buildings/massing.ts';
+import { PLATE_DETAIL, TILE_DETAIL, emitMassing } from '../r40/render/buildings/massing.ts';
 import { partGeometries, type PartKind } from '../r40/render/buildings/kit.ts';
 import { COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT } from '../r40/render/buildings/cellArrays.ts';
 import { POSE_FLOATS } from '../r40/render/buildings/partPose.ts';
@@ -211,7 +211,7 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
  */
 export function massLot40(lot: Lot40, mb: MeshBuilder, level: number, style: number): number {
   const b = building40(lot);
-  const detail = level >= 3 ? PLATE_DETAIL : level === 2 ? TILE_DETAIL : CELL_DETAIL;
+  const detail = level >= 3 ? PLATE_DETAIL : TILE_DETAIL;
   const m = emitMassing(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), false, undefined, detail);
   if (!m) return 0;
   const P = m.position, N = m.normal, C = m.colour, F = m.facade, G = m.glazing, I = m.index;
