@@ -263,6 +263,9 @@ export class CellLayer {
     for (let j = 0; j < TILES_PER_PLATE; j++) for (let i = 0; i < TILES_PER_PLATE; i++) {
       if (!this.manageTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j, limit > 0 && !plateCovers)) tilesCover = false;
     }
+    // the camera came close and the tiles cover the plate: it leaves the GPU (it used to stay for the whole session,
+    // pushing the memory ceiling down onto the near cells)
+    if (!far && tilesCover && (ps.mesh || ps.requested) && dist < limit * 0.8) { this.setMesh(ps, null, 0); ps.requested = 0; }
     if (!visible) return;
     // never a hole: the plate stands in while its tiles are not all ready (the camera came closer), the tiles while
     // the plate is not ready

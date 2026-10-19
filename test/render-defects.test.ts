@@ -60,9 +60,9 @@ test('E11: a mesh of the previous city that arrives after reset is thrown away',
   (layer as unknown as { requestCell(c: number, level: number): void }).requestCell(c, 0);
   const fresh = src.cells.pop()!;
   old.done(triangle());
-  assert.equal(L.cells[0][c].mesh, null, 'the old city\'s mesh was not taken');
+  assert.ok(L.cells[0][c].mesh === null, 'the old city\'s mesh was not taken');
   fresh.done(triangle());
-  assert.notEqual(L.cells[0][c].mesh, null, 'the new city\'s mesh was taken');
+  assert.ok(L.cells[0][c].mesh !== null, 'the new city\'s mesh was taken');
 });
 
 /** A source that answers tiles and plates at once (cells are left pending), counting the requests. */
@@ -111,4 +111,19 @@ test('E12: every tile in view between 4.2 and 6 km is covered by its tile or by 
     if (!covered) missing.push(`tile ${tx},${tz} at ${(d / 1000).toFixed(1)} km`);
   }
   assert.deepEqual(missing, [], 'tiles in view with nothing drawn');
+});
+
+test('E9: a plate the camera came close to leaves the GPU once its tiles cover it', () => {
+  const w = new World();
+  const src = { ...farSource(), buildCell(_c: number, _l: number, _p: number, done: (m: PackedMesh | null) => void) { done(triangle()); } };
+  const layer = new CellLayer(src, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 650, plate: 4200, budget: 256e6 });
+  const L = inside(layer);
+  const { camera, eye } = cornerCamera();
+  for (let i = 0; i < 3; i++) layer.update(camera, eye);
+  const centre = 2 * 5 + 2; // plate (2, 2) of the 10 km map: far from the corner
+  assert.ok(L.plates[centre].mesh !== null, 'seen from the corner the centre plate is drawn');
+  // fly to the centre: the plate's tiles and cells take over
+  eye.set(0, 300, 0); camera.position.copy(eye); camera.lookAt(500, 0, 500); camera.updateMatrixWorld();
+  for (let i = 0; i < 3; i++) layer.update(camera, eye);
+  assert.ok(L.plates[centre].mesh === null, 'the plate under the camera was let go');
 });
