@@ -107,3 +107,27 @@ test('F3: a hip roof deeper than wide covers its plan once, without holes or fol
     assert.ok(Math.abs(area - plan) < 0.01, `${w}×${d}: the roof covers ${area.toFixed(2)} m² of a ${plan.toFixed(2)} m² plan`);
   }
 });
+
+test('F4: the detail and parts passes write no vertex into a throwaway mesh', async () => {
+  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const { MeshBuilder } = await import('../src/jobs/meshBuilder.ts');
+  const heights = flatHeights(10);
+  const b = emptyBoxes(24);
+  for (let i = 0; i < 24; i++) {
+    b.x[i] = 30 + (i % 6) * 40; b.z[i] = 30 + Math.floor(i / 6) * 60; b.w[i] = 24; b.d[i] = 40; b.rot[i] = 0;
+    b.zone[i] = 1 + (i % 4); b.floors[i] = 1 + (i * 5) % 20; b.seed[i] = 1000 + i * 7919; b.style[i] = i * 13;
+  }
+  b.count = 24;
+  const vert = MeshBuilder.prototype.vert;
+  let written = 0;
+  MeshBuilder.prototype.vert = function (this: InstanceType<typeof MeshBuilder>, ...a: Parameters<typeof vert>) { written++; return vert.apply(this, a); };
+  try {
+    let parts = 0;
+    buildBuildingParts(heights, b, () => { parts++; });
+    assert.ok(parts > 0, 'the parts pass emits parts');
+    assert.equal(written, 0, `the parts pass wrote ${written} vertices`);
+    written = 0;
+    const detail = buildBuildings(heights, b, 0, 0, 256, -1)!;
+    assert.equal(written, detail.vertexCount, `the detail pass wrote ${written} vertices for a ${detail.vertexCount}-vertex mesh`);
+  } finally { MeshBuilder.prototype.vert = vert; }
+});

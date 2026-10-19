@@ -30,6 +30,17 @@ function part(f: Frame, variant: number, lx: number, y: number, lz: number, nlx:
   if (!partsOut) return;
   partsOut(variant, wx(f, lx, lz), y, wz(f, lx, lz), Math.atan2(f.s, f.c) + Math.atan2(nlx, nlz), scale);
 }
+/**
+ * The main mesh of a pass that does not want it (detail layer, parts): keeps the facade state the detail reads
+ * (curFac, curBase, curU) and stores no vertex.
+ */
+class NoMesh extends MeshBuilder {
+  override vert(): number { return 0; }
+  override tri(): void {}
+  override quad(): void {}
+  override box(): void {}
+}
+const NO_MESH = new NoMesh(false, true);
 /** Lajes: manta clara, cimento, piche, cinza escuro, telhado verde. */
 const ROOF_FLATS = [0x8f8b84, 0xa8a49b, 0x5d5f61, 0x77736c, 0x6f8a55, 0xb9b2a6];
 
@@ -309,18 +320,12 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
     const floors = Math.max(1, b.floors[i]);
     const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
     const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows: lod <= 1 ? lotParking(b, i) : [], pattern: plan.pattern[i], side: plan.side[i] };
-    if (lod === -2) {
-      // modo peças: o gerador roda num descarte e só as peças repetidas saem (part → partsOut)
-      const sink = new MeshBuilder(false, true);
-      sink.curBase = f.base;
-      g.mb = sink; g.lod = 0;
-    } else if (lod < 0) {
-      // camada de detalhe: o gerador roda inteiro num descarte (mesmo sorteio, mesmas medidas) e cada parede com
-      // janelas desenhadas manda as peças 3D para a malha de verdade (prism → windowDetail)
-      const sink = new MeshBuilder(false, true);
-      sink.curBase = f.base;
-      detailOut = mb;
-      g.mb = sink; g.lod = 0;
+    if (lod < 0) {
+      // one pass, the outputs this job asks for: the parts (lod -2, part -> partsOut) or the detail layer (lod -1,
+      // prism -> windowDetail into the real mesh); the main geometry goes to a builder that keeps nothing
+      NO_MESH.curBase = f.base;
+      if (lod === -1) detailOut = mb;
+      g.mb = NO_MESH; g.lod = 0;
     }
     genLod = g.lod;
     const v0 = mb.v;
