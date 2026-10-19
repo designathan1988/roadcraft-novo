@@ -112,3 +112,30 @@ test('driving: improved IDM with the constant-acceleration heuristic, jerk-limit
   assert.ok(s < 40 && 40 - s < 6, `stopped ${(40 - s).toFixed(2)} m short of the car`);
   assert.ok(hardest >= -c.dbe[0] - 1e-6, `braked at ${hardest.toFixed(2)} m/s² (emergency ${c.dbe[0].toFixed(2)})`);
 });
+
+test('lorry yards: a truck bound for a yard turns in at the dock\'s gate as it drives past, not from the end of the street', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  // the destination's lane: the longest one there is; a dock 16 m back from its kerb, near the lane's start
+  const k = sim.conns.cols;
+  let lane = -1;
+  for (let x = 0; x < sim.conns.end; x++) if (sim.conns.alive[x] && k.turn[x] === 1 && (lane < 0 || sim.laneLen(k.to[x]) > sim.laneLen(lane))) lane = k.to[x];
+  assert.ok(sim.laneLen(lane) > 75, `lane of ${sim.laneLen(lane).toFixed(0)} m`);
+  const p = new Float64Array(4);
+  sim.lanePoint(lane, 14, p);
+  const nx = -Math.cos(p[3]), nz = Math.sin(p[3]); // the driver's right
+  tr.setDocks(new Float32Array([p[0] + nx * 16, p[2] + nz * 16, Math.atan2(-nx, -nz)]));
+  // a truck coming along that lane to its end
+  const T = inner(tr), c = tr.veh.cols, v = tr.veh.alloc();
+  T.initVehicle(v, 2);
+  const o = v * ROUTE_CAP;
+  tr.routes[o] = sim.laneFrom(lane); tr.routes[o + 1] = sim.laneTo(lane);
+  c.rLen[v] = 2; c.rIdx[v] = 1; c.dest[v] = sim.laneTo(lane);
+  c.lane[v] = lane; c.conn[v] = -1; c.s[v] = 0; c.v[v] = 8;
+  T.setLaneCount(lane, 1); T.addMicro(v); T.insert(v, false, lane);
+  let docked = -1;
+  for (let i = 0; i < 20 * 20 && docked < 0; i++) { tr.step(0.05); if (tr.docked > 0) docked = c.s[v]; }
+  assert.ok(docked >= 0, `the truck never backed into the dock (planned ${tr.mvs.planned}, refused ${tr.mvs.refused})`);
+  assert.ok(docked < 45, `it turned in ${docked.toFixed(0)} m along the lane, past the gate at 14 m`);
+});

@@ -151,6 +151,9 @@ const TRUCK_ZONES = [0.05, 0.1, 0.6, 1, 0.4];
 /** Cell of the stop index (m) and cells per side of the map. */
 const STOP_CELL = 600, STOP_CELLS = Math.ceil(MAP_SIZE / STOP_CELL);
 
+/** Dock index cell (m) and cells per side; a truck turns into a yard whose dock is this near its centre (m). */
+const DOCK_CELL = 64, DOCK_CELLS = Math.ceil(MAP_SIZE / DOCK_CELL), YARD_REACH = 28;
+
 const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
 const TERMINAL_DWELL = 75;
@@ -497,7 +500,45 @@ export class Traffic {
   }
 
   /** Docks near the camera sent by the page: a truck arriving next to one backs into it (they never pick trips). */
-  setDocks(pts: Float32Array): void { this.docks = pts; }
+  setDocks(pts: Float32Array): void {
+    this.docks = pts;
+    // by DOCK_CELL cell, so a truck finds the docks beside it without scanning them all
+    const n = Math.floor(pts.length / 3);
+    const start = new Int32Array(DOCK_CELLS * DOCK_CELLS + 1), idx = new Int32Array(n);
+    const cell = (k: number) => this.dockCell(pts[k * 3], pts[k * 3 + 1]);
+    for (let k = 0; k < n; k++) start[cell(k) + 1]++;
+    for (let i = 0; i < DOCK_CELLS * DOCK_CELLS; i++) start[i + 1] += start[i];
+    const fill = start.slice(0, DOCK_CELLS * DOCK_CELLS);
+    for (let k = 0; k < n; k++) idx[fill[cell(k)]++] = k * 3;
+    this.dockStart = start; this.dockIdx = idx;
+  }
+  private dockStart = new Int32Array(DOCK_CELLS * DOCK_CELLS + 1);
+  private dockIdx = new Int32Array(0);
+  private dockCell(x: number, z: number): number {
+    const i = Math.min(DOCK_CELLS - 1, Math.max(0, Math.floor((x + MAP_HALF) / DOCK_CELL)));
+    const j = Math.min(DOCK_CELLS - 1, Math.max(0, Math.floor((z + MAP_HALF) / DOCK_CELL)));
+    return j * DOCK_CELLS + i;
+  }
+
+  /** A free dock within YARD_REACH of (x, z) (the docks' first number in `docks`), or −1. */
+  private dockNear(x: number, z: number, self: number): number {
+    const c = this.veh.cols, d = this.docks;
+    let best = -1, bd = YARD_REACH;
+    const ci = Math.floor((x + MAP_HALF) / DOCK_CELL), cj = Math.floor((z + MAP_HALF) / DOCK_CELL);
+    for (let j = cj - 1; j <= cj + 1; j++) for (let i = ci - 1; i <= ci + 1; i++) {
+      if (i < 0 || j < 0 || i >= DOCK_CELLS || j >= DOCK_CELLS) continue;
+      const cell = j * DOCK_CELLS + i;
+      for (let e = this.dockStart[cell]; e < this.dockStart[cell + 1]; e++) {
+        const k = this.dockIdx[e], dist = Math.hypot(d[k] - x, d[k + 1] - z);
+        if (dist >= bd) continue;
+        const key = this.dockKey(k), holder = this.spots.get(key);
+        if (holder !== undefined && holder !== self && this.veh.alive[holder] && c.spot[holder] === key) continue;
+        bd = dist; best = k;
+      }
+    }
+    return best;
+  }
+  private dockKey(k: number): number { const d = this.docks; return (Math.round(d[k]) + 20000) * 40000 + Math.round(d[k + 1]) + 20000 + 1; }
 
   private nearCam(lane: number): boolean {
     const sc = this.sim.net.segs.cols, sg = laneSeg(lane);
@@ -573,17 +614,9 @@ export class Traffic {
     if (!d.length) return false;
     const a = this.mvA;
     this.centrePose(lane, c.s[v], len, 0, a);
-    // the nearest free dock within 70 m
-    let best = -1, bd = 70;
-    const keyOf = (k: number) => (Math.round(d[k]) + 20000) * 40000 + Math.round(d[k + 1]) + 20000 + 1;
-    for (let k = 0; k + 2 < d.length; k += 3) {
-      const dist = Math.hypot(d[k] - a[0], d[k + 1] - a[2]);
-      if (dist >= bd) continue;
-      const holder = this.spots.get(keyOf(k));
-      if (holder !== undefined && holder !== v && this.veh.alive[holder] && c.spot[holder] === keyOf(k)) continue;
-      bd = dist; best = k;
-    }
-    if (best < 0 || !this.reserve(v, keyOf(best))) return false;
+    // the nearest free dock beside it (the yard's gate: within YARD_REACH)
+    const best = this.dockNear(a[0], a[2], v);
+    if (best < 0 || !this.reserve(v, this.dockKey(best))) return false;
     const yaw = d[best + 2], bx = d[best] + Math.sin(yaw) * len / 2, bz = d[best + 1] + Math.cos(yaw) * len / 2;
     const m = this.mvs.start(v, MKind.Dock, a[0], a[2], a[3], bx, bz, yaw, a[1], 9, 45);
     if (m < 0) { this.releaseSpot(v); return false; }
@@ -1759,6 +1792,8 @@ export class Traffic {
       }
     }
     if (c.dying[v]) { /* leaving */ }
+    // a truck bound for a yard turns in at its gate as it drives past (tried every second: planning the reverse costs)
+    else if (this.atDestination(v) && c.line[v] < 0 && c.kind[v] === 2 && this.docks.length && (this.microStep + v) % 20 === 0 && this.nearCam(lane) && this.tryDock(v, lane)) return;
     else if (this.atDestination(v) && c.line[v] < 0) {
       // near the camera cars and trucks decide 30 m before the end (room for the manoeuvre); the rest at 12 m
       const room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.nearCam(lane) ? 30 : 12;
