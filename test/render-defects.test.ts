@@ -699,3 +699,18 @@ test('shadows (4.0 port): low props cast only into the near cascade; the far cas
   const city = new THREE.Object3D();
   assert.equal(city.layers.test(csm.lights[2].shadow.camera.layers), true, 'the far cascade still draws the city');
 });
+
+test('E23: an object moved by its matrix has the previous frame\'s matrix in its velocity', async () => {
+  const vel = await import('../src/render/velocity.ts') as Record<string, unknown>;
+  const prev = vel.previousModelMatrix as ((o: THREE.Object3D, frameId: number) => THREE.Matrix4) | undefined;
+  assert.ok(prev, 'the velocity reads a previous model matrix per object');
+  const box = new THREE.Mesh();
+  box.updateMatrixWorld();
+  prev!(box, 10);
+  box.scale.y = 0.5; box.updateMatrixWorld(); // the collapse animation shrinks it
+  const p = prev!(box, 11);
+  assert.equal(p.elements[5], 1, 'frame 11 sees frame 10\'s matrix (scale 1)');
+  assert.equal(prev!(box, 11).elements[5], 1, 'the shadow passes of frame 11 see the same');
+  box.scale.y = 0.25; box.updateMatrixWorld();
+  assert.equal(prev!(box, 30).elements[5], 0.25, 'after frames not drawn it starts still (no jump)');
+});
