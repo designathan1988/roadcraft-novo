@@ -329,7 +329,7 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
       const address = b.address || (a.addressOf?.() ?? '');
       if (address) p.options.append(el('div', 'v2-pop-sub', address));
       p.options.append(orow(t('builder.field.function'), select(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
-      p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(Math.max(1, b.floors + d)); })));
+      p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(b.floors === 0 && d < 0 ? 0 : Math.max(1, Math.min(60, b.floors + d))); })));
       p.options.append(orow(t('ui.build.style'), select(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
       p.options.append(orow(t('ui.build.actions'),
         button('v2-act danger', t('inspector.demolish'), () => a.demolishBuilding(), svg('demolish', 16)),

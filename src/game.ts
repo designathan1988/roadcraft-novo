@@ -343,7 +343,8 @@ export class Game {
       profile: (p) => { this.roadTool.setProfile(p); },
       zone: (z) => { this.zoneTool.zone = z; },
       zoneRadius: (r) => { this.zoneTool.radius = r; },
-      floors: (d) => this.editSelected(d),
+      // 1 to 60 floors; "−" on an empty lot (rubble) leaves it empty
+      floors: (d) => { if (d > 0 || (this.selected >= 0 && this.world.buildings.cols.floors[this.selected] > 0)) this.editSelected(d); },
       style: (a) => { if (this.selected >= 0) this.editSelected(0, a); else this.newArch = a; },
       buildingFn: (f) => { if (this.selected >= 0) this.editSelected(0, undefined, f); else this.newFn = f; },
       lotMode: (m) => this.setLotMode(m),
