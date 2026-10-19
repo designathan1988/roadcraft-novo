@@ -62,7 +62,7 @@ const handlers: { [K in JobKind]: Handler<K> } = {
     return [{ cell: p.cell, props }, propTransfer(props)];
   },
   cityGen: (p) => {
-    const r = generateCity(p.seed);
+    const r = generateCity(p.seed, p.style);
     return [r, [r.nodes.buffer as ArrayBuffer, r.segs.buffer as ArrayBuffer, r.centers.buffer as ArrayBuffer]];
   },
   conform: (p) => [{ tile: p.tile, ...conformTile(H(), p.tile, p.segs) }, []],

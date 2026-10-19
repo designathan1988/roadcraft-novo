@@ -10,6 +10,7 @@ import { Rng, fbm } from '../core/rng.ts';
 import { baseHeight } from './terrainGen.ts';
 import { Zone } from '../roads/zones.ts';
 import { PROFILES } from '../roads/profiles.ts';
+import { blockLines, districtField, districtLevels, simplifyLine, traceStreets, type CityStyle, type P2 } from './cityField.ts';
 
 export const GEN = { Local: 1, Avenue: 3, AvenueBike: 4, Expressway: 5 } as const;
 
@@ -26,10 +27,17 @@ interface Poly { pts: number[]; profile: number; bridge: boolean }
 interface Center { x: number; z: number; r: number; angle: number; bx: number; bz: number }
 
 const MERGE = 7;
+/** Longest generated segment (m): under MAX_SEG_LEN (roads/network.ts), the spatial index's limit. */
+const GEN_SEG_LEN = 100;
 const MAX_LOCAL_GRADE = 0.11;
 const MAX_ART_GRADE = 0.08;
 
-export function generateCity(seed: number): CityRoads {
+/**
+ * The city from the seed. `style` lays the local streets of each district: 'classic' a rotated grid (this engine's
+ * first generator), or one of Roadcraft 4.0's (grid, organic, radial, mixed: streets along a tensor field; blocks:
+ * a straight grid of 120 × 72 m blocks). The arterials, the water and slope rules and the zones are the same for all.
+ */
+export function generateCity(seed: number, style: CityStyle = 'classic'): CityRoads {
   const rng = new Rng(seed * 7919 + 13);
   const H = (x: number, z: number) => baseHeight(x, z, seed);
   const land = (x: number, z: number) => H(x, z) > SEA_LEVEL + 1.2;
@@ -179,6 +187,10 @@ export function generateCity(seed: number): CityRoads {
     centers.forEach((c, i) => { const s = Math.hypot(x - c.x, z - c.z) / c.r; if (s < bs) { bs = s; best = i; } });
     return bs < 1.12 ? best : -1;
   };
+  if (style !== 'classic') {
+    centers.forEach((c, ci) => fieldStreets(c, ci));
+    return buildGraph(polys, centers, H, seed);
+  }
   centers.forEach((c, ci) => {
     const ca = Math.cos(c.angle), sa = Math.sin(c.angle);
     const R = c.r * 1.12;
@@ -204,6 +216,35 @@ export function generateCity(seed: number): CityRoads {
   });
 
   return buildGraph(polys, centers, H, seed);
+
+  /**
+   * Local streets of district `ci` in one of Roadcraft's styles: traced over its own ground (its share of the map,
+   * on land, not too steep, with the same countryside gaps as the classic grid), cut by water and slope by `march`.
+   */
+  function fieldStreets(c: Center, ci: number): void {
+    const R = c.r * 1.12;
+    const insideP = (p: P2): boolean => {
+      const d = Math.hypot(p.x - c.x, p.z - c.z);
+      if (d > R || !inside(p.x, p.z) || !land(p.x, p.z) || owner(p.x, p.z) !== ci) return false;
+      if (d > c.r * 0.7 && fbm(p.x / 900, p.z / 900, seed + 51, 2) < -0.25) return false;
+      return slope(p.x, p.z) < MAX_LOCAL_GRADE * 1.6;
+    };
+    const lay = (level: number, points: P2[]) => {
+      // split where the line leaves the district's ground; each piece is marched (bridges are not built here)
+      // each piece with one point every 20 m or so where it bends (the graph merges anything under 16 m into a node)
+      let run: P2[] = [];
+      const flushRun = () => {
+        if (run.length >= 2) march(simplifyLine(run, 1.2, 20).map((p) => [p.x, p.z] as [number, number]), level === 0 && style === 'blocks' ? GEN.Avenue : GEN.Local, false, MAX_LOCAL_GRADE);
+        run = [];
+      };
+      for (const p of points) { if (insideP(p)) run.push(p); else flushRun(); }
+      flushRun();
+    };
+    if (style === 'blocks') { for (const l of blockLines(c.x, c.z, R)) lay(l.level, l.points); return; }
+    const field = districtField(style, c.x, c.z, c.r, rng, seed + ci * 101)!;
+    const lines = traceStreets(field, insideP, { x0: c.x - R, z0: c.z - R, x1: c.x + R, z1: c.z + R }, districtLevels(c.r), rng);
+    for (const l of lines) lay(l.level, l.points);
+  }
 }
 
 // ---------------------------------------------------------------- grafo planar
@@ -408,7 +449,19 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
       else if (d < 1.05) zone = nearExp(mx, mz) < 800 && fbm(mx / 900, mz / 900, seed + 77, 2) > 0.05 ? Zone.Industrial : d > 0.75 ? Zone.ResLow : Zone.Residential;
       else zone = zr.next() < 0.5 ? Zone.Residential : Zone.None;
     }
-    segs.push(a, b, variant(profile, zone, d, mx, mz), zone, zone);
+    // no segment longer than the spatial index holds (MAX_SEG_LEN): long straight edges get nodes along them
+    const L = Math.hypot(nx[b] - nx[a], nz[b] - nz[a]), pieces = Math.ceil(L / GEN_SEG_LEN), prof = variant(profile, zone, d, mx, mz);
+    let from = a;
+    for (let k = 1; k <= pieces; k++) {
+      let to = b;
+      if (k < pieces) {
+        const t = k / pieces, x = nx[a] + (nx[b] - nx[a]) * t, z = nz[a] + (nz[b] - nz[a]) * t;
+        to = nx.length;
+        nx.push(x); nz.push(z); ny.push(ny[a] + (ny[b] - ny[a]) * t);
+      }
+      segs.push(from, to, prof, zone, zone);
+      from = to;
+    }
   }
   // só os nós usados, com índices novos
   const remap = new Int32Array(nx.length).fill(-1);

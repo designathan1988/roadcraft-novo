@@ -60,6 +60,7 @@ import { demolishBox } from './tools/demolish.ts';
 import { curveLotSide, deleteLot, deleteLotsAlong, joinLots, lotAt, lotFits, lotOutlineWorld, lotToWorld, moveSharedCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotsByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt } from './roads/streetNames.ts';
+import { CITY_STYLES, type CityStyle } from './jobs/cityField.ts';
 import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
@@ -534,7 +535,7 @@ export class Game {
     this.last = performance.now();
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
-    else if (params.has('cidade')) await this.generatedCity();
+    else if (params.has('cidade')) await this.generatedCity((CITY_STYLES as readonly string[]).includes(params.get('estilo') ?? '') ? params.get('estilo') as CityStyle : 'classic');
     else if (params.has('carregar')) await this.load();
     else if (!params.has('cam') && !params.has('vazio')) {
       // start screen (automated photos skip it with ?cam, ?teste or ?cidade)
@@ -1201,6 +1202,8 @@ export class Game {
       if (c) this.commands.run(c);
     },
     grow: async () => { this.growth.processDirty(); await this.pool.whenIdle(); return this.growth.fillAll(); },
+    /** The style the next generated city lays its local streets in (Roadcraft's grid, organic, radial, mixed, blocks; or classic). */
+    cityStyle: (style: CityStyle) => { if (CITY_STYLES.includes(style)) this.cityStyle = style; return this.cityStyle; },
     /** Road edits at the point (x, z): split, reverse, duplicate, join (node) and move node to (tx, tz). */
     edit: (what: 'split' | 'reverse' | 'duplicate' | 'join' | 'move', x: number, z: number, tx = 0, tz = 0) => {
       const net = this.world.roads;
@@ -1983,7 +1986,10 @@ export class Game {
   }
 
   /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
-  async generatedCity(): Promise<void> {
+  /** How the generator lays each district's local streets (`jobs/cityField.ts`; ?estilo= in the address, or api). */
+  cityStyle: CityStyle = 'classic';
+
+  async generatedCity(style: CityStyle = this.cityStyle): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     const t0 = performance.now();
@@ -1995,7 +2001,7 @@ export class Game {
       this.generating = true;
       await this.generateTerrain();
       phase('relevo');
-      const city = await this.pool.run('cityGen', { seed: w.seed }, { priority: 0 });
+      const city = await this.pool.run('cityGen', { seed: w.seed, style }, { priority: 0 });
       phase('malha viária');
       this.hud.showLoading('Assentando as vias…');
       const ids: number[] = [];

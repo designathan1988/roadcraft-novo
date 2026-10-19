@@ -23,6 +23,8 @@ test('cidade gerada: determinística, grafo limpo, nós em terra', () => {
   }
   for (let i = 0; i < n; i++) {
     assert.ok(deg[i] >= 1 && deg[i] <= 6, `grau ${deg[i]}`);
-    assert.ok(baseHeight(a.nodes[i * 3], a.nodes[i * 3 + 1], 3) > 0, 'nó na água');
+    // over water only a pier in the middle of a bridge span (two roads, deck above the water): long spans are split
+    // so no segment is longer than the spatial index holds
+    if (baseHeight(a.nodes[i * 3], a.nodes[i * 3 + 1], 3) <= 0) assert.ok(deg[i] === 2 && a.nodes[i * 3 + 2] > 1, `nó na água com grau ${deg[i]}, altura ${a.nodes[i * 3 + 2]}`);
   }
 });
