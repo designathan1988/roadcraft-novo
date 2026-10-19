@@ -28,7 +28,7 @@ test('catálogo: 38 projetos do Roadcraft, volumes dentro do lote e com andares'
     assert.ok(solid.length > 0, e.name);
   }
   // the style x pattern rows, then the catalog's window shapes; ids fit a byte
-  assert.equal(facadeWindowTable().length, ARCHES.length * PATTERN_COUNT + catalogWindowRows().length);
+  assert.equal(facadeWindowTable().length, ARCHES.length * PATTERN_COUNT + catalogWindowRows().length + 1);
   assert.ok(facadeWindowTable().length <= 256);
 });
 
@@ -61,4 +61,10 @@ test('marcos e padrões: determinísticos, o mesmo marco nunca a menos de 250 m 
   assert.ok(marks >= 2 && marks <= 14, marks + " marcos");
   const kinds = new Set(Array.from(plan.pattern));
   assert.ok(kinds.size >= 3, [...kinds].join(","));
+});
+
+test('a linha de vidro inteiro é a última da tabela de janelas', async () => {
+  const { PANE_ROW } = await import('../src/world/arch.ts');
+  assert.equal(PANE_ROW, facadeWindowTable().length - 1);
+  assert.deepEqual(facadeWindowTable()[PANE_ROW], [0, 0, 1, 0]);
 });

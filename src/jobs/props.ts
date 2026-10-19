@@ -15,12 +15,14 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from './protocol.ts';
+import { PART_PROP, POOL_PARTS, partKey, partW } from './parts40.ts';
 import { inFootprints, inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts } from './buildingGen.ts';
 
 /** Tipos de peça (4 bits; 15 = vaga livre). */
-export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17 } as const;
-/** Types 16..23 belong to the roads/vegetation work, 24..30 to the buildings work (see the shared notes). */
-export const PROP_TYPES = 18;
+export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17, ...PART_PROP } as const;
+/** Types 16..23 belong to the roads/vegetation work, 24..30 to the buildings work (see the shared notes); 18..23 are
+ * empty for now (no mesh, no draw). */
+export const PROP_TYPES = 31;
 /** Mobiliário (variante da peça Furniture). */
 export const FURN = { Hydrant: 0, Postbox: 1, Phone: 2, Drain: 3, Bollard: 4, Planter: 5,
   // peças de fachada dos prédios (sessão prédios; jobs/buildingGen.ts PART): 8..15
@@ -64,6 +66,11 @@ class Out {
     const yq = Math.min(4095, Math.round(a * 4096) & 4095);
     const sq = Math.max(0, Math.min(63, Math.round((scale - 0.5) * 42)));
     this.data.push(x, y, z, yq + (variant & 15) * 4096 + sq * 65536);
+    this.extra.push(((type & 31) | ((key & 0x07ffffff) << 5)) >>> 0);
+  }
+  /** A 4.0 building part (jobs/parts40.ts): w and key packed by partW and partKey; the building's, kept past the cell edge. */
+  addPart(type: number, x: number, y: number, z: number, w: number, key: number): void {
+    this.data.push(x, y, z, w);
     this.extra.push(((type & 31) | ((key & 0x07ffffff) << 5)) >>> 0);
   }
   /** Escala crua (6 bits), para peças que usam o campo como comprimento (fios). */
@@ -150,7 +157,7 @@ const BIOME_TREES: Array<[number, number, number, number, number]> = [
 ];
 
 /** O que o chão diz às peças: pintura/floresta, água e bioma. */
-export interface PropEnv { ground?: Uint32Array; water?: Float32Array; biome?: number }
+export interface PropEnv { ground?: Uint32Array; water?: Float32Array; biome?: number; /** the cell is near: its 4.0 buildings' parts too */ parts40?: boolean }
 
 export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, cell: number, items?: Float32Array, env?: PropEnv): PropColumns {
   const out = new Out(cell);
@@ -453,7 +460,11 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   // the buildings' parts (one generator pass), with the footprints of what they put on their lot floors, then the
   // yards: trees at the back of the houses, shrubs along the fronts, never inside those footprints
   const foot: number[][] = Array.from({ length: b.count }, () => []);
-  buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot);
+  buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot,
+    env?.parts40 ? (kind, x, y, z, yaw, sx, sy, sz, rgb) => {
+      const tv = POOL_PARTS[kind];
+      if (tv) out.addPart(tv[0], x, y, z, partW(yaw, rgb), partKey(tv[0], sx, sy, sz, tv[1]));
+    } : undefined);
   lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot);
 
   // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio

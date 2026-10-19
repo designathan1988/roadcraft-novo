@@ -410,7 +410,8 @@ test('F10: the parts, parked cars and yard plants of a building near the cell ed
     const b = oneBuilding(seed % 2 ? Zone.Residential : Zone.Mixed, 5, 36, 44, seed * 7919, seed * 6);
     b.x[0] = x0 + 256 - 8; b.z[0] = x0 + 128;
     const parts: number[] = [];
-    buildBuildingParts(w.heights, b, () => parts.push(1));
+    // the facade parts (the pool's Furniture; trees and bushes of a lot are counted with the yard plants)
+    buildBuildingParts(w.heights, b, (_v, _x, _y, _z, _yaw, _s, kind) => { if (kind === undefined) parts.push(1); });
     const r = buildProps(w.heights, w.roads.gather([], []), b, cell);
     let furniture = 0;
     for (let k = 0; k < r.count; k++) if ((r.extra[k] & 31) === PROP.Furniture) furniture++;

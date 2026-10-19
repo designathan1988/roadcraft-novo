@@ -8,6 +8,7 @@ import { CELL_COUNT, Dirty, cellId, cellOriginX, tileOriginX } from '../core/gri
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer } from '../jobs/protocol.ts';
 import type { World } from '../world/world.ts';
+import { heightAt } from '../world/heights.ts';
 import { CellLayer, type LayerSource } from './cellLayer.ts';
 import { T, lodFadeMask, useCompactVertex, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
@@ -115,7 +116,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
         (r) => done(r.mesh), { key: `plate:${p}`, priority, transfer: boxTransfer(boxes) });
     },
   };
-  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 650, plate: 4200, budget: 256e6 }, false, true);
+  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 200, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
 }
 
 
@@ -139,7 +140,8 @@ export function createCityDetail(world: World, pool: JobPool, material: THREE.Ma
     buildTile: (_t, _p, done) => done(null),
     buildPlate: (_p, _q, done) => done(null),
   };
-  return new CellLayer(src, world.dirty, Dirty.Buildings, material, { near: 1100, evict: 1400, margin: 30, detail: 220, budget: 48e6, shadows: false, sparse: true, publish: DETAIL_SHOWN }, false, true);
+  return new CellLayer(src, world.dirty, Dirty.Buildings, material, { near: 1100, evict: 1400, margin: 30, detail: 150, budget: 48e6, shadows: false, sparse: true, publish: DETAIL_SHOWN,
+    eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
 }
 
 /** Direction to the sun (from the scene's directional light, read once per render). */
@@ -342,9 +344,11 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   // glass: reflection by the angle (Schlick's Fresnel)
   const cosV = clamp(dot(V.negate(), n), 0, 1);
   const F = float(0.04).add(float(0.96).mul(pow(float(1).sub(cosV), 5)));
-  const skyRefl = mix(vec3(0.34, 0.4, 0.46), vec3(0.62, 0.7, 0.78), clamp(V.y.negate().add(0.3), 0, 1)).mul(float(1).sub(night.mul(0.92)));
+  // the sky in the glass: the 4.0 punched windows read dark grey with a faint grey sky in them (roadcraft-rua-dia.png);
+  // a curtain wall keeps the bluer sky of its tinted glass
+  const skyRefl = mix(mix(vec3(0.2, 0.21, 0.22), vec3(0.42, 0.44, 0.46), clamp(V.y.negate().add(0.3), 0, 1)), mix(vec3(0.34, 0.4, 0.46), vec3(0.62, 0.7, 0.78), clamp(V.y.negate().add(0.3), 0, 1)), isCurtain).mul(float(1).sub(night.mul(0.92)));
   const glassTint = select(isCurtain.greaterThan(0.5), select(hasWin.greaterThan(0.5), mix(cGlassB, cGlassA, clamp(fy.sub(0.2).div(0.78), 0, 1)).mul(0.45), base.mul(0.35)), vec3(0.03, 0.04, 0.05));
-  const refl = max(F, 0.2);
+  const refl = max(F, select(isCurtain.greaterThan(0.5), float(0.2), float(0.08)));
 
   // far: the facade's average before the window has few pixels (the fine pattern shimmered with TRAA)
   const detail = clamp(float(1.3).sub(max(wu, wy).mul(4.5)), 0, 1);
@@ -454,7 +458,8 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const sxw = fx.sub(0.05).div(0.9), syw = fy.sub(0.05).div(0.71), sax = fwidth(sxw).add(1e-4), say = fwidth(syw).add(1e-4);
   const shopBars = float(1).sub(band(float(0.03), float(0.97), sxw, sax).mul(band(float(0.04), float(0.96), syw, say)))
     .max(band(float(0.488), float(0.512), sxw, sax)).max(band(float(0.665), float(0.69), syw, say));
-  const paneFrame = max(max(edgeBar, crossBar).mul(plainWin), shopBars.mul(inShop)).mul(win).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt))
+  // (not on a pane of the detail layer or of a 4.0 building: its frame stands there in relief)
+  const paneFrame = max(max(edgeBar, crossBar).mul(plainWin), shopBars.mul(inShop)).mul(win).mul(float(1).sub(isGlass)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt))
     .mul(clamp(float(1.6).sub(max(ax2, ay2).mul(12)), 0, 1));
   const albedo = mix(mix(mix(mix(wallFinal, glassC.mul(mix(float(1), float(0.6), darkPane)), winAmt), rollerC, rollAmt), trimC, paneFrame), signC, signMask.mul(detail));
   m.colorNode = vec4(albedo, 1);

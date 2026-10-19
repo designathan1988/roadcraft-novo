@@ -7,10 +7,10 @@
 // 2 = ladrilho (sem platibandas); 3 = placa (só volumes e telhados).
 
 import { Rng, hash2 } from '../core/rng.ts';
-import { Zone } from '../roads/zones.ts';
+import { Zone, zoneDensity } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { MeshBuilder } from './meshBuilder.ts';
-import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, Pattern, Win, chimneyOf, facadeArch, facadeWindowTable, pickArch, type Arch } from '../world/arch.ts';
+import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, PANE_ROW, Pattern, Win, chimneyOf, facadeArch, facadeWindowTable, pickArch, type Arch } from '../world/arch.ts';
 import { cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { CELL_SIZE } from '../config.ts';
 import { SHAPE_SCALE, SHAPE_STRIDE, type BoxColumns, type PackedMesh } from './protocol.ts';
@@ -18,6 +18,7 @@ import { CIVIC_CATALOG, CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign,
 import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
 import { BAY, catalogFacade } from '../world/catalogFacade.ts';
 import { FIN } from './buildingFinishes.ts';
+import { layLot40, type PartSink } from './building40.ts';
 import { FLAT_ROOFS, ROOF_COLOURS, planRoofPlant, type RoofPlantItem } from '../world/roofPlant.ts';
 
 export const GEN_VERSION = 15;
@@ -787,6 +788,23 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     const ch = chimneyOf(b.seed[i], W, D, floors);
     if (ch) chimney(g.mb, f, ch[0], ch[1], f.base, hi + ch[2], g.lod);
   }
+  else if (lod <= 0 && lod !== -3 && R40_ZONES.has(zone)) {
+    // the Roadcraft 4.0 building (jobs/building40.ts), near: its shell in the cell's mesh (level 0), its parts to the
+    // props pool (the parts pass, level -2, when the props job asks for them); nothing in the detail layer (level -1);
+    // the old body is still made, into nothing, for the footprint the yard's props avoid
+    const dens = zoneDensity(zone);
+    const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
+    const density = dens === 0 || (use === 'residential' && floors <= 2) ? 'low' : dens === 2 || (use === 'commercial' && floors >= 8) ? 'high' : 'medium';
+    const lot40 = { cx: fit.cx, cz: fit.cz, W, D, rot, use, density, seed: b.seed[i] || i + 1, groundAt: (x: number, z: number) => heightAt(heights, x, z) } as const;
+    if (lod === 0) layLot40(lot40, mb, null, PANE_ROW);
+    else if (lod === -2 && parts40Out) layLot40(lot40, null, parts40Out, PANE_ROW);
+    if (lod === -2) {
+      const keep = partsOut;
+      partsOut = null;
+      try { if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g); else if (zone === Zone.Commercial && floors >= 8) tower(g); else block(g); }
+      finally { partsOut = keep; }
+    }
+  }
   else if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g);
   else if (zone === Zone.Commercial && floors >= 8) tower(g);
   else block(g);
@@ -800,11 +818,14 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
  * Peças repetidas dos prédios (ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água) para o pool de
  * props: o mesmo gerador, no modo peças, com o mesmo sorteio da malha. Roda no job de peças da célula.
  */
-export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][]): void {
+export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink): void {
   partsOut = emit;
   footOut = foot ?? null;
-  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; footOut = null; footI = -1; }
+  parts40Out = parts40 ?? null;
+  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; footOut = null; footI = -1; parts40Out = null; }
 }
+/** Where the parts pass sends the 4.0 buildings' parts (pool instances), when the props job asks for them. */
+let parts40Out: PartSink | null = null;
 
 /** Whether (x, z) is within `margin` of one of the footprints (captureFoot) of a building. */
 export function inFootprints(rects: number[], x: number, z: number, margin: number): boolean {
@@ -1174,7 +1195,7 @@ function block(g: Gen): void {
         } else railing(mb, f, x0 + 0.2, x1 - 0.2, z1 + depth - 0.01, y, railCol);
         for (const [c0, c1] of [[x0, x0 + 0.2], [x1 - 0.2, x1]]) prism(mb, f, c0, c1, z1, z1 + depth + 0.05, y - 0.307, y - 0.307 + fh, slabCol, BMAT.Plain, 50, slabCol, BMAT.Plain);
         // vasos/plantas no estilo tropical
-        if (g.arch === ArchId.Tropical) for (let c = 0; c < cols; c += 2) prism(mb, f, x0 + c * cw + 0.3, x0 + c * cw + 1.1, z1 + 0.2, z1 + 0.9, y, y + 0.7, 0x4f7a34, BMAT.Grass, 50, 0x4f7a34, BMAT.Grass);
+        if (g.arch === ArchId.Tropical) for (let c = 0; c < cols; c += 2) prism(mb, f, x0 + c * cw + 0.3, x0 + c * cw + 1.1, z1 + 0.2, z1 + 0.9, y, y + 0.7, 0xb3ada0, BMAT.Plain | (FIN.Concrete << 4), 50, 0x4f7a34, BMAT.Grass);
         for (let c = 0; c < cols; c++) balconyLife(f, g.seed, c, fl, x0 + c * cw, x0 + (c + 1) * cw, z1, depth, y);
         continue;
       }
@@ -1345,6 +1366,8 @@ const CURTAIN_MULLIONS = [0xd5dadd, 0x5a6168, 0xe8efee, 0xcfd6d3];
 
 /** Faces de uma peça saliente: 1 frente, 2 topo, 4 base, 8 pontas. */
 const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4, LEDGE_JAMB = 1 | 8;
+/** Zones whose buildings are the Roadcraft 4.0 ones near the camera (jobs/building40.ts). */
+const R40_ZONES = new Set<number>([Zone.Residential, Zone.ResLow, Zone.ResHigh, Zone.Commercial, Zone.ComLow, Zone.ComHigh, Zone.Mixed]);
 /** 4.0 FRAME_BAR (kit.ts:240): a window frame's bar, as a share of the opening. */
 export const FRAME_BAR = 0.045;
 /** Roadcraft 4.0 storey band and cornice (BAND_OUT, BAND_H, CORNICE_OUT) and plinth (PLINTH_GROW, PLINTH_MATERIAL). */
@@ -1390,14 +1413,13 @@ function ledge(mb: MeshBuilder, f: Frame, ax: number, az: number, dx: number, dz
   mb.quad(v[0], v[1], v[2], v[3], TX, 0, TZ);
 }
 
-/** Bola grosseira (copa de árvore) feita de dois prismas cruzados: barata e legível de longe. */
-/** treeGeo, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
-function treeGeo(...a: Parameters<typeof treeGeoTagged>): void { untagged(a[0], () => treeGeoTagged(...a)); }
-function treeGeoTagged(mb: MeshBuilder, f: Frame, x: number, z: number, y: number, h: number, r: number): void {
-  blank(mb);
-  prism(mb, f, x - 0.15, x + 0.15, z - 0.15, z + 0.15, y, y + h * 0.5, 0x6a5238, BMAT.Plain, 50, -1, 0);
-  prism(mb, f, x - r, x + r, z - r * 0.7, z + r * 0.7, y + h * 0.45, y + h, 0x5a8a3a, BMAT.Grass, 50, 0x6a9a45, BMAT.Grass);
-  prism(mb, f, x - r * 0.7, x + r * 0.7, z - r, z + r, y + h * 0.5, y + h * 1.05, 0x4f7a34, BMAT.Grass, 50, 0x5a8a3a, BMAT.Grass);
+/**
+ * A tree of a lot (a square, a park, a civic forecourt): a real tree from the props pool, as the lots' trees in
+ * jobs/props.ts, scaled to its height (the pool's tree stands ~7 m). The box trees it replaces took the lawn's
+ * material, whose grass is laid by world x, z: stripes on their sides.
+ */
+function treeGeo(_mb: MeshBuilder, f: Frame, x: number, z: number, y: number, h: number, _r: number): void {
+  part(f, 0, x, y, z, 0, 1, Math.max(0.6, Math.min(1.4, h / 7)), P_TREE);
 }
 
 /** Prédios especiais (escola, igreja, hospital, praça, parque, posto…), cada um com a sua forma. */
@@ -1481,7 +1503,15 @@ function civic(g: Gen, fn: number): void {
       ground(park ? 0x6f9a4c : 0xc4beb2, park ? BMAT.Grass : BMAT.Paving);
       if (lod > 1) break;
       if (!park) {
-        for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) solid(x * W / 4 - W / 8, x * W / 4 + W / 8, z * D / 4 - D / 8, z * D / 4 + D / 8, y0, y0 + 0.45, 0x5f8a3e, BMAT.Grass);
+        for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          // a raised bed: a concrete kerb 45 cm high round it, the soil's lawn on top just under the kerb's edge
+          const bx0 = x * W / 4 - W / 8, bx1 = x * W / 4 + W / 8, bz0 = z * D / 4 - D / 8, bz1 = z * D / 4 + D / 8;
+          blank(mb);
+          frame(mb, f, bx0, bx1, bz0, bz1, y0, y0 + 0.45, 0, 0.15, 0xb3ada0, BMAT.Plain | (FIN.Concrete << 4), FR_TOP | FR_INNER);
+          prism(mb, f, bx0 + 0.15, bx1 - 0.15, bz0 + 0.15, bz1 - 0.15, y0 + 0.38, y0 + 0.38, 0x5f8a3e, BMAT.Grass, 50, 0x5f8a3e, BMAT.Grass, false, 15);
+          // a bush at each bed's centre
+          part(f, 0, x * W / 4, y0 + 0.38, z * D / 4, 0, 1, 1.2, P_BUSH);
+        }
         solid(-2.5, 2.5, -2.5, 2.5, y0, y0 + 0.7, 0xd8d2c6);
         solid(-1.8, 1.8, -1.8, 1.8, y0 + 0.7, y0 + 0.75, 0x6f9fc0);
         solid(-0.3, 0.3, -0.3, 0.3, y0 + 0.7, y0 + 2.4, 0xd8d2c6);

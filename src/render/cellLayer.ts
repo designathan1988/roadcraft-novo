@@ -49,6 +49,8 @@ export interface LayerOptions {
   sparse?: boolean;
   /** Set to 1 for each cell whose level-0 mesh is on screen at full fade (0 otherwise): what another layer reads. */
   publish?: Uint8Array;
+  /** Distances count the eye's height over the ground too (a detail layer: from high above, its cells are far). */
+  eyeHeight?: (x: number, z: number) => number;
 }
 
 /** One mesh of the layer: a cell, a tile or a plate (`size` metres from its origin corner). */
@@ -180,7 +182,8 @@ export class CellLayer {
   private distTo(x: number, z: number, size: number): number {
     const dx = Math.max(x - this.camPos.x, 0, this.camPos.x - (x + size));
     const dz = Math.max(z - this.camPos.z, 0, this.camPos.z - (z + size));
-    return Math.hypot(dx, dz);
+    const dy = this.opt.eyeHeight ? Math.max(0, this.camPos.y - this.opt.eyeHeight(this.camPos.x, this.camPos.z)) : 0;
+    return Math.hypot(dx, dz, dy);
   }
 
   private requestCell(c: number, level: number): void {
