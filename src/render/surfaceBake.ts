@@ -151,3 +151,30 @@ function grass(): THREE.DataTexture {
 export const GRASS_TEX = grass();
 export const ASPHALT_TEX = asphalt();
 export const FOOTWAY_TEX = footway();
+
+/**
+ * Water normals as Roadcraft 4.0's (`render/water.ts` waterNormalTexels): height = ridged crests (period 24, 3
+ * octaves) × 0.62 + a long swell (period 6) × 0.38, normals by central differences (relief 0.014 × size); alpha holds a
+ * foam noise (period 9) for the shore lace, the whitecaps and the churn. One 256² tile, sampled at three scales.
+ */
+function waterNormals(): THREE.DataTexture {
+  const N = 256, data = new Uint8Array(N * N * 4), h = new Float32Array(N * N);
+  const crestN = makeNoise(91), longN = makeNoise(37), foamN = makeNoise(53);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const crest = 1 - Math.abs(fbm(crestN, x * 24 / N, y * 24 / N, 24, 3) - 0.5) * 2;
+    const long = fbm(longN, x * 6 / N, y * 6 / N, 6, 3);
+    h[y * N + x] = crest * 0.62 + long * 0.38;
+  }
+  const relief = N * 0.014;
+  const at = (x: number, y: number) => h[((y + N) % N) * N + ((x + N) % N)];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = (at(x + 1, y) - at(x - 1, y)) * 0.5 * relief, dy = (at(x, y + 1) - at(x, y - 1)) * 0.5 * relief;
+    const l = Math.hypot(dx, dy, 1), o = (y * N + x) * 4;
+    data[o] = Math.round((-dx / l * 0.5 + 0.5) * 255);
+    data[o + 1] = Math.round((-dy / l * 0.5 + 0.5) * 255);
+    data[o + 2] = Math.round((1 / l * 0.5 + 0.5) * 255);
+    data[o + 3] = Math.round(fbm(foamN, x * 9 / N, y * 9 / N, 9, 3) * 255);
+  }
+  return texture(data, N);
+}
+export const WATER_TEX = waterNormals();

@@ -7,7 +7,7 @@ import * as THREE from 'three/webgpu';
 import { currentU, foamU, waveU } from './scene.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
-import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
+import { GRASS_TEX, GRASS_TILE, WATER_TEX } from './surfaceBake.ts';
 import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
 import {
   HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TILES, PLATE_SIZE, SEA_LEVEL, TILE_SIZE,
@@ -22,7 +22,7 @@ import { heightAt } from '../world/heights.ts';
 export const gridU = T.uniform(0);
 
 const {
-  Fn, attribute, clamp, float, floor, fract, int, ivec2, max, mix, normalize, smoothstep, textureLoad,
+  Fn, attribute, clamp, float, floor, fract, int, ivec2, max, min, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot,
   transformNormalToView, uniform, varyingProperty, vec2, vec3, vec4, length, abs, sRGBTransferEOTF,
   positionWorld, fwidth, mx_noise_float, select, texture, instanceIndex, hash, sin, cos, time, positionLocal, step,
 } = T;
@@ -238,6 +238,14 @@ export class TerrainRenderer {
     return textureLoad(this.heightTex, ivec2(cx.bitAnd(int(255)), cz.bitAnd(int(255)))).depth(layer).r;
   }
 
+  /** Water level at a global 8 m sample (NO_WATER where dry). */
+  private loadWater(gx: N, gz: N): N {
+    const WRES = WATER_TILE_RES * MAP_TILES;
+    const cx = clamp(gx, int(0), int(WRES - 1)), cz = clamp(gz, int(0), int(WRES - 1));
+    const layer = cz.shiftRight(int(7)).mul(int(MAP_TILES)).add(cx.shiftRight(int(7)));
+    return textureLoad(this.waterTex, ivec2(cx.bitAnd(int(127)), cz.bitAnd(int(127)))).depth(layer).r;
+  }
+
   /** Painted ground sample (kind, strength, forest, clearing) at a global 4 m sample. */
   private loadG(gx: N, gz: N): N {
     const GRES = WATER_TILE_RES * MAP_TILES;
@@ -374,6 +382,20 @@ export class TerrainRenderer {
         const top = mix(tint(g00), tint(g10), t.x), bot = mix(tint(g01), tint(g11), t.x);
         c = mix(top, bot, t.y);
       }
+      // under and beside the water (Roadcraft 4.0): a wet band from 0.56 m over the level down to it (darker), and the
+      // bed under it, gravel turning to silt by 4.8 m deep (the water is see-through now)
+      {
+        const gw = p.xz.add(float(MAP_HALF)).div(float(WATER_SPACING));
+        const wx = int(floor(gw.x.add(0.5))), wz = int(floor(gw.y.add(0.5)));
+        const wl = max(max(this.loadWater(wx.sub(1), wz.sub(1)), this.loadWater(wx, wz.sub(1))), max(this.loadWater(wx.sub(1), wz), this.loadWater(wx, wz)));
+        // the sea is not in the level texture: under sea level the sea is the water
+        const lvl = max(wl, float(SEA_LEVEL));
+        const has = max(step(float(NO_WATER + 1), wl), step(p.y, float(SEA_LEVEL + 0.56)));
+        const dz = p.y.sub(lvl);
+        c = c.mul(mix(float(1), float(0.6), smoothstep(0.56, -0.08, dz).mul(has)));
+        const bed = mix(sRGBTransferEOTF(vec3(0.34, 0.3, 0.22)), sRGBTransferEOTF(vec3(0.18, 0.17, 0.12)), smoothstep(-0.8, -4.8, dz));
+        c = mix(c, bed, smoothstep(0, -0.8, dz).mul(has));
+      }
       // roads painted on the ground (seen where the road mesh does not reach)
       const tileF = clamp(floor(p.xz.add(float(MAP_HALF)).div(float(TILE_SIZE))), 0, float(MAP_TILES - 1));
       const layer = int(tileF.y.mul(MAP_TILES).add(tileF.x));
@@ -487,8 +509,15 @@ export class TerrainRenderer {
     return mesh;
   }
 
-  /** Water: surface at the stored level; colour by depth (ground read from the terrain's texture), foam at the shore. */
-  private createWaterMaterial(): THREE.MeshStandardNodeMaterial {
+  /**
+   * Water as Roadcraft 4.0's (`render/water.ts`): transparent, its depth read per pixel (the water's level over the
+   * ground under the pixel, from the height texture), coloured by depth (shallow 7fb2a8 → 3d7a8e → deep 245a74), its
+   * normals from three drifting scales of the baked water texture plus a wind-driven swell; along a river the ripples
+   * ride the current (the level's slope gives the downstream direction, two-phase flow sampling), lakes (flat level)
+   * just drift. Lace foam in a band in from the shore, whitecaps with the waves, churn in fast water, Fresnel (F0 0.06,
+   * power 3) toward the horizon tint.
+   */
+  private createWaterMaterial(sea = false): THREE.MeshStandardNodeMaterial {
     const wtex = this.waterTex;
     const WRES = WATER_TILE_RES * MAP_TILES;
     const loadW = (gx: N, gz: N) => {
@@ -496,7 +525,9 @@ export class TerrainRenderer {
       const layer = cz.shiftRight(int(7)).mul(int(MAP_TILES)).add(cx.shiftRight(int(7)));
       return textureLoad(wtex, ivec2(cx.bitAnd(int(127)), cz.bitAnd(int(127)))).depth(layer).r;
     };
-    const vDepth = varyingProperty('float', 'vWaterDepth');
+    const heightAt = this.heightFn();
+    // level, downstream direction (x, z) and how much it runs
+    const vW = varyingProperty('vec4', 'vWaterFlow');
     const pos = Fn(() => {
       const tile = attribute('wtile', 'float');
       const tx = tile.mod(float(MAP_TILES)), tz = floor(tile.div(float(MAP_TILES)));
@@ -506,8 +537,13 @@ export class TerrainRenderer {
       const g = xz.add(float(MAP_HALF)).div(float(WATER_SPACING));
       const ix = int(floor(g.x.add(0.5))), iz = int(floor(g.y.add(0.5)));
       const w = max(max(loadW(ix.sub(1), iz.sub(1)), loadW(ix, iz.sub(1))), max(loadW(ix.sub(1), iz), loadW(ix, iz)));
-      const gh = this.loadH(int(floor(xz.x.add(float(MAP_HALF)).div(float(HEIGHT_SPACING)))), int(floor(xz.y.add(float(MAP_HALF)).div(float(HEIGHT_SPACING)))));
-      vDepth.assign(w.sub(gh));
+      // the level's slope (dry neighbours count as level): the river runs down it; a lake is flat
+      const wet = (v: N) => select(v.greaterThan(float(NO_WATER + 1)), v, w);
+      const gx = wet(loadW(ix.sub(2), iz.sub(1)).max(loadW(ix.sub(2), iz))).sub(wet(loadW(ix.add(1), iz.sub(1)).max(loadW(ix.add(1), iz))));
+      const gz = wet(loadW(ix.sub(1), iz.sub(2)).max(loadW(ix, iz.sub(2)))).sub(wet(loadW(ix.sub(1), iz.add(1)).max(loadW(ix, iz.add(1)))));
+      const grad = vec2(gx, gz).div(float(WATER_SPACING * 3));
+      const run = smoothstep(0.0003, 0.004, length(grad));
+      vW.assign(vec4(w, normalize(grad.add(vec2(1e-7, 0))), run));
       // waves: the surface rises and falls a little (up to 0.35 m)
       const wave = T.sin(xz.x.mul(0.21).add(T.time.mul(1.3))).mul(T.sin(xz.y.mul(0.17).add(T.time.mul(1.1)))).mul(waveU.mul(0.35));
       // at the mouth (level at the sea's) the river's surface drops under the sea plane: with waves the two crossed and blinked
@@ -515,23 +551,60 @@ export class TerrainRenderer {
       const y = select(w.greaterThan(float(NO_WATER + 1)), surf, float(-2000));
       return vec3(xz.x, y, xz.y);
     });
-    const m = new THREE.MeshStandardNodeMaterial();
-    m.positionNode = pos();
-    withPrevious(m);
+    const m = new THREE.MeshStandardNodeMaterial({ transparent: true });
+    // the sea is a plane at sea level (scene.ts): no level to read and no current
+    if (!sea) { m.positionNode = pos(); withPrevious(m); }
     const p = positionWorld;
-    // current: the noise flows downwind; waves: stronger and faster; foam: white crests
-    const flow = vec2(0.91, 0.41).mul(T.time.mul(currentU.mul(0.35).add(0.12)));
-    const ripple = mx_noise_float(p.xz.mul(waveU.mul(0.08).add(0.1)).add(flow)).mul(0.5).add(0.5);
-    const deep = sRGBTransferEOTF(vec3(0.03, 0.09, 0.11)), shallow = sRGBTransferEOTF(vec3(0.14, 0.26, 0.24));
-    const depth = clamp(vDepth.div(3), 0, 1);
-    const crest = smoothstep(float(1).sub(foamU.mul(0.35)), float(1.02), ripple).mul(waveU).mul(foamU);
-    const foam = clamp(smoothstep(foamU.mul(0.5).add(0.15), 0.0, vDepth).mul(ripple.mul(0.6).add(0.4)).add(crest), 0, 1);
-    m.colorNode = vec4(mix(mix(shallow, deep, depth), vec3(0.85, 0.88, 0.86), foam), 1);
-    m.roughnessNode = mix(float(0.16), float(0.34), ripple.mul(waveU.add(0.4)));
+    const t = T.time.mod(1000);
+    const level = sea ? float(SEA_LEVEL) : vW.x, flowDir = sea ? vec2(1, 0) : vW.yz, run = sea ? float(0) : vW.w;
+    // depth per pixel: the level over the ground under this pixel
+    const depth = max(level.sub(heightAt(p.xz)), 0);
+    const waves = min(float(1), waveU.add(windU.mul(0.5)));
+    const tex = (uv: N) => texture(WATER_TEX, uv);
+    // drifting layers (13.6 m and 4.4 m) and the swell (36 m) along the wind
+    const uvA = p.xz.div(13.6).add(vec2(0.035, 0.021).mul(t)), uvB = p.xz.div(4.4).add(vec2(-0.026, 0.047).mul(t));
+    const W = tex(p.xz.div(36).add(windDirU.mul(t.mul(windU.mul(7).add(0.6)).div(36))));
+    // the current: two phases of a 2 s cycle, each carrying the ripples downstream, cross-faded
+    const p0 = fract(t.div(2)), p1 = fract(t.div(2).add(0.5)), w0 = float(1).sub(abs(float(1).sub(p0.mul(2))));
+    const shift = flowDir.mul(currentU.mul(2).add(0.6));
+    const flowed = (uv: N, scale: number) => mix(tex(uv.sub(shift.mul(p1).div(scale)).add(vec2(0.37, 0.61))), tex(uv.sub(shift.mul(p0).div(scale))), w0);
+    const A = mix(tex(uvA), flowed(p.xz.div(13.6), 13.6), run), B = mix(tex(uvB), flowed(p.xz.div(4.4), 4.4), run);
+    const nA = A.xyz.mul(2).sub(1), nB = B.xyz.mul(2).sub(1), nW = W.xyz.mul(2).sub(1);
+    // foam: lace in a band in from the shore, whitecaps with the waves, churn in fast water
+    const lace = A.w.mul(0.55).add(B.w.mul(0.65));
+    const shore = smoothstep(0.196, 0.364, depth).mul(smoothstep(0.34, 0.4, float(1).sub(smoothstep(0, 1.6, depth)).add(lace.sub(0.6).mul(0.22)))).mul(foamU);
+    const caps = smoothstep(float(0.8).sub(waves.mul(0.22)), float(0.97), W.w).mul(smoothstep(0.25, 0.8, waves)).mul(smoothstep(0.6, 2.4, depth));
+    const churn = run.mul(smoothstep(0.66, 0.78, lace)).mul(smoothstep(0.8, 3.2, currentU));
+    const foam = clamp(max(shore, caps.add(churn.mul(0.6)).mul(foamU).mul(1.6)), 0, 1);
+    // normal: the slopes of the layers summed, flattened under foam
+    // the fine ripples fade where a pixel spans more than ~1 m (far and grazing: they turned into glitter)
+    const pix = length(fwidth(p.xz));
+    const fine = smoothstep(1.6, 0.4, pix);
+    const slope = nA.xy.mul(0.62).add(nB.xy.mul(0.48)).mul(fine).add(nW.xy.mul(waves.mul(1.3)).mul(smoothstep(0.32, 2, depth))).mul(0.85).mul(float(1).sub(foam.mul(0.6)));
+    const n = normalize(vec3(slope.x, nA.z.mul(nB.z).max(0.2), slope.y));
+    m.normalNode = transformNormalToView(n);
+    // colour by depth, a slow slick variation, Fresnel toward the horizon tint, foam
+    const lin = (h: number) => sRGBTransferEOTF(vec3(((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255));
+    const deepK = float(1).sub(T.exp(depth.div(-1.44)));
+    let c: N = select(deepK.lessThan(0.5), mix(lin(0x7fb2a8), lin(0x3d7a8e), deepK.mul(2)), mix(lin(0x3d7a8e), lin(0x245a74), deepK.sub(0.5).mul(2)));
+    c = c.mul(tex(p.xz.mul(0.0031).add(vec2(0.0011, 0.0006).mul(t))).w.mul(0.12).add(0.94));
+    const view = normalize(cameraPosition.sub(p));
+    const F = float(0.06).add(float(0.94).mul(pow(float(1).sub(clamp(dot(view, n), 0, 1)), 3)));
+    c = c.mul(float(1).sub(F.mul(0.6))).mul(mix(float(0.65), float(1), foam));
+    c = mix(c, lin(0x6f95b8), F.mul(0.35).mul(float(1).sub(foam)));
+    m.colorNode = vec4(mix(c, lin(0xe6eef2), foam), 1);
+    // opaque by 3 m (4.0's rivers were deeper: 5.6 m there left our shallow rivers see-through)
+    let alpha: N = max(mix(float(0.05), float(0.88), smoothstep(0.12, 3.0, depth)), foam.mul(0.9));
+    alpha = clamp(alpha.add(F.mul(0.5)), 0, 1).mul(smoothstep(0, 0.28, depth));
+    m.opacityNode = alpha;
+    m.roughnessNode = mix(float(0.15), float(0.72), foam);
     m.metalnessNode = float(0);
-    m.maskNode = p.y.greaterThan(float(-1500));
+    if (!sea) m.maskNode = p.y.greaterThan(float(-1500));
     return m;
   }
+
+  /** The sea plane's material (scene.ts makes the plane): the same water, at sea level. */
+  createSeaMaterial(): THREE.MeshStandardNodeMaterial { return this.createWaterMaterial(true); }
 
   /** Depth only: the patch on the height texture, morphed between its levels like the view's, sunk SHADOW_SINK. */
   private createShadowMaterial(): THREE.MeshBasicNodeMaterial {

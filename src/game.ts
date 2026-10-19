@@ -441,6 +441,8 @@ export class Game {
     const { scene, renderer } = this.parts;
     scene.add(this.terrain.mesh);
     scene.add(this.terrain.waterMesh);
+    // the sea plane gets the terrain's water (it reads the ground's height under each pixel)
+    this.parts.water.material = this.terrain.createSeaMaterial();
     for (const l of this.layers) scene.add(l.group);
     scene.add(this.preview.mesh, this.preview.marker, this.preview.circle);
     scene.add(this.vehicles.group);

@@ -107,3 +107,13 @@ test('E35: the grass shows by the eye\'s height over the ground under it, not ov
   terrain.update(camera, eye);
   assert.equal(terrain.grassMesh.visible, true, 'the grass is hidden 50 m over the ground (190 m over the tile\'s mean)');
 });
+
+test('water (4.0 port): see-through, its depth read per pixel, and the sea uses the same water', () => {
+  const w = new World();
+  const terrain = new TerrainRenderer(w);
+  const river = terrain.waterMesh.material as THREE.MeshStandardNodeMaterial;
+  assert.equal(river.transparent, true, 'the river is see-through');
+  assert.ok(river.opacityNode, 'its opacity follows the depth');
+  const sea = (terrain as unknown as { createSeaMaterial?(): THREE.MeshStandardNodeMaterial }).createSeaMaterial?.();
+  assert.ok(sea && sea.transparent && sea.opacityNode, 'the sea plane has the same water');
+});
