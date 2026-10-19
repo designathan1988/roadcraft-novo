@@ -32,6 +32,8 @@ const GRID = 32; // squares per side of a patch
 const LEAF = 128; // side of the finest node (m) → 4 m between vertices
 const LEVELS = Math.log2(PLATE_SIZE / LEAF) + 1; // 0..4
 const MAX_NODES = 4096;
+/** Water tiles nearer than this (m) use the 8 m grid; farther ones the 32 m grid. */
+const WATER_FINE = 1500;
 
 /** Grass tufts: grid spacing (m), tufts per side of the camera-locked grid, and the eye height above which they go. */
 const TUFT_STEP = 0.9;
@@ -57,6 +59,16 @@ export class TerrainRenderer {
   readonly grassMesh: THREE.Mesh;
   private waterGeo: THREE.InstancedBufferGeometry;
   private waterInst: THREE.InstancedBufferAttribute;
+  /** Water tiles far from the camera: a 32 m grid (a child of `waterMesh`). */
+  readonly waterFar: THREE.Mesh;
+  private waterFarGeo: THREE.InstancedBufferGeometry;
+  private waterFarInst: THREE.InstancedBufferAttribute;
+  /** Frame a water tile was last chosen in (one entry per tile and frame). */
+  private waterSeen = new Uint32Array(MAP_TILES * MAP_TILES);
+  private waterFrame = 0;
+  private waterBox = new THREE.Box3();
+  private waterNear = 0;
+  private waterFarCount = 0;
   /** Grass colours by biome. */
   readonly grassA: Node = uniform(new THREE.Color().setRGB(0.275, 0.39, 0.185, THREE.LinearSRGBColorSpace));
   readonly grassB: Node = uniform(new THREE.Color().setRGB(0.345, 0.447, 0.227, THREE.LinearSRGBColorSpace));
@@ -144,25 +156,35 @@ export class TerrainRenderer {
     this.mesh.frustumCulled = false;
     this.mesh.receiveShadow = true;
 
-    // water of rivers and lakes: an 8 m grid per tile, instanced on the tiles with water
-    const wg = new THREE.InstancedBufferGeometry();
-    const WR = WATER_TILE_RES;
-    const wpos = new Float32Array((WR + 1) * (WR + 1) * 3);
-    for (let j = 0, k = 0; j <= WR; j++) for (let i = 0; i <= WR; i++, k += 3) { wpos[k] = i / WR; wpos[k + 2] = j / WR; }
-    const widx = new Uint32Array(WR * WR * 6);
-    for (let j = 0, k = 0; j < WR; j++) for (let i = 0; i < WR; i++, k += 6) {
-      const a = j * (WR + 1) + i, b = a + 1, c = a + WR + 1, d = c + 1;
-      widx.set([a, c, b, b, c, d], k);
-    }
-    wg.setAttribute('position', new THREE.BufferAttribute(wpos, 3));
-    wg.setIndex(new THREE.BufferAttribute(widx, 1));
-    this.waterInst = new THREE.InstancedBufferAttribute(new Float32Array(MAP_TILES * MAP_TILES), 1);
-    this.waterInst.setUsage(THREE.DynamicDrawUsage);
-    wg.setAttribute('wtile', this.waterInst);
-    wg.instanceCount = 0;
-    this.waterGeo = wg;
-    this.waterMesh = new THREE.Mesh(wg, this.createWaterMaterial());
+    // water of rivers and lakes: a grid per tile, instanced on the tiles with water that the terrain selection chose
+    // this frame (in view): 8 m near the camera, 32 m far (every water tile drew the full 8 m grid, in view or not)
+    const waterGrid = (WR: number) => {
+      const wg = new THREE.InstancedBufferGeometry();
+      const wpos = new Float32Array((WR + 1) * (WR + 1) * 3);
+      for (let j = 0, k = 0; j <= WR; j++) for (let i = 0; i <= WR; i++, k += 3) { wpos[k] = i / WR; wpos[k + 2] = j / WR; }
+      const widx = new Uint32Array(WR * WR * 6);
+      for (let j = 0, k = 0; j < WR; j++) for (let i = 0; i < WR; i++, k += 6) {
+        const a = j * (WR + 1) + i, b = a + 1, c = a + WR + 1, d = c + 1;
+        widx.set([a, c, b, b, c, d], k);
+      }
+      wg.setAttribute('position', new THREE.BufferAttribute(wpos, 3));
+      wg.setIndex(new THREE.BufferAttribute(widx, 1));
+      const inst = new THREE.InstancedBufferAttribute(new Float32Array(MAP_TILES * MAP_TILES), 1);
+      inst.setUsage(THREE.DynamicDrawUsage);
+      wg.setAttribute('wtile', inst);
+      wg.instanceCount = 0;
+      return { wg, inst };
+    };
+    const near = waterGrid(WATER_TILE_RES), far = waterGrid(WATER_TILE_RES / 4);
+    this.waterGeo = near.wg; this.waterInst = near.inst;
+    this.waterFarGeo = far.wg; this.waterFarInst = far.inst;
+    const waterMat = this.createWaterMaterial();
+    this.waterMesh = new THREE.Mesh(near.wg, waterMat);
     this.waterMesh.frustumCulled = false;
+    this.waterFar = new THREE.Mesh(far.wg, waterMat);
+    this.waterFar.frustumCulled = false;
+    // drawn with the near grid's mesh (a child: whoever adds the water adds both)
+    this.waterMesh.add(this.waterFar);
 
     this.grassMesh = this.createGrass();
     this.mesh.add(this.grassMesh);
@@ -504,12 +526,6 @@ export class TerrainRenderer {
     if (w.waterDirty.size) {
       for (const l of w.waterDirty) this.waterTex.addLayerUpdate(l);
       w.waterDirty.clear(); this.waterTex.needsUpdate = true;
-      // tiles with water (at most 100: list rebuilt only when the water changes)
-      const a = this.waterInst.array as Float32Array;
-      let n = 0;
-      for (let t = 0; t < MAP_TILES * MAP_TILES; t++) if (w.tileWater[t]) a[n++] = t;
-      this.waterGeo.instanceCount = n;
-      this.waterInst.needsUpdate = true;
     }
     const dirty = this.world.layerDirty;
     if (dirty.size === 0) return;
@@ -533,6 +549,8 @@ export class TerrainRenderer {
     const fl = Math.hypot(this.fwd.x, this.fwd.z) || 1;
     (this.grassCentre.value as THREE.Vector2).set(viewPos.x + this.fwd.x / fl * ahead, viewPos.z + this.fwd.z / fl * ahead);
     this.count = 0;
+    this.waterFrame++;
+    this.waterNear = 0; this.waterFarCount = 0;
     const roots = Math.ceil(MAP_SIZE / PLATE_SIZE);
     const top = LEVELS - 1;
     for (let rz = 0; rz < roots; rz++) {
@@ -543,6 +561,12 @@ export class TerrainRenderer {
       }
     }
     this.geometry.instanceCount = this.count;
+    for (const [g, a, n] of [[this.waterGeo, this.waterInst, this.waterNear], [this.waterFarGeo, this.waterFarInst, this.waterFarCount]] as const) {
+      g.instanceCount = n;
+      a.clearUpdateRanges();
+      a.addUpdateRange(0, n);
+      a.needsUpdate = true;
+    }
     this.inst.clearUpdateRanges();
     this.inst.addUpdateRange(0, this.count * 4);
     this.inst.needsUpdate = true;
@@ -562,6 +586,22 @@ export class TerrainRenderer {
     const o = this.count * 4;
     this.instArray[o] = x; this.instArray[o + 1] = z; this.instArray[o + 2] = size; this.instArray[o + 3] = level;
     this.count++;
+    // the water tiles under this patch, once per frame: near ones get the 8 m grid
+    const w = this.world;
+    const tx0 = tileX(x), tx1 = tileX(Math.min(x + size, MAP_HALF) - 1), tz0 = tileX(z), tz1 = tileX(Math.min(z + size, MAP_HALF) - 1);
+    for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) {
+      const t = tileId(tx, tz);
+      if (!w.tileWater[t] || this.waterSeen[t] === this.waterFrame) continue;
+      this.waterSeen[t] = this.waterFrame;
+      const ox = tx * TILE_SIZE - MAP_HALF, oz = tz * TILE_SIZE - MAP_HALF;
+      // a big patch spans several tiles: each one is tested on its own (water level is at most the tile's top)
+      this.waterBox.min.set(ox, w.tileMin[t] - 2, oz);
+      this.waterBox.max.set(ox + TILE_SIZE, w.tileMax[t] + 2, oz + TILE_SIZE);
+      if (!this.frustum.intersectsBox(this.waterBox)) continue;
+      const d = Math.hypot(Math.max(ox - this.camPos.x, 0, this.camPos.x - ox - TILE_SIZE), Math.max(oz - this.camPos.z, 0, this.camPos.z - oz - TILE_SIZE));
+      if (d < WATER_FINE) (this.waterInst.array as Float32Array)[this.waterNear++] = t;
+      else (this.waterFarInst.array as Float32Array)[this.waterFarCount++] = t;
+    }
   }
 
   private bounds(x: number, z: number, size: number): THREE.Box3 {

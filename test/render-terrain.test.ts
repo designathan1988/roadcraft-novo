@@ -35,3 +35,32 @@ test('E34: on the 24 km map no terrain patch behind the camera is drawn', () => 
   }
   assert.deepEqual(behind.slice(0, 5), [], `${behind.length} of ${inner.count} patches are outside the view`);
 });
+
+test('E33: water is drawn only on the tiles in view, with a coarse grid far away', async () => {
+  const { MAP_TILES, TILE_SIZE } = await import('../src/config.ts');
+  const w = new World();
+  w.tileMin.fill(0); w.tileMax.fill(50);
+  // a long river: water on every tile of the map
+  w.tileWater.fill(1);
+  for (let t = 0; t < MAP_TILES * MAP_TILES; t++) w.waterDirty.add(t);
+  const terrain = new TerrainRenderer(w);
+  terrain.uploadDirtyLayers();
+  const { camera, eye } = centreCamera();
+  terrain.update(camera, eye);
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const meshes = [terrain.waterMesh, ...((terrain as unknown as { waterFar?: THREE.Mesh }).waterFar ? [(terrain as unknown as { waterFar: THREE.Mesh }).waterFar] : [])];
+  let tris = 0;
+  const outside: number[] = [];
+  for (const m of meshes) {
+    const g = m.geometry as THREE.InstancedBufferGeometry;
+    const tiles = g.attributes.wtile as THREE.InstancedBufferAttribute;
+    for (let i = 0; i < g.instanceCount; i++) {
+      const t = tiles.getX(i), tx = t % MAP_TILES, tz = Math.floor(t / MAP_TILES);
+      const x = tx * TILE_SIZE - MAP_TILES * TILE_SIZE / 2, z = tz * TILE_SIZE - MAP_TILES * TILE_SIZE / 2;
+      if (!frustum.intersectsBox(new THREE.Box3(new THREE.Vector3(x, -10, z), new THREE.Vector3(x + TILE_SIZE, 60, z + TILE_SIZE)))) outside.push(t);
+    }
+    tris += g.instanceCount * g.index!.count / 3;
+  }
+  assert.deepEqual(outside.slice(0, 5), [], `${outside.length} water tiles drawn outside the view`);
+  assert.ok(tris < 2e6, `${(tris / 1e6).toFixed(1)} M water triangles for one river`);
+});
