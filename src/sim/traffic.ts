@@ -1034,6 +1034,8 @@ export class Traffic {
     this.setLaneCount(lane, 1);
     if (this.leaveBay(v, lane)) return;
     this.mesoEnter(v, lane, true);
+    // born inside the window: drawn from the start
+    if (this.inWindow(lane)) this.materialize(lane);
   }
 
   /**
@@ -1190,6 +1192,8 @@ export class Traffic {
     let lane = c.lane[v];
     if (!sim.net.segs.alive[laneSeg(lane)]) { c.why[v] = End.Lost; this.finish(v); return; }
     if (c.dying[v]) { this.finish(v); return; }
+    // on a lane inside the window, behind drawn vehicles: it waits to fit behind them (never passes them unseen)
+    if (this.laneHead[lane] >= 0 && this.inWindow(lane)) { this.materialize(lane); if (!c.micro[v]) this.schedule(v, this.time + 1); return; }
     if (this.atDestination(v)) {
       // a drop-off: the trip ends there and the car goes on to another after a moment at the kerb
       if (this.dropsOff(v) && this.dropOffTrip(v, sim.laneTo(lane))) { this.schedule(v, this.time + 6); return; }
@@ -2457,6 +2461,42 @@ export class Traffic {
       this.unlink(v);
       this.removeMicro(v);
       this.mesoEnter(v, lane, true);
+    }
+    // far-model vehicles on lanes now inside the window become drawn ones (the window came to them, or they were born
+    // there): nobody inside the window is invisible, holding a queue or an exit's room unseen
+    const sc = sim.net.segs.cols, w = this.window;
+    sim.net.segIndex.query(this.camX - w, this.camZ - w, this.camX + w, this.camZ + w, (s) => {
+      if (!sim.net.segs.alive[s] || Math.hypot(sc.mx[s] - this.camX, sc.mz[s] - this.camZ) >= w) return;
+      for (let k = 0; k < 16; k++) if (this.mesoHead[s * 16 + k] >= 0) this.materialize(s * 16 + k);
+    });
+  }
+
+  /**
+   * The far-model vehicles of a lane become near ones, in their order on it: each where its timing says it is by now,
+   * behind the vehicles already drawn and at least a car length plus 2 m behind the one ahead (a queue fills from the
+   * line backwards). Those that do not fit stay in the far model until they move on.
+   */
+  private materialize(lane: number): void {
+    const c = this.veh.cols, sim = this.sim, L = sim.laneLen(lane);
+    const tail = this.laneTail[lane];
+    let limit = tail >= 0 ? c.s[tail] - c.len[tail] - 2 : L - 0.5;
+    const free = laneSpeed(sim.net.segs.cols.profile[laneSeg(lane)]);
+    for (let v = this.mesoHead[lane]; v >= 0;) {
+      const next = c.mnext[v];
+      if (c.dying[v]) { this.finish(v); v = next; continue; }
+      const span = c.tExit[v] - c.tIn[v];
+      const est = span > 0 ? c.s0[v] + (L - c.s0[v]) * Math.min(1, Math.max(0, (this.time - c.tIn[v]) / span)) : L;
+      const s = Math.min(est, limit);
+      if (s < c.len[v]) break;
+      this.mesoUnlink(v);
+      c.s[v] = s; c.conn[v] = -1; c.held[v] = 0; c.wait[v] = 0;
+      // in a queue it stands; otherwise it drives at what the lane has been driving at
+      c.v[v] = s < est - 1 ? 0 : Math.min(free * c.vf[v], this.laneVel[lane] > 0 ? this.laneVel[lane] : free * 0.7);
+      c.fade[v] = 0;
+      this.addMicro(v);
+      this.insert(v, false, lane);
+      limit = s - c.len[v] - 2;
+      v = next;
     }
   }
 

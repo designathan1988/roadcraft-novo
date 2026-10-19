@@ -929,3 +929,26 @@ test('C23: changing a junction\'s control keeps the cars inside it where they ar
     assert.ok(Math.hypot(p[0] - before[i][0], p[2] - before[i][2]) < 1, `car ${i} moved ${Math.hypot(p[0] - before[i][0], p[2] - before[i][2]).toFixed(1)} m when the control changed`);
   });
 });
+
+test('C33: inside the camera window every vehicle is a drawn one (none stays invisible in the far model)', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim, 8000, 8000);
+  tr.density = 1 / 20;
+  for (let i = 0; i < 20 * 60; i++) tr.step(0.05);
+  // the camera arrives over the city
+  tr.camX = 0; tr.camZ = 0; tr.checkWindow();
+  for (let i = 0; i < 20 * 5; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
+  tr.checkWindow(); // (as the worker does every half second)
+  const c = tr.veh.cols, T = inner(tr);
+  let hidden = 0, all = 0;
+  for (let v = 0; v < tr.veh.end; v++) {
+    if (!tr.veh.alive[v] || c.lane[v] < 0) continue;
+    all++;
+    // (one waiting to fit behind a full queue of drawn vehicles stays out of sight until there is room)
+    const tail = tr.laneTail[c.lane[v]];
+    const room = tail < 0 || c.s[tail] - c.len[tail] - 2 >= c.len[v];
+    if (!c.micro[v] && T.inWindow(c.lane[v]) && room) hidden++;
+  }
+  assert.ok(all > 50, `vehicles ${all}`);
+  assert.equal(hidden, 0, `${hidden} of ${all} vehicles inside the window are invisible (far model)`);
+});
