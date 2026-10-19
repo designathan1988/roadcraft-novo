@@ -690,6 +690,19 @@ export const SCENARIOS = {
     check('Options lists the alignment key', /Trocar o traçado|Change the alignment|alignment/i.test(dlg.textContent), 'no alignment key');
     check('Options has Reset for the road keys', [...dlg.querySelectorAll('button')].some((b) => /Restaurar padrão|Reset/.test(b.textContent)), 'no reset');
   `,
+  // The 4.0 drawer on a narrow screen (shell.ts:1913-1930): pinned to both edges, tabs that do not fit keep only the
+  // lit one's name, and a card name never cut inside a word
+  'drawer-narrow-4.0': { width: 700, query: '?vazio&hora=11&workers=3', script: `
+    click('[data-cat=build]'); await frames(3);
+    const d = Q('.v2-drawer').getBoundingClientRect();
+    const k = Q('.v2-dock').getBoundingClientRect();
+    check('the drawer is pinned to both edges, as the dock', Math.abs(d.left - k.left) <= 2 && Math.abs(d.right - k.right) <= 2, 'drawer ' + d.left.toFixed(0) + '-' + d.right.toFixed(0) + ', dock ' + k.left.toFixed(0) + '-' + k.right.toFixed(0));
+    const tabs = Q('.v2-tabs');
+    check('tabs that do not fit go compact', tabs.classList.contains('compact') || tabs.classList.contains('tight'), 'tabs ' + tabs.className + ' (' + tabs.scrollWidth + ' / ' + tabs.parentElement.clientWidth + ')');
+    click('[data-cat=landscape]'); await frames(2); click(byText('.v2-tab', '^Rua|^Street')); await frames(3);
+    const cut = QA('.v2-strip .v2-card-name').filter((n) => n.scrollWidth > n.clientWidth + 1).map((n) => n.textContent);
+    check('no card name cut inside a word', cut.length === 0, 'cut: ' + cut.join(', '));
+  ` },
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

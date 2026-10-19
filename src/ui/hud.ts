@@ -511,8 +511,19 @@ export class Hud {
     const sr = this.side.getBoundingClientRect();
     if (sr.width > 0 && sr.bottom > this.drawer.getBoundingClientRect().top - 4) right = Math.min(right, sr.left - 12);
     const room = Math.max(320, right - left);
-    this.drawer.style.left = `${Math.round(right - left >= 320 ? (left + right) / 2 : vw / 2)}px`;
-    this.drawer.style.maxWidth = `${Math.floor(room)}px`;
+    // a narrow screen pins the drawer to both edges (shell.css, max-width: 780px), as Roadcraft 4.0
+    this.drawer.style.left = vw <= 780 ? '' : `${Math.round(right - left >= 320 ? (left + right) / 2 : vw / 2)}px`;
+    this.drawer.style.maxWidth = vw <= 780 ? '' : `${Math.floor(room)}px`;
+    // a card whose name has a word wider than the card grows to the word
+    for (const name of this.parts.strip.querySelectorAll<HTMLElement>('.v2-card-name')) {
+      const over = name.scrollWidth - name.clientWidth, card = name.parentElement;
+      if (over > 1 && card) card.style.width = `${Math.ceil(card.offsetWidth + over)}px`;
+    }
+    // the modes keep their names while they fit; when they do not, only the one in use keeps its name, then none
+    const tabs = this.parts.tabs, head = tabs.parentElement!;
+    tabs.classList.remove('compact', 'tight');
+    if (tabs.scrollWidth > head.clientWidth - 8) tabs.classList.add('compact');
+    if (tabs.scrollWidth > head.clientWidth - 8) tabs.classList.add('tight');
   }
 
   // ================================================================ popovers
