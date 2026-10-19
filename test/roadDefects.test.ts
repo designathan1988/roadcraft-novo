@@ -949,3 +949,20 @@ test('D35: a new road through any part of a lot clears it; a lot beside the road
   assert.equal(w.buildings.alive[deep], 0, 'the deep lot the road runs across still stands');
   assert.equal(w.buildings.alive[beside], 1, 'the lot beside the road was demolished');
 });
+
+test('D36: changing only the density keeps the buildings that fit it; towers go when the zone turns low', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const w = flatWorld(1e9);
+  road(w, -150, 0, 150, 0);
+  const z = new RoadJournal(w, 'zone');
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential); }
+  const house = w.addBuilding({ x: 30, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  const tower = w.addBuilding({ x: 60, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 2, zone: Zone.Residential, floors: 12, style: 1 });
+  const paint = (zone: number) => { const t = new ZoneTool(w, new CommandStack()); t.zone = zone; t.radius = 60; t.begin(); t.dab(45, 16); t.end(); };
+  paint(Zone.ResHigh);
+  assert.equal(w.buildings.alive[house], 1, 'turning residential to high density demolished the house');
+  assert.equal(w.buildings.alive[tower], 1, 'turning residential to high density demolished the tower');
+  paint(Zone.ResLow);
+  assert.equal(w.buildings.alive[house], 1, 'turning it low demolished the house too');
+  assert.equal(w.buildings.alive[tower], 0, 'a 12-floor tower stays in a low-density zone');
+});

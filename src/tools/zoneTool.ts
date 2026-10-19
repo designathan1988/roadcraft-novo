@@ -5,6 +5,10 @@ import type { CommandStack } from '../core/commands.ts';
 import { RoadJournal } from '../roads/build.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
+import { baseZone, zoneDensity } from '../roads/zones.ts';
+
+/** Most floors a low-density zone grows (world/growth.ts floorsFor: houses up to 3, shops up to 4). */
+const LOW_DENSITY_FLOORS = 4;
 import type { World } from '../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
@@ -124,7 +128,10 @@ export class ZoneTool {
     const half = side === 0 ? info.left : info.right;
     const doomed: number[] = [];
     this.world.buildingIndex.query(sc.mx[s] - sc.len[s] / 2 - 70, sc.mz[s] - sc.len[s] / 2 - 70, sc.mx[s] + sc.len[s] / 2 + 70, sc.mz[s] + sc.len[s] / 2 + 70, (id) => {
-      if (col.zone[id] === keepZone || col.zone[id] === 0) return;
+      // buildings keep their base zone (residential, commercial…): the same base in another density stays, except a
+      // building taller than a low-density zone holds
+      if (col.zone[id] === 0) return;
+      if (col.zone[id] === baseZone(keepZone) && (zoneDensity(keepZone) > 0 || col.floors[id] <= LOW_DENSITY_FLOORS)) return;
       // projected on the segment: it must be on the right side and within 70 m of the road
       let best = Infinity, bu = 0, tx = 0, tz = 0;
       for (let i = 0; i <= 16; i++) {
