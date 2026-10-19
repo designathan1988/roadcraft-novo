@@ -282,11 +282,13 @@ export function setTimeOfDay(p: SceneParts, hour: number, clouds = 0.25, rain = 
   const height = Math.sin(THREE.MathUtils.degToRad(elev));
   const light = Math.min(1, Math.max(0, (height + 0.1) / 0.25)), dark = 1 - light;
   const warm = Math.max(0, 1 - 1.6 * height);
-  const grey = GRAY_SKY.clone().multiplyScalar(0.25 + 0.75 * day);
+  const grey = GRAY_SKY;
   const sk = p.sky;
-  (sk.zenith.value as THREE.Color).copy(ZENITH_DAY).lerp(ZENITH_NIGHT, dark).lerp(grey, overcast * 0.9);
-  (sk.horizon.value as THREE.Color).copy(HORIZON_DAY).lerp(HORIZON_DUSK, warm * light * 0.7).lerp(HORIZON_NIGHT, dark).lerp(grey, overcast * 0.9).multiplyScalar(1 - 0.4 * rain);
-  (sk.sunColor.value as THREE.Color).setRGB(1, 0.96 - 0.12 * warm, 0.9 - 0.28 * warm).multiplyScalar(light * (1 - overcast));
+  // as 4.0's environment.ts:249-266: overcast greys the zenith 0.85 and the horizon 0.7 of the way (by daylight); the
+  // sun's glow goes from fff0d2 to ffa860 as it sinks
+  (sk.zenith.value as THREE.Color).copy(ZENITH_DAY).lerp(ZENITH_NIGHT, dark).lerp(grey, overcast * 0.85 * light);
+  (sk.horizon.value as THREE.Color).copy(HORIZON_DAY).lerp(HORIZON_DUSK, warm * light * 0.7).lerp(HORIZON_NIGHT, dark).lerp(grey, overcast * 0.7 * light).multiplyScalar(1 - 0.4 * rain);
+  (sk.sunColor.value as THREE.Color).copy(SUN_DAY).lerp(SUN_LOW, Math.min(1, warm)).multiplyScalar(light * (1 - overcast));
   // near the ground the horizon is the saturated pale blue (by day; it fades with the light and the clouds)
   sk.low.value = (1 - smooth(100, 260, eyeHeight)) * light * (1 - overcast) * (1 - warm);
   _envDir.copy(p.sky.sunPosition.value as THREE.Vector3);
