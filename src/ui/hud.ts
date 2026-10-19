@@ -250,6 +250,7 @@ export class Hud {
   private rowsKey = '';
   private lineNow = 0;
   private picked: BuildingInfo | null = null;
+  private peopleShown = false;
   private host: DrawerHost;
   private fileIn: HTMLInputElement;
 
@@ -716,6 +717,8 @@ export class Hud {
   /** The city's numbers (twice a second). */
   setStatus(s: CityStatus): void {
     this.status = s;
+    // the People tab shown before the cooked people loaded: it becomes the full creator when they arrive
+    if (!this.peopleShown && this.a.peopleCatalog?.()) { this.peopleShown = true; if (this.open && this.cat === 'landscape' && this.s.landTab === 'people') this.render(); }
     const line = s.cars + s.peds > 0 ? `${plural('status.vehicles', s.cars)} · ${plural('status.people', s.peds)}` : '';
     if (this.statsText.data !== line) this.statsText.data = line;
     const tip = t('ui.stats.tip', { residents: fmtCount(s.residents), jobs: fmtCount(s.jobs), buildings: fmtCount(s.buildings), speed: fmtInt(s.speedKmh) });

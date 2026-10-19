@@ -15,7 +15,13 @@ export function renderPeople(h: DrawerHost, p: DrawerParts, simpleColours: reado
   const s = h.s, a = h.a;
   const cat = a.peopleCatalog?.() ?? null;
   if (!cat) {
-    const ps = s.person, send = (): void => a.personSpec({ ...ps });
+    // the cooked people may load before the click: they get the same count and behaviour as this panel shows
+    const ps = s.person, send = (): void => {
+      a.personSpec({ ...ps });
+      Object.assign(s.people, { count: ps.count, mode: ps.walk ? 'walk' : 'stand' });
+      a.personOptions?.({ ...s.people });
+    };
+    send();
     const sw = el('div', 'v2-swatches');
     simpleColours.forEach((c, i) => {
       const b = el('button', `v2-swatch${ps.color === i ? ' on' : ''}`);
