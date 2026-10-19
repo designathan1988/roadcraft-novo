@@ -242,6 +242,8 @@ function copingOf(trim: number): number {
   const r = (trim >> 16) & 255, g = (trim >> 8) & 255, b = trim & 255, hi = Math.max(r, g, b), lo = Math.min(r, g, b);
   return hi > 0 && (hi - lo) / hi > 0.45 ? 0xb9bcbd : trim;
 }
+/** 4.0 GOURMET_OUT (buildingMesh.ts:201): how far a varanda gourmet's slab stands out. */
+const GOURMET_OUT = 1.6;
 /** 4.0 PARAPET_H, PARAPET_T (buildingMesh.ts:185-186). */
 const PARAPET_H = 0.85, PARAPET_T = 0.25;
 
@@ -1151,15 +1153,26 @@ function block(g: Gen): void {
     const cols = Math.max(1, Math.round(bw / colW));
     const cw = bw / cols;
     const glassRail = balc === Balcony.Continuous && r.next() < 0.6;
-    const railCol = glassRail ? 0x8fb0c0 : r.next() < 0.5 ? 0xe8e8e4 : 0x2c3034;
-    const depth = balc === Balcony.Continuous ? 1.4 : 1.0;
+    // 4.0: the railing in the trim (buildingMesh.ts:1645), the slab of a varanda gourmet the wall's own x 0.92
+    // (slabColour :3144-3149), a balcony's slab concrete
+    const railCol = glassRail ? 0x8fb0c0 : (r.next(), trim);
+    const depth = balc === Balcony.Continuous ? GOURMET_OUT : 1.3;
+    const slabCol = shadeHex(wallCol, 0.92);
     for (let fl = 1; fl < lower; fl++) {
       const y = y0 + groundH + (fl - 1) * fh;
       if (balc === Balcony.Continuous) {
+        // the 4.0 varanda gourmet (buildingMesh.ts:1719-1738): the slab 24 cm, its edge beam with a drip under the front,
+        // a glass parapet with its metal cap (or a railing), the side walls closing the run storey on storey
         blank(mb);
-        prism(mb, f, x0, x1, z1, z1 + depth, y - 0.18, y, 0xe2e0da, BMAT.Plain, 50, 0xd6d3cc, BMAT.Plain, true);
-        if (glassRail) prism(mb, f, x0, x1, z1 + depth - 0.06, z1 + depth, y, y + 1.05, railCol, BMAT.Curtain, 50, railCol, BMAT.Metal);
-        else railing(mb, f, x0, x1, z1 + depth, y, railCol);
+        prism(mb, f, x0, x1, z1, z1 + depth, y - 0.24, y, slabCol, BMAT.Plain, 50, slabCol, BMAT.Plain, true);
+        // the yard keeps its plants out from under the balconies
+        if (fl === 1) captureFoot(f, x0, x1, z1, z1 + depth + 0.05, footGround);
+        prism(mb, f, x0, x1, z1 + depth - 0.14, z1 + depth + 0.02, y - 0.29, y - 0.11, slabCol, BMAT.Plain, 50, -1, 0, true);
+        if (glassRail) {
+          prism(mb, f, x0 + 0.2, x1 - 0.2, z1 + depth - 0.05, z1 + depth - 0.03, y, y + 1.05, railCol, BMAT.Curtain, 50, railCol, BMAT.Metal);
+          prism(mb, f, x0 + 0.2, x1 - 0.2, z1 + depth - 0.07, z1 + depth - 0.01, y + 1.05, y + 1.1, trim, BMAT.Metal, 50, trim, BMAT.Metal);
+        } else railing(mb, f, x0 + 0.2, x1 - 0.2, z1 + depth - 0.01, y, railCol);
+        for (const [c0, c1] of [[x0, x0 + 0.2], [x1 - 0.2, x1]]) prism(mb, f, c0, c1, z1, z1 + depth + 0.05, y - 0.307, y - 0.307 + fh, slabCol, BMAT.Plain, 50, slabCol, BMAT.Plain);
         // vasos/plantas no estilo tropical
         if (g.arch === ArchId.Tropical) for (let c = 0; c < cols; c += 2) prism(mb, f, x0 + c * cw + 0.3, x0 + c * cw + 1.1, z1 + 0.2, z1 + 0.9, y, y + 0.7, 0x4f7a34, BMAT.Grass, 50, 0x4f7a34, BMAT.Grass);
         for (let c = 0; c < cols; c++) balconyLife(f, g.seed, c, fl, x0 + c * cw, x0 + (c + 1) * cw, z1, depth, y);
@@ -1167,11 +1180,15 @@ function block(g: Gen): void {
       }
       for (let c = 0; c < cols; c++) {
         if (balc === Balcony.Alternate && (c + fl) % 2 !== 0) continue;
-        const cx0 = x0 + c * cw + cw * a.winSide * 0.6, cx1 = x0 + (c + 1) * cw - cw * a.winSide * 0.6;
+        const cx0 = x0 + c * cw + 0.15, cx1 = x0 + (c + 1) * cw - 0.15;
+        // the 4.0 balcony (buildingMesh.ts:1641-1646): a concrete slab 18 cm the bay's width less 30 cm, 1.3 m out,
+        // the railing on its three sides in the trim
         blank(mb);
-        prism(mb, f, cx0, cx1, z1, z1 + depth, y - 0.15, y, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true);
+        prism(mb, f, cx0, cx1, z1, z1 + depth, y - 0.18, y, 0xc4c1b8, BMAT.Plain | (FIN.Concrete << 4), 50, 0xc4c1b8, BMAT.Plain | (FIN.Concrete << 4), true);
+        if (fl <= 2) captureFoot(f, cx0, cx1, z1, z1 + depth, footGround);
         railing(mb, f, cx0, cx1, z1 + depth, y, railCol);
-        if (depth > 0) { prism(mb, f, cx0, cx0 + 0.05, z1, z1 + depth, y + 0.95, y + 1.0, railCol, BMAT.Metal, 50, railCol, BMAT.Metal); prism(mb, f, cx1 - 0.05, cx1, z1, z1 + depth, y + 0.95, y + 1.0, railCol, BMAT.Metal, 50, railCol, BMAT.Metal); }
+        prism(mb, f, cx0, cx0 + 0.05, z1, z1 + depth, y + 0.97, y + 1.03, railCol, BMAT.Metal, 50, railCol, BMAT.Metal);
+        prism(mb, f, cx1 - 0.05, cx1, z1, z1 + depth, y + 0.97, y + 1.03, railCol, BMAT.Metal, 50, railCol, BMAT.Metal);
         balconyLife(f, g.seed, c, fl, cx0, cx1, z1, depth, y);
       }
     }

@@ -343,7 +343,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const cosV = clamp(dot(V.negate(), n), 0, 1);
   const F = float(0.04).add(float(0.96).mul(pow(float(1).sub(cosV), 5)));
   const skyRefl = mix(vec3(0.34, 0.4, 0.46), vec3(0.62, 0.7, 0.78), clamp(V.y.negate().add(0.3), 0, 1)).mul(float(1).sub(night.mul(0.92)));
-  const glassTint = select(isCurtain.greaterThan(0.5), mix(cGlassB, cGlassA, clamp(fy.sub(0.2).div(0.78), 0, 1)).mul(0.45), vec3(0.03, 0.04, 0.05));
+  const glassTint = select(isCurtain.greaterThan(0.5), select(hasWin.greaterThan(0.5), mix(cGlassB, cGlassA, clamp(fy.sub(0.2).div(0.78), 0, 1)).mul(0.45), base.mul(0.35)), vec3(0.03, 0.04, 0.05));
   const refl = max(F, 0.2);
 
   // far: the facade's average before the window has few pixels (the fine pattern shimmered with TRAA)
@@ -356,7 +356,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const insideAmt = mix(mix(vec3(0.07, 0.065, 0.06), vec3(1.0, 0.88, 0.64).mul(avgLit).mul(0.42), night), inside, max(detail, isGlass));
 
   // curtain wall spandrels: opaque, the glass colour darkened
-  const wallC = select(isCurtain.greaterThan(0.5), mix(cSpand, cMull, cMullAmt.mul(detail)), base);
+  const wallC = select(isCurtain.greaterThan(0.5), select(hasWin.greaterThan(0.5), mix(cSpand, cMull, cMullAmt.mul(detail)), base.mul(0.55)), base);
   const signC = mix(vec3(0.85, 0.2, 0.15), vec3(0.15, 0.4, 0.85), rnd).mul(mix(float(1), float(0.6), step(float(0.5), rnd2)));
   // surround and shutters (only where there is a real window, not on the curtain wall)
   const archMask = bayOn.mul(hasWin).mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(step(float(0), yy)).mul(float(1).sub(inShop)).mul(detail);

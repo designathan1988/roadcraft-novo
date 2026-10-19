@@ -233,3 +233,19 @@ test('vidro 1c: curtain walls stand the 4.0 fins and transoms, in the mullion co
   for (let i = 0; i < md.vertexCount; i++) if (mull.has((md.color[i * 4] << 16) | (md.color[i * 4 + 1] << 8) | md.color[i * 4 + 2])) fins++;
   assert.ok(fins > 500, `${fins} fin and transom vertices in the 4.0 mullion colours`);
 });
+
+test('sacada 5: balconies are the 4.0 ones (gourmet slab in the wall x 0.92 with its edge beam, concrete balcony 1.3 m)', async () => {
+  const { ARCHES } = await import('../src/world/arch.ts');
+  const { heights, b } = block();
+  const m = buildBuildings(heights, b, 0, 0, 256, 0)!, p = positions(m);
+  const rgb = (i: number) => (m.color[i * 4] << 16) | (m.color[i * 4 + 1] << 8) | m.color[i * 4 + 2];
+  const shade = (c: number, k: number) => (Math.round(((c >> 16) & 255) * k) << 16) | (Math.round(((c >> 8) & 255) * k) << 8) | Math.round((c & 255) * k);
+  const slabs = new Set(ARCHES.flatMap((a) => a.walls.map((w) => shade(w, 0.92))));
+  let gourmet = 0, concrete = 0;
+  for (let i = 0; i < m.vertexCount; i++) {
+    if (slabs.has(rgb(i))) gourmet++;
+    if (rgb(i) === 0xc4c1b8) concrete++;
+  }
+  assert.ok(gourmet + concrete > 100, `${gourmet} gourmet and ${concrete} balcony slab vertices`);
+  assert.ok(p.length > 0);
+});
