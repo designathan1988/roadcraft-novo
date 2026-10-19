@@ -1,6 +1,6 @@
-// Rotas: A* no grafo de nós e trechos (mão única respeitada), custo em tempo.
-// A pé: o mesmo grafo, sem mão única, só trechos com calçada.
-// Arrays tipados reaproveitados entre buscas; nada percorre a frota.
+// Routes: A* in time over the road graph. Vehicles search directed segments (one-way streets, banned turns and the
+// lanes' connections respected); on foot, the nodes (no one-way streets, only segments with a sidewalk).
+// Typed arrays reused between searches; nothing walks the fleet.
 
 import { MAX_DEG } from '../roads/network.ts';
 import { PROFILES, PROFILE_INFO } from '../roads/profiles.ts';
@@ -9,9 +9,9 @@ import type { SimNet } from './lanes.ts';
 
 const MAX_SPEED = 90 / 3.6;
 /**
- * Carro: a estimativa do resto do caminho usa a velocidade típica da cidade com as esperas (30 km/h), não a
- * máxima: a busca abre ~3× menos nós (o mapa de 16 km abre com a frota em metade do tempo e cada viagem nova
- * custa menos), e as rotas saem quase as mesmas (velocidade no centro igual, medido).
+ * Car: the estimate of the rest of the way uses the city's typical speed with its waits (30 km/h), not the top
+ * speed: the search opens ~3× fewer nodes (the 16 km map opens with its fleet in half the time and each new trip
+ * costs less), and the routes come out nearly the same (same speed downtown, measured).
  */
 const GUESS_SPEED = 30 / 3.6;
 export const WALK_SPEED = 1.35;
@@ -27,12 +27,12 @@ export class Router {
   private heapSize = 0;
   private path = new Int32Array(1024);
   private sim: SimNet;
-  /** Expansões máximas por busca (rotas longas demais falham e o carro some). */
+  /** Most expansions per search (a longer route fails). */
   limit = 40000;
-  /** Nós abertos e buscas sem caminho, desde sempre (diagnóstico). */
+  /** Nodes opened and searches with no path, ever (diagnostics). */
   expanded = 0; failed = 0;
 
-  /** Veículos por trecho e sentido (do trânsito): o custo sobe com a lotação. */
+  /** Vehicles per segment and direction (from traffic): the cost rises as it fills up. */
   segLoad: Uint16Array | null = null;
 
   constructor(sim: SimNet) { this.sim = sim; }
@@ -43,7 +43,7 @@ export class Router {
     if (sim.net.nodes.cols.deg[n] < 3) return 0;
     const ai = n * 8 + sim.segArm[sIn * 2 + (sc.a[sIn] === n ? 0 : 1)];
     const ao = n * 8 + sim.segArm[sOut * 2 + (sc.a[sOut] === n ? 0 : 1)];
-    // rumo de chegada (contra o braço de entrada) e braço de saída: produto vetorial > 0 é à direita
+    // arriving heading (against the entry arm) and exit arm: a cross product > 0 is to the right
     const hx = -sim.armDx[ai], hz = -sim.armDz[ai], ox = sim.armDx[ao], oz = sim.armDz[ao];
     const cross = hx * oz - hz * ox, dot = hx * ox + hz * oz;
     const turn = dot > 0.7 ? 0 : cross > 0 ? 2 : dot < -0.7 ? 15 : 6;

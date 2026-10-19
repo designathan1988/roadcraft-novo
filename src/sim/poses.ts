@@ -1,14 +1,13 @@
-// Poses compartilhadas entre o worker de simulação e a página, em buffer triplo
-// sem trava. O escritor publica trocando seu buffer pelo do meio; o leitor
-// pega o do meio quando há um novo. Ninguém espera ninguém.
+// Poses shared between the simulation worker and the page, in a lock-free triple buffer. The writer publishes by
+// swapping its buffer with the middle one; the reader takes the middle one when there is a new one. Nobody waits.
 //
-// Cada registro guarda a pose anterior e a atual, para a página interpolar.
+// Each record holds the previous pose and the current one, for the page to interpolate.
 
 /** px, py, pz, pyaw, x, y, z, yaw, type*256+colour, opacity, look. The 11th number (index 10, added at the end) is a
  * 16-bit appearance id (0..65535): stable per pedestrian (drawn when it is born), the vehicle id for vehicles and
  * a hash for people waiting at stops. The people renderer picks body, clothes and hair from it. */
 export const POSE_STRIDE = 11;
-export const MAX_AGENTS = 1 << 17; // 131 072 carros + pessoas na janela micro
+export const MAX_AGENTS = 1 << 17; // 131,072 vehicles + people in the micro window
 
 /**
  * The records of a publication are sorted by TILE m square of a TILE_GRID × TILE_GRID grid around the camera (the
@@ -17,7 +16,7 @@ export const MAX_AGENTS = 1 << 17; // 131 072 carros + pessoas na janela micro
  */
 export const TILE = 128, TILE_GRID = 32, TILES = TILE_GRID * TILE_GRID;
 
-const STATE = 0; // bits 0-1: índice do meio; bit 2: novo
+const STATE = 0; // bits 0-1: index of the middle buffer; bit 2: new
 const NEW = 4;
 const HEADER_INTS = 4;
 /** Numbers per buffer in `meta`: count, tick time (ms), dt (ms), tick, grid origin x and z, sorted by tile (1/0). */
@@ -25,7 +24,7 @@ const META = 7;
 
 export interface PoseBuffers {
   sab: SharedArrayBuffer;
-  ctl: Int32Array; // [estado]
+  ctl: Int32Array; // [state]
   /** Per buffer: META numbers (see META). */
   meta: Float64Array;
   /** Per buffer: the first record of each tile (TILES + 1). */
@@ -79,13 +78,13 @@ export function sortByTile(src: Float32Array, n: number, dst: Float32Array, tile
   }
 }
 
-/** Lado da simulação. */
+/** The simulation's side. */
 export class PoseWriter {
   back: number;
   private b: PoseBuffers;
   constructor(b: PoseBuffers) {
     this.b = b;
-    // estado inicial: meio = 1, escritor = 0, leitor = 2
+    // initial state: middle = 1, writer = 0, reader = 2
     Atomics.store(b.ctl, STATE, 1);
     this.back = 0;
   }
@@ -106,12 +105,12 @@ export class PoseWriter {
   }
 }
 
-/** Lado da página. */
+/** The page's side. */
 export class PoseReader {
   front = 2;
   private b: PoseBuffers;
   constructor(b: PoseBuffers) { this.b = b; }
-  /** Pega o buffer mais novo, se houver. Devolve true quando trocou. */
+  /** Takes the newest buffer, if any. Returns true when it swapped. */
   acquire(): boolean {
     if ((Atomics.load(this.b.ctl, STATE) & NEW) === 0) return false;
     this.front = Atomics.exchange(this.b.ctl, STATE, this.front) & 3;
