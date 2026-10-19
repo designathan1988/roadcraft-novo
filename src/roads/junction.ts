@@ -1,11 +1,11 @@
-// Forma dos nós, igual para o desenho (worker de malha) e para o trânsito
-// (worker de simulação): braço de cada ponta de trecho e recuo de cada braço.
+// Node shape, the same for drawing (mesh worker) and for traffic (simulation
+// worker): the arm of each segment end and the setback of each arm.
 
 import { armAngle, armRetreats, closestT, type Arm, type Quad } from './geometry.ts';
 import { PROFILE_INFO } from './profiles.ts';
 import type { RoadNetwork } from './network.ts';
 
-/** Braço de uma ponta de trecho: direção para fora do nó e meias larguras. */
+/** Arm of a segment end: direction out of the node and half widths. */
 export function armOf(q: Quad, profile: number, end: 0 | 1): Arm {
   const info = PROFILE_INFO[profile];
   let dx = end === 0 ? q.cx - q.x0 : q.cx - q.x1, dz = end === 0 ? q.cz - q.z0 : q.cz - q.z1;
@@ -18,14 +18,14 @@ export function armOf(q: Quad, profile: number, end: 0 | 1): Arm {
 
 const tmp = new Float64Array(16);
 
-/** Balão de retorno na ponta de rua sem saída (roadcraft `junction/bulb.ts`): raio do asfalto e largura da calçada. */
+/** Turning bulb at a dead end (roadcraft `junction/bulb.ts`): asphalt radius and footway width. */
 export const BULB_R = 10, BULB_WALK = 2.5;
-/** Marca do nó com balão no grafo que vai para os workers (`RoadGraph.nctl`). */
+/** Mark of a node with a bulb in the graph sent to the workers (`RoadGraph.nctl`). */
 export const NODE_BULB = 200;
 
 /**
- * Recuo da ponta de rua sem saída com balão: onde o círculo do asfalto encontra a borda da pista (0 = sem balão:
- * via larga, trecho curto). O trecho termina ali e o balão desenha o resto, sem nada no mesmo plano.
+ * Setback of a dead end with a bulb: where the asphalt circle meets the carriageway edge (0 = no bulb: wide road,
+ * short segment). The segment ends there and the bulb draws the rest, with nothing on the same plane.
  */
 export function bulbRetreat(arm: Arm, len: number): number {
   const half = Math.max(arm.asphLeft, arm.asphRight);
@@ -34,8 +34,8 @@ export function bulbRetreat(arm: Arm, len: number): number {
 }
 
 /**
- * Recuo de cada braço de um nó (na ordem dada). `lens` limita o recuo a 45%
- * do trecho. Devolve também a ordem anti-horária dos braços.
+ * Setback of each arm of a node (in the given order). `lens` caps the setback at 45%
+ * of the segment. Also returns the counter-clockwise order of the arms.
  */
 export function junctionRetreats(arms: Arm[], lens: number[], out: Float64Array, order: number[], bulb = false): void {
   const n = arms.length;
@@ -50,14 +50,14 @@ export function junctionRetreats(arms: Arm[], lens: number[], out: Float64Array,
 const bulbQ: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
 
 /**
- * O nó é ponta de rua sem saída com balão de retorno: via estreita, trecho longo e nenhuma outra via a menos do
- * balão e de uma folga (a geração deixa pontas encostadas em outras vias: ali o círculo cobriria a outra pista).
- * A página decide (e marca no grafo, NODE_BULB); a simulação usa esta mesma conta.
+ * The node is a dead end with a turning bulb: narrow road, long segment and no other road closer than the bulb
+ * plus a margin (generation leaves ends touching other roads: there the circle would cover the other carriageway).
+ * The page decides (and marks it in the graph, NODE_BULB); the simulation uses this same rule.
  */
 export function bulbAt(net: RoadNetwork, n: number): boolean {
   const nc = net.nodes.cols;
   if (!net.nodes.alive[n] || nc.deg[n] !== 1) return false;
-  // cada célula que encosta no nó pergunta de novo (malha, lotes, peças): guarda até a rede mudar
+  // every cell touching the node asks again (mesh, lots, props): kept until the network changes
   let c = bulbCache.get(net);
   if (!c || c.version !== net.version) { c = { version: net.version, at: new Map() }; bulbCache.set(net, c); }
   const known = c.at.get(n);
