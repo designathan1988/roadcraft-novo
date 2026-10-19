@@ -1,8 +1,7 @@
-// Carros, ônibus, caminhões e pessoas na tela. As poses vêm do worker de simulação
-// (buffer triplo); aqui só se interpola, recorta e escolhe o nível:
-// perto, modelos com cabine e rodas; no meio, caixas; longe, "carros de
-// densidade" pintados no shader das vias (ver roads.ts).
-// Quatro chamadas de desenho para a frota inteira.
+// Cars, buses, trucks and people on screen. The poses come from the simulation worker (triple buffer); here they are
+// only interpolated, culled and given their level: near, models with cabins and wheels; in the middle, boxes; far,
+// "density cars" painted in the roads' shader (see roads.ts).
+// Four draw calls for the whole fleet.
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -23,13 +22,13 @@ const MID = 1700;
 const CAP_NEAR = 6000;
 const CAP_MID = 30000;
 
-// frota real: muito branco, prata e cinza, alguns pretos e carros coloridos vivos
+// a real fleet: much white, silver and grey, some black and a few brightly coloured cars
 export const PAINTS = [
   0xf2f2f0, 0x1c1d20, 0x8c8f94, 0xb5b8bc, 0xe8e8e4, 0xb3221f, 0x2a5aa8, 0xc4c7cb,
   0x2f7a4a, 0xd8c39a, 0x5f6368, 0xe4b512, 0x3f74c9, 0xd96a1d, 0x8e1b1b, 0x1f6f78,
 ];
 
-/** Partes: [x, y, z, largura, altura, comprimento, cor fixa ou -1 = pintura]. */
+/** Parts: [x, y, z, width, height, length, fixed colour or -1 = paint]. */
 type Part = [number, number, number, number, number, number, number];
 
 function model(parts: Part[]): THREE.BufferGeometry {
@@ -40,7 +39,7 @@ function model(parts: Part[]): THREE.BufferGeometry {
     const n = g.attributes.position.count;
     const c = new Float32Array(n * 3), paint = new Float32Array(n), glow = new Float32Array(n);
     const color = new THREE.Color(col < 0 ? 0xffffff : col).convertSRGBToLinear();
-    // faróis (1) e lanternas (2) acendem à noite e na chuva; setas (3 esquerda, 4 direita) piscam
+    // headlights (1) and tail lights (2) light up at night and in the rain; indicators (3 left, 4 right) blink
     const gl = glowOf(col);
     for (let i = 0; i < n; i++) { c[i * 3] = color.r; c[i * 3 + 1] = color.g; c[i * 3 + 2] = color.b; paint[i] = col < 0 ? 1 : 0; glow[i] = gl; }
     g.setAttribute('color', new THREE.BufferAttribute(c, 3));
@@ -54,7 +53,7 @@ function model(parts: Part[]): THREE.BufferGeometry {
 }
 
 const GLASS = 0x1a2430, TIRE = 0x161616, LIGHT = 0xfff1c8, RED = 0x8a1010;
-/** Setas (âmbar apagado; acendem pelo bit da simulação): esquerda = +x do modelo (o rumo gira de +z para +x). */
+/** Indicators (unlit amber; lit by the simulation's bit): left = the model's +x (the heading turns from +z to +x). */
 const AMBER_L = 0xb8741a, AMBER_R = 0xb8741b;
 const glowOf = (col: number) => (col === LIGHT ? 1 : col === RED ? 2 : col === AMBER_L ? 3 : col === AMBER_R ? 4 : col === GLASS ? GLASS_GLOW : 0);
 /** Glass (smooth, reflects the sky), exhaust puff, and the wheel parts (100 + 2 × part + front: tyre, hubcap, spoke). */
@@ -92,8 +91,8 @@ function puff(parts: THREE.BufferGeometry[], x: number, y: number, z: number): v
   parts.push(g);
 }
 /**
- * Sombra de mancha (roadcraft `blobShadows`) para os veículos além de SHADOW_NEAR, que não entram nas cascatas:
- * retângulo escuro 3 cm acima da pista, com a borda pontilhada (o TRAA suaviza). `glow` = BLOB; a cor leva o canto.
+ * Blob shadow (roadcraft `blobShadows`) for the vehicles beyond SHADOW_NEAR, which are not in the cascades: a dark
+ * rectangle 3 cm above the road with a dithered edge (TRAA smooths it). `glow` = BLOB; the colour carries the corner.
  */
 const BLOB = 9;
 function withBlob(g: THREE.BufferGeometry, w: number, l: number): THREE.BufferGeometry {
@@ -102,7 +101,7 @@ function withBlob(g: THREE.BufferGeometry, w: number, l: number): THREE.BufferGe
   q.deleteAttribute('uv');
   const n = q.attributes.position.count, pos = q.attributes.position.array;
   const c = new Float32Array(n * 3);
-  // canto em −1..1 nos canais r e g (o shader faz a queda do meio para a borda)
+  // corner in −1..1 in the r and g channels (the shader fades from the middle to the edge)
   for (let i = 0; i < n; i++) { c[i * 3] = Math.sign(pos[i * 3]); c[i * 3 + 1] = Math.sign(pos[i * 3 + 2]); }
   q.setAttribute('color', new THREE.BufferAttribute(c, 3));
   q.setAttribute('paint', new THREE.BufferAttribute(new Float32Array(n), 1));
@@ -111,16 +110,16 @@ function withBlob(g: THREE.BufferGeometry, w: number, l: number): THREE.BufferGe
   return mergeGeometries([g.index ? g.toNonIndexed() : g, q])!;
 }
 
-/** Ocupante (silhueta na janela): `glow` = OCC + lugar (1-16); aparece se o lugar couber na lotação da pose. */
+/** Occupant (a silhouette in the window): `glow` = OCC + seat (1-16); shown if the seat is within the pose's load. */
 const OCC = 10, HEAD = 0x9c7a62, SHIRT = 0x56677a;
-/** Silhuetas de ocupantes 3 cm fora do vidro (o vidro é opaco): cabeça e ombros, lugar `seat`. */
+/** Occupant silhouettes 3 cm outside the glass (the glass is opaque): head and shoulders, seat `seat`. */
 function occupant(parts: THREE.BufferGeometry[], x: number, y: number, z: number, side: number, seat: number): void {
   const head = new THREE.BoxGeometry(0.02, 0.24, 0.2); head.translate(x + side * 0.01, y + 0.42, z);
   const body = new THREE.BoxGeometry(0.02, 0.3, 0.42); body.translate(x + side * 0.01, y + 0.15, z);
   for (const [g, col] of [[head, HEAD], [body, SHIRT]] as const) { const t = tagged(g, col); t.getAttribute('glow').array.fill(OCC + seat); parts.push(t); }
 }
 
-/** Atributos de cor, pintura e farol numa geometria pronta (sem índice, para juntar). */
+/** Colour, paint and light attributes on a finished geometry (not indexed, to merge). */
 function tagged(g: THREE.BufferGeometry, col: number, limb = 0): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g;
   out.deleteAttribute('uv');
@@ -136,7 +135,7 @@ function tagged(g: THREE.BufferGeometry, col: number, limb = 0): THREE.BufferGeo
   return out;
 }
 
-/** Perfil lateral (z para a frente, y para cima) extrudado na largura, centrado em x. */
+/** Side profile (z forward, y up) extruded across the width, centred on x. */
 function profile(pts: Array<[number, number]>, width: number): THREE.BufferGeometry {
   const sh = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y)));
   // rounded edges as Roadcraft's extruded bodies (carBody.ts extrude with a bevel): the same overall size
@@ -148,7 +147,7 @@ function profile(pts: Array<[number, number]>, width: number): THREE.BufferGeome
   return g;
 }
 
-/** Pedestre: o mesmo corpo da pessoa do criador (sapatos, pernas, tronco e braços na cor da roupa, mãos, pescoço, cabeça e cabelo). */
+/** Pedestrian: the same body as the creator's person (shoes, legs, torso and arms in the clothes' colour, hands, neck, head and hair). */
 function personModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const box = (x: number, y: number, z: number, w: number, h: number, l: number, col: number, limb = 0) => {
@@ -157,39 +156,39 @@ function personModel(): THREE.BufferGeometry {
   const ball = (x: number, y: number, z: number, r: number, sy: number, col: number, detail = 0, limb = 0) => {
     const b = new THREE.IcosahedronGeometry(r, detail); b.scale(1, sy, 1); b.translate(x, y, z); parts.push(tagged(b, col, limb));
   };
-  // tronco de cone (7 lados) de y0 a y1, achatado em z; sem tampas onde fica escondido
+  // a truncated cone (7 sides) from y0 to y1, flattened in z; no caps where they are hidden
   const limbC = (x: number, y0: number, y1: number, rTop: number, rBot: number, sz: number, col: number, limb = 0, open = true) => {
     const c = new THREE.CylinderGeometry(rTop, rBot, y1 - y0, 7, 1, open); c.scale(1, 1, sz); c.translate(x, (y0 + y1) / 2, 0); parts.push(tagged(c, col, limb));
   };
-  // sapatos, pernas afinando para o tornozelo, quadril
+  // shoes, legs narrowing to the ankle, hips
   box(-0.095, 0, 0.03, 0.11, 0.07, 0.24, 0x1b1b1b, 1); box(0.095, 0, 0.03, 0.11, 0.07, 0.24, 0x1b1b1b, 2);
   limbC(-0.095, 0.06, 0.84, 0.078, 0.052, 1, PANTS, 1); limbC(0.095, 0.06, 0.84, 0.078, 0.052, 1, PANTS, 2);
   limbC(0, 0.76, 0.93, 0.17, 0.165, 0.62, PANTS, 0, false);
-  // tronco mais largo nos ombros, braços afinando para o punho, mãos
+  // torso wider at the shoulders, arms narrowing to the wrist, hands
   limbC(0, 0.9, 1.4, 0.205, 0.168, 0.58, -1, 0, false);
   limbC(-0.25, 0.83, 1.38, 0.058, 0.045, 1, -1, 3); limbC(0.25, 0.83, 1.38, 0.058, 0.045, 1, -1, 4);
   ball(-0.25, 0.79, 0, 0.05, 1.2, SKIN, 0, 3); ball(0.25, 0.79, 0, 0.05, 1.2, SKIN, 0, 4);
-  // pescoço, cabeça e cabelo
+  // neck, head and hair
   limbC(0, 1.37, 1.46, 0.048, 0.052, 1, SKIN);
   ball(0, 1.56, 0, 0.115, 1.12, SKIN, 1);
   ball(0, 1.615, -0.02, 0.122, 0.82, HAIR, 1);
   return mergeGeometries(parts)!;
 }
 
-/** Carroceria de passeio pelo perfil lateral (z para a frente, y para cima). */
+/** A passenger car's body by its side profile (z forward, y up). */
 interface CarSpec {
-  /** Silhueta da carroceria, dos vidros (um pouco mais larga: aparece dos lados) e do teto. */
+  /** Outline of the body, of the windows (a little wider: they show at the sides) and of the roof. */
   body: Array<[number, number]>; glass: Array<[number, number]>; roof: Array<[number, number]>;
   width: number; half: number;
-  /** Rodas: distância do eixo ao centro (z), raio. */
+  /** Wheels: distance from the axle to the centre (z), radius. */
   axle: number; wheel: number;
   /** Altura das luzes. */
   lamp: number;
-  /** Caçamba da picape: z0, z1, y0, y1. */
+  /** The pickup's bed: z0, z1, y0, y1. */
   bed?: [number, number, number, number];
 }
 
-/** Sedã, hatch, SUV, van e picape (os estilos 0-4 da simulação; o 5 é a moto), como os arquétipos do roadcraft. */
+/** Sedan, hatchback, SUV, van and pickup (the simulation's styles 0-4; 5 is the motorbike), as roadcraft's archetypes. */
 const CAR_SPECS: CarSpec[] = [
   {
     body: [[2.2, 0.3], [2.2, 0.68], [1.95, 0.8], [1.0, 0.88], [0.32, 1.4], [-1.05, 1.42], [-1.75, 0.98], [-2.18, 0.9], [-2.2, 0.3]],
@@ -219,7 +218,7 @@ const CAR_SPECS: CarSpec[] = [
   },
 ];
 
-/** Carro de passeio: carroceria pelo perfil (capô, para-brisa, teto, traseira), vidros, rodas, para-choques, luzes e setas. */
+/** Passenger car: body by its profile (bonnet, windscreen, roof, rear), windows, wheels, bumpers, lights and indicators. */
 function carModel(k: CarSpec = CAR_SPECS[0]): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [tagged(profile(k.body, k.width), -1), tagged(profile(k.glass, k.width + 0.03), GLASS), tagged(profile(k.roof, k.width - 0.14), -1)];
   const box = (x: number, y: number, z: number, w: number, h: number, l: number, col: number) => {
@@ -229,14 +228,14 @@ function carModel(k: CarSpec = CAR_SPECS[0]): THREE.BufferGeometry {
   if (k.bed) {
     const [z0, z1, y0, y1] = k.bed;
     box(0, y0, (z0 + z1) / 2, W, y1 - y0, z1 - z0, -1);
-    box(0, y1, (z0 + z1) / 2, W - 0.16, 0.03, z1 - z0 - 0.14, 0x2a2b2d); // a caçamba vista de cima
+    box(0, y1, (z0 + z1) / 2, W - 0.16, 0.03, z1 - z0 - 0.14, 0x2a2b2d); // the bed seen from above
   }
   const by = k.wheel - 0.11;
-  box(0, by, H - 0.03, W - 0.02, 0.22, 0.12, 0x2a2b2d); // para-choques
+  box(0, by, H - 0.03, W - 0.02, 0.22, 0.12, 0x2a2b2d); // bumpers
   box(0, by, -H + 0.03, W - 0.02, 0.22, 0.12, 0x2a2b2d);
   box(W * 0.34, k.lamp, H + 0.01, 0.42, 0.12, 0.02, LIGHT); box(-W * 0.34, k.lamp, H + 0.01, 0.42, 0.12, 0.02, LIGHT);
   box(W * 0.37, k.lamp + 0.06, -H - 0.01, 0.36, 0.12, 0.02, RED); box(-W * 0.37, k.lamp + 0.06, -H - 0.01, 0.36, 0.12, 0.02, RED);
-  // setas nos quatro cantos (+x = esquerda do motorista), 3 cm à frente das luzes (nada no mesmo plano)
+  // indicators at the four corners (+x = the driver's left), 3 cm in front of the lights (nothing in the same plane)
   for (const zz of [H + 0.04, -H - 0.04]) { box(W / 2 - 0.09, k.lamp - 0.02, zz, 0.18, 0.14, 0.02, AMBER_L); box(-W / 2 + 0.09, k.lamp - 0.02, zz, 0.18, 0.14, 0.02, AMBER_R); }
   // motorista nas janelas dos dois lados (lugar 1)
   const gy = k.lamp + 0.22, gz = k.glass[1][0] - 0.35;
@@ -246,18 +245,18 @@ function carModel(k: CarSpec = CAR_SPECS[0]): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-/** Moto com o piloto (capacete na cor da moto), 2,1 m. */
+/** Motorbike with its rider (helmet in the bike's colour), 2.1 m. */
 function motoModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [tagged(profile([[0.95, 0.42], [0.88, 0.78], [0.35, 0.86], [-0.25, 0.9], [-0.9, 0.82], [-0.98, 0.5], [-0.3, 0.4]], 0.3), -1)];
   const box = (x: number, y: number, z: number, w: number, h: number, l: number, col: number) => {
     const b = new THREE.BoxGeometry(w, h, l); b.translate(x, y + h / 2, z); parts.push(tagged(b, col));
   };
   for (const z of [0.72, -0.72]) wheel(parts, 0.06, 0.31, z, 0.31, 0.12, z > 0);
-  box(0, 0.86, 0.72, 0.62, 0.04, 0.04, 0x2a2b2d); // guidão
+  box(0, 0.86, 0.72, 0.62, 0.04, 0.04, 0x2a2b2d); // handlebar
   box(0, 0.74, 0.97, 0.14, 0.1, 0.03, LIGHT); box(0, 0.76, -0.99, 0.12, 0.08, 0.03, RED);
   box(0.17, 0.78, 0.94, 0.05, 0.05, 0.03, AMBER_L); box(-0.17, 0.78, 0.94, 0.05, 0.05, 0.03, AMBER_R);
   box(0.17, 0.7, -0.97, 0.05, 0.05, 0.03, AMBER_L); box(-0.17, 0.7, -0.97, 0.05, 0.05, 0.03, AMBER_R);
-  // piloto (só sem as pessoas cozidas, src/render/people): lugar 1 dos ocupantes
+  // rider (only without the cooked people, src/render/people): occupant seat 1
   const rider = parts.length;
   box(0.15, 0.5, 0.05, 0.12, 0.42, 0.3, 0x24262c); box(-0.15, 0.5, 0.05, 0.12, 0.42, 0.3, 0x24262c);
   const t = new THREE.BoxGeometry(0.4, 0.62, 0.24); t.rotateX(0.32); t.translate(0, 1.22, 0.02); parts.push(tagged(t, 0x30343c));
@@ -276,7 +275,7 @@ const BUS: Part[] = [
   [1.15, 0.6, 5.92, 0.16, 0.14, 0.02, AMBER_L], [-1.15, 0.6, 5.92, 0.16, 0.14, 0.02, AMBER_R],
   [1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_L], [-1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_R],
 ];
-/** Bicicleta com o ciclista (1,8 m): rodas finas, quadro, guidão, ciclista curvado e capacete na cor. */
+/** Bicycle with its rider (1.8 m): thin wheels, frame, handlebar, the rider bent forward and a helmet in the colour. */
 export function bikeModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const box = (x: number, y: number, z: number, w: number, h: number, l: number, col: number) => {
@@ -297,11 +296,11 @@ export function bikeModel(): THREE.BufferGeometry {
     const h = new THREE.CylinderGeometry(r, r, L, 5, 1, true); h.applyQuaternion(q); h.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     parts.push(tagged(h, col));
   };
-  // quadro (pintado), guidão, selim
+  // frame (painted), handlebar, saddle
   bar(0, 0.35, -0.55, 0, 0.75, -0.12, 0.022, -1); bar(0, 0.35, -0.55, 0, 0.4, 0.05, 0.022, -1);
   bar(0, 0.4, 0.05, 0, 0.75, -0.12, 0.022, -1); bar(0, 0.75, -0.12, 0, 0.82, 0.42, 0.022, -1); bar(0, 0.35, 0.55, 0, 0.92, 0.42, 0.02, 0x2a2b2d);
   box(0, 0.92, 0.38, 0.5, 0.03, 0.04, 0x2a2b2d); box(0, 0.8, -0.16, 0.12, 0.05, 0.24, 0x1b1b1b);
-  // ciclista (só sem as pessoas cozidas, src/render/people): lugar 1 dos ocupantes, aceso pela cor
+  // rider (only without the cooked people, src/render/people): occupant seat 1, shown by the colour
   const rider = parts.length;
   box(0.11, 0.42, -0.08, 0.1, 0.42, 0.14, 0x2c3140); box(-0.11, 0.42, 0.02, 0.1, 0.42, 0.14, 0x2c3140);
   const t = new THREE.BoxGeometry(0.34, 0.55, 0.22); t.rotateX(0.55); t.translate(0, 1.12, 0.02); parts.push(tagged(t, 0x56677a));
@@ -311,7 +310,7 @@ export function bikeModel(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-/** Ônibus com os passageiros nas janelas: 16 lugares alternando os lados, da frente para trás (o 1 é o motorista). */
+/** Bus with its passengers in the windows: 16 seats alternating sides, front to back (1 is the driver). */
 function busModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [model(BUS).toNonIndexed()];
   for (const z of [3.8, -3.6]) for (const x of [1.1, -1.1]) wheel(parts, x, 0.47, z, 0.47, 0.3, z > 0);
@@ -324,7 +323,7 @@ function busModel(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-/** Caminhão com o motorista na cabine. */
+/** Truck with its driver in the cab. */
 function truckModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [model(TRUCK).toNonIndexed()];
   for (const z of [3.6, -3.2]) for (const x of [1.1, -1.1]) wheel(parts, x, 0.48, z, 0.48, 0.32, z > 0);
@@ -337,35 +336,35 @@ const TRUCK: Part[] = [
   [0, 0.4, 3.65, 2.4, 1.3, 2.2, -1], // cabine
   [0, 1.7, 3.85, 2.3, 0.75, 1.6, GLASS],
   [0, 2.45, 3.65, 2.4, 0.25, 2.2, -1],
-  [0, 0.9, -1.1, 2.5, 2.7, 7.1, 0xd9d6cf], // baú
+  [0, 0.9, -1.1, 2.5, 2.7, 7.1, 0xd9d6cf], // box body
   [0, 0.35, -1.1, 2.0, 0.55, 7.1, 0x2b2b2b],
   [0.9, 0.55, -4.67, 0.36, 0.16, 0.02, RED], [-0.9, 0.55, -4.67, 0.36, 0.16, 0.02, RED],
   [1.12, 0.75, 4.77, 0.14, 0.12, 0.02, AMBER_L], [-1.12, 0.75, 4.77, 0.14, 0.12, 0.02, AMBER_R],
   [1.12, 0.75, -4.67, 0.14, 0.12, 0.02, AMBER_L], [-1.12, 0.75, -4.67, 0.14, 0.12, 0.02, AMBER_R],
 ];
 const SKIN = 0xc89a78, PANTS = 0x2c3140, HAIR = 0x2a1f18;
-/** Vagão de trem/metrô (20 m): caixa pintada na cor da linha, faixa de janelas, teto, truques. */
+/** Train/metro wagon (20 m): a box painted in the line's colour, a band of windows, roof, bogies. */
 const WAGON: Part[] = [
   [0, 0.9, 0, 2.9, 2.9, 19.6, 0xd8dadc],
-  [0, 1.05, 0, 2.94, 0.5, 19.7, -1], // faixa da cor da linha
+  [0, 1.05, 0, 2.94, 0.5, 19.7, -1], // band in the line's colour
   [0, 2.0, 0, 2.95, 1.0, 18.4, GLASS],
   [0, 3.8, 0, 2.6, 0.25, 18.8, 0x9aa0a4],
   [0, 0.3, 6.5, 2.4, 0.65, 2.6, 0x2a2b2d], [0, 0.3, -6.5, 2.4, 0.65, 2.6, 0x2a2b2d], // truques
   [0, 1.4, 9.82, 2.2, 1.6, 0.04, GLASS], [0, 0.95, 9.84, 1.6, 0.18, 0.02, LIGHT],
 ];
-/** Caixa unitária para o nível do meio (escalada por instância). */
+/** Unit box for the middle level (scaled per instance). */
 const BOX: Part[] = [[0, 0, 0, 1, 1, 1, -1]];
 const KIND_DIMS: Array<[number, number, number]> = [[1.8, 1.45, 4.4], [2.5, 3.0, 12], [2.5, 3.3, 9.5], [0.45, 1.7, 0.3], [2.95, 4.0, 19.8],
-  // estilos de carro 1-5 (hatch, SUV, van, picape, moto): caixa 5-9
+  // car styles 1-5 (hatchback, SUV, van, pickup, motorbike): boxes 5-9
   [1.74, 1.45, 3.9], [1.88, 1.72, 4.6], [1.92, 1.97, 4.9], [1.88, 1.74, 5.3], [0.7, 1.6, 2.1],
   // bicicleta (10)
   [0.6, 1.75, 1.8]];
-/** Índice do modelo detalhado: estilos de carro 0-5, ônibus 6, caminhão 7, pessoa 8, vagão 9, bicicleta 10. */
+/** Index of the detailed model: car styles 0-5, bus 6, truck 7, person 8, wagon 9, bicycle 10. */
 const modelOf = (kind: number, style: number) => (kind === 0 ? style : kind + 5);
 const dimsOf = (kind: number, style: number) => (kind === 0 && style > 0 ? 4 + style : kind === 5 ? 10 : kind);
-/** Pessoas: modelo até aqui, caixa até PERSON_MID. */
+/** People: the model up to here, a box up to PERSON_MID. */
 const PERSON_NEAR = 70;
-/** Veículos detalhados com sombra só até aqui; depois, o mesmo modelo sem sombra (a sombra some na distância). */
+/** Detailed vehicles cast shadows only up to here; beyond, the same model without (the shadow fades with distance). */
 const SHADOW_NEAR = 90;
 const PERSON_MID = 480;
 
@@ -373,7 +372,7 @@ class Batch {
   readonly mesh: THREE.Mesh;
   readonly pos: Float32Array;
   readonly info: Float32Array;
-  /** Pose do quadro anterior (velocidade do TRAA: sem ela o carro andando borra e treme). */
+  /** The previous frame's pose (TRAA velocity: without it a moving car smears and shakes). */
   readonly prev: Float32Array;
   private posAttr: THREE.InstancedBufferAttribute;
   private prevAttr: THREE.InstancedBufferAttribute;
@@ -391,7 +390,7 @@ class Batch {
     this.info = new Float32Array(cap * 4);
     this.prev = new Float32Array(cap * 4);
     this.prevAttr = new THREE.InstancedBufferAttribute(this.prev, 4).setUsage(THREE.DynamicDrawUsage) as THREE.InstancedBufferAttribute;
-    // pessoas: os membros já ocupam o 8º buffer de vértices (limite do WebGPU); a 1,4 m/s a pose atual basta
+    // people: the limbs already take the 8th vertex buffer (WebGPU's limit); at 1.4 m/s the current pose is enough
     if (!animated) g.setAttribute('iprev', this.prevAttr);
     this.posAttr = new THREE.InstancedBufferAttribute(this.pos, 4).setUsage(THREE.DynamicDrawUsage) as THREE.InstancedBufferAttribute;
     this.infoAttr = new THREE.InstancedBufferAttribute(this.info, 4).setUsage(THREE.DynamicDrawUsage) as THREE.InstancedBufferAttribute;
@@ -399,8 +398,8 @@ class Batch {
     g.setAttribute('iinfo', this.infoAttr);
     g.instanceCount = 0;
     this.geo = g;
-    // um material por combinação (comum, caixa, pessoa) para todos os lotes: cada material a mais é um shader a
-    // montar e compilar na carga (19 lotes eram 19 materiais e a cidade abria 1,5 s mais devagar)
+    // one material per combination (plain, box, person) for every batch: each extra material is one more shader to
+    // build and compile at load (19 batches were 19 materials and the city opened 1.5 s slower)
     const key = (scaled ? 1 : 0) + (animated ? 2 : 0);
     this.mesh = new THREE.Mesh(g, MATERIALS[key] ??= vehicleMaterial(scaled, animated));
     this.mesh.frustumCulled = false;
@@ -408,8 +407,8 @@ class Batch {
     this.mesh.receiveShadow = true;
   }
 
-  /** `lod`: troca perto/meio por máscaras complementares (perto: ruído < lod; meio: lod = −1 − f, ruído ≥ f),
-   *  assim o modelo e a caixa nunca disputam o mesmo pixel. */
+  /** `lod`: near/middle cross over by complementary masks (near: noise < lod; middle: lod = −1 − f, noise ≥ f), so
+   *  the model and the box never fight over the same pixel. */
   push(x: number, y: number, z: number, yaw: number, color: number, alpha: number, kind: number, lod = 1, px = x, py = y, pz = z, pyaw = yaw): void {
     if (this.count >= this.cap) return;
     const o = this.count * 4;
@@ -442,12 +441,12 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   let local: Node = attribute('position', 'vec3');
   let nrm: Node = attribute('normal', 'vec3');
   if (animated) {
-    // só as pessoas: pernas e braços balançam (carros e ônibus não pagam esta conta)
+    // people only: legs and arms swing (cars and buses do not pay for it)
     const limb = attribute('limb', 'float');
     const isLimb = step(float(0.5), limb);
     const isArm = step(float(2.5), limb);
     const side = select(mod(limb, 2).greaterThan(0.5), float(1), float(-1));
-    // passo: ~1,9 passadas por segundo, fase pela posição (cada pessoa no seu ritmo)
+    // stride: ~1.9 steps a second, phase by position (each person in their own rhythm)
     const phase = time.mul(6).add(ipos.x.mul(0.71)).add(ipos.z.mul(0.53));
     const ang = sin(phase).mul(select(isArm.greaterThan(0.5), float(0.45), float(0.5))).mul(side).mul(select(isArm.greaterThan(0.5), float(-1), float(1))).mul(isLimb);
     const pivot = select(isArm.greaterThan(0.5), float(1.36), float(0.83));
@@ -457,7 +456,7 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
     nrm = vec3(nrm.x, nrm.y.mul(ca).sub(nrm.z.mul(sa)), nrm.y.mul(sa).add(nrm.z.mul(ca)));
   }
   if (scaled) {
-    // caixa unitária com base no chão, escalada pelo tipo
+    // unit box standing on the ground, scaled by kind
     const k = int(info.z.add(0.5));
     const dims = uniformArray(KIND_DIMS.map((d) => new THREE.Vector3(...d)), 'vec3');
     local = local.add(vec3(0, 0.5, 0)).mul(dims.element(k));
@@ -502,16 +501,16 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   withPrevious(m, animated ? undefined : rotBy(iprev.w)(local).add(iprev.xyz));
   m.normalNode = transformNormalToView(normalize(rot(nrm)));
   const palette = uniformArray(PAINTS.map((p) => new THREE.Color(p)), 'color');
-  // info.x = cor (0-15) + 16 × luzes da simulação (1 freio, 2 seta esquerda, 4 seta direita)
+  // info.x = colour (0-15) + 16 × the simulation's lights (1 brake, 2 left indicator, 4 right indicator)
   const code = floor(info.x.add(0.5));
   const paint = sRGBTransferEOTF(palette.element(int(mod(code, 16))));
   const lightBits = floor(code.div(16));
-  // ocupantes: lugares até a lotação (bits 3-5 das luzes, 0-7 → 0-16 lugares; carro = só o motorista)
+  // occupants: seats up to the load (bits 3-5 of the lights, 0-7 → 0-16 seats; a car = the driver only)
   const seatsOn = floor(lightBits.div(8)).mul(16 / 7);
   const glowA = attribute('glow', 'float');
   const seat = glowA.sub(OCC);
   const occOk = seat.lessThan(0.5).or(seat.greaterThan(16.5)).or(seat.lessThan(seatsOn.add(0.5)));
-  // sombra de mancha: escura no meio, some na borda (pontilhado por outro ruído)
+  // blob shadow: dark in the middle, fading at the edge (dithered by another noise)
   const isBlob = step(abs(glowA.sub(BLOB)), float(0.5));
   const blobR = attribute('color', 'vec3').xy.length().div(1.414);
   const blobOk = isBlob.lessThan(0.5).or(float(1).sub(smoothstep(float(0.35), float(1), blobR)).mul(0.85).greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(7.0, 13.0)))));
@@ -531,19 +530,19 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
     const on = max(nightU, rainU.mul(0.7));
     const isK = (k: number) => step(abs(gl.sub(k)), float(0.5));
     const brake = mod(lightBits, 2), left = mod(floor(lightBits.div(2)), 2), right = mod(floor(lightBits.div(4)), 2);
-    // (os lugares dos ocupantes ficam acima de 9.5: nenhuma luz)
-    // seta pisca a 1,5 Hz; freio acende a lanterna também de dia
+    // (the occupants' seats are above 9.5: no light)
+    // indicators blink at 1.5 Hz; the brake lights the tail light by day too
     const blink = step(float(0), sin(time.mul(9.42)));
     const head = vec3(1, 0.93, 0.78).mul(6).mul(on).mul(isK(1));
     const tail = vec3(1, 0.05, 0.03).mul(max(on.mul(3.5), brake.mul(2.6))).mul(isK(2));
     const amber = vec3(1, 0.5, 0.06).mul(7).mul(blink).mul(isK(3).mul(left).add(isK(4).mul(right)));
     m.emissiveNode = head.add(tail).add(amber);
   }
-  // aparece e some por pontilhado (sem transparência)
+  // appears and disappears by dithering (no transparency)
   const alpha = info.y, lod = info.w;
   const n = interleavedGradientNoise(screenCoordinate.xy);
   const lodOk = select(lod.greaterThanEqual(0), n.lessThan(lod), n.greaterThanEqual(lod.negate().sub(1)));
-  // surgir/sumir com outro ruído (o mesmo ruído do nível furaria os mesmos pixels nos dois)
+  // fading in/out with another noise (the level's noise would cut the same pixels in both)
   m.maskNode = lodOk.and(occOk).and(blobOk).and(puffShow).and(alpha.greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(23.0, 41.0)))));
   return m;
 }
@@ -556,7 +555,7 @@ export function followMatch(d: Float32Array, o: number, f: { info: number; id: n
 export class VehicleRenderer {
   readonly group = new THREE.Group();
   private near: Batch[];
-  /** Carros, ônibus e caminhões detalhados além de SHADOW_NEAR: o mesmo modelo, sem sombra. */
+  /** Detailed cars, buses and trucks beyond SHADOW_NEAR: the same model, without a shadow. */
   private nearFar: Batch[];
   private mid: Batch;
   private reader: PoseReader;
@@ -564,42 +563,42 @@ export class VehicleRenderer {
   private pv = new THREE.Matrix4();
   private sphere = new THREE.Sphere(new THREE.Vector3(), 7);
   private tileBox = new THREE.Box3();
-  /** Pedestres e ciclistas cozidos (src/render/people); até carregarem, os bonecos simples. */
+  /** Cooked pedestrians and cyclists (src/render/people); until they load, the simple figures. */
   readonly people = new PeopleRenderer();
 
   constructor(reader: PoseReader) {
     this.reader = reader;
-    // um modelo por estilo de carro (o mesmo material: uma chamada a mais por estilo que aparece)
+    // one model per car style (the same material: one more call per style on screen)
     const cars = [...CAR_SPECS.map((k) => carModel(k)), motoModel()];
     const bus = busModel(), truck = truckModel();
     const carCap = (i: number) => (i < 2 ? CAP_NEAR : CAP_NEAR / 2);
     this.near = [...cars.map((g, i) => new Batch(g, carCap(i), false)), new Batch(bus, 1024, false), new Batch(truck, 1024, false), new Batch(personModel(), 8000, false, true, true), new Batch(model(WAGON), 512, false), new Batch(bikeModel(), 2000, false)];
-    // além da sombra das cascatas: o mesmo modelo com a sombra de mancha embaixo
+    // beyond the cascades' shadow: the same model with the blob shadow under it
     const blobs = [...CAR_SPECS.map((k) => [k.width, k.half * 2]), [0.7, 2.1]];
     this.nearFar = [...cars.map((g, i) => new Batch(withBlob(g, blobs[i][0], blobs[i][1]), carCap(i), false, false)),
       new Batch(withBlob(bus, 2.5, 11.8), 1024, false, false), new Batch(withBlob(truck, 2.5, 9.5), 1024, false, false)];
-    // longe (caixas até 1,7 km): sem sombra (menos de um pixel, e eram até 30 mil nas três passadas de sombra)
+    // far (boxes up to 1.7 km): no shadow (less than a pixel, and up to 30,000 in the three shadow passes)
     this.mid = new Batch(model(BOX), CAP_MID, true, false);
     for (const b of [...this.near, ...this.nearFar, this.mid]) this.group.add(b.mesh);
     this.group.add(this.people.group);
     void this.people.load();
   }
 
-  /** Medições: não desenha as pessoas. */
+  /** Measurements: the people are not drawn. */
   hidePeople = false;
 
-  /** Veículo seguido pela câmera: rastreado pela pose mais perto da última, com o mesmo tipo e cor. */
+  /** Vehicle the camera follows: tracked by its id and its kind and colour (`followMatch`), nearest to the last place. */
   follow: { x: number; z: number; info: number; id: number; lost: number } | null = null;
-  /** Pose do seguido neste quadro: x, y, z, rumo. */
+  /** The followed vehicle's pose this frame: x, y, z, heading. */
   readonly followPose = new Float64Array(4);
 
-  /** Começa a seguir o veículo mais perto de (x, z), num raio. */
+  /** Starts following the vehicle nearest (x, z), within a radius. */
   pick(x: number, z: number, radius: number): boolean {
     const r = this.reader, d = r.data;
     let best = -1, bd = radius * radius;
     for (let i = 0; i < r.count; i++) {
       const o = i * POSE_STRIDE;
-      if ((Math.floor(d[o + 8] / 256) & 255) === 3) continue; // pessoas não
+      if ((Math.floor(d[o + 8] / 256) & 255) === 3) continue; // not people
       const dd = (d[o + 4] - x) ** 2 + (d[o + 6] - z) ** 2;
       if (dd < bd) { bd = dd; best = o; }
     }
@@ -608,8 +607,8 @@ export class VehicleRenderer {
     return true;
   }
 
-  /** Lê as poses mais novas, interpola e enche os lotes visíveis. */
-  /** Momento do quadro anterior (pose anterior para a velocidade do TRAA). */
+  /** Reads the newest poses, interpolates and fills the visible batches. */
+  /** The previous frame's time (the previous pose for TRAA's velocity). */
   private lastNow = 0;
 
   update(camera: THREE.Camera, eye: THREE.Vector3, frameNow = performance.now()): void {
@@ -624,11 +623,11 @@ export class VehicleRenderer {
     people?.begin(camera);
     const n = r.count;
     if (n > 0) {
-      // instante do quadro (o do rAF), não o do meio do quadro: senão o passo varia com o trabalho antes daqui
+      // the frame's instant (the rAF's), not mid-frame: otherwise the step varies with the work before this
       const now = performance.timeOrigin + frameNow;
       const span = Math.max(1, r.dt);
       const t = Math.min(1, Math.max(0, (now - r.tickTime) / span));
-      // anterior pela mesma reta (antes do passo atual: extrapola para trás, no máximo um passo)
+      // the previous one along the same line (before the current step: extrapolated back, at most one step)
       const prevNow = this.lastNow > 0 && frameNow - this.lastNow < 200 ? performance.timeOrigin + this.lastNow : now;
       const tp = Math.min(t, Math.max(-1, (prevNow - r.tickTime) / span));
       const d = r.data;
@@ -667,19 +666,19 @@ export class VehicleRenderer {
           if (!this.frustum.intersectsSphere(this.sphere)) continue;
           const dist = Math.hypot(x - eye.x, y - eye.y, z - eye.z);
           if (dist > MID) continue;
-          // tipo × 256 + cor (bits 0-3; estilo do carro nos bits 4-6; 128 = vagão da frente) + luzes × 65536
+          // kind × 256 + colour (bits 0-3; car style in bits 4-6; 128 = leading wagon) + lights × 65536
           const info = d[o + 8], lights = Math.floor(info / 65536), base = info - lights * 65536;
           const kind = Math.floor(base / 256), low = base - kind * 256;
           const style = kind === 0 ? (low >> 4) & 7 : 0;
-          // com as pessoas cozidas o piloto da moto é uma delas: os lugares da moto apagam
+          // with the cooked people the motorbike's rider is one of them: the bike's seats go off
           const shown = people && kind === 0 && style === 5 ? lights & 7 : lights;
           const color = (kind === 0 ? low & 15 : low & 127) + shown * 16 + (kind === 5 && !people ? 128 : 0);
-          // pessoas e bicicletas: pequenas, modelo só até PERSON_NEAR e caixa até PERSON_MID
+          // people and bicycles: small, the model only up to PERSON_NEAR and a box up to PERSON_MID
           const person = kind === 3, small = person || kind === 5;
           if ((small && dist > PERSON_MID) || (person && this.hidePeople)) continue;
           if (people && small) { people.push(d, o, x, y, z, yaw, px, py, pz, pyaw, dist, r.dt, !person); if (person) continue; }
           if (people && kind <= 2 && dist < NEAR) people.occupants(kind, style, x, y, z, yaw, px, py, pz, pyaw, info, lights, dist, d[o + 10]);
-          // perto/meio com troca pontilhada numa faixa de 30 m (pessoas: 10 m)
+          // near/middle crossing over by dithering in a 30 m band (people: 10 m)
           const fadeNear = small ? Math.min(1, Math.max(0, (PERSON_NEAR + 5 - dist) / 10)) : Math.min(1, Math.max(0, (NEAR + 15 - dist) / 30));
           const alpha = d[o + 9];
           const mi = modelOf(kind, style);
@@ -697,7 +696,7 @@ export class VehicleRenderer {
     this.mid.commit();
   }
 
-  /** Atualiza o seguido depois do quadro: perdeu de vista por meio segundo, solta. */
+  /** Updates the followed vehicle after the frame: out of sight for half a second, let go. */
   private trackFollow(found: boolean): void {
     const f = this.follow;
     if (!f) return;
@@ -705,7 +704,7 @@ export class VehicleRenderer {
     else if (++f.lost > 30) this.follow = null;
   }
 
-  /** Malhas para compilar os shaders na carga. */
+  /** Meshes to compile the shaders at load. */
   warmup(): void {
     for (const b of [...this.near, ...this.nearFar, this.mid]) { b.count = 0; b.push(0, -1000, 0, 0, 0, 1, 0); b.commit(); }
   }
