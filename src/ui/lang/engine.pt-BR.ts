@@ -293,6 +293,8 @@ export const ENGINE_PT: Record<string, string> = {
   'save.tilesUnreadable.other': '{count} pedaços do mapa estavam ilegíveis e voltaram do relevo original. O salvamento foi guardado como estava em "{folder}".',
   'save.repaired.one': 'Mapa reparado: 1 ponta solta dentro de outra via virou cruzamento.',
   'save.repaired.other': 'Mapa reparado: {count} pontas soltas dentro de outras vias viraram cruzamentos.',
+  'save.roadsCut.one': '1 trecho de via que terminava num pedaço ilegível do mapa foi tirado.',
+  'save.roadsCut.other': '{count} trechos de via que terminavam num pedaço ilegível do mapa foram tirados.',
   'save.exportNotSaved': 'O mapa não foi exportado porque o salvamento não terminou.',
   'save.exportNothing': 'Nada salvo para exportar ainda.',
   'save.exported': 'Mapa exportado ({mb} MB).',

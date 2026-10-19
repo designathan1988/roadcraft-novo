@@ -267,6 +267,21 @@ const SCENARIOS = {
       check('a stray tile file of an opened package is not taken in', names.filter((n) => n.startsWith('tile_')).length === listed(), names + '; tiles listed ' + listed());
     }
   `,
+  // A13: when a tile cannot be read, the roads of the tile next to it that end in it do not link to its dead nodes
+  'unreadable-neighbour': `
+    road(-150, 1500, 150, 1500);
+    const s = w.roads.nearestSeg(0, 1500, 6)[0], c = w.roads.segs.cols, n = w.roads.nodes.cols;
+    const ta = tileOf(n.x[c.a[s]], n.z[c.a[s]]), tb = tileOf(n.x[c.b[s]], n.z[c.b[s]]);
+    check('the road crosses from one tile to the next', ta !== tb, 'tiles ' + ta + ', ' + tb);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    // the tile of the far end (the segment is saved with its first end) is damaged
+    const file = await tileFile(tb), data = await files.read(file);
+    await files.write(file, data.map((v, i) => (i > 8 ? v ^ 0xa5 : v)));
+    const e0 = errors.length;
+    const r = await within(g.load(), 30000);
+    check('the save opens', r === 'returned' && !g.busy, 'load() ' + r);
+    check('no road ends on a node that was not read', deadEnds() === 0, deadEnds() + ' segments with a dead end; errors: ' + errors.slice(e0).join(' | '));
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);

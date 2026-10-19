@@ -15,7 +15,7 @@ import { CommandStack } from './core/commands.ts';
 import { CELL_COUNT, Dirty, TILE_COUNT, cellId, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
 import { JobPool } from './jobs/pool.ts';
 import { packTileHeights } from './jobs/storage.ts';
-import { SHAPE_SCALE, SHAPE_STRIDE, boxTransfer, roadGraphTransfer, type BoxColumns, type JobResults, type RoadSave } from './jobs/protocol.ts';
+import { SEG_REC, SHAPE_SCALE, SHAPE_STRIDE, boxTransfer, roadGraphTransfer, type BoxColumns, type JobResults, type RoadSave } from './jobs/protocol.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
 import { createRoads, createTrafficLook, setPaintStyle, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
@@ -2191,7 +2191,7 @@ export class Game {
     const order = [...gens.filter((g) => !g.missing.size), ...gens.filter((g) => g.missing.size)];
     this.hud.showLoading(t('save.loading'));
     try {
-      let report: { missing: number; damaged: number; repaired: number } | null = null, used = order[0];
+      let report: { missing: number; damaged: number; repaired: number; cut: number } | null = null, used = order[0];
       for (let k = 0; k < order.length && !report; k++) {
         used = order[k];
         report = await this.openGeneration(slot, used, k === order.length - 1);
@@ -2201,6 +2201,7 @@ export class Game {
       if (fellBack) this.hud.toast(t('save.fallback', { folder: q ?? '—' }));
       if (report!.damaged) this.hud.toast(plural('save.tilesUnreadable', report!.damaged, { folder: q ?? '—' }));
       if (report!.missing) this.hud.toast(plural('save.tilesMissing', report!.missing, { folder: q ?? '—' }));
+      if (report!.cut) this.hud.toast(plural('save.roadsCut', report!.cut));
       if (report!.repaired) this.hud.toast(plural('save.repaired', report!.repaired));
       this.endRebuild(null, '');
       this.hud.toast(t('save.loaded'));
@@ -2216,7 +2217,7 @@ export class Game {
    * `last` false the result is null and the world is left half built (the caller opens another generation); with
    * `last` its terrain comes back from the seed and it is counted. A storage failure throws.
    */
-  private async openGeneration(slot: SaveSlot, g: Generation, last: boolean): Promise<{ missing: number; damaged: number; repaired: number } | null> {
+  private async openGeneration(slot: SaveSlot, g: Generation, last: boolean): Promise<{ missing: number; damaged: number; repaired: number; cut: number } | null> {
     const w = this.world;
     const meta = decodeMeta(g.metaBytes);
     w.clearBuildings();
@@ -2298,16 +2299,31 @@ export class Game {
     const failed = done.find((r) => r.status === 'rejected');
     if (failed) throw (failed as PromiseRejectedResult).reason;
     if (unreadable.length && !last) return null;
-    // roads: all nodes before the segments (segments link tiles)
+    // roads: all nodes before the segments (segments link tiles). A segment saved with its first end whose other end
+    // was in a tile that could not be read is left out (it would link to a node that is not there); its tile is
+    // written again at the next save
     for (const r of roads) w.roads.loadNodes(r);
-    for (const r of roads) w.roads.loadSegs(r);
+    const alive = w.roads.nodes.alive, nc = w.roads.nodes.cols, cutTiles = new Set<number>();
+    let cut = 0;
+    for (const r of roads) {
+      const s = r.segs, keep: number[] = [];
+      for (let k = 0; k < s.length; k += SEG_REC) {
+        if (alive[s[k + 1]] && alive[s[k + 2]]) { for (let i = 0; i < SEG_REC; i++) keep.push(s[k + i]); continue; }
+        cut++;
+        const end = alive[s[k + 1]] ? s[k + 1] : s[k + 2];
+        if (alive[end]) cutTiles.add(tileId(tileX(nc.x[end]), tileX(nc.z[end])));
+      }
+      w.roads.loadSegs(keep.length === s.length ? r : { ...r, segs: new Float32Array(keep) });
+    }
     // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
     for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
     try {
       for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
     } catch { /* save without chosen junctions */ }
-    // what was read is what the save holds; only the repair below needs writing
+    // what was read is what the save holds; only the repair below and the tiles that lost a segment need writing
     w.saveDirty.fill(0);
+    for (const t of cutTiles) { w.saveDirty[t] = 1; w.saveVer[t]++; }
+    if (cut) this.unsaved = true;
     // old maps: dead ends lying inside another road become junctions (marked to save)
     const repaired = repairDanglingEnds(w);
     if (repaired) this.unsaved = true;
@@ -2316,7 +2332,7 @@ export class Game {
     this.saveBlocked = false;
     this.slotGame = meta.gameId;
     this.slotBase = g;
-    return { missing, damaged: unreadable.length - missing, repaired };
+    return { missing, damaged: unreadable.length - missing, repaired, cut };
   }
 
   /** Saves and downloads the whole map as a .cidade file (only a save that completed is exported, nothing else). */

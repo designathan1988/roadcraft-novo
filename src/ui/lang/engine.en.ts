@@ -293,6 +293,8 @@ export const ENGINE_EN: Record<string, string> = {
   'save.tilesUnreadable.other': '{count} parts of the map could not be read and came back as the original terrain. The save was kept as it was in "{folder}".',
   'save.repaired.one': 'Map repaired: 1 loose end inside another road became a junction.',
   'save.repaired.other': 'Map repaired: {count} loose ends inside other roads became junctions.',
+  'save.roadsCut.one': '1 road segment that ended in an unreadable part of the map was removed.',
+  'save.roadsCut.other': '{count} road segments that ended in an unreadable part of the map were removed.',
   'save.exportNotSaved': 'The map was not exported because the save did not finish.',
   'save.exportNothing': 'Nothing saved to export yet.',
   'save.exported': 'Map exported ({mb} MB).',
