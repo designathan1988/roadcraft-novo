@@ -315,6 +315,19 @@ const SCENARIOS = {
     w.buildingIndex.query(-3100, -3100, -2500, -2900, () => { grown++; });
     check('no building of the city on screen before grows in the opened one', grown === 0 && !roadAt(-2800, -3000), grown + ' buildings where the old city had its zoned road');
   `,
+  // A10: two openings, or an opening and a save, never run together (nothing is inserted twice)
+  'overlap': `
+    road(1500, 1500, 1700, 1500);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    const segs = w.roads.segs.size, builds = w.buildings.size, e0 = errors.length;
+    const [l1, l2] = await Promise.all([g.load(), g.load()]);
+    check('a second opening while one runs is refused', l1 === true && l2 === false, 'load() ' + l1 + ', ' + l2);
+    const [l3, s3] = await Promise.all([g.load(), g.save(false)]);
+    check('a save while opening is refused', l3 === true && s3 === false, 'load() ' + l3 + ', save() ' + s3);
+    const [s4, l4] = await Promise.all([g.save(false), g.load()]);
+    check('an opening while saving is refused', s4 === true && l4 === false, 'save() ' + s4 + ', load() ' + l4);
+    check('nothing is doubled', w.roads.segs.size === segs && w.buildings.size === builds && errors.length === e0, 'segments ' + w.roads.segs.size + ' of ' + segs + ', errors: ' + errors.slice(e0).join(' | '));
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);
