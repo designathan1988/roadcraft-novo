@@ -40,6 +40,7 @@ export class Post {
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, sun: THREE.DirectionalLight, opts: PostOptions) {
     this.camWorldU.value = camera.matrixWorld;
     this.projInvU.value = camera.projectionMatrixInverse;
+    this.fogU = T.uniform((scene.fog as THREE.FogExp2 | null)?.color ?? new THREE.Color(0xa8c3e2));
     this.renderer = renderer;
     this.opts = opts;
     this.sun = sun;
@@ -97,6 +98,18 @@ export class Post {
       const world = this.camWorldU.mul(vec4(view, 1)).xyz;
       const shade = cloudShadowAt(world, this.sunU).mul(cloudShadowStrength(nightU)).mul(rawDepth.greaterThan(0).toFloat());
       color = vec4(color.rgb.mul(float(1).sub(shade)), color.a);
+      // aerial perspective as Roadcraft 4.0's (postprocess.ts:866-873): extinction 3.912 / 30 km per metre through air
+      // whose density falls with height (scale 1200 m, integrated along the ray), × 0.55, toward the horizon's colour
+      const camPos = this.camWorldU.mul(vec4(0, 0, 0, 1)).xyz;
+      const toP = world.sub(camPos);
+      const tAir = T.length(toP);
+      const rdY = toP.y.div(max(tAir, float(1e-3)));
+      const y0 = max(camPos.y, float(0)), y1 = max(world.y, float(0));
+      const hazeDepth = select(T.abs(rdY).greaterThan(1e-4),
+        float(1200).mul(T.exp(y1.div(-1200)).sub(T.exp(y0.div(-1200)))).div(rdY.negate()),
+        tAir.mul(T.exp(y0.div(-1200))));
+      const haze = float(1).sub(T.exp(max(hazeDepth, float(0)).mul(-3.912 / 30000))).mul(0.55).mul(rawDepth.greaterThan(0).toFloat());
+      color = vec4(mix(color.rgb, this.fogU, haze), color.a);
     }
     // one TRAA per output: one TRAA shared by two final images loses its history and the whole image shook at the
     // edges (10% of the pixels changing with everything still)
@@ -132,7 +145,8 @@ export class Post {
       let d: Node = clamp(toDisplay(c).add(casDelta(src)), 0, 1);
       const l = dot(d, vec3(0.2126, 0.7152, 0.0722));
       // contrast: an S round the middle grey
-      d = mix(d, smoothstep(0, 1, d), 0.35);
+      // 0.25 as Roadcraft 4.0's grade (postprocess.ts:1142)
+      d = mix(d, smoothstep(0, 1, d), 0.25);
       // vibrance: the dull colours gain more than the vivid
       const sat = max(max(d.r, d.g), d.b).sub(min(min(d.r, d.g), d.b));
       d = mix(vec3(l, l, l), d, float(1).add(float(1).sub(sat).mul(0.3)));
@@ -180,6 +194,8 @@ export class Post {
   private camWorldU = T.uniform(new THREE.Matrix4());
   private projInvU = T.uniform(new THREE.Matrix4());
   private sunU = T.uniform(new THREE.Vector3(0, 1, 0));
+  /** The fog's colour (the sky at the horizon, set by scene.ts each frame; the same Color object). */
+  private fogU: Node;
   /** Nodes holding GPU targets (the scene pass, AO, bloom, anti-aliasing and the image copied into it). */
   private owned: Array<{ dispose(): void }> = [];
   private sun: THREE.DirectionalLight;
