@@ -1049,10 +1049,11 @@ export class Traffic {
     this.mesoTries++;
     if (this.laneCount[to] >= cap && c.wait[v] < 40) { c.wait[v] += 2; this.mesoFull++; this.schedule(v, this.time + 2); return; }
     c.wait[v] = 0;
-    this.admit(node, sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)]);
     const enterMicro = this.inWindow(to);
     const tail = this.laneTail[to];
     if (enterMicro && tail >= 0 && c.s[tail] < c.len[tail] + S0 + 4) { this.schedule(v, this.time + 0.6); return; }
+    // counted only once it really goes through (flow inspector, automatic control, jammed-junction detection)
+    this.admit(node, sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)]);
     this.setLaneCount(lane, -1);
     this.setLaneCount(to, 1);
     c.lane[v] = to;
