@@ -15,6 +15,7 @@ export const ENGINE_EN: Record<string, string> = {
   'road.reason.fullNode': 'a node there would have more than {max} roads',
   'road.ring.exists': 'There is a roundabout here already.',
   'road.ring.water': 'The roundabout does not fit here: the ring would sit over water.',
+  'road.move.tooLong': 'a road there would be longer than {max} m (split it first)',
   'ui.stats.tip': '{residents} residents · {jobs} jobs · {buildings} buildings · {speed} km/h average nearby',
   'ui.cat.roads': 'Roads',
   'ui.cat.zones': 'Zoning and lots',

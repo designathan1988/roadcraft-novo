@@ -9,7 +9,7 @@ import { Dirty } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
 import { heightAt, heightIndex, sampleCoord, worldOfSample } from '../world/heights.ts';
 import type { BuildingRec, World } from '../world/world.ts';
-import { arcTable, bez, bezD, closestT, intersectQuads, splitQuad, subQuad, tAtLength, type Quad } from './geometry.ts';
+import { arcTable, bez, bezD, bezLength, closestT, intersectQuads, splitQuad, subQuad, tAtLength, type Quad } from './geometry.ts';
 import { MAX_DEG, MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './network.ts';
 import { t as text } from '../ui/i18n.ts';
 import { SegFlag } from './flags.ts';
@@ -1068,7 +1068,8 @@ export function joinAt(world: World, n: number): RoadJournal {
   if (segs.length !== 2) return j;
   const [s1, s2] = segs;
   if (sc.profile[s1] !== sc.profile[s2] || (sc.flags[s1] & ~KIND_MASK) !== (sc.flags[s2] & ~KIND_MASK) || (sc.flags[s1] & SegFlag.Ring)) return j;
-  if (sc.len[s1] + sc.len[s2] > MAX_SEG_LEN * 2) return j;
+  // the spatial index finds a segment by its midpoint: none may be longer than MAX_SEG_LEN
+  if (sc.len[s1] + sc.len[s2] > MAX_SEG_LEN) return j;
   // ends in order (s1 arrives at the node, s2 leaves it), respecting the one-way direction
   const p = sc.a[s1] === n ? sc.b[s1] : sc.a[s1], q = sc.a[s2] === n ? sc.b[s2] : sc.a[s2];
   if (p === q) return j;
@@ -1099,6 +1100,11 @@ export function moveNode(world: World, n: number, x: number, z: number): RoadJou
   for (const s of segs) {
     const o = sc.a[s] === n ? sc.b[s] : sc.a[s];
     if (Math.hypot(nc.x[o] - x, nc.z[o] - z) < 8) return 'uma via ali ficaria curta demais';
+    // the curve's length after the move (control point translated by half), within the spatial index's limit
+    const q = net.quad(s);
+    if (sc.a[s] === n) { q.x0 = x; q.z0 = z; } else { q.x1 = x; q.z1 = z; }
+    q.cx += dx / 2; q.cz += dz / 2;
+    if (bezLength(q) > MAX_SEG_LEN) return text('road.move.tooLong', { max: MAX_SEG_LEN });
     if (sc.flags[s] & SegFlag.Ring) return 'nó de rotatória não se move';
   }
   const recs = segs.map((s) => j.removeSeg(s));

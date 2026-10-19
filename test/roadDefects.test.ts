@@ -540,10 +540,10 @@ test('D15: joining two segments keeps each side\'s zone and refuses what one seg
   const make = (y: number, z2l: number = Zone.Commercial) => {
     const w = flatWorld(1e9);
     const net = w.roads;
-    const p = net.addNode({ x: -100, z: 0, y: 10 }), n = net.addNode({ x: 0, z: 0, y }), q = net.addNode({ x: 100, z: 0, y: 10 });
+    const p = net.addNode({ x: -50, z: 0, y: 10 }), n = net.addNode({ x: 0, z: 0, y }), q = net.addNode({ x: 50, z: 0, y: 10 });
     // both drawn east to west (q → n → p): residential on the left, commercial on the right
-    net.addSeg({ a: n, b: p, cx: -50, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: Zone.Commercial });
-    net.addSeg({ a: q, b: n, cx: 50, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: z2l });
+    net.addSeg({ a: n, b: p, cx: -25, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: Zone.Commercial });
+    net.addSeg({ a: q, b: n, cx: 25, cz: 0, profile: 0, flags: 16, zl: Zone.Residential, zr: z2l });
     return { w, n };
   };
   const { w, n } = make(10);
@@ -559,4 +559,25 @@ test('D15: joining two segments keeps each side\'s zone and refuses what one seg
   assert.ok(joinAt(hump.w, hump.n).empty, 'joining lost the 4 m hump of the middle node');
   const mixed = make(10, Zone.Industrial);
   assert.ok(joinAt(mixed.w, mixed.n).empty, 'joining lost the zone of one half');
+});
+
+test('D16: no edit makes a segment longer than the spatial index holds; clicks near the end still find it', async () => {
+  const { joinAt, moveNode } = await import('../src/roads/build.ts');
+  const { MAX_SEG_LEN } = await import('../src/roads/network.ts');
+  const w = flatWorld(1e9);
+  const net = w.roads;
+  const p = net.addNode({ x: -110, z: 0, y: 10 }), n = net.addNode({ x: 0, z: 0, y: 10 }), q = net.addNode({ x: 110, z: 0, y: 10 });
+  net.addSeg({ a: p, b: n, cx: -55, cz: 0, profile: 0, flags: 16 });
+  net.addSeg({ a: n, b: q, cx: 55, cz: 0, profile: 0, flags: 16 });
+  const j = joinAt(w, n);
+  if (!j.empty) assert.ok(j.settle());
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) assert.ok(net.segs.cols.len[s] <= MAX_SEG_LEN + 0.01, `a join made a ${net.segs.cols.len[s].toFixed(0)} m segment`);
+  assert.ok(net.nearestSeg(108, 0, 4), 'a click 2 m from the end of the road finds nothing');
+  // moving a node far away
+  const w2 = flatWorld(1e9);
+  road(w2, 0, 0, 100, 0);
+  const end = w2.roads.nearestNode(100, 0, 1);
+  const m = moveNode(w2, end, 400, 0);
+  if (typeof m !== 'string') assert.ok(m.settle());
+  for (let s = 0; s < w2.roads.segs.end; s++) if (w2.roads.segs.alive[s]) assert.ok(w2.roads.segs.cols.len[s] <= MAX_SEG_LEN + 0.01, `moving a node made a ${w2.roads.segs.cols.len[s].toFixed(0)} m segment`);
 });

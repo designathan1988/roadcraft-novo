@@ -15,6 +15,7 @@ export const ENGINE_PT: Record<string, string> = {
   'road.reason.fullNode': 'um nó ali ficaria com mais de {max} vias',
   'road.ring.exists': 'Já existe uma rotatória aqui.',
   'road.ring.water': 'A rotatória não cabe aqui: o anel passaria sobre a água.',
+  'road.move.tooLong': 'uma via ali ficaria mais longa que {max} m (divida-a antes)',
   'ui.stats.tip': '{residents} moradores · {jobs} empregos · {buildings} prédios · {speed} km/h de média perto daqui',
   'ui.cat.roads': 'Vias',
   'ui.cat.zones': 'Zoneamento e lotes',
