@@ -48,10 +48,13 @@ export class Table<S extends Schema> {
     for (const fn of this.growListeners) fn(cap);
   }
 
-  /** Reserves an id (reuses one from the free list). Fields are not zeroed here. */
-  alloc(): number {
+  /**
+   * Reserves an id (reuses one from the free list). Fields are not zeroed here. `fresh`: a never-used id, for
+   * entities made outside the undo history (growth): a freed id may still be restored by an undo (`allocAt`).
+   */
+  alloc(fresh = false): number {
     let id: number;
-    if (this.freeTop > 0) id = this.free[--this.freeTop];
+    if (this.freeTop > 0 && !fresh) id = this.free[--this.freeTop];
     else {
       if (this.end >= this.capacity) this.grow(this.end + 1);
       id = this.end++;

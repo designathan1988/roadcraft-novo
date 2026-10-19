@@ -123,7 +123,7 @@ export class Growth {
   }
 
   private grow(l: LotColumns, i: number, organic: boolean): void {
-    this.world.addBuilding(this.recordFor(l, i, organic));
+    this.world.growBuilding(this.recordFor(l, i, organic));
     this.markTaken(cellId(cellX(l.x[i]), cellX(l.z[i])), i);
     this.last = { x: l.x[i], z: l.z[i] };
     this.acc -= 1;
@@ -265,7 +265,7 @@ export class Growth {
     return best;
   }
 
-  place(l: LotColumns, i: number): number { return this.world.addBuilding(this.recordFor(l, i)); }
+  place(l: LotColumns, i: number): number { return this.world.growBuilding(this.recordFor(l, i)); }
 
   /** Free lot containing the point. */
   lotAt(x: number, z: number): { lots: LotColumns; i: number } | null {
@@ -291,7 +291,7 @@ export class Growth {
       for (let i = 0; i < l.count; i++) if (!this.occupied(l, i)) {
         const rec = this.recordFor(l, i);
         rec.built = this.world.clock - generatedBuilt(rec.seed);
-        this.world.addBuilding(rec); n++;
+        this.world.growBuilding(rec); n++;
       }
     }
     return n;

@@ -217,6 +217,18 @@ export class World {
   addBuilding(b: BuildingRec, at?: number): number {
     let id: number;
     if (at !== undefined) { this.buildings.allocAt(at); id = at; } else id = this.buildings.alloc();
+    return this.fillBuilding(b, id);
+  }
+
+  /**
+   * A building made outside the undo history (growth, generated city): it takes a never-used id, so an undo can
+   * always restore a building that a command removed with the id it had.
+   */
+  growBuilding(b: BuildingRec): number {
+    return this.fillBuilding(b, this.buildings.alloc(true));
+  }
+
+  private fillBuilding(b: BuildingRec, id: number): number {
     const c = this.buildings.cols;
     const { x, z } = b;
     c.x[id] = x; c.z[id] = z; c.w[id] = b.w; c.d[id] = b.d; c.h[id] = b.h; c.rot[id] = b.rot; c.color[id] = b.color;
@@ -250,8 +262,30 @@ export class World {
     return { x: r[1], z: r[2], w: r[3], d: r[4], h: r[5], rot: r[6], color: r[7], seed: r[8], zone: r[9], floors: r[10], style: r[11], fn: r[12] ?? 0, built: r[13], shape: n ? r.slice(15, 15 + n * 2) : undefined };
   }
 
+  /**
+   * Puts back a building a command removed (undo of a removal, redo of an addition), with its id. Every later command
+   * is undone already, so whatever stands on its lot now came from outside the history (growth): it gives way.
+   */
   restoreBuilding(r: number[]): void {
-    this.addBuilding(World.recOf(r), r[0]);
+    const rec = World.recOf(r);
+    for (const other of this.buildingsOverlapping(rec)) this.removeBuilding(other);
+    // its id is never taken outside the history (`growBuilding`), but should anything hold it, move that elsewhere
+    if (this.buildings.alive[r[0]]) {
+      const held = World.recOf(this.buildingRec(r[0]));
+      this.removeBuilding(r[0]);
+      this.growBuilding(held);
+    }
+    this.addBuilding(rec, r[0]);
+  }
+
+  /** Live buildings whose lot rectangle overlaps this one's (lots that only touch along an edge do not count). */
+  private buildingsOverlapping(b: BuildingRec): number[] {
+    const c = this.buildings.cols, out: number[] = [];
+    const reach = Math.hypot(b.w, b.d) / 2 + 60;
+    this.buildingIndex.query(b.x - reach, b.z - reach, b.x + reach, b.z + reach, (id) => {
+      if (rectsOverlap(b.x, b.z, b.w / 2 - 0.5, b.d / 2 - 0.5, b.rot, c.x[id], c.z[id], c.w[id] / 2 - 0.5, c.d[id] / 2 - 0.5, c.rot[id])) out.push(id);
+    });
+    return out;
   }
 
   /** Changes floors/style (player edit). */
@@ -320,4 +354,24 @@ export class World {
     this.decayHeap.clear();
     this.clock = 0;
   }
+}
+
+/**
+ * Whether two rotated rectangles (centre, half sizes along their own x and z, rotation as the lots use it) overlap,
+ * by the separating axis test. Rectangles that only touch do not overlap.
+ */
+function rectsOverlap(ax: number, az: number, ahw: number, ahd: number, arot: number,
+  bx: number, bz: number, bhw: number, bhd: number, brot: number): boolean {
+  if (ahw <= 0 || ahd <= 0 || bhw <= 0 || bhd <= 0) return false;
+  const ac = Math.cos(arot), as = Math.sin(arot), bc = Math.cos(brot), bs = Math.sin(brot);
+  // each rectangle's axes in world space (the inverse of the lots' world-to-local turn)
+  const axes = [[ac, -as], [as, ac], [bc, -bs], [bs, bc]];
+  const dx = bx - ax, dz = bz - az;
+  for (const [nx, nz] of axes) {
+    const d = Math.abs(dx * nx + dz * nz);
+    const ra = ahw * Math.abs(ac * nx - as * nz) + ahd * Math.abs(as * nx + ac * nz);
+    const rb = bhw * Math.abs(bc * nx - bs * nz) + bhd * Math.abs(bs * nx + bc * nz);
+    if (d >= ra + rb) return false;
+  }
+  return true;
 }

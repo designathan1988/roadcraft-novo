@@ -8,6 +8,10 @@ import { RoadJournal, buildRoad, planRoad, snap } from '../src/roads/build.ts';
 import { buildBuildings } from '../src/jobs/buildingGen.ts';
 import { emptyBoxes, type PackedMesh } from '../src/jobs/protocol.ts';
 import { Zone } from '../src/roads/zones.ts';
+import { CommandStack } from '../src/core/commands.ts';
+import { Growth } from '../src/world/growth.ts';
+import type { JobPool } from '../src/jobs/pool.ts';
+import type { LotColumns } from '../src/jobs/protocol.ts';
 
 /** World positions of a packed mesh's vertices. */
 function positions(m: PackedMesh): Array<[number, number, number]> {
@@ -64,4 +68,31 @@ test('F1: a building that overhangs its cell is not flattened at the cell edge',
     for (const [x, , z] of positions(m)) { maxX = Math.max(maxX, x); maxZ = Math.max(maxZ, z); }
     assert.ok(maxX > 260 && maxZ > 260, `level ${lod}: the building ends at x=${maxX.toFixed(2)}, z=${maxZ.toFixed(2)} (cut at 256)`);
   }
+});
+
+test('A20: undoing a demolition works after growth took the lot (and its freed id)', () => {
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  const rec = { x: 100, z: 100, w: 20, d: 30, h: 0, rot: 0, color: 0, seed: 77, zone: Zone.Residential, floors: 3, style: 5 };
+  const build = new RoadJournal(w, 'build');
+  const id = build.addBuilding(rec);
+  commands.push(build);
+  const demolish = new RoadJournal(w, 'demolish');
+  demolish.removeBuilding(id);
+  commands.push(demolish);
+  // the lot is free again: growth grows a building on it, outside the history
+  const lot: LotColumns = { count: 1, x: new Float32Array([100]), z: new Float32Array([100]), w: new Float32Array([20]), d: new Float32Array([30]),
+    rot: new Float32Array([0]), zone: new Uint8Array([Zone.Residential]), seed: new Uint32Array([991]), profile: new Uint8Array([0]) };
+  new Growth(w, null as unknown as JobPool).place(lot, 0);
+  // a neighbour on the next lot, sharing the lot edge at x = 110: it must stay
+  const neighbour = w.growBuilding({ ...rec, x: 120, seed: 555 });
+  assert.doesNotThrow(() => commands.undo(), 'undo of the demolition');
+  assert.equal(w.buildings.alive[id], 1, 'the demolished building is back with its id');
+  assert.equal(w.buildings.cols.seed[id], 77, 'it is the same building');
+  let onLot = 0;
+  w.buildingIndex.query(80, 80, 105, 120, (b) => { if (Math.abs(w.buildings.cols.x[b] - 100) < 1) onLot++; });
+  assert.equal(onLot, 1, 'one building on the lot, not the restored one on top of the grown one');
+  assert.equal(w.buildings.alive[neighbour], 1, 'the neighbour sharing the lot edge stays');
+  assert.doesNotThrow(() => commands.redo(), 'redo of the demolition');
+  assert.equal(w.buildings.alive[id], 0);
 });
