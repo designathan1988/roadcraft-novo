@@ -19,6 +19,7 @@ import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPr
 import { remapSpec, type JunctionSpec } from './control.ts';
 import { ROAD_TUNING } from './tuning.ts';
 import { ARCHES, archFor, eraAt } from '../world/arch.ts';
+import { NO_WATER, waterAt } from '../world/ground.ts';
 
 // --------------------------------------------------------------- journal
 
@@ -80,7 +81,7 @@ export class RoadJournal implements Command {
     const nc = this.net.nodes.cols, p = new Float64Array(2), kinds: number[] = [];
     for (const t of [0.1, 0.3, 0.5, 0.7, 0.9]) {
       bez(q, t, p);
-      kinds.push(buildKindAt(nc.y[a] + (nc.y[b] - nc.y[a]) * t, heightAt(this.world.heights, p[0], p[1])));
+      kinds.push(buildKindAt(nc.y[a] + (nc.y[b] - nc.y[a]) * t, heightAt(this.world.heights, p[0], p[1]), waterAt(this.world.water, p[0], p[1])));
     }
     return dominantKind(kinds);
   }
@@ -364,17 +365,22 @@ function smoothGround(h: Float32Array, x: number, z: number): number {
  * Heights along the path, every `step` meters: follows the terrain + the requested
  * offset, passes over water, respects the fixed points and the maximum grade.
  */
-export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, offset: number, maxGrade: number, fixed: Fixed[], step = 6): { at: Float64Array; y: Float64Array } {
+export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, offset: number, maxGrade: number, fixed: Fixed[], step = 6, water?: Float32Array): { at: Float64Array; y: Float64Array } {
   const len = table[table.length - 1];
   const n = Math.max(2, Math.ceil(len / step) + 1);
   const at = new Float64Array(n), y = new Float64Array(n);
   const isFixed = new Uint8Array(n);
+  // over water a road on or above the ground never dips below the bridge clearance (narrow rivers are not smoothed away)
+  const floor = new Float64Array(n).fill(-Infinity);
   const p = new Float64Array(2);
   for (let i = 0; i < n; i++) {
     at[i] = len * i / (n - 1);
     bez(q, tAtLength(table, at[i]), p);
     const g = smoothGround(h, p[0], p[1]);
-    y[i] = g < SEA_LEVEL + 0.5 ? SEA_LEVEL + 7 + offset : g + offset;
+    // over the sea or a river or lake of the player's: a bridge 7 m over the water
+    const wl = water ? waterAt(water, p[0], p[1]) : NO_WATER;
+    y[i] = g < SEA_LEVEL + 0.5 ? SEA_LEVEL + 7 + offset : wl > g ? wl + 7 + offset : g + offset;
+    if (offset >= 0 && (g < SEA_LEVEL + 0.5 || wl > g)) floor[i] = Math.max(SEA_LEVEL, wl) + ROAD_TUNING.economy.bridgeFrom + 0.5;
   }
   for (const f of fixed) {
     const i = Math.round(f.at / len * (n - 1));
@@ -385,15 +391,15 @@ export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, off
     let prev = y[0];
     for (let i = 1; i < n - 1; i++) {
       const cur = y[i];
-      if (!isFixed[i]) y[i] = (prev + 2 * cur + y[i + 1]) / 4;
+      if (!isFixed[i]) y[i] = Math.max(floor[i], (prev + 2 * cur + y[i + 1]) / 4);
       prev = cur;
     }
   }
   const d = len / (n - 1);
   const g = maxGrade * d;
   for (let pass = 0; pass < 3; pass++) {
-    for (let i = 1; i < n; i++) if (!isFixed[i]) y[i] = Math.min(y[i - 1] + g, Math.max(y[i - 1] - g, y[i]));
-    for (let i = n - 2; i >= 0; i--) if (!isFixed[i]) y[i] = Math.min(y[i + 1] + g, Math.max(y[i + 1] - g, y[i]));
+    for (let i = 1; i < n; i++) if (!isFixed[i]) y[i] = Math.max(floor[i], Math.min(y[i - 1] + g, Math.max(y[i - 1] - g, y[i])));
+    for (let i = n - 2; i >= 0; i--) if (!isFixed[i]) y[i] = Math.max(floor[i], Math.min(y[i + 1] + g, Math.max(y[i + 1] - g, y[i])));
   }
   return { at, y };
 }
@@ -438,7 +444,7 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
   else if (start.seg >= 0) fixed.push({ at: 0, y: segHeightAt(net, start.seg, start.t) });
   if (end.node >= 0) fixed.push({ at: len, y: nc.y[end.node] });
   else if (end.seg >= 0) fixed.push({ at: len, y: segHeightAt(net, end.seg, end.t) });
-  let pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed);
+  let pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed, 6, world.water);
 
   const fail = (reason: string): RoadPlan => ({ ok: false, reason, quad: q, profile: pr, len, junctions: [] });
   if (len < MIN_LEN) return fail('curta demais');
@@ -483,7 +489,7 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
   // junctions pin the height and go into the profile
   if (junctions.length) {
     for (const [tn, s, to] of junctions) fixed.push({ at: arcAtT(table, tn), y: segHeightAt(net, s, to) });
-    pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed);
+    pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed, 6, world.water);
   }
   // no node may end up with more roads than it holds: an end on a node takes one more, a junction on a node two more
   const extra = new Map<number, number>();
@@ -693,7 +699,7 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
       const target = py[i] - 0.06;
       const gap = target - old; // + fill, - cut
       if (gap > 4.5 || gap < -7) continue; // bridge or tunnel: the terrain stays
-      if (old < SEA_LEVEL + 0.3) continue; // never fills water: it becomes a bridge
+      if (old < SEA_LEVEL + 0.3 || waterAt(world.water, x, z) > old) continue; // never fills water: it becomes a bridge
       // cut with a retaining wall: the ground rises right at the edge (the wall covers it); embankment: 7 m slope
       const bl = wallCut && gap < 0 ? 1.2 : blend;
       if (d >= half + bl) continue;

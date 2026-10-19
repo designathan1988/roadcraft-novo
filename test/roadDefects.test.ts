@@ -454,3 +454,23 @@ test('D10: the terrain brush and the river redraw the roads and redo the lots th
     assert.ok(w.dirty.drain(k).includes(rc), `the river did not mark the ${name}`);
   }
 });
+
+test('D11: a road across a river the player dug crosses it on a bridge and leaves the riverbed alone', async () => {
+  const { RiverCommand, waterAt } = await import('../src/world/ground.ts');
+  const { BuildKind, buildKindAt } = await import('../src/roads/economy.ts');
+  const w = flatWorld(1e9, 20);
+  const river = new RiverCommand(w, [[0, -300], [0, 300]], 24, 3);
+  river.apply();
+  const level = waterAt(w.water, 0, 0);
+  assert.ok(level > 10 && level < 20, `the river runs at ${level}`);
+  const bed = ground(w, 0, 0);
+  const a = snap(w.roads, -150, 0, 8), b = snap(w.roads, 150, 0, 8);
+  const p = planRoad(w, a, null, b, 0, 0);
+  assert.ok(p.ok, p.reason);
+  const mid = p.profile.y[Math.floor(p.profile.y.length / 2)];
+  assert.ok(mid > level + 4, `the road crosses the river at ${mid.toFixed(2)}, the water is at ${level.toFixed(2)}`);
+  assert.ok(buildRoad(w, p, a, b, 0).settle());
+  assert.ok(Math.abs(ground(w, 0, 0) - bed) < 0.01, `the riverbed was filled from ${bed.toFixed(2)} to ${ground(w, 0, 0).toFixed(2)}`);
+  // a road 2 m over a riverbed that is under water is a bridge, never an embankment
+  assert.equal(buildKindAt(bed + 2, bed, level), BuildKind.Bridge, 'over the river the road is priced as an embankment');
+});

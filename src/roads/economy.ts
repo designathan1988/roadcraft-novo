@@ -23,9 +23,9 @@ export function withKind(flags: number, kind: number): number { return (flags & 
 /** Price of one metre of this profile built at grade (R$/m): computed with the profile (`profiles.ts` derive). */
 export function pricePerMetre(profile: number): number { return PROFILE_INFO[profile]?.cost ?? 0; }
 
-/** How a point of road at height `y` over ground `ground` is built. */
-export function buildKindAt(y: number, ground: number): number {
-  if (ground < SEA_LEVEL + 0.3 && y > ground) return BuildKind.Bridge; // never filled over water
+/** How a point of road at height `y` over ground `ground` (and water at `water`, if any) is built. */
+export function buildKindAt(y: number, ground: number, water = -Infinity): number {
+  if ((ground < SEA_LEVEL + 0.3 || water > ground) && y > ground) return BuildKind.Bridge; // never filled over water
   const gap = y - ground;
   if (gap > E.bridgeFrom) return BuildKind.Bridge;
   if (gap >= E.fillFrom) return BuildKind.Embankment;
