@@ -59,7 +59,7 @@ import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
 import { curveLotSide, deleteLot, deleteLotsAlong, joinLots, lotAt, lotFits, lotOutlineWorld, lotToWorld, moveSharedCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotsByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
-import { addressAt } from './roads/streetNames.ts';
+import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
 import { CITY_STYLES, type CityStyle } from './jobs/cityField.ts';
 import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
@@ -389,15 +389,7 @@ export class Game {
         else { this.preview.hide(); this.preview.circle.visible = false; }
       },
       streetName: (x, z) => this.hudActions.streetNameAt?.(x, z) ?? '',
-      nameStreet: (seg, name) => {
-        const w = this.world, chain = streetChain(w, seg);
-        const before = chain.map((x) => w.streetNames.get(x));
-        this.commands.run({
-          label: 'nome da rua',
-          apply: () => { for (const x of chain) w.streetNames.set(x, name); this.textSigns.version++; this.unsaved = true; },
-          invert: () => { chain.forEach((x, i) => { const b = before[i]; if (b === undefined) w.streetNames.delete(x); else w.streetNames.set(x, b); }); this.textSigns.version++; },
-        });
-      },
+      nameStreet: (seg, name) => this.commands.run(nameStreetCommand(this.world, seg, name, () => { this.textSigns.version++; this.unsaved = true; this.inspector.refresh(); })),
     });
     this.commands.onPush = (c) => {
       const l = c.label;

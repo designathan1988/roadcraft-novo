@@ -433,7 +433,8 @@ export class Inspector {
     name.type = 'text'; name.maxLength = 40; name.value = w.streetNames.get(s) ?? '';
     name.placeholder = street;
     name.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') name.blur(); });
-    name.addEventListener('change', () => { const v = name.value.trim(); if (v && v !== w.streetNames.get(s)) this.a.nameStreet(s, v); });
+    // an empty name takes the typed one away (the generated name comes back)
+    name.addEventListener('change', () => { const v = name.value.trim(); if (v !== (w.streetNames.get(s) ?? '')) this.a.nameStreet(s, v); });
     box.append(name, note(t('inspector.numbers', { from: fmtInt(1 + Math.floor(from)), to: fmtInt(Math.ceil(from + sc.len[s])) })));
 
     // actions

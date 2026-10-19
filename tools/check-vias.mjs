@@ -96,6 +96,26 @@ const SCENARIOS = {
     await wait(300);
     check('a right-angle junction has no such warning', !document.querySelector('.inspector .inspect-warning'), 'warning shown');
   `,
+  // B50: a street name typed in the inspector can be taken away (an empty name gives the generated one back)
+  'street-name-clear': `
+    road(1500, 1500, 1700, 1500);
+    const s = w.roads.nearestSeg(1550, 1500, 3)[0];
+    g.setTool('inspect');
+    g.inspector.pick(1550, 1500);
+    await wait(300);
+    const field = () => document.querySelector('.inspector input.v2-search');
+    const generated = field().placeholder;
+    field().value = 'Rua Digitada'; field().dispatchEvent(new Event('change'));
+    await wait(200);
+    check('a typed name names the street', w.streetNames.get(s) === 'Rua Digitada', 'name ' + w.streetNames.get(s));
+    field().value = ''; field().dispatchEvent(new Event('change'));
+    await wait(200);
+    check('an empty name takes the typed name away', !w.streetNames.has(s), 'name ' + w.streetNames.get(s));
+    const title = document.querySelector('.inspector h3');
+    check('the generated name is back', title && title.textContent === generated, 'title ' + (title && title.textContent) + ', generated ' + generated);
+    g.commands.undo();
+    check('undo brings the typed name back', w.streetNames.get(s) === 'Rua Digitada', 'name ' + w.streetNames.get(s));
+  `,
 };
 
 const pick = process.argv.slice(2);
