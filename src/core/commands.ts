@@ -8,7 +8,12 @@ export interface Command {
   invert(): void;
   /** Tries to absorb a following command (e.g. brush dabs of the same stroke). */
   merge?(next: Command): boolean;
+  /** Memory the command keeps for undo (bytes), for the history's budget. Absent: small. */
+  readonly bytes?: number;
 }
+
+/** The history keeps at most this much memory of steps (the oldest go first; the newest step always stays). */
+export const HISTORY_BYTES = 512 * 2 ** 20;
 
 export class CommandStack {
   private done: Command[] = [];
@@ -25,7 +30,9 @@ export class CommandStack {
    */
   onError: (err: unknown, cmd: Command, redo: boolean) => void = (err) => { console.error(err); };
 
-  constructor(limit = 500) { this.limit = limit; }
+  readonly byteLimit: number;
+
+  constructor(limit = 500, byteLimit = HISTORY_BYTES) { this.limit = limit; this.byteLimit = byteLimit; }
 
   /** Applies and records. */
   run(cmd: Command): void {
@@ -39,6 +46,9 @@ export class CommandStack {
     if (this.open && this.open.merge?.(cmd)) { this.onChange(); return; }
     this.done.push(cmd);
     if (this.done.length > this.limit) this.done.shift();
+    let bytes = 0;
+    for (const c of this.done) bytes += c.bytes ?? 0;
+    while (bytes > this.byteLimit && this.done.length > 1) bytes -= this.done.shift()!.bytes ?? 0;
     this.onPush(cmd);
     this.onChange();
   }

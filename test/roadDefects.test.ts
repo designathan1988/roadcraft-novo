@@ -421,3 +421,16 @@ test('A19: restoring ids one by one (load, undo) takes time in proportion to the
   assert.equal(got.size, 10);
   for (const id of got) assert.equal(id % 7, 0);
 });
+
+test('A44: the undo history drops its oldest steps past a byte budget; flattening the map says what it holds', async () => {
+  const { FlattenMap } = await import('../src/world/brush.ts');
+  const w = flatWorld(0);
+  const flat = new FlattenMap(w, 20);
+  assert.ok((flat.bytes ?? 0) >= w.heights.length * 2, 'the flatten command reports the heights it keeps');
+  const commands = new CommandStack();
+  const big = (): Command => ({ label: 'big', bytes: 100 * 2 ** 20, apply() {}, invert() {} });
+  for (let i = 0; i < 10; i++) commands.push(big());
+  let steps = 0;
+  while (commands.undo()) steps++;
+  assert.ok(steps * 100 <= 512 && steps >= 1, `${steps} steps of 100 MB kept in the history`);
+});

@@ -49,6 +49,13 @@ export class RoadJournal implements Command {
 
   get empty(): boolean { return this.ops.length === 0; }
 
+  /** Memory kept for undo: the terrain samples (the rest is small records). */
+  get bytes(): number {
+    let n = this.ops.length * 64;
+    for (const op of this.ops) if (op.t === 'terrain') n += op.idx.byteLength + op.before.byteLength + op.after.byteLength;
+    return n;
+  }
+
   /** Change in road value (R$) made by this journal, over the roads the player paid for. */
   private value = 0;
   /** The same over roads that were free (SegFlag.Free): costs when it grows, never gives anything back. */

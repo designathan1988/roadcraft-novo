@@ -46,6 +46,7 @@ export class FlattenMap implements Command {
   readonly label = 'aplainar mapa';
   private world: World;
   private old: Uint16Array;
+  get bytes(): number { return this.old.byteLength; }
   private y: number;
   constructor(world: World, y: number) {
     this.world = world;
@@ -162,6 +163,8 @@ export class BrushStroke implements Command {
     }
     touchSamples(this.world, this.gx0, this.gz0, this.gx1, this.gz1);
   }
+
+  get bytes(): number { return this.idx.byteLength + this.old.byteLength + this.after.byteLength; }
 
   apply(): void { if (this.finished) this.write(this.after); }
   invert(): void { this.write(this.old); }
