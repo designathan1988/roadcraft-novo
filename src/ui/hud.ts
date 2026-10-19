@@ -755,6 +755,9 @@ export class Hud {
     const tip = t('ui.stats.tip', { residents: fmtCount(s.residents), jobs: fmtCount(s.jobs), buildings: fmtCount(s.buildings), speed: fmtInt(s.speedKmh) });
     if (this.stats.title !== tip && !this.stats.dataset.tip) this.stats.title = tip; else if (this.stats.dataset.tip) this.stats.dataset.tip = tip;
     this.syncMetrics();
+    // the decay of the building in the Build panel follows the city clock
+    const decayEl = this.open && this.cat === 'build' ? this.toolOptions.querySelector('.v2-decay') : null;
+    if (decayEl) { const d = `${Math.round(Math.max(0, this.a.decayOf?.() ?? 0) * 100)}%`; if (decayEl.textContent !== d) decayEl.textContent = d; }
     if (s.impossible !== this.impossibleShown) {
       this.impossibleShown = s.impossible;
       this.impossibleB.hidden = s.impossible === 0;

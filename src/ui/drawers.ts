@@ -341,7 +341,7 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
         const renovate = button('v2-pill rp-open', t('ui.build.renovate'), () => { a.renovate?.(); h.render(); }, svg('build', 16));
         if (!a.renovate) soon(renovate, SOON());
         renovate.title = t('ui.build.renovateTip');
-        p.options.append(orow(t('ui.build.decay'), el('span', 'v2-stepper-value', `${Math.round(decay * 100)}%`), renovate));
+        p.options.append(orow(t('ui.build.decay'), el('span', 'v2-stepper-value v2-decay', `${Math.round(decay * 100)}%`), renovate));
       }
     } else {
       p.strip.append(el('p', 'v2-note', t('v2.build.selectToEdit')));
