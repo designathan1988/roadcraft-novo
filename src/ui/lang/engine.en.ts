@@ -20,6 +20,7 @@ export const ENGINE_EN: Record<string, string> = {
   'road.move.outside': 'outside the map',
   'road.move.crosses': 'the road would run over another one at the same level, with no junction',
   'road.preview.cost': 'Costs {price}. Click to end the stretch (it goes on from there); Esc stops.',
+  'lot.hint.delete': 'Click or drag over the lots: a building becomes an empty lot and an empty lot goes away (one step to undo).',
   'ui.stats.tip': '{residents} residents · {jobs} jobs · {buildings} buildings · {speed} km/h average nearby',
   'ui.cat.roads': 'Roads',
   'ui.cat.zones': 'Zoning and lots',

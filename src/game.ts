@@ -57,7 +57,7 @@ import { InsideView } from './render/inside.ts';
 import { Blast } from './render/blast.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
-import { curveLotSide, deleteLot, joinLots, lotAt, lotFits, lotToWorld, moveLotCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotByLine } from './world/lotEdit.ts';
+import { curveLotSide, deleteLot, deleteLotsAlong, joinLots, lotAt, lotFits, lotOutlineWorld, lotToWorld, moveSharedCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotsByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt } from './roads/streetNames.ts';
 import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
@@ -164,7 +164,9 @@ export class Game {
   private riverWidth = 14;
   private riverPts: Array<[number, number]> = [];
   private pointer = { x: 0, y: 0, inside: false };
-  private drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' = 'none';
+  private drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' | 'lots' = 'none';
+  /** Points of the lot delete stroke being dragged (Roadcraft: every lot under it goes, in one step). */
+  private lotStroke: Array<[number, number]> = [];
   /** Demolish by rectangle: corner where the drag started. */
   private boxStart: THREE.Vector3 | null = null;
   private roadTool: RoadTool;
@@ -868,6 +870,10 @@ export class Game {
         this.drag = 'node';
       } else if (e.button === 0 && this.tool === 'building' && this.lotMode === 'corner' && this.grabCorner(this.rig.pick(this.ndcX(), this.ndcY()))) {
         this.drag = 'node';
+      } else if (e.button === 0 && this.tool === 'building' && this.lotMode === 'delete' && !this.lotExtra) {
+        const hit = this.rig.pick(this.ndcX(), this.ndcY());
+        this.drag = 'lots';
+        this.lotStroke = hit ? [[hit.x, hit.z]] : [];
       } else if (e.button === 0 && this.tool === 'zone' && !this.zoneBlock) {
         this.drag = 'zone';
         this.zoneTool.begin();
@@ -895,6 +901,10 @@ export class Game {
       }
       if (this.drag === 'rotate') this.rig.rotate(dx, dy);
       else if (this.drag === 'pan') this.rig.pan(this.ndcX(), this.ndcY());
+      else if (this.drag === 'lots') {
+        const hit = this.rig.pick(this.ndcX(), this.ndcY()), last = this.lotStroke[this.lotStroke.length - 1];
+        if (hit && (!last || Math.hypot(hit.x - last[0], hit.z - last[1]) > 2)) this.lotStroke.push([hit.x, hit.z]);
+      }
     });
     const finishDrag = (e: PointerEvent) => {
       if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
@@ -915,6 +925,12 @@ export class Game {
         this.stroke = null;
       }
       if (this.drag === 'zone') this.zoneTool.end();
+      if (this.drag === 'lots') {
+        const r = this.lotStroke.length ? deleteLotsAlong(this.world, this.lotStroke) : null;
+        this.lotStroke = [];
+        if (typeof r === 'string') this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.');
+        else if (r) { this.commands.push(r); this.hud.toast('Apagado.'); }
+      }
       if (this.drag === 'free') this.roadTool.freeEnd(this.rig.pick(this.ndcX(), this.ndcY()));
       if (this.drag === 'row' && this.boxStart) {
         const b = this.rig.pick(this.ndcX(), this.ndcY());
@@ -1095,7 +1111,7 @@ export class Game {
   /** Undo (false) or redo (true), with sound. */
   private history(redo: boolean): void {
     // a brush, zoning or free road still being dragged is recorded on release: undo waits for it
-    if (this.drag === 'brush' || this.drag === 'zone' || this.drag === 'free' || this.drag === 'node') return;
+    if (this.drag === 'brush' || this.drag === 'zone' || this.drag === 'free' || this.drag === 'node' || this.drag === 'lots') return;
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
 
@@ -1658,7 +1674,7 @@ export class Game {
       poly: 'Clique os cantos do lote; Enter ou duplo clique fecha, Backspace volta um ponto.',
       split: 'Clique num lote para dividi-lo (escolha lado a lado ou frente e fundos e em quantos).',
       join: 'Clique num lote e depois no lote ao lado para juntá-los.',
-      delete: 'Clique num prédio: vira lote vazio. Clique num lote vazio: ele some.',
+      delete: t('lot.hint.delete'),
       front: 'Clique perto de um lado do lote: a construção vira de frente para ele.',
       corner: 'Arraste um canto do lote para mudar o tamanho.',
     };
@@ -1749,7 +1765,8 @@ export class Game {
     this.cornerDrag = null;
     this.preview.hideAll();
     if (!c || !hit || !this.world.buildings.alive[c.id]) return;
-    const r = moveLotCorner(this.world, c.id, c.k, hit.x, hit.z);
+    const [cx, cz] = lotOutlineWorld(this.world, c.id)[c.k];
+    const r = moveSharedCorner(this.world, cx, cz, hit.x, hit.z);
     if (typeof r === 'string') { this.hud.toast(`Não mudou: ${r}.`); return; }
     this.commands.push(r);
   }
@@ -1796,8 +1813,7 @@ export class Game {
     let r: RoadJournal | string;
     if (this.lotExtra === 'line') {
       // the lot the line crosses: under its middle, or under either end
-      const id = [lotAt(this.world, (ax + bx) / 2, (az + bz) / 2), lotAt(this.world, ax, az), lotAt(this.world, bx, bz)].find((i) => i >= 0) ?? -1;
-      r = id < 0 ? 'a linha não passa por nenhum lote' : splitLotByLine(this.world, id, ax, az, bx, bz);
+      r = splitLotsByLine(this.world, ax, az, bx, bz);
     } else {
       const id = lotAt(this.world, ax, az);
       r = id < 0 ? 'clique primeiro perto de um lado, dentro do lote' : curveLotSide(this.world, id, ax, az, bx, bz);

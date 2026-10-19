@@ -20,6 +20,7 @@ export const ENGINE_PT: Record<string, string> = {
   'road.move.outside': 'fora do mapa',
   'road.move.crosses': 'a via passaria por cima de outra no mesmo nível, sem cruzamento',
   'road.preview.cost': 'Custa {price}. Clique para terminar o trecho (continua a partir dele); Esc encerra.',
+  'lot.hint.delete': 'Clique ou arraste sobre os lotes: o prédio vira lote vazio e o lote vazio some (um passo só para desfazer).',
   'ui.stats.tip': '{residents} moradores · {jobs} empregos · {buildings} prédios · {speed} km/h de média perto daqui',
   'ui.cat.roads': 'Vias',
   'ui.cat.zones': 'Zoneamento e lotes',

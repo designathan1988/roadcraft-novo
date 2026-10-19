@@ -448,3 +448,83 @@ function convexHull(pts: Array<[number, number]>): Array<[number, number]> {
   for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
+
+// ------------------------------------------------------------------ edits on every lot touched (Roadcraft 4.0 lots.ts)
+
+/** Lots whose outline has a corner within `r` m of (x, z), with the indices of those corners. */
+function lotsWithCorner(world: World, x: number, z: number, r: number): Array<[number, number[]]> {
+  const out: Array<[number, number[]]> = [];
+  world.buildingIndex.query(x - 120, z - 120, x + 120, z + 120, (id) => {
+    const ks: number[] = [];
+    lotOutlineWorld(world, id).forEach(([cx, cz], k) => { if (Math.hypot(cx - x, cz - z) < r) ks.push(k); });
+    if (ks.length) out.push([id, ks]);
+  });
+  return out;
+}
+
+/**
+ * Drags the lot corner at (fromX, fromZ) to (x, z) on every lot that has it (neighbours share their corners), as
+ * one step. A rectangle whose corner leaves its rectangle becomes a polygon lot in the same rotation.
+ */
+export function moveSharedCorner(world: World, fromX: number, fromZ: number, x: number, z: number): RoadJournal | string {
+  const lots = lotsWithCorner(world, fromX, fromZ, 0.8);
+  if (!lots.length) return 'nenhum canto de lote aqui';
+  const ids = lots.map(([id]) => id);
+  const next: Array<[number, BuildingRec]> = [];
+  for (const [id, ks] of lots) {
+    const r = rec(world, id), o = lotOutlineWorld(world, id);
+    for (const k of ks) o[k] = [x, z];
+    if (!isSimple(o)) return 'os lados do lote se cruzariam';
+    const f = frameLot(o, r.rot);
+    if (!f) return 'lote pequeno demais';
+    if (f.w > 200 || f.d > 200) return 'lote grande demais';
+    const fits = lotFits(world, o, ids);
+    if (fits) return fits;
+    next.push([id, { ...r, ...f, shape: f.shape }]);
+  }
+  const j = new RoadJournal(world, 'cantos do lote');
+  for (const [id] of next) j.removeBuilding(id);
+  for (const [, r] of next) j.addBuilding(r);
+  return j;
+}
+
+/** Splits every lot the segment (ax, az)–(bx, bz) runs across in two along it, as one step (Roadcraft split by line). */
+export function splitLotsByLine(world: World, ax: number, az: number, bx: number, bz: number): RoadJournal | string {
+  const L = Math.hypot(bx - ax, bz - az);
+  if (L < 2) return 'trace uma linha que atravesse os lotes';
+  const nx = -(bz - az) / L, nz = (bx - ax) / L, c = ax * nx + az * nz;
+  const hit: number[] = [];
+  world.buildingIndex.query(Math.min(ax, bx) - 120, Math.min(az, bz) - 120, Math.max(ax, bx) + 120, Math.max(az, bz) + 120, (id) => {
+    const o = lotOutlineWorld(world, id);
+    // corners on both sides of the line, and the segment itself passing through the lot
+    const side = o.map(([x, z]) => x * nx + z * nz - c);
+    if (!(side.some((v) => v < -0.05) && side.some((v) => v > 0.05))) return;
+    for (let k = 0; k <= 20; k++) if (pointInPolygon(o, ax + (bx - ax) * k / 20, az + (bz - az) * k / 20)) { hit.push(id); return; }
+  });
+  if (!hit.length) return 'a linha não atravessa nenhum lote';
+  const all = new RoadJournal(world, 'dividir lotes por linha');
+  let why = '';
+  for (const id of hit) {
+    const r = splitLotByLine(world, id, ax, az, bx, bz);
+    if (typeof r === 'string') why = r; else all.append(r);
+  }
+  return all.empty ? why || 'a linha não atravessa nenhum lote' : all;
+}
+
+/**
+ * Delete stroke (Roadcraft): every lot under the line through `pts` (sampled every 2 m) is deleted, as one step: a
+ * building becomes an empty lot, an empty lot goes away.
+ */
+export function deleteLotsAlong(world: World, pts: Pt[]): RoadJournal | string {
+  const hit = new Set<number>();
+  const visit = (x: number, z: number) => { const id = lotAt(world, x, z); if (id >= 0) hit.add(id); };
+  if (pts.length === 1) visit(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1], [bx, bz] = pts[i], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2));
+    for (let k = 0; k <= n && hit.size < 400; k++) visit(ax + (bx - ax) * k / n, az + (bz - az) * k / n);
+  }
+  if (!hit.size) return 'nenhum lote no traço';
+  const all = new RoadJournal(world, 'apagar lotes');
+  for (const id of hit) all.append(deleteLot(world, id));
+  return all;
+}
