@@ -118,3 +118,13 @@ test('the in-game interface checks (tools/check-interface.mjs) all compile', asy
   assert.deepEqual(bad, []);
   assert.ok(Object.keys(SCENARIOS).length > 40);
 });
+
+test('reload keys (Ctrl+R, Ctrl+Shift+R, F5) never reach the browser, even from a text box', () => {
+  const w = fakeWindow();
+  const { d } = deps();
+  installKeys(d);
+  const box = new (globalThis as unknown as { HTMLInputElement: new () => object }).HTMLInputElement();
+  for (const [code, mods] of [['KeyR', { ctrlKey: true }], ['KeyR', { ctrlKey: true, shiftKey: true }], ['KeyR', { metaKey: true }], ['F5', {}], ['F5', { ctrlKey: true }]] as const) {
+    for (const target of [null, box]) assert.ok(w.send('keydown', { code, ...mods, target: target as EventTarget | null }).prevented, `${code} ${JSON.stringify(mods)} ${target ? 'in a box' : ''} reaches the browser`);
+  }
+});

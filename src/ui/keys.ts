@@ -161,6 +161,9 @@ export function installKeys(d: GameKeyDeps): void {
   const rules = gameKeyRules(d);
   window.addEventListener('keydown', (e) => {
     d.wake();
+    // the browser's reload keys (Ctrl+R, Ctrl+Shift+R, F5) would throw away the city's unsaved work: the page reloads
+    // and nothing is saved. The game keeps them, even while typing in a box (Electron's menu sees the key as used).
+    if (e.code === 'F5' || (e.code === 'KeyR' && (e.ctrlKey || e.metaKey))) { e.preventDefault(); return; }
     // typing in a box: the box keeps its keys
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
     // a button clicked before keeps the focus: Enter or Space must not click it again (they are the game's keys)
