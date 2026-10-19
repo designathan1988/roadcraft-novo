@@ -17,6 +17,8 @@ import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
 import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPrice, withKind } from './economy.ts';
 import type { JunctionSpec } from './control.ts';
+import { ROAD_TUNING } from './tuning.ts';
+import { ARCHES, archFor, eraAt } from '../world/arch.ts';
 
 // --------------------------------------------------------------- journal
 
@@ -587,8 +589,13 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
   const doomed: number[] = [];
   world.buildingIndex.query(minX - reach - 40, minZ - reach - 40, maxX + reach + 40, maxZ + reach + 40, (id) => {
     const r = Math.hypot(col.w[id], col.d[id]) / 2;
-    const [d] = nearest(col.x[id], col.z[id]);
-    if (d < half + r * 0.8) doomed.push(id);
+    const [d, i] = nearest(col.x[id], col.z[id]);
+    if (d >= half + r * 0.8) return;
+    // a deck that passes over the roof, or a tunnel deep under the lot, leaves the building standing
+    const g = heightAt(world.heights, col.x[id], col.z[id]);
+    if (py[i] - DECK_DEPTH > g + buildingTop(col, id)) return;
+    if (py[i] < g - ROAD_TUNING.economy.tunnelFrom) return;
+    doomed.push(id);
   });
   for (const id of doomed) j.removeBuilding(id);
 
@@ -622,6 +629,14 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
     }
   }
   if (idx.length) j.terrain(new Int32Array(idx), new Float32Array(before), new Float32Array(after), [minX - reach, minZ - reach, maxX + reach, maxZ + reach]);
+}
+
+/** Deck and girders under a road surface on a bridge (m): a roof must stay below this much under the road. */
+const DECK_DEPTH = 2;
+/** Highest a building may reach over its ground (m): its storeys at the height of its architecture, plus roof and crown. */
+function buildingTop(col: World['buildings']['cols'], id: number): number {
+  const arch = ARCHES[archFor(col.zone[id], col.floors[id], eraAt(col.x[id], col.z[id]), col.style[id])];
+  return col.floors[id] * (arch?.floorH ?? 5.6) + 4;
 }
 
 function smooth(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }

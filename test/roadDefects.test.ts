@@ -203,3 +203,30 @@ test('D3: a refused roundabout leaves every road as it was', () => {
     assert.equal(w.money, money);
   }
 });
+
+test('D5: a bridge or a tunnel leaves the buildings below or above it standing; a road at grade clears them', () => {
+  const w = flatWorld(1e9);
+  const rec = (x: number, floors: number) => ({ x, z: 0, w: 16, d: 16, h: 0, rot: 0, color: 0, seed: x, zone: Zone.Residential, floors, style: 1 });
+  // a low house under a viaduct 16 m up, a row of houses over a metro 12 m down, and a house in the way at grade
+  const house = w.addBuilding(rec(0, 2));
+  const row = [w.addBuilding(rec(400, 3)), w.addBuilding(rec(430, 3)), w.addBuilding(rec(460, 3))];
+  const inWay = w.addBuilding(rec(900, 2));
+  // the viaduct's ends stand on piers 16 m up, so the whole span stays up
+  w.roads.addNode({ x: -120, z: 0, y: 26 }); w.roads.addNode({ x: 120, z: 0, y: 26 });
+  road(w, -120, 0, 120, 0, 0, 16);
+  assert.equal(w.buildings.alive[house], 1, 'the house under the viaduct was demolished');
+  const metro = PROFILE_INFO.findIndex((p) => p.name.startsWith('Metrô'));
+  w.roads.addNode({ x: 300, z: 0, y: -2 }); w.roads.addNode({ x: 560, z: 0, y: -2 });
+  road(w, 300, 0, 560, 0, metro, -12);
+  for (const id of row) assert.equal(w.buildings.alive[id], 1, `the house ${id} over the metro was demolished`);
+  road(w, 860, 0, 940, 0, 0, 0);
+  assert.equal(w.buildings.alive[inWay], 0, 'a road at grade still clears the house in its way');
+});
+
+test('D5: a tall tower under a low bridge is still in the way', () => {
+  const w = flatWorld(1e9);
+  const tower = w.addBuilding({ x: 0, z: 0, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 3, zone: Zone.Commercial, floors: 20, style: 1 });
+  w.roads.addNode({ x: -120, z: 0, y: 26 }); w.roads.addNode({ x: 120, z: 0, y: 26 });
+  road(w, -120, 0, 120, 0, 0, 16);
+  assert.equal(w.buildings.alive[tower], 0, 'a 20-floor tower cannot stand under a deck 16 m up');
+});
