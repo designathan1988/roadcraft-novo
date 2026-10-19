@@ -296,7 +296,10 @@
 
 /* ---------------------------------------------------------------- tooltip, answers */
 .v2-tip { position: fixed; z-index: 20; pointer-events: none; padding: 4px 8px; border: 1px solid var(--v-line); border-radius: 6px; background: var(--v-bg-solid); color: var(--v-text); font-size: 12px; font-weight: 600; white-space: pre; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4); }
-.v2-toast { position: absolute; left: 50%; top: calc(12px + var(--v-hud-h) + 10px); transform: translateX(-50%); z-index: 10; max-width: min(520px, calc(100vw - 24px)); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; pointer-events: none; }
+/* Toasts: the newest on top, up to four at once, each for as long as it takes to read. */
+.v2-toasts { position: absolute; left: 50%; top: calc(12px + var(--v-hud-h) + 10px); transform: translateX(-50%); z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.v2-toast { max-width: min(520px, calc(100vw - 24px)); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; pointer-events: none; text-align: center; }
+.v2-toast[hidden] { display: none; }
 
 /* ---------------------------------------------------------------- narrower screens */
 @media (max-width: 1100px) {

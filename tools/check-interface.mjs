@@ -228,6 +228,21 @@ export const SCENARIOS = {
     g.sim.postMessage = post;
     check('the demand follows the clock, not noon', sent.length > 0 && sent[sent.length - 1] !== 12 && Math.abs(sent[sent.length - 1] - g.hour) < 1.2, 'demand hour ' + sent + ', clock ' + g.hour.toFixed(2));
   `,
+  // B52: the repair notice opening an old map stays readable next to "City loaded"
+  'B52-toasts-stack': `
+    const net = w.roads;
+    const n = (x, z) => net.addNode({ x, z, y: 10 });
+    const P = n(1400, 1500), B = n(1700, 1500), C = n(1550, 1500.5), D = n(1550, 1600);
+    net.addSeg({ a: P, b: B, cx: 1550, cz: 1500, profile: 0, flags: 0, zl: 0, zr: 0 });
+    net.addSeg({ a: C, b: D, cx: 1550, cz: 1550, profile: 0, flags: 0, zl: 0, zr: 0 });
+    for (let t = 0; t < w.saveDirty.length; t++) w.saveDirty[t] = 1;
+    await g.save(false);
+    await g.load();
+    await wait(300);
+    const shown = QA('.v2-toast').filter((e) => !e.hidden).map((e) => e.textContent).join(' / ');
+    check('the repair notice is still shown', /reparado|repaired/i.test(shown), 'toasts: ' + shown);
+    check('and so is "City loaded"', /carregada|loaded/i.test(shown), 'toasts: ' + shown);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

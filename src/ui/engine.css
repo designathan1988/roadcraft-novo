@@ -19,7 +19,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 }
 .v2-hintbar[hidden] { display: none; }
 .v2:has(> .v2-drawer:not([hidden])) > .v2-hintbar { bottom: auto; top: calc(12px + var(--v-hud-h) + 10px); }
-.v2:has(> .v2-toast:not([hidden])) > .v2-hintbar { opacity: 0; }
+.v2:has(> .v2-toasts > .v2-toast:not([hidden])) > .v2-hintbar { opacity: 0; }
 
 /* The selection column holds the inspector and hides with it. */
 .v2-side:not(:has(> .inspector:not(.hidden))) { display: none; }

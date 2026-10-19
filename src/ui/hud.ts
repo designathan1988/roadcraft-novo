@@ -250,8 +250,8 @@ export class Hud {
   private toolOptions: HTMLElement;
   private parts: DrawerParts;
   private hint: HTMLElement;
-  private toastEl: HTMLElement;
-  private toastTimer = 0;
+  /** The toasts shown now (newest first). */
+  private toasts: HTMLElement;
   private tip: HTMLElement;
   private tipFor: HTMLElement | null = null;
   private compass: Compass;
@@ -379,13 +379,13 @@ export class Hud {
     this.side = el('aside', 'v2-side');
     this.hint = el('div', 'v2-hintbar');
     this.hint.hidden = true;
-    this.toastEl = el('div', 'v2-toast');
-    this.toastEl.setAttribute('role', 'status');
-    this.toastEl.hidden = true;
+    this.toasts = el('div', 'v2-toasts');
+    this.toasts.setAttribute('role', 'status');
+    this.toasts.setAttribute('aria-live', 'polite');
     this.tip = el('div', 'v2-tip');
     this.tip.hidden = true;
 
-    this.root.append(hud, this.pop, this.drawer, this.toolOptions, this.side, this.hint, dock, this.toastEl, this.tip, this.about.root, this.fileIn);
+    this.root.append(hud, this.pop, this.drawer, this.toolOptions, this.side, this.hint, dock, this.toasts, this.tip, this.about.root, this.fileIn);
     this.compass = mountCompass(this.root, { north: () => a.north(), drag: (dx, dy) => a.orbit(dx, dy) });
     // the panels never let a click or a wheel through to the map
     for (const e of [hud, this.pop, this.drawer, this.toolOptions, this.side, dock]) {
@@ -768,11 +768,21 @@ export class Hud {
 
   setView(mode: 'persp' | 'iso'): void { this.view = mode; if (this.popId === 'camera') this.fillPop('camera'); }
 
+  /**
+   * A short message. Several can show at once (a repair notice is not hidden by "City loaded"): the newest on top, at
+   * most four, each for as long as it takes to read; the same text again only restarts its time.
+   */
   toast(text: string): void {
-    this.toastEl.textContent = forTouch(loose(text));
-    this.toastEl.hidden = false;
-    clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => { this.toastEl.hidden = true; }, 2600);
+    const shown = forTouch(loose(text));
+    let box = [...this.toasts.children].find((e) => e.textContent === shown) as HTMLElement | undefined;
+    if (!box) {
+      box = el('div', 'v2-toast', shown);
+      this.toasts.prepend(box);
+      while (this.toasts.childElementCount > 4) this.toasts.lastElementChild!.remove();
+    } else this.toasts.prepend(box);
+    clearTimeout(Number(box.dataset.timer));
+    const b = box;
+    b.dataset.timer = String(window.setTimeout(() => b.remove(), Math.min(9000, 2600 + shown.length * 45)));
   }
 
   showLoading(text: string): void {

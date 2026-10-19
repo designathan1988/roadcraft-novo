@@ -52,6 +52,7 @@ export const SCENES = {
   'remover-postes': scene(`click('[data-cat=landscape]');await W(200);click(byText('.v2-tab','^Rua|^Street'));await W(200);click(byText('.v2-card','Remover postes|Remove poles'));await W(300);click('[data-pop=camera]')`),
   'ingles': scene(`click('[data-cat=roads]')`),
   'nos-impossiveis': scene(`g.world.unlimited=true;const x=g.rig.target.x+40,z=g.rig.target.z+40;g.api.road(x-200,z-400,x,z-400);g.api.road(x,z-400,x+200,z-400);g.api.road(x,z-400,x+200,z-345);await W(1200);click('.v2-warn');await W(1500)`),
+  'avisos': scene(`g.hud.toast('Mapa reparado: 1 ponta solta dentro de outra via virou cruzamento.');g.hud.toast('Cidade carregada.');await W(100)`),
   'transporte-linha': scene(`const n=g.world.roads,sc=n.segs.cols,nc=n.nodes.cols;const s=n.nearestSeg(g.rig.target.x,g.rig.target.z,600)[0];const xa=nc.x[sc.a[s]],za=nc.z[sc.a[s]],xb=nc.x[sc.b[s]],zb=nc.z[sc.b[s]];g.api.line(0,[xa*0.7+xb*0.3,za*0.7+zb*0.3,xa*0.3+xb*0.7,za*0.3+zb*0.7],3);click('[data-cat=transit]');await W(400)`),
 };
 
