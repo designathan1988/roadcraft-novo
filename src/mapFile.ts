@@ -1,5 +1,5 @@
-// Mapa em arquivo: junta os arquivos do salvamento (meta e ladrilhos, já comprimidos) num arquivo
-// só para baixar, e faz o caminho de volta. Não lê o mundo: copia o que o salvamento gravou.
+// Map as a file: bundles the save files (meta and tiles, already compressed) into a single file
+// for download, and does the reverse. Does not read the world: it copies what the save wrote.
 
 const MAGIC = 'CIDADE-MAPA-1';
 
@@ -11,7 +11,7 @@ async function slotDir(slot: string, create: boolean): Promise<FileSystemDirecto
   } catch { return null; }
 }
 
-/** Os arquivos do salvamento num pacote: [MAGIC][n] e, para cada um, [nome][tamanho][bytes]. */
+/** The save files in one package: [MAGIC][n] and, for each one, [name][size][bytes]. */
 export async function packSlot(slot: string): Promise<Blob | null> {
   const dir = await slotDir(slot, false);
   if (!dir) return null;
@@ -35,7 +35,7 @@ export async function packSlot(slot: string): Promise<Blob | null> {
   return new Blob(parts, { type: 'application/octet-stream' });
 }
 
-/** Troca o salvamento do `slot` pelo conteúdo do pacote. Erro se o arquivo não for um mapa. */
+/** Replaces the save in `slot` with the package contents. Throws if the file is not a map. */
 export async function unpackToSlot(slot: string, file: Blob): Promise<number> {
   const buf = new Uint8Array(await file.arrayBuffer());
   const head = new TextEncoder().encode(MAGIC);
@@ -56,7 +56,7 @@ export async function unpackToSlot(slot: string, file: Blob): Promise<number> {
   if (!files.some(([n]) => n.startsWith('meta'))) throw new Error('arquivo de mapa sem a descrição do mapa');
   const root = await navigator.storage.getDirectory();
   const saves = await root.getDirectoryHandle('saves', { create: true });
-  try { await saves.removeEntry(slot, { recursive: true }); } catch { /* não havia */ }
+  try { await saves.removeEntry(slot, { recursive: true }); } catch { /* there was none */ }
   const dir = await saves.getDirectoryHandle(slot, { create: true });
   for (const [name, data] of files) {
     const w = await (await dir.getFileHandle(name, { create: true })).createWritable();

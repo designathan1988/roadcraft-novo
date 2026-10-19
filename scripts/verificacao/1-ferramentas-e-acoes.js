@@ -19,6 +19,11 @@
   };
   const segs = () => w.roads.segs.size, blds = () => w.buildings.size, items = () => w.items.size;
   const X = 1500, Z = 1500;
+  // as ferramentas são verificadas em modo livre (o caixa dos preços do Roadcraft acaba no meio do roteiro); a economia
+  // tem a verificação própria, com o caixa ligado só nela
+  w.unlimited = true;
+  // via que o roteiro precisa: recusada vira erro no console (a verificação em curso falha com o motivo)
+  const road = (...x) => { const r = a.road(...x); if (r !== 'ok') console.error('via recusada: ' + r); return r; };
 
   // ---------------- interface: cada ferramenta e um clique no mapa
   const c = g.canvas;
@@ -50,13 +55,13 @@
   await check('via cruzando (cruzamento)', () => { const s = segs(); const r = a.road(X, Z - 200, X, Z + 200, 'Rua local'); return r === 'ok' && segs() > s + 1 ? true : `road=${r} segs ${s}->${segs()}`; });
   await check('desfazer e refazer', () => { const s = segs(); g.commands.undo(); const u = segs(); g.commands.redo(); return u < s && segs() === s ? true : `${s} -> ${u} -> ${segs()}`; });
   await check('dividir via', () => { const s = segs(); const r = a.edit('split', X + 130, Z); return r === 'ok' && segs() === s + 1 ? true : r; });
-  await check('inverter via (mão única)', () => { a.road(X - 200, Z - 500, X + 200, Z - 500, 'Mão única, 2 faixas'); const sg = w.roads.nearestSeg(X + 50, Z - 500, 10)[0]; const a0 = w.roads.segs.cols.a[sg]; const r = a.edit('reverse', X + 50, Z - 500); const s2 = w.roads.nearestSeg(X + 50, Z - 500, 10)[0]; return r === 'ok' && w.roads.segs.cols.b[s2] === a0 ? true : r; });
+  await check('inverter via (mão única)', () => { road(X - 200, Z - 500, X + 200, Z - 500, 'Mão única, 2 faixas'); const sg = w.roads.nearestSeg(X + 50, Z - 500, 10)[0]; const a0 = w.roads.segs.cols.a[sg]; const r = a.edit('reverse', X + 50, Z - 500); const s2 = w.roads.nearestSeg(X + 50, Z - 500, 10)[0]; return r === 'ok' && w.roads.segs.cols.b[s2] === a0 ? true : r; });
   await check('duplicar via', () => { const r = a.edit('duplicate', X - 100, Z); return r === 'ok' || r; });
   await check('mover nó', () => { const r = a.edit('move', X + 100, Z, X + 110, Z + 5); return r === 'ok' || r; });
   await check('unir no nó', () => { const r = a.edit('join', X + 110, Z + 5); return r === 'ok' || r === 'recusado' || r; });
   await check('faixa zebra no meio da quadra', () => a.crossing(X, Z + 120, 9) === 'ok' || 'recusado');
   await check('faixa com semáforo', () => a.crossing(X, Z - 120, 10) === 'ok' || 'recusado');
-  await check('retorno no canteiro', () => { a.road(X - 200, Z + 400, X + 200, Z + 400, 'Avenida com ciclovia'); const r = a.uturn(X + 50, Z + 400); return r === 'ok' || r; });
+  await check('retorno no canteiro', () => { road(X - 200, Z + 400, X + 200, Z + 400, 'Avenida com ciclovia'); const r = a.uturn(X + 50, Z + 400); return r === 'ok' || r; });
   await check('semáforo no cruzamento', () => { a.junction(X, Z, 1); const n = w.roads.nearestNode(X, Z, 20); return w.roads.junctions.get(n)?.ctl === 1 || 'controle não gravou'; });
 
   // ---------------- zonas, crescimento, lotes, criador
@@ -118,5 +123,5 @@
   // ---------------- desfazer tudo
   await check('desfazer tudo sem erro', () => { let n = 0; while (g.commands.undo() && n < 500) n++; return true; });
 
-  console.log('VERIFICAÇÃO ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
+  console.log('VERIFICAÇÃO ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()

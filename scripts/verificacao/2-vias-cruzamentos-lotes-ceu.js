@@ -22,6 +22,11 @@
   const P = (x, z) => ({ x, y: 0, z });
   const rt = g.roadTool;
   const X = 1500, Z = 1500;
+  // as ferramentas são verificadas em modo livre (o caixa dos preços do Roadcraft acaba no meio do roteiro); a economia
+  // tem a verificação própria, com o caixa ligado só nela
+  w.unlimited = true;
+  // via que o roteiro precisa: recusada vira erro no console (a verificação em curso falha com o motivo)
+  const road = (...x) => { const r = a.road(...x); if (r !== 'ok') console.error('via recusada: ' + r); return r; };
   const segNear = (x, z) => net.nearestSeg(x, z, 12)?.[0] ?? -1;
   const click = (tool, pts, setup) => { g.setTool(tool); rt.setMode(tool); setup && setup(); for (const p of pts) { rt.hover(P(p[0], p[1])); rt.click(P(p[0], p[1])); } };
   await g.view(X, Z, 0, 50, 500, 11);
@@ -43,21 +48,24 @@
   });
   await check('quarteirões de uma vez', () => { const s = segs(); click('blocks', [[X + 700, Z + 700]], () => { rt.blocks = { cols: 2, rows: 2, size: 100, angle: 0 }; }); return segs() >= s + 12 || `só ${segs() - s} trechos`; });
   const midVsEnd = (z) => { const nc = net.nodes.cols; const m = net.nearestNode(X, z, 60); return m >= 0 ? nc.y[m] - a.ground(nc.x[m], nc.z[m]) : NaN; };
-  await check('ponte (via elevada)', () => { a.road(X - 300, Z + 600, X + 300, Z + 600, 'Avenida', 9); const d = midVsEnd(Z + 600); return d > 5 || `meio a ${d} m do chão`; });
-  await check('túnel (via rebaixada)', () => { a.road(X - 300, Z + 800, X + 300, Z + 800, 'Avenida', -10); const d = midVsEnd(Z + 800); return d < -5 || `meio a ${d} m do chão`; });
-  await check('corte com muro de arrimo', () => { rt.cutWalls = true; a.road(X - 300, Z + 1000, X + 300, Z + 1000, 'Rua local', -4); rt.cutWalls = false; const s = segNear(X, Z + 1000); return s >= 0 && (sc.flags[s] & 8) !== 0 || 'sem marca de muro'; });
-  await check('trocar perfil da via', () => { a.road(X - 300, Z - 600, X + 300, Z - 600, 'Rua local'); const s = segNear(X + 50, Z - 600); const p0 = sc.profile[s]; click('upgrade', [[X + 50, Z - 600]], () => rt.setProfile(3)); return sc.profile[segNear(X + 50, Z - 600)] !== p0 || 'perfil igual'; });
-  await check('rotatória com raio', () => { a.road(X - 300, Z - 900, X + 300, Z - 900, 'Avenida'); a.road(X, Z - 1200, X, Z - 600 - 10, 'Avenida'); rt.ringRadius = 30; const s = segs(); click('roundabout', [[X, Z - 900]]); return segs() > s || 'sem rotatória'; });
-  await check('mobiliário automático marcado na via', () => { rt.furniture = 2; a.road(X + 400, Z - 300, X + 600, Z - 300, 'Rua local'); rt.furniture = 0; const s = segNear(X + 500, Z - 300); return s >= 0 && (sc.flags[s] >> 1 & 3) !== 0 || `flags ${sc.flags[s]}`; });
+  await check('ponte (via elevada)', () => { road(X - 300, Z + 600, X + 300, Z + 600, 'Avenida', 9); const d = midVsEnd(Z + 600); return d > 5 || `meio a ${d} m do chão`; });
+  await check('túnel (via rebaixada)', () => { road(X - 300, Z + 800, X + 300, Z + 800, 'Avenida', -10); const d = midVsEnd(Z + 800); return d < -5 || `meio a ${d} m do chão`; });
+  await check('corte com muro de arrimo', () => { rt.cutWalls = true; road(X - 300, Z + 1000, X + 300, Z + 1000, 'Rua local', -4); rt.cutWalls = false; const s = segNear(X, Z + 1000); return s >= 0 && (sc.flags[s] & 8) !== 0 || 'sem marca de muro'; });
+  await check('trocar perfil da via', () => { road(X - 300, Z - 600, X + 300, Z - 600, 'Rua local'); const s = segNear(X + 50, Z - 600); const p0 = sc.profile[s]; click('upgrade', [[X + 50, Z - 600]], () => rt.setProfile(3)); return sc.profile[segNear(X + 50, Z - 600)] !== p0 || 'perfil igual'; });
+  await check('rotatória com raio', () => { road(X - 300, Z - 900, X + 300, Z - 900, 'Avenida'); road(X, Z - 1200, X, Z - 600 - 10, 'Avenida'); rt.ringRadius = 30; const s = segs(); click('roundabout', [[X, Z - 900]]); return segs() > s || 'sem rotatória'; });
+  await check('mobiliário automático marcado na via', () => { rt.furniture = 2; road(X + 400, Z - 300, X + 600, Z - 300, 'Rua local'); rt.furniture = 0; const s = segNear(X + 500, Z - 300); return s >= 0 && (sc.flags[s] >> 1 & 3) !== 0 || `flags ${sc.flags[s]}`; });
   await check('regras de construção dão o motivo', () => { const r = a.road(X - 300, Z - 900, X + 300, Z - 900, 'Avenida'); return typeof r === 'string' && r !== 'ok' && r.length > 3 || `aceitou uma via em cima de outra (${r})`; });
-  await check('economia: construir cobra, demolir devolve', () => {
-    const m0 = w.money; a.road(X + 400, Z + 200, X + 600, Z + 200, 'Avenida'); const m1 = w.money;
+  await check('economia: construir cobra, demolir devolve um quarto, sem saldo recusa', () => {
+    w.unlimited = false; w.money = 10_000_000;
+    const m0 = w.money; road(X + 400, Z + 200, X + 600, Z + 200, 'Avenida'); const m1 = w.money;
     const n = a.demolish(X + 450, Z + 190, X + 550, Z + 210); const m2 = w.money;
-    return m1 < m0 && n > 0 && m2 > m1 || `dinheiro ${m0} -> ${m1} -> ${m2}, demolidos ${n}`;
+    w.money = 100; const s0 = segs(); const r = a.road(X + 400, Z + 260, X + 600, Z + 260, 'Avenida'); const refused = segs() === s0 && w.money === 100 && r !== 'ok';
+    w.unlimited = true;
+    return m1 < m0 && n > 0 && m2 > m1 && m2 - m1 < (m0 - m1) * 0.3 && refused || `dinheiro ${m0} -> ${m1} -> ${m2}, demolidos ${n}, sem saldo: ${r}`;
   });
 
   // ---------------- cruzamento
-  a.road(X - 300, Z - 1500, X + 300, Z - 1500, 'Avenida'); a.road(X, Z - 1800, X, Z - 1200 - 10, 'Rua local');
+  road(X - 300, Z - 1500, X + 300, Z - 1500, 'Avenida'); road(X, Z - 1800, X, Z - 1200 - 10, 'Rua local');
   const node = () => net.nearestNode(X, Z - 1500, 20);
   for (const [ctl, nome] of [[2, 'placas (preferencial)'], [3, 'pare em todos'], [4, 'dar preferência'], [5, 'minirrotatória'], [6, 'sem controle'], [1, 'semáforo']])
     await check(`controle do cruzamento: ${nome}`, async () => { a.junction(X, Z - 1500, ctl); await wait(150); return net.junctions.get(node())?.ctl === ctl || 'não gravou'; });
@@ -70,10 +78,10 @@
   await check('mapa de congestionamento', () => { H.trafficView(); H.trafficView(); return true; });
   await check('métricas e pedestres da simulação', async () => { await wait(3000); const s = g.stats(); return s.cars > 0 && s.peds >= 0 || `stats ${JSON.stringify(s)}`; });
   await check('terminal de ônibus', () => { const n = g.transit.terminals.length; a.line(0, [X - 250, Z + 1000 + 8, X + 250, Z + 1000 + 8], 2); g.clickTransit(P(X + 250, Z + 1008)); return true; });
-  await check('trem: trilho e linha', () => { const n = g.transit.lines.length; a.road(X - 600, Z + 1300, X + 600, Z + 1300, 'Ferrovia dupla'); a.line(1, [X - 500, Z + 1300, X + 500, Z + 1300], 1); return g.transit.lines.length > n || 'linha de trem não criada'; });
+  await check('trem: trilho e linha', () => { const n = g.transit.lines.length; road(X - 600, Z + 1300, X + 600, Z + 1300, 'Ferrovia dupla'); a.line(1, [X - 500, Z + 1300, X + 500, Z + 1300], 1); return g.transit.lines.length > n || 'linha de trem não criada'; });
 
   // ---------------- zonas, lotes, prédios
-  await check('zonas de densidade alta crescem mais alto', async () => { a.road(X + 800, Z - 1000, X + 1100, Z - 1000, 'Avenida'); a.zone(X + 950, Z - 1000, 150, 6); await a.grow(); let max = 0; w.buildingIndex.query(X + 780, Z - 1100, X + 1120, Z - 900, (b) => { max = Math.max(max, w.buildings.cols.floors[b]); }); return max >= 4 || `máx ${max} andares`; });
+  await check('zonas de densidade alta crescem mais alto', async () => { road(X + 800, Z - 1000, X + 1100, Z - 1000, 'Avenida'); a.zone(X + 950, Z - 1000, 150, 6); await a.grow(); let max = 0; w.buildingIndex.query(X + 780, Z - 1100, X + 1120, Z - 900, (b) => { max = Math.max(max, w.buildings.cols.floors[b]); }); return max >= 4 || `máx ${max} andares`; });
   await check('zonear a quadra inteira', () => { g.setTool('zone'); H.zoneFill(true); g.zoneTool.zone = 1; const r = g.zoneTool.fillBlock(X + 750, Z + 750); H.zoneFill(false); return r === 'ok' || r; });
   const lot = a.lot(X + 1200, Z + 20, X + 1240, Z + 20, X + 1240, Z + 60, 1, 3);
   await check('dividir lote', () => { const b = blds(); g.setTool('building'); H.lotMode('split'); H.lotSplit('side', 2); g.clickLotTool(P(X + 1220, Z + 40)); return blds() > b || 'não dividiu'; });
@@ -104,5 +112,5 @@
   await check('saúde do jogo (F9)', async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); await wait(300); const ok = /quadro|ms|memória/i.test(document.body.innerText); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); return ok || 'painel F9 não apareceu'; });
   await check('salvamento automático', async () => { g.unsaved = true; g.autosaveAt = 0; await wait(2500); return g.unsaved === false || 'não salvou sozinho'; });
 
-  console.log('VERIFICAÇÃO2 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
+  console.log('VERIFICAÇÃO2 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()

@@ -19,8 +19,13 @@
   const net = w.roads, sc = net.segs.cols, rt = g.roadTool;
   const P = (x, z) => ({ x, y: a.ground(x, z), z });
   const X = 1500, Z = 1500;
+  // as ferramentas são verificadas em modo livre (o caixa dos preços do Roadcraft acaba no meio do roteiro); a economia
+  // tem a verificação própria, com o caixa ligado só nela
+  w.unlimited = true;
+  // via que o roteiro precisa: recusada vira erro no console (a verificação em curso falha com o motivo)
+  const road = (...x) => { const r = a.road(...x); if (r !== 'ok') console.error('via recusada: ' + r); return r; };
   await g.view(X, Z, 0, 50, 400, 11);
-  a.road(X - 300, Z, X + 300, Z, 'Avenida'); a.road(X, Z - 300, X, Z + 300, 'Rua com estacionamento');
+  road(X - 300, Z, X + 300, Z, 'Avenida'); road(X, Z - 300, X, Z + 300, 'Rua com estacionamento');
   const seg = net.nearestSeg(X + 150, Z, 10)[0];
 
   await check('conta-gotas pega o perfil da via', () => { g.setTool('road'); rt.setMode('road'); const id = rt.pick(P(X + 150, Z)); return id === sc.profile[seg] || `pegou ${id}, via é ${sc.profile[seg]}`; });
@@ -41,5 +46,5 @@
   await check('idioma inglês', () => { const t0 = document.body.innerText.includes('Câmera'); return t0 || 'texto base ausente'; });
   await check('novo mapa', async () => { const c0 = window.confirm; window.confirm = () => true; const p = H.newMap(); window.confirm = c0; await wait(3000); return true; });
 
-  console.log('VERIFICAÇÃO3 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
+  console.log('VERIFICAÇÃO3 ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()

@@ -1,6 +1,6 @@
-// Worker de simulação: dono do trânsito e dos pedestres. Recebe as mudanças da rede viária e a
-// posição da câmera; publica poses (buffer triplo) e ocupação das vias
-// (memória compartilhada). A página só lê.
+// Simulation worker: owns traffic and pedestrians. Receives the road network changes and the
+// camera position; publishes poses (triple buffer) and road occupancy
+// (shared memory). The page only reads.
 
 import { PoseWriter, POSE_STRIDE, MAX_AGENTS, viewPoseBuffers } from './poses.ts';
 import { SimNet, decodeOp } from './lanes.ts';
@@ -9,9 +9,9 @@ import { Peds } from './peds.ts';
 
 export type ToSim =
   | { type: 'init'; poses: SharedArrayBuffer; heights: SharedArrayBuffer; occupancy: SharedArrayBuffer; signals: SharedArrayBuffer; tickHz: number }
-  | { type: 'speed'; value: number } // 0 = pausado, 1, 2, 4
+  | { type: 'speed'; value: number } // 0 = paused, 1, 2, 4
   | { type: 'camera'; x: number; z: number }
-  /** Portas dos prédios perto da câmera (x, z): os pedestres saem delas. */
+  /** Building doors near the camera (x, z): pedestrians come out of them. */
   | { type: 'doors'; pts: Float32Array }
   /** Warehouse loading docks near the camera: (x, z, yaw facing the street) each. */
   | { type: 'docks'; pts: Float32Array }
@@ -26,15 +26,15 @@ export type ToSim =
   | { type: 'people'; x: number; z: number; count: number; color: number }
   | { type: 'hit'; x: number; z: number; r: number; one: boolean };
 
-/** Do worker para a página. */
+/** From the worker to the page. */
 export type FromSim =
   | { type: 'probe'; seg: number; vehicles: number; speed: number; queue: number; capacity: number }
   | { type: 'probeNode'; node: number; passed: number; time: number }
   | { type: 'hit'; people: number; vehicles: number }
   /** Manoeuvres going on (answer to 'probeManoeuvres'): [x, z, kind (sim/manoeuvres MKind), share done] each; counters. */
-  | { type: 'manoeuvres'; list: number[]; planned: number; kerbStops: number; docked: number }
-  /** O automático trocou o controle do nó pelo fluxo medido (Flow: 1 semáforo, 2 placas). A página pode
-   *  passar o mesmo `flow` para `effectiveControl` (pintura, placas, cabeças de semáforo, inspetor). */
+  | { type: 'manoeuvres'; list: number[]; planned: number; kerbStops: number; docked: number; crossings: number[]; trains: number[] }
+  /** Automatic mode switched the node's control based on measured flow (Flow: 1 traffic light, 2 signs). The page can
+   *  pass the same `flow` to `effectiveControl` (paint, signs, signal heads, inspector). */
   | { type: 'autoControl'; node: number; flow: number }
   | { type: 'stats'; cars: number; micro: number; peds: number; arrived: number; lost: number; speed: number; stopped: number;
       lines: Array<{ id: number; buses: number; perHour: number; waiting: number }> }
@@ -52,7 +52,7 @@ sim.onSegAdded = (s) => traffic.clearWear(s);
 const peds = new Peds(sim);
 peds.carsGo = (n, arm) => traffic.carsGo(n, arm);
 traffic.pedCrossing = (n) => peds.crossing(n);
-// ônibus e pedestres: quem vai de ônibus anda até a parada, espera, viaja e desce a pé
+// buses and pedestrians: bus riders walk to the stop, wait, ride and get off on foot
 peds.pickTrip = () => traffic.pickTrip();
 peds.onStop = (l, a, b) => traffic.pedAtStop(l, a, b);
 traffic.onAlight = (node, n) => peds.spawnAt(node, n);
@@ -74,7 +74,7 @@ let failed = false;
 function step(): void {
   if (!writer) return;
   try { stepInner(); } catch (err) {
-    // erro na simulação: avisa a página uma vez e segue (o próximo passo tenta de novo)
+    // simulation error: tell the page once and carry on (the next step tries again)
     if (!failed) { failed = true; scope.postMessage({ type: 'error', message: String((err as Error)?.stack ?? err) }); }
   }
   next += dtMs;
@@ -84,7 +84,7 @@ function step(): void {
 function stepInner(): void {
   if (!writer) return;
   const dt = dtMs / 1000;
-  // rede mudou: refaz só os nós tocados
+  // network changed: rebuild only the touched nodes
   const removed = sim.removedSegs.splice(0);
   if (removed.length) traffic.segsRemoved(removed);
   const rebuilt = sim.rebuild();

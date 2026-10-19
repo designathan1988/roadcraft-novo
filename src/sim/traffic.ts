@@ -1,7 +1,7 @@
-// Trânsito: meso no mapa inteiro (fila por faixa, eventos por veículo), micro
-// numa janela em volta da câmera (IDM para seguir, MOBIL para trocar de faixa,
-// semáforos por braço que se ajustam à fila, preferência nas rotatórias).
-// Tudo em tabelas SoA; nenhum laço passa pela frota inteira por passo.
+// Traffic: meso over the whole map (queue per lane, events per vehicle), micro
+// in a window around the camera (IDM for car-following, MOBIL for lane changes,
+// signals per arm that adapt to the queue, right of way at roundabouts).
+// Everything in SoA tables; no loop goes over the whole fleet per step.
 
 import { Table } from '../core/table.ts';
 import { MAP_HALF, MAP_SIZE } from '../config.ts';
@@ -20,56 +20,56 @@ import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
 const WINDOW = 1500;
-// meso (longe da câmera) no ritmo do micro: a frota é uma só, então se o meso anda mais rápido os carros se
-// juntam na janela até ela travar, e se anda mais devagar a janela esvazia (era o caso: meso a 6 km/h, micro a
-// 20). O meso leva este fator vezes a conta de `mesoEnter` (andar livre pela lotação + espera do cruzamento).
-// Conferido em scripts/transito.ts contra o mapa inteiro em micro (JANELA=1e6): os carros num raio de 1,5 km
-// do centro andam junto com os da rodada toda micro (2,0 enche a janela, 4,0 esvazia)
+// meso (far from the camera) at the pace of micro: the fleet is a single one, so if meso runs faster the cars
+// pile up in the window until it jams, and if it runs slower the window empties (that was the case: meso at
+// 6 km/h, micro at 20). Meso takes this factor times the `mesoEnter` estimate (free driving scaled by
+// occupancy + junction wait). Checked in scripts/transito.ts against the whole map in micro (JANELA=1e6): cars
+// within 1.5 km of the centre move along with those of the all-micro run (2.0 fills the window, 4.0 empties it)
 const MESO_ALPHA = 2.5;
 const WINDOW_OUT = 1750;
-/** Parado há tanto tempo (s), o motorista reconsidera a rota (roadcraft STUCK_SECONDS). */
+/** Stopped for this long (s), the driver reconsiders the route (roadcraft STUCK_SECONDS). */
 export const STUCK_SECONDS = 10;
-/** Cruzamento travado: alguém esperando na linha e ninguém passou há tanto tempo (s). */
+/** Jammed junction: someone waiting at the line and nobody has gone through for this long (s). */
 export const JAM_SECONDS = 20;
-/** Esperando a mesma saída cheia há tanto tempo (s), o motorista guarda a vez nela. */
+/** Waiting for the same full exit for this long (s), the driver claims its turn on it. */
 const STARVE_SECONDS = 30;
-/** Liberação controlada de um cruzamento travado: um veículo a cada tanto (s). */
+/** Controlled release of a jammed junction: one vehicle every this many seconds. */
 const RELEASE_EVERY = 3;
-/** Buscas de rota por passo (desvios e reconsiderações): o resto tenta no passo seguinte. */
+/** Route searches per step (detours and reconsiderations): the rest try on the next step. */
 const ROUTE_BUDGET = 6;
 /**
- * A frota não é fixa nem salta: abaixo do alvo ela cresce no ritmo das viagens novas, chegando ao alvo com esta
- * constante de tempo (s, ~ a duração de uma viagem). Sem isso o pico das 18 h (o relógio do jogo anda 1 h por
- * minuto) punha 50% de carros a mais na rede em dois minutos, e eles levavam 15 min para chegar: o centro
- * caía para 10 km/h depois de ~10 min de jogo. Abaixo de FILL_SHARE do alvo (mapa abrindo) enche de uma vez.
+ * The fleet is neither fixed nor jumps: below the target it grows at the pace of new trips, reaching the target with
+ * this time constant (s, ~ the length of a trip). Without it the 18:00 peak (the game clock runs 1 h per minute)
+ * put 50% more cars on the network in two minutes, and they took 15 min to arrive: the centre dropped to
+ * 10 km/h after ~10 min of play. Below FILL_SHARE of the target (map opening) it fills at once.
  */
 const FLEET_TAU = 600, FILL_SHARE = 0.5;
 /**
- * Lotação (fração da faixa cheia) das ruas em volta a partir da qual um nó perde peso como origem ou destino,
- * e quanto perde por unidade de lotação (zero com 35%). Medido: sem isso o centro acumulava carros e caía
- * de ~18 para ~14 km/h em 20 min.
+ * Occupancy (fraction of a full lane) of the surrounding streets above which a node loses weight as origin or
+ * destination, and how much it loses per unit of occupancy (zero at 35%). Measured: without it the centre piled up
+ * cars and dropped from ~18 to ~14 km/h in 20 min.
  */
 const CROWD_OCC = 0.15, CROWD_SLOPE = 5;
 /**
- * Região engarrafada (blocos de 400 m, recalculados a cada 4 s pela lotação dos trechos): viagens que começam ou
- * terminam nela vão para outro lugar, como quem evita o centro no pico. Sem isso a frota (fixa) escorria para o centro
- * até travar: no pico, 845 → 1 423 carros a 700 m do centro em 20 min e 17,8 → 9,9 km/h.
+ * Congested region (400 m blocks, recomputed every 4 s from segment occupancy): trips that start or end in it go
+ * somewhere else, like people avoiding downtown at rush hour. Without it the (fixed) fleet drained into the centre
+ * until it jammed: at peak, 845 → 1,423 cars within 700 m of the centre in 20 min and 17.8 → 9.9 km/h.
  */
 export const REGION = 400, REGION_OCC = 0.1, REGION_SLOPE = 7, REGION_EVERY = 4;
 const REGION_N = Math.ceil(MAP_SIZE / REGION);
 /**
- * Governador da frota (roadcraft `populationGovernor`, aqui pelo trânsito e não pelo custo do passo): a velocidade média
- * da janela micro (o que o jogador vê, parados incluídos) abaixo de GOV_SLOW corta o alvo da frota aos poucos, acima de
- * GOV_FAST devolve. Medido: a rede da cidade gerada não carrega a frota do pico (tudo em micro cai para 8,6 km/h e não
- * para de cair); com o governador o pico tem menos carros e anda.
+ * Fleet governor (roadcraft `populationGovernor`, here driven by traffic rather than step cost): the average speed of
+ * the micro window (what the player sees, stopped vehicles included) below GOV_SLOW gradually cuts the fleet target,
+ * above GOV_FAST gives it back. Measured: the generated city's network cannot carry the peak fleet (all-micro drops
+ * to 8.6 km/h and keeps falling); with the governor the peak has fewer cars and keeps moving.
  */
 const GOV_SLOW = 15 / 3.6, GOV_FAST = 18 / 3.6, GOV_MIN = 0.75;
-/** O desvio de quem reconsidera volta à rota até tantos nós adiante. */
+/** A reconsidering driver's detour rejoins the route up to this many nodes ahead. */
 const REJOIN = 6;
 
 /**
- * IDM. Carro arranca a 2,8 m/s² (com 2,2 o centro ficava ~2 km/h mais lento, medido); ônibus, caminhão e
- * trem, pesados, a 2,2 (e param no ponto certo). 0,9 s de distância.
+ * IDM. Cars accelerate at 2.8 m/s² (with 2.2 the centre was ~2 km/h slower, measured); buses, trucks and
+ * trains, being heavy, at 2.2 (and stop at the right spot). 0.9 s headway.
  */
 const A_MAX = 2.8, A_HEAVY = 2.2, B_COMF = 2.2, S0 = 2.2, T_HEAD = 0.9;
 
@@ -78,56 +78,61 @@ const vehSchema = {
   len: Float32Array, vf: Float32Array, micro: Uint8Array, kind: Uint8Array, color: Uint8Array,
   dest: Int32Array, rIdx: Uint8Array, rLen: Uint8Array,
   tExit: Float64Array,
-  next: Int32Array, prev: Int32Array, // lista da faixa/conexão (micro), da frente para trás
+  next: Int32Array, prev: Int32Array, // lane/connection list (micro), front to back
   px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array,
   fade: Float32Array, dying: Uint8Array,
   lcFrom: Int32Array, lcT: Float32Array, lcCool: Float32Array,
   microIdx: Int32Array,
-  // ônibus: linha (-1 = carro comum), próxima parada, tempo parado, lotação, já atendeu a parada
+  // bus: line (-1 = ordinary car), next stop, dwell time, load, stop already served
   line: Int16Array, stopI: Uint8Array, dwell: Float32Array, load: Uint8Array, served: Uint8Array,
-  // tempo parado na linha de retenção (placa de pare, fila de quem dá a preferência)
+  // time stopped at the stop line (stop sign, queue of those yielding)
   wait: Float32Array,
-  // parado (em qualquer ponto da faixa) desde a última vez que reconsiderou a rota
+  // stopped (anywhere on the lane) since the last time it reconsidered the route
   held: Float32Array,
-  // luzes (roadcraft vehicleSignals): freando/parado, e a conexão de saída planejada (para a seta)
+  // lights (roadcraft vehicleSignals): braking/stopped, and the planned exit connection (for the indicator)
   brk: Uint8Array, exitC: Int32Array,
-  // na vaga ao lado da faixa (0 = na faixa, 1 = na vaga): entrando nela ao chegar ou saindo dela ao começar
+  // in the bay beside the lane (0 = in the lane, 1 = in the bay): pulling in on arrival or out at the start
   pk: Float32Array,
   // manoeuvre (sim/manoeuvres.ts, −1 = none) and the lane position (front) where it ends
   mv: Int32Array, ms: Float32Array,
 };
 
-/** Linha de ônibus como a simulação a vê: paradas resolvidas em faixas. */
+/** Bus line as the simulation sees it: stops resolved to lanes. */
 interface SimLine {
   id: number; color: number; buses: number;
-  /** 0 ônibus, 1 trem, 2 metrô (trilhos). */
+  /** 0 bus, 1 train, 2 metro (rails). */
   mode: number;
   stopLane: number[]; stopV: number[]; waiting: number[]; lastT: number[];
-  /** Quem espera em cada parada, por parada de destino (gente de verdade e demanda de fundo). */
+  /** Who is waiting at each stop, by destination stop (real people and background demand). */
   waitTo: Float64Array[];
-  /** Ponto da parada na calçada (para desenhar quem espera). */
+  /** Stop position on the sidewalk (to draw those waiting). */
   stopX: number[]; stopZ: number[]; stopY: number[]; stopYaw: number[];
-  /** Embarques desde o último relatório, e a média por hora. */
+  /** Boardings since the last report, and the hourly average. */
   boardings: number; perHour: number;
-  /** Paradas terminais (índice resolvido): espera longa. */
+  /** Terminal stops (resolved index): long dwell. */
   term: Set<number>;
 }
 
-/** Linha recebida da página: paradas como pontos (x, z) na calçada. */
-export interface LineSpec { id: number; color: number; buses: number; stops: number[]; mode?: number; /** índices das paradas que são terminais */ term?: number[] }
+/** Line received from the page: stops as (x, z) points on the sidewalk. */
+export interface LineSpec {
+  id: number; color: number; buses: number; stops: number[]; mode?: number; /** indices of the stops that are terminals */ term?: number[];
+  /** Bus line that runs as a ring (last stop → first). Otherwise (Roadcraft) it runs out and back: the return trip
+   *  stops on the other side of the street, and both ends are terminals. Trains always follow their stations in order. */
+  loop?: boolean;
+}
 
 const DWELL = 14;
-/** Espera no terminal (s): o ônibus descansa e acerta o horário antes de voltar. */
+/** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
 const TERMINAL_DWELL = 75;
 const BUS_CAP = 70;
-const WAIT_RATE = 1 / 9; // pessoas chegando por segundo em cada parada
+const WAIT_RATE = 1 / 9; // people arriving per second at each stop
 
-/** Comprimento por tipo: carro, ônibus, caminhão, (pessoa), trem (3 vagões de 20 m). */
+/** Length per kind: car, bus, truck, (person), train (3 wagons of 20 m). */
 const KIND_LEN = [4.4, 12, 9.5, 0.6, 62];
-/** Estacionando (roadcraft kerbStops/parking): freada, encostar na vaga (s) e quanto tempo fica parado antes de sumir. */
+/** Parking (roadcraft kerbStops/parking): deceleration, time to pull into the bay (s), and how long it stays before disappearing. */
 const PARK_DECEL = 2.6, PARK_SIDE_S = 2.4, PARK_STAY = 3;
 
-/** u do meio da faixa de estacionamento à direita de quem anda no sentido `dir` do trecho (NaN = sem vaga). */
+/** u of the middle of the parking strip on the right of someone driving in direction `dir` of the segment (NaN = no bays). */
 function parkU(profile: number, dir: number): number {
   for (const e of PROFILE_INFO[profile].edges) {
     if (e.strip.kind !== 'parking') continue;
@@ -137,17 +142,17 @@ function parkU(profile: number, dir: number): number {
   return NaN;
 }
 
-/** Desgaste por veículo que entra numa faixa: uma via de 1 000 veículos por hora fica bem gasta em ~1 h de simulação a 1×. */
+/** Wear per vehicle entering a lane: a road with 1,000 vehicles per hour gets well worn in ~1 h of simulation at 1×. */
 const WEAR_PER_PASS = 0.2;
 /**
- * Carros de passeio (roadcraft archetypes): sedã, hatch, SUV, van, picape e moto, com o comprimento de cada um
- * e a fatia da frota. O estilo vai nos bits 4-6 da cor (a página escolhe o modelo por ele).
+ * Passenger cars (roadcraft archetypes): sedan, hatchback, SUV, van, pickup and motorbike, with each one's length
+ * and share of the fleet. The style goes in bits 4-6 of the colour (the page picks the model from it).
  */
 export const CAR_STYLE_LEN = [4.4, 3.9, 4.6, 4.9, 5.3, 2.1];
 const CAR_STYLE_SHARE = [0.3, 0.3, 0.17, 0.08, 0.07, 0.08];
-/** Bits das luzes na pose (× 65536 no campo tipo/cor): freio, seta esquerda, seta direita. */
+/** Light bits in the pose (× 65536 in the kind/colour field): brake, left indicator, right indicator. */
 export const LIGHT_BRAKE = 1, LIGHT_LEFT = 2, LIGHT_RIGHT = 4;
-/** Vagões do trem e o comprimento de cada um. */
+/** Train wagons and the length of each. */
 export const WAGONS = 3, WAGON_LEN = 20.5;
 
 export class Traffic {
@@ -155,50 +160,50 @@ export class Traffic {
   readonly router: Router;
   readonly veh = new Table(vehSchema, 1 << 12);
   routes = new Int32Array((1 << 12) * ROUTE_CAP);
-  /** Lista ordenada de veículos micro por faixa e por conexão (cabeça = o da frente). */
+  /** Ordered list of micro vehicles per lane and per connection (head = the frontmost). */
   laneHead = new Int32Array((1 << 14) * 16).fill(-1);
   laneTail = new Int32Array((1 << 14) * 16).fill(-1);
   connHead = new Int32Array(1 << 14).fill(-1);
-  /** Quem espera demais numa preferência reclama a vez (décimos de segundo do relógio da simulação). */
+  /** Whoever waits too long at a yield claims the turn (tenths of a second of the simulation clock). */
   private connClaim = new Int32Array(1 << 14).fill(-100);
   connTail = new Int32Array(1 << 14).fill(-1);
-  /** Todos os veículos (micro e meso) por faixa, e a última saída meso (fila FIFO). */
+  /** All vehicles (micro and meso) per lane, and the last meso exit (FIFO queue). */
   laneCount = new Uint16Array((1 << 14) * 16);
   laneLastExit = new Float64Array((1 << 14) * 16);
   /**
-   * Vez na faixa de saída cheia: quem espera há STARVE_SECONDS por ela guarda a próxima vaga (renovada a cada
-   * passo); sem isso um braço via a saída encher sempre com quem vinha dos outros e esperava minutos.
+   * Turn on a full exit lane: whoever has waited STARVE_SECONDS for it holds the next free spot (renewed every
+   * step); without it an arm saw the exit always filled by those coming from the others and waited for minutes.
    */
   private exitClaim = new Int32Array((1 << 14) * 16).fill(-1);
   private exitClaimT = new Float64Array((1 << 14) * 16);
-  /** Veículos por trecho e sentido (a rota evita o que está cheio). */
+  /** Vehicles per segment and direction (routing avoids what is full). */
   segLoad = new Uint16Array((1 << 14) * 2);
-  /** Desgaste acumulado por trecho (passagens × peso; 255 = gasto). */
+  /** Accumulated wear per segment (passes × weight; 255 = worn out). */
   segWear = new Float32Array(1 << 14);
-  /** Ocupação por trecho e sentido, para os "carros de densidade" do shader. */
+  /** Occupancy per segment and direction, for the shader's "density cars". */
   occupancy: Uint8Array | null = null;
-  /** Estado dos semáforos por nó, para o desenho: 0 = fora da janela; senão 1 + braço * 4 + estado (0 verde, 1 amarelo, 2 vermelho). */
+  /** Signal state per node, for drawing: 0 = outside the window; otherwise 1 + arm * 4 + state (0 green, 1 amber, 2 red). */
   signals: Uint8Array | null = null;
-  /** Veículos micro, densos (para publicar e iterar). */
+  /** Micro vehicles, dense (to publish and iterate). */
   micro = new Int32Array(1 << 12);
   microN = 0;
-  /** Faixas e conexões com veículos micro. */
+  /** Lanes and connections with micro vehicles. */
   private activeLanes = new Set<number>();
   private activeConns = new Set<number>();
-  /** Eventos meso: heap (tempo, veículo). */
+  /** Meso events: heap (time, vehicle). */
   private evT = new Float64Array(1 << 12);
   private evV = new Int32Array(1 << 12);
   private evN = 0;
-  // semáforos
+  // traffic signals
   sigPhase = new Uint8Array(1 << 14);
   sigTimer = new Float32Array(1 << 14);
   sigGreen = new Float32Array(1 << 14);
-  sigState = new Uint8Array(1 << 14); // 0 verde, 1 amarelo, 2 vermelho geral
+  sigState = new Uint8Array(1 << 14); // 0 green, 1 amber, 2 all-red
   private signalNodes = new Set<number>();
-  /** Semáforos perto da câmera (só eles andam; os de longe ficam parados). */
+  /** Signals near the camera (only these run; distant ones stay frozen). */
   private windowSignals = new Set<number>();
 
-  /** Velocidade média dos carros perto da câmera (m/s). */
+  /** Average speed of the cars near the camera (m/s). */
   avgSpeed(): number {
     const c = this.veh.cols;
     let s = 0, stopped = 0;
@@ -207,10 +212,10 @@ export class Traffic {
     return this.microN ? s / this.microN : 0;
   }
 
-  /** Parados perto da câmera (contado junto com a velocidade média). */
+  /** Stopped vehicles near the camera (counted along with the average speed). */
   stopped = 0;
 
-  /** Um trecho agora: veículos (micro e meso), velocidade média dos que se vê, fila (parados) e capacidade. */
+  /** A segment right now: vehicles (micro and meso), average speed of the visible ones, queue (stopped) and capacity. */
   probe(seg: number): { vehicles: number; speed: number; queue: number; capacity: number } {
     const sim = this.sim, c = this.veh.cols;
     if (!sim.net.segs.alive[seg]) return { vehicles: 0, speed: 0, queue: 0, capacity: 0 };
@@ -225,7 +230,7 @@ export class Traffic {
     return { vehicles, speed: seen ? sum / seen : laneSpeed(p) * 0.85, queue, capacity };
   }
 
-  /** Rede apagada (mapa novo, carregar): todos os veículos saem, filas e semáforos zeram. */
+  /** Network cleared (new map, load): all vehicles leave, queues and signals reset. */
   clearAll(): void {
     this.veh.clear();
     this.laneHead.fill(-1); this.laneTail.fill(-1); this.connHead.fill(-1); this.connTail.fill(-1); this.connClaim.fill(-100);
@@ -245,65 +250,65 @@ export class Traffic {
     this.mvs.clear();
   }
 
-  /** Trecho novo (o id pode ser de um demolido): asfalto novo. */
+  /** New segment (the id may belong to a demolished one): fresh asphalt. */
   clearWear(seg: number): void {
     if (seg < this.segWear.length) this.segWear[seg] = 0;
     if (this.occupancy && seg * 4 + 2 < this.occupancy.length) this.occupancy[seg * 4 + 2] = 0;
   }
 
-  /** Linhas de ônibus (índice = posição; o veículo guarda o índice). */
+  /** Bus lines (index = position; the vehicle stores the index). */
   lines: SimLine[] = [];
-  /** Ônibus de cada linha (para não varrer a frota). */
+  /** Buses of each line (so the fleet is not scanned). */
   private busSets: Array<Set<number>> = [];
-  /** Passageiros de cada ônibus por parada de destino. */
+  /** Passengers of each bus by destination stop. */
   private riders = new Map<number, Float64Array>();
-  /** Gente desce do ônibus no nó `node` (os pedestres continuam a pé). */
+  /** People get off the bus at node `node` (the pedestrians carry on on foot). */
   onAlight: (node: number, count: number) => void = () => {};
   private lineCheck = 0;
 
-  /** Alguém atravessando na faixa do nó? (dos pedestres) */
+  /** Is someone walking on the node's crosswalk? (from the pedestrians) */
   pedCrossing: (n: number) => boolean = () => false;
 
-  /** Veículos que passaram por cada nó (micro e meso), para o fluxo do cruzamento. */
+  /** Vehicles that went through each node (micro and meso), for the junction flow. */
   nodePass = new Uint32Array(1 << 14);
-  /** Última passagem normal por nó (sem liberação), para achar cruzamento travado; e a próxima liberação. */
+  /** Last normal pass per node (not a release), to detect a jammed junction; and the next release. */
   private lastAdmit = new Float64Array(1 << 14);
   private releaseAt = new Float64Array(1 << 14);
   private jamAt = new Float64Array(1 << 14);
-  /** Controle automático pelo fluxo medido. */
+  /** Automatic control from the measured flow. */
   readonly advisor: FlowAdvisor;
-  /** Viagens evitam começar ou terminar em rua engarrafada. */
+  /** Trips avoid starting or ending on a congested street. */
   crowdAvoid = true;
-  /** Contagens: rotas reconsideradas, cruzamentos que travaram, veículos liberados. */
+  /** Counters: reconsidered routes, junctions that jammed, vehicles released. */
   reroutes = 0; jams = 0; released = 0;
-  /** Meso: tentativas de passar ao fim da faixa e quantas acharam a próxima cheia (congestionamento longe da câmera). */
+  /** Meso: attempts to move on at the end of the lane and how many found the next one full (congestion far from the camera). */
   mesoTries = 0; mesoFull = 0;
   private routeBudget = 0;
 
-  /** Explosão: veículos da janela micro a até `r` metros saem de cena (devolve quantos). */
+  /** Explosion: micro-window vehicles within `r` metres leave the scene (returns how many). */
   blast(x: number, z: number, r: number): number {
     const c = this.veh.cols;
     let n = 0;
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
       if (!c.has[v] || Math.hypot(c.px[v] - x, c.pz[v] - z) > r) continue;
-      // estacionando: já está fora da faixa, só apaga (o `stepParkers` termina)
+      // parking: already out of the lane, just fade it (`stepParkers` finishes it)
       if (c.dying[v] !== 2) c.dying[v] = 1;
       c.fade[v] = Math.min(c.fade[v], 0.3); n++;
     }
     return n;
   }
 
-  /** Contagens para depuração e testes. */
+  /** Counters for debugging and tests. */
   arrived = 0; lost = 0;
   camX = 0; camZ = 0;
-  /** Raio da janela micro (m). Os diagnósticos põem o mapa inteiro em micro para medir o meso. */
+  /** Radius of the micro window (m). Diagnostics put the whole map in micro to measure meso. */
   window = WINDOW;
   time = 0;
   private rng = new Rng(12345);
   private tmp = new Float64Array(4);
   private tmp2 = new Float64Array(4);
-  /** Densidade alvo (veículos por metro de faixa). */
+  /** Target density (vehicles per metre of lane). */
   density = 1 / 100;
 
   constructor(sim: SimNet) {
@@ -346,14 +351,14 @@ export class Traffic {
 
   get count(): number { return this.veh.size; }
 
-  // ------------------------------------------------------------ listas
+  // ------------------------------------------------------------ lists
 
-  /** Insere v na lista (faixa ou conexão) mantendo a ordem por s (da frente para trás). */
+  /** Inserts v into the list (lane or connection) keeping it ordered by s (front to back). */
   private insert(v: number, onConn: boolean, id: number): void {
     const c = this.veh.cols;
     const head = onConn ? this.connHead : this.laneHead;
     const tail = onConn ? this.connTail : this.laneTail;
-    // procura de trás para frente (quase sempre entra no fim)
+    // search from the back forward (it almost always goes at the end)
     let after = tail[id];
     while (after >= 0 && c.s[after] < c.s[v]) after = c.prev[after];
     const before = after >= 0 ? c.next[after] : head[id];
@@ -363,7 +368,7 @@ export class Traffic {
     (onConn ? this.activeConns : this.activeLanes).add(id);
   }
 
-  /** Carros encostando na vaga (fora das listas das faixas: quem vem atrás passa). */
+  /** Cars pulling into a bay (out of the lane lists: those behind can pass). */
   private parkers = new Set<number>();
   /** Manoeuvres near the camera (Reeds-Shepp): into the bay, out of it, a truck backing into a dock. */
   readonly mvs = new Manoeuvres();
@@ -379,7 +384,7 @@ export class Traffic {
   private mvB = new Float64Array(4);
 
   /** The manoeuvres going on, for the page (inspection, photos): [x, z, kind, share done] each, and the counters. */
-  manoeuvreList(): { list: number[]; planned: number; kerbStops: number; docked: number } {
+  manoeuvreList(): { list: number[]; planned: number; kerbStops: number; docked: number; crossings: number[]; trains: number[] } {
     const t = this.mvs.t, mc = t.cols, list: number[] = [], p = this.mvA;
     for (let m = 0; m < t.end; m++) {
       if (!t.alive[m]) continue;
@@ -394,7 +399,10 @@ export class Traffic {
       this.sim.lanePoint(c.lane[v], c.s[v], p);
       list.push(p[0], p[2], 4, Math.min(1, c.dwell[v] / 6));
     }
-    return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked };
+    // level crossings with the barrier down, and the trains in the window (x, z) for inspection
+    const crossings = [...this.crossingClosed.keys()].filter((n) => this.crossingDown(n)), trains: number[] = [];
+    this.lines.forEach((ln, li) => { if (ln.mode) for (const v of this.busSets[li]) if (this.veh.alive[v] && c.micro[v] && c.lane[v] >= 0) { this.sim.lanePoint(c.lane[v], c.s[v], p); trains.push(p[0], p[2]); } });
+    return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked, crossings, trains };
   }
 
   /** Docks sent by the page; each gets the node trucks drive to. */
@@ -542,8 +550,8 @@ export class Traffic {
   }
 
   /**
-   * Chegou: se a faixa da direita tem vaga ao lado, o carro sai da fila (quem vem atrás passa), freia encostando
-   * na vaga com a seta da direita, fica parado um pouco e some. Só desenho: ninguém mais o enxerga.
+   * Arrived: if the right lane has a bay beside it, the car leaves the queue (those behind pass), brakes while pulling
+   * into the bay with the right indicator on, stays a moment and disappears. Drawing only: nobody else sees it.
    */
   private startParking(v: number, lane: number): boolean {
     const c = this.veh.cols, sim = this.sim;
@@ -557,7 +565,7 @@ export class Traffic {
     return true;
   }
 
-  /** Quem está estacionando: freia, encosta, espera e some. */
+  /** Those parking: brake, pull over, wait and disappear. */
   private stepParkers(dt: number): void {
     const c = this.veh.cols, sim = this.sim;
     for (const v of this.parkers) {
@@ -614,7 +622,7 @@ export class Traffic {
     const L = this.sim.laneLen(lane) * Math.max(1, lanes);
     const o = seg * 4 + (dir > 0 ? 0 : 1);
     if (o < occ.length) occ[o] = Math.min(255, Math.round((total * 7.5 / L) * 255));
-    // desgaste: cada veículo que entra na faixa gasta um pouco o trecho (micro e meso: o mapa inteiro)
+    // wear: each vehicle entering the lane wears the segment a little (micro and meso: the whole map)
     if (delta > 0 && seg * 4 + 2 < occ.length) {
       const w = (this.segWear[seg] += WEAR_PER_PASS);
       occ[seg * 4 + 2] = Math.min(255, w | 0);
@@ -640,7 +648,7 @@ export class Traffic {
     c.microIdx[last] = i;
   }
 
-  // ------------------------------------------------------------ eventos meso
+  // ------------------------------------------------------------ meso events
 
   private schedule(v: number, t: number): void {
     this.veh.cols.tExit[v] = t;
@@ -672,11 +680,11 @@ export class Traffic {
     return v;
   }
 
-  // ------------------------------------------------------------ rotas
+  // ------------------------------------------------------------ routes
 
   private routeAt(v: number, k: number): number { return this.routes[v * ROUTE_CAP + k]; }
 
-  /** Trecho entre o nó atual da rota e o seguinte (-1 se não houver). */
+  /** Segment between the current route node and the next (-1 if none). */
   private segBetween(a: number, b: number): number {
     const net = this.sim.net, sc = net.segs.cols;
     const o = a * MAX_DEG, d = net.nodes.cols.deg[a];
@@ -691,21 +699,21 @@ export class Traffic {
     const c = this.veh.cols;
     const ban = c.lane[v] >= 0 && !allowBack ? laneSeg(c.lane[v]) : -1;
     let n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP, false, ban);
-    if (n < 2 && ban >= 0) n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP); // beco: retorna
+    if (n < 2 && ban >= 0) n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP); // dead end: turn back
     c.rLen[v] = n;
     c.rIdx[v] = 1;
     c.dest[v] = dest;
     return n >= 2;
   }
 
-  /** Trecho `k` passos depois do próximo na rota (−1 se a rota acaba antes). */
+  /** Segment `k` steps after the next one on the route (−1 if the route ends before). */
   private segAfter(v: number, k: number): number {
     const c = this.veh.cols, i = c.rIdx[v] + 1 + k;
     if (i >= c.rLen[v]) return -1;
     return this.segBetween(this.routeAt(v, i - 1), this.routeAt(v, i));
   }
 
-  /** Faixa menos cheia do trecho/sentido que tem conexão para `after` (−1: qualquer); fora da de ônibus para carro. */
+  /** Least full lane of the segment/direction that connects to `after` (−1: any); bus lanes excluded for cars. */
   private pickLane(seg: number, dir: number, after: number, bus: boolean, fallback: number): number {
     const sim = this.sim, n = laneCount(sim.net.segs.cols.profile[seg], dir);
     let best = fallback, bc = fallback >= 0 ? this.laneCount[fallback] : 1e9;
@@ -718,7 +726,7 @@ export class Traffic {
     return best;
   }
 
-  /** Próximo trecho da rota a partir do nó em que a faixa atual termina. */
+  /** Next route segment from the node where the current lane ends. */
   private nextSeg(v: number): number {
     const c = this.veh.cols;
     const k = c.rIdx[v];
@@ -726,7 +734,7 @@ export class Traffic {
     return this.segBetween(this.routeAt(v, k), this.routeAt(v, k + 1));
   }
 
-  /** Replaneja com a faixa atual levando a `node` (rIdx = 0 aponta para ele). */
+  /** Replans with the current lane leading to `node` (rIdx = 0 points at it). */
   private replanFrom(v: number, node: number, allowBack = false): void {
     const c = this.veh.cols;
     if (c.line[v] >= 0) { this.busPlan(v, node); return; }
@@ -740,7 +748,7 @@ export class Traffic {
     return c.rIdx[v] >= c.rLen[v] - 1 && this.routeAt(v, c.rIdx[v]) === c.dest[v];
   }
 
-  // ------------------------------------------------------------ demanda
+  // ------------------------------------------------------------ demand
 
   private randomNode(): number {
     const t = this.sim.net.nodes;
@@ -752,41 +760,41 @@ export class Traffic {
     return -1;
   }
 
-  /** Hora do dia (da página) e multiplicadores do jogador. */
+  /** Hour of day (from the page) and the player's multipliers. */
   hour = 10;
-  /** Demanda escolhida (0,6 baixa, 1 normal, 1,5 pico) e porcentagem do tráfego. */
+  /** Chosen demand (0.6 low, 1 normal, 1.5 peak) and traffic percentage. */
   demand = 1;
   trafficShare = 1;
 
-  /** Peso de cada zona (nenhuma, residencial, comercial, industrial, misto) para origem e destino na hora atual. */
+  /** Weight of each zone (none, residential, commercial, industrial, mixed) for origin and destination at the current hour. */
   private zoneWeights(origin: boolean): number[] {
     const h = this.hour;
     const morning = h >= 6 && h < 10, evening = h >= 16 && h < 20;
-    // de manhã sai de casa para o trabalho; à tarde volta; no meio do dia, comércio
+    // in the morning from home to work; in the evening back; midday, shopping
     const home = [0.15, 1, 0.15, 0.1, 0.5], work = [0.1, 0.2, 1, 0.8, 0.6], mid = [0.15, 0.5, 0.8, 0.4, 0.8];
     if (morning) return origin ? home : work;
     if (evening) return origin ? work : home;
     return mid;
   }
 
-  /** Viagens novas que ainda cabem neste passo além de repor quem chegou (FLEET_TAU). */
+  /** New trips still allowed this step beyond replacing those who arrived (FLEET_TAU). */
   private spawnCredit = 0;
-  /** Tamanho da frota no fim do passo anterior (até o alvo): quem chegou é reposto sem gastar crédito. */
+  /** Fleet size at the end of the previous step (up to the target): arrivals are replaced without spending credit. */
   private fleetFloor = 0;
 
-  /** Quantos carros a hora pede (curva do dia, picos às 8 e às 18). */
+  /** How many cars the hour calls for (daily curve, peaks at 8:00 and 18:00). */
   dayFactor(): number {
     const h = this.hour;
     const peak = (c: number, w: number) => Math.exp(-((h - c) * (h - c)) / (2 * w * w));
     return 0.3 + 0.55 * peak(8, 1.3) + 0.6 * peak(18, 1.5) + 0.35 * peak(13, 2.5) - 0.2 * (h < 5 || h > 23 ? 1 : 0);
   }
 
-  /** Lotação de cada região (carros / vagas nas faixas) e quando foi medida. */
+  /** Occupancy of each region (cars / lane slots) and when it was measured. */
   regionOcc = new Float32Array(REGION_N * REGION_N);
   private regionLoad = new Float32Array(REGION_N * REGION_N);
   private regionCap = new Float32Array(REGION_N * REGION_N);
   private regionT = -Infinity;
-  /** Desliga a recusa por região (medida A/B). */
+  /** Turns off region avoidance (A/B measurement). */
   regionAvoid = true;
 
   regionOf(x: number, z: number): number {
@@ -795,7 +803,7 @@ export class Traffic {
     return j * REGION_N + i;
   }
 
-  /** Mede a lotação das regiões (a cada REGION_EVERY s: uma passada pelos trechos, não por passo). */
+  /** Measures region occupancy (every REGION_EVERY s: one pass over the segments, not per step). */
   private measureRegions(): void {
     if (this.time - this.regionT < REGION_EVERY) return;
     this.regionT = this.time;
@@ -810,7 +818,7 @@ export class Traffic {
       C[r] += sc.len[s] * (info.lanesFwd + info.lanesBack) / 7.5;
     }
     for (let r = 0; r < L.length; r++) this.regionOcc[r] = C[r] > 0 ? L[r] / C[r] : 0;
-    // governador: velocidade média da janela micro (só com gente bastante para medir)
+    // governor: average speed of the micro window (only with enough vehicles to measure)
     let sum = 0;
     const cv = this.veh.cols.v;
     for (let i = 0; i < this.microN; i++) sum += cv[this.micro[i]];
@@ -822,13 +830,13 @@ export class Traffic {
     }
   }
 
-  /** Fração da frota que a rede carrega agora (governador) e a velocidade média da janela (m/s). */
+  /** Fraction of the fleet the network carries now (governor) and the window's average speed (m/s). */
   gov = 1;
   windowSpeed = 0;
-  /** Desliga o governador (medida A/B). */
+  /** Turns off the governor (A/B measurement). */
   governed = true;
 
-  /** Nó pela zona das vias em volta (sorteio com rejeição: O(1) esperado). */
+  /** Node picked by the zone of the surrounding roads (rejection sampling: O(1) expected). */
   private zonedNode(weights: number[]): number {
     const net = this.sim.net, t = net.nodes, sc = net.segs.cols;
     for (let i = 0; i < 24; i++) {
@@ -842,11 +850,11 @@ export class Traffic {
         const info = PROFILE_INFO[sc.profile[s]], cap = sc.len[s] / 7.5;
         occ = Math.max(occ, this.segLoad[s * 2] / (cap * Math.max(1, info.lanesFwd)), this.segLoad[s * 2 + 1] / (cap * Math.max(1, info.lanesBack)));
       }
-      // pelo comprimento de rua em volta (os lotes), não por nó: cruzamentos colados no centro não viram
-      // origem e destino de viagens a mais
+      // by the street length around it (the lots), not per node: tightly packed junctions downtown do not become
+      // the origin and destination of extra trips
       w *= Math.min(1, front / 120);
-      // rua em volta engarrafada: a viagem sai (ou vai) para outro lugar, como quem evita o horário ou o
-      // bairro parado; sem isso o centro junta carros até travar (a frota é a mesma, só muda onde)
+      // congested surrounding street: the trip starts (or ends) somewhere else, like people avoiding the rush hour or
+      // the gridlocked district; without it the centre piles up cars until it jams (same fleet, only where changes)
       if (this.crowdAvoid && occ > CROWD_OCC) w *= Math.max(0, 1 - (occ - CROWD_OCC) * CROWD_SLOPE);
       if (this.regionAvoid) {
         const ro = this.regionOcc[this.regionOf(t.cols.x[n], t.cols.z[n])];
@@ -867,7 +875,7 @@ export class Traffic {
       const cand = this.zonedNode(wd);
       if (cand < 0 || cand === a) continue;
       const d = Math.hypot(nc.x[cand] - nc.x[a], nc.z[cand] - nc.z[a]);
-      // viagens curtas são mais comuns (distância média ~2,5 km)
+      // short trips are more common (mean distance ~2.5 km)
       if (d > 200 && d < 7000 && this.rng.next() < Math.exp(-d / 2500)) { b = cand; break; }
     }
     if (b < 0) return;
@@ -885,7 +893,7 @@ export class Traffic {
     const after = this.nextSeg(v);
     const lane = this.pickLane(seg, dir, after, false, after >= 0 ? this.sim.laneToward(seg, dir, after, 0, false) : laneId(seg, dir, 0));
     if (lane < 0 || laneCount(net.segs.cols.profile[seg], dir) === 0) { this.veh.release(v); return; }
-    // faixa cheia: não há onde sair com o carro (a viagem nasce em outro lugar)
+    // lane full: nowhere to pull out with the car (the trip is born elsewhere)
     if (this.laneCount[lane] + 1 > this.sim.laneLen(lane) / 7.5) { this.veh.release(v); return; }
     const c = this.veh.cols;
     c.lane[v] = lane; c.conn[v] = -1;
@@ -896,13 +904,13 @@ export class Traffic {
   }
 
   /**
-   * Nasce perto da câmera (350 m), na faixa da direita de um trecho com vagas: sai da vaga (parado na guia, seta da
-   * esquerda, entra na faixa) em vez de andar invisível no meso até a próxima esquina. Só com folga atrás.
+   * Born near the camera (350 m), in the right lane of a segment with bays: pulls out of the bay (stopped at the kerb,
+   * left indicator, merges into the lane) instead of driving invisibly in meso to the next corner. Only with room behind.
    */
   private leaveBay(v: number, lane: number): boolean {
     const c = this.veh.cols, sim = this.sim;
     if (c.kind[v] !== 0 || laneIdx(lane) !== 0) return false;
-    // só onde se vê (350 m da câmera): no resto da janela micro nascer no meso não muda o desenho e custa menos
+    // only where it is visible (350 m from the camera): elsewhere in the micro window, spawning in meso looks the same and costs less
     const sc = sim.net.segs.cols, sg = laneSeg(lane);
     if (Math.hypot(sc.mx[sg] - this.camX, sc.mz[sg] - this.camZ) > 350) return false;
     if (Number.isNaN(parkU(sim.net.segs.cols.profile[laneSeg(lane)], laneDir(lane)))) return false;
@@ -910,7 +918,7 @@ export class Traffic {
     if (s < 10 || s > sim.laneLen(lane) - 25) return false;
     for (let o = this.laneHead[lane]; o >= 0; o = c.next[o]) {
       const d = c.s[o] - s;
-      if (d > -40 && d < c.len[o] + 8) return false; // alguém chegando atrás ou logo à frente
+      if (d > -40 && d < c.len[o] + 8) return false; // someone coming from behind or just ahead
     }
     c.v[v] = 0; c.pk[v] = 1; c.dwell[v] = 0; c.held[v] = 0; c.fade[v] = 0;
     this.addMicro(v);
@@ -967,29 +975,29 @@ export class Traffic {
     return Math.hypot(sc.mx[s] - this.camX, sc.mz[s] - this.camZ) < this.window;
   }
 
-  /** Veículo passa a andar em modo meso na faixa (agenda a saída). */
+  /** Vehicle switches to meso mode on the lane (schedules its exit). */
   private mesoEnter(v: number, lane: number, spawned = false): void {
     const c = this.veh.cols;
     const L = this.sim.laneLen(lane);
     const p = this.sim.net.segs.cols.profile[laneSeg(lane)];
     const lanes = Math.max(1, laneCount(p, laneDir(lane)));
-    // a fila já sai da vazão (um veículo a cada 1,8 s por faixa) e a faixa cheia anda devagar: o
-    // congestionamento existe longe da câmera também, e a vazão que chega à janela micro é a que um
-    // trânsito daquela lotação daria
+    // the queue already drains at the capacity rate (one vehicle every 1.8 s per lane) and a full lane moves slowly:
+    // congestion exists far from the camera too, and the flow reaching the micro window is what traffic at that
+    // occupancy would deliver
     const rest = spawned ? L - c.s[v] : L;
     let extra = 0;
-    // ônibus na faixa da sua parada: para, atende e já sabe a próxima
+    // bus on the lane of its stop: stops, serves it and already knows the next one
     if (c.line[v] >= 0) {
       const ln = this.lines[c.line[v]];
       if (ln && ln.stopLane[c.stopI[v]] === lane) { extra = ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL; this.serve(v); }
     }
-    // o cruzamento no fim da faixa: a mesma espera que a rota estima (semáforo, pare, conversão) e a
-    // vazão do braço, como no micro
+    // the junction at the end of the lane: the same wait the router estimates (signal, stop, turn) and the
+    // arm's throughput, as in micro
     const ns = this.nextSeg(v);
     const wait = ns >= 0 ? this.router.nodeCost(this.sim.laneTo(lane), laneSeg(lane), ns) : 0;
     const node = this.sim.laneTo(lane);
     const headway = this.sim.nodePhases[node] > 0 ? 3.4 : wait >= 6 ? 3.6 : wait >= 4 ? 2.6 : 1.8;
-    // tempo: andar livre, mais lento pela lotação (curva BPR), mais a espera do cruzamento; tudo vezes MESO_ALPHA
+    // time: free driving, slowed by occupancy (BPR curve), plus the junction wait; all times MESO_ALPHA
     const occ = Math.min(1, this.laneCount[lane] * 7.5 / (L * lanes));
     const run = rest / (laneSpeed(p) * c.vf[v]) * (1 + 3 * occ * occ) + wait;
     const t = Math.max(this.time + run * MESO_ALPHA + extra, this.laneLastExit[lane] + headway / lanes);
@@ -1007,19 +1015,19 @@ export class Traffic {
     }
   }
 
-  /** Fim da faixa em modo meso: escolhe a próxima, espera se estiver cheia. */
+  /** End of the lane in meso mode: picks the next one, waits if it is full. */
   private mesoAdvance(v: number): void {
     const c = this.veh.cols, sim = this.sim;
     const lane = c.lane[v];
     if (!sim.net.segs.alive[laneSeg(lane)] || c.dying[v]) { this.despawn(v); return; }
     if (this.atDestination(v)) {
       if (c.line[v] < 0) { this.arrived++; this.despawn(v); return; }
-      this.busPlan(v, sim.laneTo(lane)); // ônibus chegou sem atender: refaz o trecho até a parada
+      this.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
       if (c.dying[v]) { this.despawn(v); return; }
     }
     let ns = this.nextSeg(v);
     if (ns < 0) {
-      // rota acabou antes do destino (rota truncada): planeja de novo daqui
+      // route ended before the destination (truncated route): plan again from here
       this.replanFrom(v, sim.laneTo(lane));
       if (c.dying[v]) { this.despawn(v); return; }
       ns = this.nextSeg(v);
@@ -1028,16 +1036,16 @@ export class Traffic {
     const conn = sim.connToward(lane, ns, c.line[v] >= 0);
     const node = sim.laneTo(lane);
     const dir = sim.net.segs.cols.a[ns] === node ? 1 : -1;
-    // meso: entra na faixa menos cheia entre as que servem para a conversão seguinte (todas as faixas
-    // carregam carros, como no micro; senão todos chegam à janela numa faixa só)
+    // meso: enters the least full lane among those valid for the next turn (all lanes carry cars,
+    // as in micro; otherwise everyone reaches the window in a single lane)
     let to = conn >= 0 ? this.pickLane(ns, dir, this.segAfter(v, 1), c.line[v] >= 0, sim.conns.cols.to[conn]) : sim.laneToward(ns, dir, ns, 0);
-    if (to < 0 && ns === laneSeg(lane)) to = laneId(ns, dir, 0); // retorno no fim de beco
+    if (to < 0 && ns === laneSeg(lane)) to = laneId(ns, dir, 0); // U-turn at a dead end
     if (to < 0 || !sim.net.segs.alive[ns]) { this.despawn(v); return; }
-    // fila: faixa cheia segura o veículo
+    // queue: a full lane holds the vehicle
     const cap = sim.laneLen(to) / 7.5;
-    // fila: espera vaga; preso demais (impasse longe da câmera, onde ninguém vê), segue assim mesmo. O meso
-    // não reconsidera a rota: desviando das faixas meso cheias ele mandava os carros para a janela micro
-    // (medido: a janela enchia e o centro caía de 16 para 8 km/h)
+    // queue: wait for room; stuck too long (deadlock far from the camera, where nobody sees), go anyway. Meso
+    // does not reconsider routes: detouring around full meso lanes sent the cars into the micro window
+    // (measured: the window filled up and the centre dropped from 16 to 8 km/h)
     this.mesoTries++;
     if (this.laneCount[to] >= cap && c.wait[v] < 40) { c.wait[v] += 2; this.mesoFull++; this.schedule(v, this.time + 2); return; }
     c.wait[v] = 0;
@@ -1050,7 +1058,7 @@ export class Traffic {
     c.lane[v] = to;
     c.rIdx[v]++;
     if (enterMicro) {
-      // entrou na janela: vira micro no começo da faixa
+      // entered the window: becomes micro at the start of the lane
       c.s[v] = 0;
       c.held[v] = 0;
       c.v[v] = Math.min(laneSpeed(sim.net.segs.cols.profile[ns]) * c.vf[v], tail >= 0 ? Math.max(2, (c.s[tail] - c.len[tail]) / T_HEAD) : 99);
@@ -1063,15 +1071,15 @@ export class Traffic {
     this.mesoEnter(v, to);
   }
 
-  // ------------------------------------------------------------ cruzamentos
+  // ------------------------------------------------------------ junctions
 
-  /** Fase do semáforo aberta para o braço da conexão? */
+  /** Is the signal stage open for the connection's arm? */
   private stageGreen(conn: number, amberToo = false): boolean {
     const sim = this.sim, k = sim.conns.cols, n = k.node[conn];
     return sim.armStage[n * 8 + k.arm[conn]] === this.sigPhase[n] && (this.sigState[n] === 0 || (amberToo && this.sigState[n] === 1));
   }
 
-  /** A conexão pode ser usada agora? (semáforo, preferência do anel) — sem olhar a preferência entre veículos. */
+  /** Can the connection be used now? (signal, ring priority) — without looking at right of way between vehicles. */
   gateOpen(conn: number): boolean {
     const sim = this.sim, k = sim.conns.cols;
     const n = k.node[conn];
@@ -1080,7 +1088,7 @@ export class Traffic {
       const from = k.from[conn];
       const fromRing = (sim.net.segs.cols.flags[laneSeg(from)] & SegFlag.Ring) !== 0;
       if (fromRing) return true;
-      // entrada: espera o anel livre (carros chegando ao nó ou passando por ele)
+      // entry: wait for the ring to be clear (cars approaching the node or going through it)
       for (let c = sim.nodeConn[n]; c >= 0; c = k.nextAtNode[c]) {
         const f = k.from[c];
         if ((sim.net.segs.cols.flags[laneSeg(f)] & SegFlag.Ring) === 0) continue;
@@ -1093,13 +1101,13 @@ export class Traffic {
     return true;
   }
 
-  /** Peso da regra do braço: principal e semáforo passam antes; sem placa no meio; quem dá a preferência ou para, depois. */
+  /** Rank of the arm's rule: main road and signal go first; unsigned in the middle; yield or stop last. */
   private ruleRank(conn: number): number {
     const k = this.sim.conns.cols, r = this.sim.armRule[k.node[conn] * 8 + k.arm[conn]];
     return r === Rule.Main || r === Rule.Signal ? 3 : r === Rule.Free ? 2 : 1;
   }
 
-  /** `d` passa antes de `c`? Regra do braço, depois o movimento (reto > direita > esquerda), depois quem vem pela direita. */
+  /** Does `d` go before `c`? Arm rule, then the movement (straight > right > left), then whoever comes from the right. */
   private outranks(d: number, c: number): boolean {
     const rd = this.ruleRank(d), rc = this.ruleRank(c);
     if (rd !== rc) return rd > rc;
@@ -1109,10 +1117,10 @@ export class Traffic {
     const n = k.node[c], sim = this.sim;
     const hx = -sim.armDx[n * 8 + k.arm[c]], hz = -sim.armDz[n * 8 + k.arm[c]];
     const ox = sim.armDx[n * 8 + k.arm[d]], oz = sim.armDz[n * 8 + k.arm[d]];
-    return ox * hz - oz * hx < 0; // braço de d à direita de quem chega por c
+    return ox * hz - oz * hx < 0; // d's arm is to the right of someone arriving via c
   }
 
-  /** Há alguém na conexão `d` ou chegando nela em breve (para quem precisa esperar por ela)? */
+  /** Is someone on connection `d` or about to reach it (for whoever must wait for it)? */
   private connBusy(d: number, me: number, strict: boolean): boolean {
     if (this.connHead[d] >= 0) return true;
     const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
@@ -1121,31 +1129,31 @@ export class Traffic {
     if (h < 0 || h === me) return false;
     const dist = sim.laneLen(f) - c.s[h];
     if (dist > 45) return false;
-    // vai mesmo por d?
+    // is it really taking d?
     const ns = this.nextSeg(h);
     if (ns < 0 || laneSeg(k.to[d]) !== ns || sim.connToward(f, ns, c.line[h] >= 0) !== d) return false;
-    // quem tem a vez está parado porque a saída dele está cheia: não vai sair agora, o outro passa
+    // the one with right of way is stopped because its exit is full: it will not go now, the other passes
     if (c.v[h] < 0.5 && !this.exitRoom(d, h)) return false;
-    // paciência (roadcraft): quem espera aceita brecha menor, 0,06 s por segundo esperado, até 1,5 s (mínimo 2,2 s)
+    // impatience (roadcraft): whoever waits accepts a smaller gap, 0.06 s per second waited, up to 1.5 s (minimum 2.2 s)
     const imp = Math.min(1.5, c.wait[me] * 0.06);
     if (strict) return dist < 5 || dist / Math.max(1, c.v[h]) < Math.max(2.2, 3 - imp);
-    // mesma regra, parado na linha: quem chegou primeiro passa
+    // same rule, stopped at the line: first come, first served
     if (c.v[h] < 0.5 && dist < 5) return c.wait[h] > c.wait[me] + 0.3;
     if (sim.nodePhases[k.node[d]] > 0 && !this.stageGreen(d, true)) return false;
     return dist < 6 || dist / Math.max(1, c.v[h]) < Math.max(2.2, 3.5 - imp);
   }
 
-  /** Cabe na faixa de saída? (não entra no cruzamento para ficar parado nele) */
+  /** Is there room on the exit lane? (do not enter the junction only to get stuck in it) */
   private exitRoom(conn: number, v: number, extra = 0, deep = false): boolean {
     const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
     const to = k.to[conn];
-    // a vaga está guardada para quem espera por ela há mais tempo (outro braço não fura a vez)
+    // the spot is reserved for whoever has waited longest for it (another arm cannot jump the queue)
     const cl = this.exitClaim[to];
     if (cl >= 0 && cl !== v && this.time - this.exitClaimT[to] < 1 && this.veh.alive[cl]) return false;
     const L = sim.laneLen(to);
-    // cruzamentos colados (a faixa entre eles é mais curta que um carro): ela é parte dos dois cruzamentos; a vaga que
-    // conta é a da faixa seguinte da rota, descontando quem está nela e quem vai para ela. Exigir vaga na faixa de 1 m
-    // deixava passar um carro por vez pelo cruzamento duplo (o pior nó do centro gerado)
+    // back-to-back junctions (the lane between them is shorter than a car): it is part of both junctions; the room
+    // that counts is on the next lane of the route, minus those on it and those heading to it. Requiring room on the
+    // 1 m lane let only one car at a time through the double junction (the worst node of the generated downtown)
     if (L < 8 && !deep) {
       const kk = c.rIdx[v];
       const ns2 = kk + 2 < c.rLen[v] ? this.segBetween(this.routeAt(v, kk + 1), this.routeAt(v, kk + 2)) : -1;
@@ -1161,36 +1169,79 @@ export class Traffic {
       }
     }
     const tail = this.laneTail[to];
-    // o último da faixa andando abre espaço no tempo de atravessar (~2 s): quem está atrás já pode entrar
+    // the last one on the lane, moving, frees room in the time it takes to cross (~2 s): those behind may enter
     let room = (tail >= 0 ? c.s[tail] - c.len[tail] + Math.min(c.v[tail], 6) * 1.5 : L) - extra;
     let inbound = 0;
-    // quem já está no cruzamento indo para a mesma faixa
+    // those already in the junction heading to the same lane
     for (let x = sim.nodeConn[k.node[conn]]; x >= 0; x = k.nextAtNode[x]) {
       if (k.to[x] !== to) continue;
       for (let u = this.connHead[x]; u >= 0; u = c.next[u]) { room -= c.len[u] + 2; inbound++; }
     }
     if (extra > 0) inbound++;
-    // faixa vazia (mesmo curta): pode entrar; senão precisa caber
+    // empty lane (even a short one): may enter; otherwise it must fit
     if (this.laneCount[to] === 0 && inbound === 0) return true;
-    // trecho curto entre cruzamentos colados: é quase parte do cruzamento; o último andando, cabe mais um
+    // short segment between close junctions: nearly part of the junction; if the last one is moving, one more fits
     if (L < 25 && tail >= 0 && c.v[tail] > 2 && inbound === 0) return true;
     if (this.laneCount[to] >= Math.max(1, L / 7.5)) return false;
     return room > Math.min(c.len[v] + 2.5, L * 0.6);
   }
 
-  /** Portão para um veículo: semáforo (no amarelo passa quem não consegue parar), pare, preferência, saída livre. */
+  /** Gate for a vehicle: signal (on amber those who cannot stop go), stop sign, right of way, clear exit. */
   private gateFor(conn: number, v: number, toEnd: number): boolean {
-    // emenda de via (nó de duas vias sem controle): não há cruzamento para bloquear; o IDM segue o último da faixa
-    // seguinte através do nó (`aheadThrough`). Exigir folga ali parava a fila a cada emenda (a cidade divide as vias a
-    // cada ≤112 m) e o anda-e-para descia até o centro: 31 → 196 saídas cheias atrás de emendas em 20 min de pico.
+    // road splice (uncontrolled two-way node): there is no junction to block; IDM follows the last vehicle on the next
+    // lane through the node (`aheadThrough`). Requiring room there stopped the queue at every splice (the city splits
+    // roads every ≤112 m) and the stop-and-go spread to the centre: 31 → 196 full exits behind splices in 20 min of peak.
     const sim = this.sim, n = sim.conns.cols.node[conn];
     if (sim.net.nodes.cols.deg[n] === 2 && sim.nodeCtl[n] === Ctl.None) return true;
     if (!this.exitRoom(conn, v)) return false;
     return this.gateRules(conn, v, toEnd);
   }
 
+  /** Level crossings whose barrier is down (a train within reach): node → simulation time until it lifts. */
+  private crossingClosed = new Map<number, number>();
+  /** Barrier reach: a train this far (m, along its route) or on the crossing closes it. */
+  static readonly CROSSING_REACH = 160;
+
+  /**
+   * Level crossings (Roadcraft): each train in the micro window closes the barriers of the crossings ahead of it
+   * on its route within CROSSING_REACH, and of the one it is on, for 1 s, renewed every step while it is there.
+   * The page reads the state in the signals buffer: 128 | the rail arms' bits while the barrier is down, 0 up.
+   * Work per step: the trains in the window × the nodes of their route within reach.
+   */
+  private updateCrossings(): void {
+    const c = this.veh.cols, sim = this.sim, sc = sim.net.segs.cols;
+    this.lines.forEach((ln, li) => {
+      if (!ln.mode) return;
+      for (const v of this.busSets[li]) {
+        if (!this.veh.alive[v] || !c.micro[v]) continue;
+        if (c.conn[v] >= 0) { const n = sim.conns.cols.node[c.conn[v]]; if (sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1); }
+        if (c.lane[v] < 0) continue;
+        let d = sim.laneLen(c.lane[v]) - c.s[v];
+        for (let k = c.rIdx[v]; k < c.rLen[v] && d < Traffic.CROSSING_REACH; k++) {
+          const n = this.routeAt(v, k);
+          if (n >= 0 && n < sim.nodeCtl.length && sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1);
+          if (k + 1 < c.rLen[v]) { const s = this.segBetween(n, this.routeAt(v, k + 1)); if (s < 0) break; d += sc.len[s]; }
+        }
+      }
+    });
+    for (const [n, until] of this.crossingClosed) {
+      const open = until < this.time || !sim.net.nodes.alive[n];
+      if (this.signals && n < this.signals.length) {
+        let mask = 0;
+        if (!open) { const segs = sim.net.segsOf(n, []); segs.forEach((s, a) => { if (PROFILE_INFO[sc.profile[s]].rail) mask |= 1 << a; }); }
+        this.signals[n] = open ? 0 : 128 | (mask & 63);
+      }
+      if (open) this.crossingClosed.delete(n);
+    }
+  }
+
+  /** The barrier of the level crossing at node n is down. */
+  crossingDown(n: number): boolean { return (this.crossingClosed.get(n) ?? -1) >= this.time; }
+
   private gateRules(conn: number, v: number, toEnd: number): boolean {
     const sim = this.sim, k = sim.conns.cols, n = k.node[conn], c = this.veh.cols;
+    // level crossing with the barrier down: road traffic waits (the train goes through)
+    if (sim.nodeCtl[n] === Ctl.Crossing && this.crossingDown(n) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(k.from[conn])]].rail) return false;
     if (sim.nodePhases[n] > 0) {
       if (!this.windowSignals.has(n)) return true;
       if (!this.stageGreen(conn)) {
@@ -1198,15 +1249,15 @@ export class Traffic {
         return false;
       }
     } else if (sim.nodeRing[n]) return this.gateOpen(conn);
-    // zebra: dá a vez a quem está atravessando (o pedestre aparece só perto da câmera)
+    // zebra: give way to whoever is crossing (the pedestrian only appears near the camera)
     else if (sim.nodeCtl[n] === Ctl.Zebra) return !this.pedCrossing(n);
-    else if (sim.armRule[n * 8 + k.arm[conn]] === Rule.Stop && c.wait[v] < 1.2) return false; // pare: para antes de seguir
-    // preferência: espera quem passa antes (no semáforo, só o conflito permitido, como a conversão à esquerda)
+    else if (sim.armRule[n * 8 + k.arm[conn]] === Rule.Stop && c.wait[v] < 1.2) return false; // stop sign: halt before going on
+    // right of way: wait for those who go first (at a signal, only the permitted conflict, such as a left turn)
     const list = sim.conflicts.get(conn);
     if (!list) return true;
-    const stuck = c.wait[v] > 8; // ninguém fica preso para sempre: depois de 12 s só respeita quem já está no cruzamento
+    const stuck = c.wait[v] > 8; // nobody stays stuck forever: after 12 s only those already in the junction are respected
     const now = Math.round(this.time * 10);
-    // e reclama a vez: quem vem pela preferencial e ainda pode parar com folga deixa passar
+    // and claims the turn: those on the priority road who can still stop comfortably let it through
     if (stuck) this.connClaim[conn] = now;
     const sv = c.v[v], canStop = toEnd > (sv * sv) / (2 * 3) + 1;
     for (let i = 0; i < list.length; i++) {
@@ -1216,7 +1267,7 @@ export class Traffic {
       if (sim.nodePhases[n] > 0 && !this.stageGreen(d, true) && this.connHead[d] < 0) continue;
       const higher = this.outranks(d, conn);
       if (higher && this.connBusy(d, v, this.ruleRank(d) > this.ruleRank(conn))) return false;
-      if (!higher && this.connHead[d] >= 0 && this.ruleRank(d) >= this.ruleRank(conn)) return false; // não entra em cima de quem já está passando
+      if (!higher && this.connHead[d] >= 0 && this.ruleRank(d) >= this.ruleRank(conn)) return false; // do not drive into someone already going through
     }
     return true;
   }
@@ -1229,7 +1280,7 @@ export class Traffic {
       const spec = sim.net.junctions.get(n);
       const pedSig = sim.nodeCtl[n] === Ctl.PedSignal;
       if (spec?.fixed || pedSig) {
-        // tempo fixo: o ciclo segue o relógio (com a defasagem), para a onda verde
+        // fixed time: the cycle follows the clock (with the offset), for the green wave
         const greens: number[] = [];
         let cycle = 0;
         for (let i = 0; i < phases; i++) { const g = Math.max(5, spec?.greens?.[i] ?? (pedSig ? (i === 0 ? 30 : 12) : 20)); greens.push(g); cycle += g + 4.5; }
@@ -1247,10 +1298,10 @@ export class Traffic {
       } else {
         this.sigTimer[n] += dt;
         const st = this.sigState[n];
-        // prioridade ao ônibus: ônibus esperando no vermelho encurta o verde dos outros
+        // bus priority: a bus waiting at red shortens the others' green
         const busWaiting = spec?.bus && st === 0 && this.sigTimer[n] > 6 && this.busWaitingAt(n);
-        // a cada segundo de verde (depois do mínimo): fila vazia aqui e gente esperando do outro lado corta o
-        // verde; ninguém esperando do outro lado segura o verde
+        // every second of green (after the minimum): an empty queue here with vehicles waiting on the other side cuts
+        // the green; nobody waiting on the other side holds the green
         let endGreen = busWaiting || false;
         const tg = this.sigTimer[n];
         if (!endGreen && st === 0 && tg >= 6 && Math.floor(tg) !== Math.floor(tg - dt)) {
@@ -1262,7 +1313,7 @@ export class Traffic {
         if (st === 0 && (tg >= this.sigGreen[n] || endGreen)) { this.sigState[n] = 1; this.sigTimer[n] = 0; }
         else if (st === 1 && this.sigTimer[n] >= 3) { this.sigState[n] = 2; this.sigTimer[n] = 0; }
         else if (st === 2 && this.sigTimer[n] >= 1.5) {
-          // próxima fase com fila (pula fases vazias)
+          // next stage with a queue (skips empty stages)
           let next = this.sigPhase[n];
           for (let k = 1; k <= phases; k++) {
             const cand = (this.sigPhase[n] + k) % phases;
@@ -1271,12 +1322,12 @@ export class Traffic {
           this.sigPhase[n] = next;
           this.sigState[n] = 0;
           this.sigTimer[n] = 0;
-          // verde se ajusta à fila
+          // green adapts to the queue
           this.sigGreen[n] = Math.min(40, Math.max(8, 5 + this.stageQueue(n, next) * 1.8));
         }
       }
       if (this.signals && n < this.signals.length) {
-        // 128 | amarelo << 6 | braços com verde/amarelo
+        // 128 | amber << 6 | arms with green/amber
         let mask = 0;
         if (this.sigState[n] < 2) for (let a = 0; a < 8; a++) if (sim.armStage[n * 8 + a] === this.sigPhase[n] && a < sim.net.nodes.cols.deg[n]) mask |= 1 << a;
         this.signals[n] = 128 | (this.sigState[n] === 1 ? 64 : 0) | (mask & 63);
@@ -1284,7 +1335,7 @@ export class Traffic {
     }
   }
 
-  /** Fila de uma fase (soma dos braços dela). */
+  /** Queue of a stage (sum over its arms). */
   private stageQueue(n: number, stage: number): number {
     let q = 0;
     const deg = this.sim.net.nodes.cols.deg[n];
@@ -1292,7 +1343,7 @@ export class Traffic {
     return q;
   }
 
-  /** Algum ônibus parado no vermelho deste nó? */
+  /** Is any bus stopped at red at this node? */
   private busWaitingAt(n: number): boolean {
     const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
     for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
@@ -1303,12 +1354,12 @@ export class Traffic {
     return false;
   }
 
-  /** Carros do braço `arm` do nó `n` com verde ou amarelo (pedestres esperam). Só na janela. */
+  /** Cars on arm `arm` of node `n` have green or amber (pedestrians wait). Only within the window. */
   carsGo(n: number, arm: number): boolean {
     return this.windowSignals.has(n) && this.sim.armStage[n * 8 + arm] === this.sigPhase[n] && this.sigState[n] < 2;
   }
 
-  /** Veículos esperando num braço (perto da linha de retenção). */
+  /** Vehicles waiting on an arm (near the stop line). */
   private armQueue(n: number, arm: number): number {
     const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
     let q = 0;
@@ -1324,7 +1375,7 @@ export class Traffic {
     return q;
   }
 
-  /** Uma conexão vai sumir (nó refeito): quem está nela pula para a faixa de destino. */
+  /** A connection is about to disappear (node rebuilt): those on it jump to the destination lane. */
   evacuateConn(conn: number): void {
     const c = this.veh.cols, sim = this.sim;
     for (let v = this.connHead[conn]; v >= 0;) {
@@ -1344,7 +1395,7 @@ export class Traffic {
     this.activeConns.delete(conn);
   }
 
-  /** Nós refeitos: semáforos recomeçam. */
+  /** Rebuilt nodes: signals restart. */
   nodesRebuilt(nodes: number[]): void {
     for (const n of nodes) {
       if (!this.sim.net.nodes.alive[n] || this.sim.nodePhases[n] === 0) { this.signalNodes.delete(n); continue; }
@@ -1353,12 +1404,12 @@ export class Traffic {
     }
   }
 
-  /** Trechos removidos: veículos nas faixas deles saem. */
+  /** Removed segments: vehicles on their lanes leave. */
   segsRemoved(segs: number[]): void {
     if (!segs.length) return;
     const dead = new Set(segs);
     const c = this.veh.cols;
-    // só os micro estão em listas; meso descobrem no próximo evento
+    // only micro vehicles are in lists; meso ones find out at their next event
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
       const lane = c.conn[v] >= 0 ? this.sim.conns.cols.to[c.conn[v]] : c.lane[v];
@@ -1370,11 +1421,11 @@ export class Traffic {
 
   // ------------------------------------------------------------ micro
 
-  /** Aceleração IDM com líder a `gap` metros andando a `vl`. */
+  /** IDM acceleration with a leader `gap` metres ahead moving at `vl`. */
   private idm(v: number, v0: number, gap: number, vl: number, am = A_MAX): number {
     const dv = v - vl;
-    // arranque da fila (roadcraft): o da frente saiu e eu ainda estou devagar → encosto menos e reajo mais
-    // rápido (até 60%, some aos 4 m/s); a fila sai junta, sem sanfona
+    // queue discharge (roadcraft): the one ahead has left and I am still slow → keep a shorter gap and react
+    // faster (up to 60%, gone at 4 m/s); the queue moves off together, without an accordion effect
     const rel = vl > 0.3 && v < 4 ? 0.6 * (1 - v / 4) * Math.min(1, vl / 1.5) : 0;
     const sStar = S0 * (1 - rel) + Math.max(0, v * T_HEAD * (1 - rel) + (v * dv) / (2 * Math.sqrt(am * B_COMF)));
     const g = Math.max(0.1, gap);
@@ -1383,7 +1434,7 @@ export class Traffic {
 
   private stepMicro(dt: number): void {
     const c = this.veh.cols, sim = this.sim;
-    // conexões primeiro (estão na frente das faixas que alimentam)
+    // connections first (they are ahead of the lanes that feed them)
     for (const conn of [...this.activeConns]) {
       for (let v = this.connHead[conn]; v >= 0;) {
         const next = c.next[v];
@@ -1401,7 +1452,7 @@ export class Traffic {
     }
   }
 
-  /** Distância até o veículo de trás da conexão/faixa à frente (para seguir através do nó). */
+  /** Distance to the rearmost vehicle on the connection/lane ahead (to follow through the node). */
   private aheadThrough(conn: number): [number, number] {
     const c = this.veh.cols, k = this.sim.conns.cols;
     const t = this.connTail[conn];
@@ -1422,9 +1473,9 @@ export class Traffic {
     let gap = 1e9, vl = 99;
     const lead = c.prev[v];
     if (lead >= 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
-    // fim da faixa: destino, semáforo ou o que vem depois do nó
+    // end of the lane: destination, signal or whatever comes after the node
     let conn = -1, release = false;
-    // ônibus: a parada é um obstáculo até ele parar e atender
+    // bus: the stop is an obstacle until it halts and serves it
     let atStop = false;
     if (c.line[v] >= 0 && !c.dying[v]) {
       const ln = this.lines[c.line[v]];
@@ -1440,7 +1491,7 @@ export class Traffic {
         }
       }
     }
-    if (c.dying[v]) { /* saindo */ }
+    if (c.dying[v]) { /* leaving */ }
     else if (this.atDestination(v) && c.line[v] < 0) {
       // near the camera cars and trucks decide 30 m before the end (room for the manoeuvre); the rest at 12 m
       const room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.nearCam(lane) ? 30 : 12;
@@ -1450,14 +1501,14 @@ export class Traffic {
       if (ns < 0 && !c.dying[v]) { this.replanFrom(v, sim.laneTo(lane)); ns = this.nextSeg(v); }
       if (ns >= 0) conn = sim.connToward(lane, ns, c.line[v] >= 0);
       if (conn < 0) {
-        // faixa errada: tenta trocar; senão segue qualquer conexão e replaneja
+        // wrong lane: try to change; otherwise take any connection and replan
         if (ns >= 0) this.mandatoryChange(v, lane, ns);
         conn = sim.laneConn[lane];
         if (conn < 0 && lead < 0 && c.lane[v] === lane) this.escapeLane(v, lane);
       }
-      // parado há 10 s na fila de uma faixa cheia (não no vermelho de uma faixa com folga): reconsidera a
-      // rota, fugindo do que está cheio (roadcraft reconsiderRoute). Na linha já é tarde para mudar (como no
-      // roadcraft): ali quem desvia é `detour`, e só para uma saída com espaço
+      // stopped for 10 s in the queue of a full lane (not at the red of a lane with room): reconsider the
+      // route, avoiding what is full (roadcraft reconsiderRoute). At the line it is too late to change (as in
+      // roadcraft): there `detour` handles it, and only toward an exit with room
       if (c.held[v] >= STUCK_SECONDS && lead >= 0 && c.line[v] < 0 && this.routeBudget > 0) {
         c.held[v] = 0;
         if (this.laneCount[lane] >= 0.6 * L / 7.5 && this.reconsider(v, lane, -1)) {
@@ -1468,36 +1519,36 @@ export class Traffic {
       if (lead < 0) {
         const toEnd = L - c.s[v];
         if (toEnd < 6 && c.v[v] < 0.5) c.wait[v] += dt;
-        // saída bloqueada há um tempo: o motorista desvia por outra saída livre desta faixa
+        // exit blocked for a while: the driver detours via another free exit of this lane
         if (conn >= 0 && c.wait[v] > 6 && c.lcCool[v] <= 0 && !this.exitRoom(conn, v)) {
           c.lcCool[v] = 5;
           const alt = this.detour(v, lane, conn);
           if (alt >= 0) conn = alt;
         }
-        // esperando a saída cheia há muito tempo: guarda a próxima vaga dela (o que espera há mais tempo ganha)
+        // waiting for the full exit for a long time: reserve its next free spot (the longest waiter wins)
         if (conn >= 0 && toEnd < 6 && c.wait[v] > STARVE_SECONDS) {
           const to = sim.conns.cols.to[conn], cl = this.exitClaim[to];
           if (cl === v || cl < 0 || this.time - this.exitClaimT[to] >= 1 || !this.veh.alive[cl] || c.wait[cl] < c.wait[v]) { this.exitClaim[to] = v; this.exitClaimT[to] = this.time; }
         }
-        // cruzamento travado (ninguém passa há 20 s e este espera há 20 s): passa um por vez, com a caixa livre
+        // jammed junction (nobody through for 20 s and this one waiting 20 s): one at a time, with the box clear
         if (conn >= 0 && toEnd < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
         if (conn < 0 || !(release || this.gateFor(conn, v, toEnd))) { gap = Math.min(gap, toEnd - 1); vl = 0; }
-        else { const [g2, v2] = this.aheadThrough(conn); if (toEnd + g2 < gap) { gap = toEnd + g2; vl = v2; } } // (não apaga a parada do ônibus)
-        // ônibus e trem: a parada logo depois do nó já entra na frenagem (trem rápido não para em 20 m)
+        else { const [g2, v2] = this.aheadThrough(conn); if (toEnd + g2 < gap) { gap = toEnd + g2; vl = v2; } } // (does not override the bus stop)
+        // bus and train: a stop just past the node already counts for braking (a fast train cannot stop in 20 m)
         const sg = this.stopAhead(v, conn);
         if (sg >= 0 && toEnd + sg < gap) { gap = toEnd + sg; vl = 0; }
       }
     }
     let a = this.idm(c.v[v], v0, gap, vl, c.kind[v] ? A_HEAVY : A_MAX);
-    if (c.dying[v]) a = Math.min(a, 0); // quem chegou some sem frear na frente dos outros
-    if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // na vaga, esperando para sair
+    if (c.dying[v]) a = Math.min(a, 0); // an arrived vehicle disappears without braking in front of others
+    if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // in the bay, waiting to pull out
     if (c.mv[v] >= 0) a = -9; // pulling out of the bay: held until the manoeuvre is back in the lane
     if (atStop) a = Math.min(a, -2);
     a = Math.max(-9, a);
     const nv = Math.max(0, c.v[v] + a * dt);
     c.exitC[v] = conn;
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;
-    // saindo da vaga: o desenho desliza da guia para a faixa (a simulação já o tem na faixa)
+    // pulling out of the bay: the drawing slides from the kerb to the lane (the simulation already has it in the lane)
     if (c.pk[v] > 0 && !c.dying[v] && c.mv[v] < 0 && (c.dwell[v] += dt) > 1.2) c.pk[v] = Math.max(0, c.pk[v] - dt / PARK_SIDE_S);
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
     c.v[v] = nv;
@@ -1507,11 +1558,11 @@ export class Traffic {
     if (c.fade[v] < 1) c.fade[v] = Math.min(1, c.fade[v] + dt * 1.2);
     if (nv < 0.5) c.held[v] += dt; else c.held[v] = 0;
     if (c.s[v] >= L) {
-      // faixa sem saída nenhuma (a conversão era de outra faixa e a troca não deu): para na linha e troca de
-      // faixa quando couber (`escapeLane`), em vez de sumir
+      // lane with no exit at all (the turn was from another lane and the change failed): stop at the line and change
+      // lanes when there is room (`escapeLane`), instead of disappearing
       if (conn < 0) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
       if (!release && !this.gateFor(conn, v, 0)) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
-      // entra na conexão
+      // enter the connection
       this.unlink(v);
       c.s[v] -= L;
       c.conn[v] = conn;
@@ -1526,7 +1577,7 @@ export class Traffic {
     if (c.lcCool[v] <= 0 && lead >= 0) this.discretionaryChange(v, lane);
   }
 
-  /** Alguém passou pelo nó `n` vindo do braço `arm` (micro ou meso): fluxo do braço e "o nó anda". */
+  /** Someone went through node `n` from arm `arm` (micro or meso): arm flow and "the node is moving". */
   private admit(n: number, arm: number): void {
     this.nodePass[n]++;
     this.advisor.pass[n * 8 + arm]++;
@@ -1534,17 +1585,17 @@ export class Traffic {
   }
 
   /**
-   * Cruzamento travado (invariants do roadcraft: ninguém passou há JAM_SECONDS e `v` espera na linha há
-   * isso): `v` pode passar sem esperar a vez nem a saída, um veículo por vez a cada RELEASE_EVERY s, só
-   * com a caixa livre (ninguém nas conexões que cruzam a dele) e sem pedestre na faixa. No semáforo só quem
-   * está no verde (a saída cheia o segurava): ninguém fura o vermelho. Num ciclo de faixas cheias, cada um
-   * que entra na caixa abre uma vaga atrás e a roda anda.
+   * Jammed junction (roadcraft invariants: nobody has gone through for JAM_SECONDS and `v` has waited at the line
+   * that long): `v` may go without waiting for its turn or for the exit, one vehicle every RELEASE_EVERY s, only
+   * with the box clear (nobody on connections crossing its own) and no pedestrian on the crosswalk. At a signal only
+   * those on green (held by the full exit): nobody runs the red. In a cycle of full lanes, each one entering the box
+   * frees a spot behind and the wheel turns.
    */
   private jamRelease(conn: number, v: number): boolean {
     const sim = this.sim, k = sim.conns.cols, n = k.node[conn];
     if (this.time - this.lastAdmit[n] < JAM_SECONDS || this.time < this.releaseAt[n]) return false;
     if (this.veh.cols.wait[v] < JAM_SECONDS) return false;
-    if (this.jamAt[n] < this.lastAdmit[n]) { this.jamAt[n] = this.time; this.jams++; } // travamento novo
+    if (this.jamAt[n] < this.lastAdmit[n]) { this.jamAt[n] = this.time; this.jams++; } // new jam
     if (sim.nodePhases[n] > 0 && (!this.windowSignals.has(n) || !this.stageGreen(conn, true))) return false;
     if (this.connHead[conn] >= 0 && this.veh.cols.s[this.connTail[conn]] < this.veh.cols.len[this.connTail[conn]] + 2) return false;
     if (this.pedCrossing(n)) return false;
@@ -1554,16 +1605,16 @@ export class Traffic {
   }
 
   /**
-   * Motorista parado há STUCK_SECONDS reconsidera a rota (roadcraft reconsiderRoute): a busca já foge das
-   * vias cheias (custo pela lotação) e, se a saída que ele queria está cheia, proíbe aquele trecho.
-   * Sem outro caminho fica com a rota de antes. Devolve se mudou de rota.
+   * A driver stopped for STUCK_SECONDS reconsiders the route (roadcraft reconsiderRoute): the search already avoids
+   * full roads (cost by occupancy) and, if the exit it wanted is full, bans that segment.
+   * With no other path it keeps the previous route. Returns whether the route changed.
    */
   private reconsider(v: number, lane: number, blocked: number): boolean {
     const c = this.veh.cols, sim = this.sim;
     if (c.line[v] >= 0 || this.routeBudget <= 0) return false;
     const node = sim.laneTo(lane);
-    // a rota segue de `node` (rIdx aponta para ele); o desvio é local: volta à rota alguns nós adiante
-    // (busca curta, barata), e o resto da rota fica como estava
+    // the route continues from `node` (rIdx points at it); the detour is local: it rejoins the route a few nodes
+    // ahead (short, cheap search), and the rest of the route stays as it was
     const o = v * ROUTE_CAP, k0 = c.rIdx[v], len = c.rLen[v];
     if (k0 >= len || this.routes[o + k0] !== node || k0 + 1 >= len) return false;
     const j = Math.min(len - 1, k0 + REJOIN);
@@ -1574,15 +1625,15 @@ export class Traffic {
     const n = this.router.route(node, target, this.detourPath, 0, ROUTE_CAP, false, laneSeg(lane), false, blocked);
     this.router.limit = lim;
     if (n < 2 || this.detourPath[n - 1] !== target) return false;
-    // só um desvio que esta faixa alcança (sem troca de faixa forçada na fila, que acabava em conexão errada
-    // e rota refeita do zero do outro lado)
+    // only a detour this lane can reach (no forced lane change in the queue, which ended in a wrong connection
+    // and a route rebuilt from scratch on the other side)
     const first = this.segBetween(this.detourPath[0], this.detourPath[1]);
     if (first < 0 || this.sim.connToward(lane, first, false) < 0) return false;
-    // nada mudou (a mesma sequência de nós): fica
+    // nothing changed (the same node sequence): keep it
     let same = n === j - k0 + 1;
     for (let i = 0; same && i < n; i++) same = this.detourPath[i] === this.routes[o + k0 + i];
     if (same) return false;
-    // nova rota: desvio + o que sobrava depois do ponto de volta (até caber)
+    // new route: detour + what remained after the rejoin point (as far as it fits)
     this.splice(v, 0, n, j);
     this.reroutes++;
     return true;
@@ -1590,7 +1641,7 @@ export class Traffic {
   private detourPath = new Int32Array(ROUTE_CAP);
   private tailTmp = new Int32Array(ROUTE_CAP);
 
-  /** Rota nova de `v`: `pre` nós já em routes[0..pre), o desvio (`detourPath`, n nós) e o que sobrava da rota depois do índice `j`. */
+  /** New route of `v`: `pre` nodes already in routes[0..pre), the detour (`detourPath`, n nodes) and what remained of the route after index `j`. */
   private splice(v: number, pre: number, n: number, j: number): void {
     const c = this.veh.cols, o = v * ROUTE_CAP, len = c.rLen[v];
     const tail = this.tailTmp, rest = Math.max(0, Math.min(len - j - 1, ROUTE_CAP - pre - n));
@@ -1601,8 +1652,8 @@ export class Traffic {
   }
 
   /**
-   * Outra conexão da faixa com espaço na saída; a rota é refeita a partir dela, voltando à rota de antes
-   * alguns nós adiante (busca curta; sem volta por perto, até o destino). −1 se não houver.
+   * Another connection of the lane with room at the exit; the route is rebuilt from it, rejoining the previous route
+   * a few nodes ahead (short search; with no rejoin nearby, all the way to the destination). −1 if none.
    */
   private detour(v: number, lane: number, blocked: number): number {
     const c = this.veh.cols, sim = this.sim, k = sim.conns.cols;
@@ -1631,7 +1682,7 @@ export class Traffic {
     return -1;
   }
 
-  /** Distância do começo da conexão até a parada (se a parada está na faixa depois dela), ou −1. */
+  /** Distance from the start of the connection to the stop (if the stop is on the lane after it), or −1. */
   private stopAhead(v: number, conn: number): number {
     const c = this.veh.cols;
     if (c.line[v] < 0 || conn < 0) return -1;
@@ -1651,8 +1702,8 @@ export class Traffic {
     else {
       const lt = this.laneTail[to];
       if (lt >= 0) { gap = L - c.s[v] + c.s[lt] - c.len[lt]; vl = c.v[lt]; }
-      // outra conexão juntando na mesma faixa: quem está mais perto do fim entra antes (sem isso os dois
-      // chegavam juntos e um aparecia dentro do outro no começo da faixa)
+      // another connection merging into the same lane: whoever is closer to the end goes first (without it both
+      // arrived together and one appeared inside the other at the start of the lane)
       const mine = L - c.s[v];
       for (let x = sim.nodeConn[k.node[conn]]; x >= 0; x = k.nextAtNode[x]) {
         if (x === conn || k.to[x] !== to) continue;
@@ -1671,7 +1722,7 @@ export class Traffic {
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;
     if (c.fade[v] < 1) c.fade[v] = Math.min(1, c.fade[v] + dt * 1.2);
     if (c.s[v] < L) return;
-    // chegou na faixa seguinte
+    // reached the next lane
     this.unlink(v);
     c.conn[v] = -1;
     const from = c.lane[v];
@@ -1680,13 +1731,13 @@ export class Traffic {
     c.lane[v] = to;
     c.s[v] -= L;
     c.rIdx[v]++;
-    // a rota pode ter sido furada (faixa errada): replaneja a partir do fim desta faixa;
-    // indo para um retorno no canteiro, replaneja podendo voltar (quem passou do destino retorna ali)
+    // the route may have been broken (wrong lane): replan from the end of this lane;
+    // heading to a median U-turn, replan allowing turning back (whoever overshot the destination turns there)
     const endNode = sim.laneTo(to);
     if (sim.nodeCtl[endNode] === Ctl.UTurn && c.line[v] < 0) this.replanFrom(v, endNode, true);
     else if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== endNode) this.replanFrom(v, endNode);
     if (!this.inWindowOut(to)) {
-      // saiu da janela: volta a ser meso
+      // left the window: back to meso
       this.removeMicro(v);
       this.mesoEnter(v, to);
       return;
@@ -1699,9 +1750,9 @@ export class Traffic {
     return Math.hypot(sc.mx[s] - this.camX, sc.mz[s] - this.camZ) < this.window + WINDOW_OUT - WINDOW;
   }
 
-  // ------------------------------------------------------------ troca de faixa
+  // ------------------------------------------------------------ lane changes
 
-  /** Vizinhos na faixa `lane` em torno de s: [líder, seguidor]. */
+  /** Neighbours on lane `lane` around s: [leader, follower]. */
   private around(lane: number, s: number): [number, number] {
     const c = this.veh.cols;
     let lead = -1;
@@ -1720,7 +1771,7 @@ export class Traffic {
     const gapF = lead >= 0 ? c.s[lead] - c.len[lead] - c.s[v] : 1e9;
     const gapB = follow >= 0 ? c.s[v] - c.len[v] - c.s[follow] : 1e9;
     if (gapF < 2 || gapB < 3) return false;
-    // segurança: o novo seguidor não freia forte
+    // safety: the new follower does not brake hard
     const am = c.kind[v] ? A_HEAVY : A_MAX;
     if (follow >= 0 && this.idm(c.v[follow], v0, gapB, c.v[v], c.kind[follow] ? A_HEAVY : A_MAX) < -3.5) return false;
     const aNew = this.idm(c.v[v], v0, gapF, lead >= 0 ? c.v[lead] : 99, am);
@@ -1742,8 +1793,8 @@ export class Traffic {
   }
 
   /**
-   * Parado no fim de uma faixa sem saída nenhuma: vai para a faixa vizinha que tem saída (a rota é refeita
-   * depois do cruzamento). Parado há 5 s na linha, troca com qualquer espaço físico (o vizinho espera).
+   * Stopped at the end of a lane with no exit at all: moves to the adjacent lane that has one (the route is rebuilt
+   * after the junction). Stopped at the line for 5 s, it changes into any physical gap (the neighbour waits).
    */
   private escapeLane(v: number, lane: number): void {
     const c = this.veh.cols, sim = this.sim;
@@ -1759,7 +1810,7 @@ export class Traffic {
     c.lcCool[v] = 0.5;
   }
 
-  /** Cabe fisicamente ao lado, e quem vem atrás ainda para (freando forte) antes de encostar. */
+  /** Physically fits alongside, and whoever is behind can still stop (braking hard) before touching. */
   private roomBeside(v: number, target: number): boolean {
     const c = this.veh.cols;
     const [lead, follow] = this.around(target, c.s[v]);
@@ -1775,7 +1826,7 @@ export class Traffic {
     if (target < 0 || target === lane) return;
     const step = laneIdx(target) > laneIdx(lane) ? 1 : -1;
     const adj = laneId(seg, dir, laneIdx(lane) + step);
-    // parado há 5 s na linha esperando a troca: entra com qualquer espaço físico (o vizinho espera)
+    // stopped at the line for 5 s waiting to change: takes any physical gap (the neighbour waits)
     if (this.canChange(v, adj, 2) || (c.wait[v] > 5 && c.v[v] < 0.5 && this.roomBeside(v, adj))) this.doChange(v, lane, adj);
     else c.lcCool[v] = 0.5;
   }
@@ -1788,24 +1839,24 @@ export class Traffic {
     if (n < 2) return;
     const ns = this.nextSeg(v);
     const L = sim.laneLen(lane);
-    if (L - c.s[v] < 60) return; // perto do nó: fica na faixa
+    if (L - c.s[v] < 60) return; // near the node: stay in the lane
     for (const step of [-1, 1]) {
       const i = laneIdx(lane) + step;
       if (i < 0 || i >= n) continue;
       const target = laneId(seg, dir, i);
       if (ns >= 0 && sim.connToward(target, ns) < 0) continue;
-      if (c.line[v] < 0 && sim.isBusLane(target)) continue; // carro não entra na faixa de ônibus
-      // à direita tem um pouco de preferência (manter a direita)
+      if (c.line[v] < 0 && sim.isBusLane(target)) continue; // cars do not enter the bus lane
+      // slight preference for the right (keep right)
       if (this.canChange(v, target, step < 0 ? 0.1 : -0.1)) { this.doChange(v, lane, target); return; }
     }
   }
 
-  // ------------------------------------------------------------ ônibus
+  // ------------------------------------------------------------ buses
 
-  /** Troca o conjunto de linhas. Ônibus de linhas que mudaram saem; os novos nascem nas paradas. */
+  /** Replaces the set of lines. Buses of changed lines leave; new ones spawn at the stops. */
   setLines(specs: LineSpec[]): void {
     const c = this.veh.cols, net = this.sim.net, sc = net.segs.cols;
-    // tira os ônibus atuais (só os das listas das linhas)
+    // remove the current buses (only those in the lines' lists)
     for (const set of this.busSets) {
       for (const v of [...set]) {
         if (!this.veh.alive[v]) continue;
@@ -1816,25 +1867,27 @@ export class Traffic {
       const rail = (sp.mode ?? 0) > 0;
       const ln: SimLine = { id: sp.id, color: sp.color, buses: sp.buses, mode: sp.mode ?? 0, stopLane: [], stopV: [], waiting: [], lastT: [],
         stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
-      for (let i = 0; i + 1 < sp.stops.length; i += 2) {
-        const x = sp.stops[i], z = sp.stops[i + 1];
-        // ônibus: via comum mais perto; trem e metrô: trilho mais perto
+      /** One stop at (x, z); `flip`: the stop of the return trip, across the street. False if no road there. */
+      const addStop = (x: number, z: number, i: number, flip: boolean): boolean => {
+        // bus: nearest ordinary road; train and metro: nearest rail
         const hit = net.nearestSeg(x, z, 40, (sg) => PROFILE_INFO[sc.profile[sg]].rail === rail);
-        if (!hit) continue;
+        if (!hit) return false;
         const [seg, t] = hit;
         const q = net.quad(seg);
         const pp = new Float64Array(2), dd = new Float64Array(2);
         bez(q, t, pp); bezD(q, t, dd);
-        // lado: u+ (esquerda de a→b) é a calçada de quem anda de b para a
+        // return trip: the same stop mirrored across the street's centre line
+        if (flip) { x = 2 * pp[0] - x; z = 2 * pp[1] - z; }
+        // side: u+ (left of a→b) is the sidewalk of those driving from b to a
         const u = (x - pp[0]) * dd[1] - (z - pp[1]) * dd[0];
         let dir = u > 0 ? -1 : 1;
         if (rail) {
-          // estação: a linha segue para a próxima estação pelo trilho do sentido dela
+          // station: the line heads to the next station on the track of its direction
           const ni = (i + 2) % sp.stops.length, nx = sp.stops[ni] - x, nz = sp.stops[ni + 1] - z;
           dir = nx * dd[0] + nz * dd[1] >= 0 ? 1 : -1;
         }
         if (laneCount(sc.profile[seg], dir) === 0) dir = -dir;
-        if (laneCount(sc.profile[seg], dir) === 0) continue;
+        if (laneCount(sc.profile[seg], dir) === 0) return false;
         const lane = laneId(seg, dir, 0);
         const L = this.sim.laneLen(lane);
         const along = this.sim.sAlong(seg, t);
@@ -1846,7 +1899,15 @@ export class Traffic {
         const lp = new Float64Array(4);
         this.sim.lanePoint(lane, ln.stopV[ln.stopV.length - 1], lp);
         ln.stopX.push(x); ln.stopZ.push(z); ln.stopY.push(lp[1] + 0.15);
-        ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // olhando para a via
+        ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // facing the road
+        return true;
+      };
+      const kept: number[] = [];
+      for (let i = 0; i + 1 < sp.stops.length; i += 2) if (addStop(sp.stops[i], sp.stops[i + 1], i, false)) kept.push(i);
+      // Roadcraft bus lines go out and back: the stops of the return trip on the other side, the two ends terminals
+      if (!rail && !sp.loop && kept.length >= 2) {
+        ln.term.add(0); ln.term.add(ln.stopLane.length - 1);
+        for (let k = kept.length - 2; k >= 1; k--) addStop(sp.stops[kept[k]], sp.stops[kept[k] + 1], kept[k], true);
       }
       ln.waitTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
       return ln;
@@ -1856,7 +1917,7 @@ export class Traffic {
     this.keepBuses();
   }
 
-  /** Mantém o número de ônibus de cada linha (os que sumiram renascem numa parada). */
+  /** Keeps the number of buses on each line (those that vanished respawn at a stop). */
   private keepBuses(): void {
     if (this.lines.length === 0) return;
     const c = this.veh.cols;
@@ -1890,8 +1951,8 @@ export class Traffic {
     this.mesoEnter(v, lane, true);
   }
 
-  /** Atende a parada: desce e sobe gente; o próximo trecho vai até a parada seguinte. */
-  /** Demanda de fundo que chegou desde a última vez, espalhada pelos destinos. */
+  /** Serves the stop: people get off and on; the next leg goes to the following stop. */
+  /** Background demand that arrived since last time, spread over the destinations. */
   private accrue(ln: SimLine, i: number): void {
     const n = ln.stopLane.length;
     const room = Math.max(0, 120 - ln.waiting[i]);
@@ -1902,7 +1963,7 @@ export class Traffic {
     ln.waiting[i] += add;
   }
 
-  /** Um pedestre chegou na parada `from` querendo ir até `to`. */
+  /** A pedestrian arrived at stop `from` wanting to go to `to`. */
   pedAtStop(li: number, from: number, to: number): void {
     const ln = this.lines[li];
     if (!ln || from >= ln.waitTo.length || to >= ln.waitTo.length) return;
@@ -1911,7 +1972,7 @@ export class Traffic {
     ln.waiting[from] += 1;
   }
 
-  /** Para os pedestres: uma viagem de ônibus ao acaso (linha, parada de embarque, de descida, nó do embarque). */
+  /** For pedestrians: a random bus trip (line, boarding stop, alighting stop, boarding node). */
   pickTrip(): [number, number, number, number] | null {
     if (this.lines.length === 0) return null;
     const li = this.rng.int(0, this.lines.length);
@@ -1931,13 +1992,13 @@ export class Traffic {
     this.accrue(ln, i);
     let r = this.riders.get(v);
     if (!r || r.length !== n) { r = new Float64Array(n); this.riders.set(v, r); }
-    // descem os que vão para esta parada (e continuam a pé)
+    // those bound for this stop get off (and carry on on foot)
     const off = r[i];
     r[i] = 0;
-    if (off >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(off)); // do trem a pessoa sai pela estação (sem calçada no trilho)
+    if (off >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(off)); // from a train people leave through the station (no sidewalk on the rails)
     let load = 0;
     for (let j = 0; j < n; j++) load += r[j];
-    // sobem os que esperam, até lotar
+    // those waiting get on, until full
     const room = Math.max(0, (ln.mode ? 600 : BUS_CAP) - load);
     const take = Math.min(Math.floor(ln.waiting[i]), room);
     if (take > 0 && ln.waiting[i] > 0) {
@@ -1952,10 +2013,10 @@ export class Traffic {
     this.busPlan(v, this.sim.laneTo(c.lane[v]));
   }
 
-  /** Rota do nó `from` até a parada atual: chega pela faixa da parada (no sentido certo). */
+  /** Route from node `from` to the current stop: arrives via the stop's lane (in the right direction). */
   private busPlan(v: number, from: number): void {
     const c = this.veh.cols, sim = this.sim, ln = this.lines[c.line[v]];
-    if (!ln) { c.line[v] = -1; c.dying[v] = 1; return; }  // (linha sumiu: o conjunto já foi trocado)
+    if (!ln) { c.line[v] = -1; c.dying[v] = 1; return; }  // (line gone: the set has already been replaced)
     const target = ln.stopLane[c.stopI[v]];
     if (!sim.net.segs.alive[laneSeg(target)]) { c.dying[v] = 1; return; }
     const a = sim.laneFrom(target), b = sim.laneTo(target);
@@ -1966,15 +2027,15 @@ export class Traffic {
       const ban = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
       const rail = ln.mode > 0;
       n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, ban, rail);
-      if (n < 2 && ban >= 0) n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, -1, rail); // beco: retorna
+      if (n < 2 && ban >= 0) n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, -1, rail); // dead end: turn back
       if (n < 2) { c.dying[v] = 1; return; }
-      if (this.routes[o + n - 1] !== a) { c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = a; return; } // rota truncada: segue e replaneja no fim
+      if (this.routes[o + n - 1] !== a) { c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = a; return; } // truncated route: go on and replan at the end
     }
     this.routes[o + n] = b;
     c.rLen[v] = n + 1; c.rIdx[v] = 0; c.dest[v] = b;
   }
 
-  /** Quem espera nas paradas perto da câmera (pessoas paradas, até 14 por parada). */
+  /** Those waiting at stops near the camera (standing people, up to 14 per stop). */
   writeStopPeople(data: Float32Array, stride: number, start: number, max: number): number {
     let n = 0;
     for (const ln of this.lines) {
@@ -1983,7 +2044,7 @@ export class Traffic {
         if (Math.abs(x - this.camX) > 600 || Math.abs(z - this.camZ) > 600) continue;
         const w = Math.min(14, Math.floor(Math.min(120, ln.waiting[i] + (this.time - ln.lastT[i]) * WAIT_RATE)));
         const yaw = ln.stopYaw[i];
-        const ax = Math.cos(yaw), az = -Math.sin(yaw); // ao longo da calçada
+        const ax = Math.cos(yaw), az = -Math.sin(yaw); // along the sidewalk
         for (let k = 0; k < w && start + n < max; k++) {
           const h = ((i * 7 + k * 13 + ln.id * 31) % 97) / 97;
           const along = (k - w / 2) * 0.75 + (h - 0.5) * 0.4;
@@ -1995,6 +2056,7 @@ export class Traffic {
           data[o + 4] = px; data[o + 5] = ln.stopY[i]; data[o + 6] = pz; data[o + 7] = fy;
           data[o + 8] = 3 * 256 + ((k * 5 + i) % 16);
           data[o + 9] = 1;
+          data[o + 10] = (Math.imul(ln.id * 131 + i * 31 + k, 2654435761) >>> 16) & 0xffff;
           n++;
         }
       }
@@ -2002,7 +2064,7 @@ export class Traffic {
     return n;
   }
 
-  /** Números das linhas para a interface (passageiros por hora). */
+  /** Line figures for the interface (passengers per hour). */
   lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> {
     return this.lines.map((ln, i) => {
       const have = this.busSets[i].size;
@@ -2015,9 +2077,9 @@ export class Traffic {
     });
   }
 
-  // ------------------------------------------------------------ janela
+  // ------------------------------------------------------------ window
 
-  /** A câmera andou: quem ficou longe vira meso; semáforos da janela. */
+  /** The camera moved: those now far away become meso; window signals. */
   checkWindow(): void {
     const c = this.veh.cols, sim = this.sim;
     const old = this.windowSignals;
@@ -2026,7 +2088,7 @@ export class Traffic {
     sim.net.nodeIndex.query(this.camX - r, this.camZ - r, this.camX + r, this.camZ + r, (n) => {
       if (sim.nodePhases[n] > 0 && this.signalNodes.has(n)) this.windowSignals.add(n);
     });
-    // quem saiu da janela volta a "desconhecido" no desenho
+    // those that left the window go back to "unknown" in the drawing
     if (this.signals) for (const n of old) if (!this.windowSignals.has(n) && n < this.signals.length) this.signals[n] = 0;
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
@@ -2039,7 +2101,7 @@ export class Traffic {
     }
   }
 
-  // ------------------------------------------------------------ passo
+  // ------------------------------------------------------------ step
 
   step(dt: number): void {
     this.time += dt;
@@ -2047,11 +2109,11 @@ export class Traffic {
     this.routeBudget = ROUTE_BUDGET;
     this.advisor.step(this.time);
     const target = Math.min(MAX_VEHICLES, Math.floor(this.sim.laneMeters * this.density * this.dayFactor() * this.demand * this.trafficShare * this.gov));
-    // repõe quem chegou e cresce no ritmo de FLEET_TAU (o mapa abrindo enche de uma vez)
+    // replace arrivals and grow at the FLEET_TAU pace (an opening map fills at once)
     const have = this.veh.size;
     if (have < target * FILL_SHARE) this.spawnCredit = target - have;
     else this.spawnCredit = Math.min(this.spawnCredit + Math.max(0, target - have) * dt / FLEET_TAU, Math.max(0, target - have));
-    // (cada tentativa é uma busca de rota: poucas falhas por passo, o resto tenta no seguinte)
+    // (each attempt is a route search: few failures per step, the rest try on the next)
     for (let k = 0, fails = 0; k < 60 && fails < 8 && this.veh.size < target && (this.veh.size < this.fleetFloor || this.spawnCredit >= 1); k++) {
       const before = this.veh.size;
       this.spawn();
@@ -2062,6 +2124,7 @@ export class Traffic {
     this.lineCheck -= dt;
     if (this.lineCheck <= 0) { this.lineCheck = 2; this.keepBuses(); }
     this.updateSignals(dt);
+    this.updateCrossings();
     this.processMeso();
     this.mvs.beginStep();
     this.stepMicro(dt);
@@ -2069,7 +2132,7 @@ export class Traffic {
     this.stepParkers(dt);
   }
 
-  /** Vagões do trem: uma pose por vagão, seguindo o trilho para trás (anterior guardada por vagão). */
+  /** Train wagons: one pose per wagon, following the track backwards (previous pose stored per wagon). */
   private wagonPrev = new Map<number, Float32Array>();
   private writeTrain(v: number, data: Float32Array, stride: number, n: number, p: Float64Array): number {
     const c = this.veh.cols;
@@ -2078,7 +2141,7 @@ export class Traffic {
     if (!prev) { prev = new Float32Array(WAGONS * 4); this.wagonPrev.set(v, prev); }
     for (let k = 0; k < WAGONS; k++) {
       backAlong(this.sim, c.lane[v], c.conn[v], c.s[v], WAGON_LEN * (k + 0.5), p);
-      // rumo pela linha entre as pontas do vagão (curvas)
+      // heading along the line between the wagon's ends (curves)
       const fx = p[0], fz = p[2];
       backAlong(this.sim, c.lane[v], c.conn[v], c.s[v], WAGON_LEN * k + 1, this.tmp2);
       const yaw = Math.atan2(this.tmp2[0] - fx, this.tmp2[2] - fz);
@@ -2087,6 +2150,7 @@ export class Traffic {
       data[o] = prev[q]; data[o + 1] = prev[q + 1]; data[o + 2] = prev[q + 2]; data[o + 3] = prev[q + 3];
       data[o + 4] = fx; data[o + 5] = p[1]; data[o + 6] = fz; data[o + 7] = yaw;
       data[o + 8] = 4 * 256 + c.color[v] + (k === 0 ? 128 : 0);
+      data[o + 10] = v & 0xffff;
       data[o + 9] = Math.max(0, Math.min(1, c.fade[v]));
       prev[q] = fx; prev[q + 1] = p[1]; prev[q + 2] = fz; prev[q + 3] = yaw;
       n++;
@@ -2094,11 +2158,11 @@ export class Traffic {
     return n;
   }
 
-  /** Escreve as poses dos micro (anterior e atual). */
+  /** Writes the poses of the micro vehicles (previous and current). */
   private turnTmp = new Float64Array(4);
   /**
-   * Luzes do veículo: freio, e a seta da conversão (dentro do cruzamento, ou a 45 m dele com a saída já
-   * escolhida) ou da troca de faixa (`lights` já trazido). Esquerda = o rumo cresce ao longo da conexão.
+   * Vehicle lights: brake, and the turn indicator (inside the junction, or within 45 m of it with the exit already
+   * chosen) or the lane-change one (`lights` passed in). Left = the heading increases along the connection.
    */
   private lightBits(v: number, lights: number): number {
     const c = this.veh.cols, sim = this.sim;
@@ -2127,10 +2191,10 @@ export class Traffic {
         const lane = c.lane[v];
         const L = sim.laneLen(lane);
         sim.lanePoint(lane, Math.min(L, c.s[v]), p);
-        // troca de faixa suave: mistura com a faixa de origem
+        // smooth lane change: blend with the origin lane
         if (c.lcT[v] < 1 && c.lcFrom[v] >= 0 && sim.net.segs.alive[laneSeg(c.lcFrom[v])]) {
           sim.lanePoint(c.lcFrom[v], Math.min(L, c.s[v]), q);
-          // seta da troca de faixa: para o lado da faixa nova (direita do motorista = (−cos, sen) do rumo)
+          // lane-change indicator: toward the new lane's side (driver's right = (−cos, sin) of the heading)
           if (c.lcT[v] < 0.8) lights |= -Math.cos(p[3]) * (p[0] - q[0]) + Math.sin(p[3]) * (p[2] - q[2]) > 0 ? LIGHT_RIGHT : LIGHT_LEFT;
           const t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
           p[0] += (q[0] - p[0]) * k; p[2] += (q[2] - p[2]) * k;
@@ -2151,7 +2215,7 @@ export class Traffic {
         p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
         if (c.v[v] < 0.1 && ((this.time * 1.5) % 1) < 0.5) lights |= LIGHT_LEFT | LIGHT_RIGHT;
       }
-      // na vaga ou a caminho dela (deslocamento em u, no sentido do trecho): entrando, seta da direita; saindo, da esquerda
+      // in the bay or on the way to it (offset in u, along the segment direction): pulling in, right indicator; pulling out, left
       if (!centred && c.dying[v] !== 4 && c.pk[v] > 0 && c.conn[v] < 0) {
         const lane = c.lane[v], dir = laneDir(lane);
         const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
@@ -2159,17 +2223,18 @@ export class Traffic {
         if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
         if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
       }
-      // ponto de referência no meio do veículo
+      // reference point at the middle of the vehicle
       const back = centred ? 0 : c.len[v] / 2;
       p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
       const o = n * stride;
       if (!c.has[v]) { c.px[v] = p[0]; c.py[v] = p[1]; c.pz[v] = p[2]; c.pyaw[v] = p[3]; c.has[v] = 1; }
       data[o] = c.px[v]; data[o + 1] = c.py[v]; data[o + 2] = c.pz[v]; data[o + 3] = c.pyaw[v];
       data[o + 4] = p[0]; data[o + 5] = p[1]; data[o + 6] = p[2]; data[o + 7] = p[3];
-      // ocupantes (roadcraft occupants): carro e caminhão com o motorista; ônibus pela lotação (0-7)
+      // occupants (roadcraft occupants): car and truck with the driver; bus by load (0-7)
       const seats = c.kind[v] === 1 ? Math.min(7, Math.ceil(c.load[v] / BUS_CAP * 7)) : c.kind[v] === 3 ? 0 : 1;
       data[o + 8] = c.kind[v] * 256 + c.color[v] + (this.lightBits(v, lights) + seats * 8) * 65536;
       data[o + 9] = Math.max(0, Math.min(1, c.fade[v]));
+      data[o + 10] = v & 0xffff;
       c.px[v] = p[0]; c.py[v] = p[1]; c.pz[v] = p[2]; c.pyaw[v] = p[3];
       n++;
     }
@@ -2177,7 +2242,7 @@ export class Traffic {
   }
 }
 
-/** Ponto a `d` metros atrás da frente do veículo (passa para a faixa anterior pela reta, se faltar). */
+/** Point `d` metres behind the vehicle's front (continues onto the previous lane along a straight line if needed). */
 function backAlong(sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array): void {
   if (conn >= 0) {
     if (s - d >= 0) { sim.connPoint(conn, s - d, out); return; }

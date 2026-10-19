@@ -1,5 +1,5 @@
-// Salvamento binário por ladrilho, comprimido, no sistema de arquivos privado
-// da origem (OPFS). Roda no worker. Só os ladrilhos que mudaram são gravados.
+// Binary per-tile save, compressed, in the origin private file system (OPFS).
+// Runs in the worker. Only tiles that changed are written.
 
 import { HEIGHT_TILE_RES, MAP_TILES, SAVE_VERSION, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { heightIndex } from '../world/heights.ts';
@@ -7,7 +7,7 @@ import { SEG_REC, SEG_REC_V2, boxColumnList, columnStride, emptyBoxes, type BoxC
 import { generatedBuilt } from '../world/decay.ts';
 
 const MAGIC_TILE = 0x31544443; // 'CDT1'
-const HEIGHT_Q = 100; // centímetros
+const HEIGHT_Q = 100; // centimeters
 
 export function quantizeHeight(h: number): number {
   const v = Math.round((h - TERRAIN_MIN_Y) * HEIGHT_Q);
@@ -37,18 +37,18 @@ export function encodeTile(tile: number, heights: Uint16Array, boxes: BoxColumns
     new Uint8Array(buf, o, b).set(new Uint8Array(col.buffer, col.byteOffset, b));
     o += b;
   }
-  // vias (versão 2)
+  // roads (version 2)
   dv.setUint32(o, roads.nodes.length, true); o += 4;
   dv.setUint32(o, roads.segs.length, true); o += 4;
   for (const arr of [roads.nodes, roads.segs]) {
     new Uint8Array(buf, o, arr.byteLength).set(new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength));
     o += arr.byteLength;
   }
-  // itens de rua (versão 4)
+  // street items (version 4)
   dv.setUint32(o, items.length, true); o += 4;
   new Uint8Array(buf, o, items.byteLength).set(new Uint8Array(items.buffer, items.byteOffset, items.byteLength));
   o += items.byteLength;
-  // chão pintado e água (versão 5)
+  // painted ground and water (version 5)
   dv.setUint32(o, ground.length, true); o += 4;
   new Uint8Array(buf, o, ground.byteLength).set(new Uint8Array(ground.buffer, ground.byteOffset, ground.byteLength)); o += ground.byteLength;
   dv.setUint32(o, water.length, true); o += 4;
@@ -100,7 +100,7 @@ export function decodeTile(data: Uint8Array): { tile: number; heights: Uint16Arr
   return { tile, heights, boxes, roads, ground, water };
 }
 
-/** Copia as alturas quantizadas de um ladrilho (feito na página, proporcional ao ladrilho). */
+/** Copies a tile's quantized heights (done on the page, proportional to the tile). */
 export function packTileHeights(src: Float32Array, tile: number): Uint16Array {
   const tx = tile % MAP_TILES, tz = (tile / MAP_TILES) | 0;
   const out = new Uint16Array(HEIGHT_TILE_RES * HEIGHT_TILE_RES);
@@ -109,7 +109,7 @@ export function packTileHeights(src: Float32Array, tile: number): Uint16Array {
   return out;
 }
 
-/** Escreve as alturas de um ladrilho no array compartilhado e devolve min/max. */
+/** Writes a tile's heights into the shared array and returns min/max. */
 export function unpackTileHeights(dst: Float32Array, tile: number, q: Uint16Array): { min: number; max: number } {
   const tx = tile % MAP_TILES, tz = (tile / MAP_TILES) | 0;
   const base = heightIndex(tx * HEIGHT_TILE_RES, tz * HEIGHT_TILE_RES);
@@ -123,7 +123,7 @@ export function unpackTileHeights(dst: Float32Array, tile: number, q: Uint16Arra
   return { min, max };
 }
 
-/** Versão 2 não tinha zonas: acrescenta dois zeros por trecho. */
+/** Version 2 had no zones: appends two zeros per segment. */
 function widenSegs(old: Float32Array): Float32Array {
   const n = old.length / SEG_REC_V2;
   const out = new Float32Array(n * SEG_REC);

@@ -1,7 +1,7 @@
-// Verificação no jogo de verdade (GPU da máquina): roda os roteiros de scripts/verificacao/ num mapa vazio,
-// cada um numa sessão do Electron, e junta o resultado. Cada roteiro usa as mesmas ações dos botões e
-// confere o efeito no mundo (vias, prédios, itens, linhas...) e que nada foi parar no console como erro.
-// Uso: npx vite build && node tools/verificar.mjs   (sai com código 1 se algo falhar)
+// Verification in the real game (the machine's GPU): runs the scripts in scripts/verificacao/ on an empty map,
+// each in its own Electron session, and collects the results. Each script uses the same actions as the buttons and
+// checks the effect on the world (roads, buildings, items, lines...) and that nothing reached the console as an error.
+// Usage: npx vite build && node tools/verificar.mjs   (exits with code 1 if anything fails)
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts', 'verificacao');
-// VER_ONLY=texto roda só os roteiros cujo nome contém o texto; VER_LIMIT=segundos muda o tempo de cada um
+// VER_ONLY=text runs only the scripts whose name contains the text; VER_LIMIT=seconds changes each one's time limit
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js') && (!process.env.VER_ONLY || f.includes(process.env.VER_ONLY))).sort();
 const shot = path.join(os.tmpdir(), 'cidade-verificacao.png');
 let ok = 0, bad = 0;
@@ -26,7 +26,7 @@ for (const f of files) {
   });
   const ver = lines.filter((l) => l.includes('VER ')).map((l) => l.slice(l.indexOf('VER ') + 4));
   if (ver.length === 0) { console.log(`${f}: o roteiro não terminou`); bad++; continue; }
-  // sem a linha final o roteiro travou ou estourou o tempo: a última verificação impressa diz onde
+  // without the final line the script hung or timed out: the last printed check says where
   if (!lines.some((l) => l.includes('VERIFICAÇÃO'))) ver.push(`FALHOU o roteiro parou depois de: ${ver[ver.length - 1] ?? '(nada)'}`);
   const fails = ver.filter((v) => v.startsWith('FALHOU'));
   ok += ver.length - fails.length; bad += fails.length;

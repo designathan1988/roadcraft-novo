@@ -94,8 +94,8 @@ test('trânsito: carros nascem, andam, param no vermelho e chegam', () => {
   assert.ok(entries > 10, `entradas pela via secundária ${entries}`);
   assert.ok(badEntries <= entries * 0.05, `entrou com a principal ocupada: ${badEntries} de ${entries}`);
   assert.ok(moved > 0 || before.size === 0);
-  const n = tr.writePoses(data, 10);
-  for (let i = 0; i < n * 10; i++) assert.ok(Number.isFinite(data[i]), `pose ${i}`);
+  const n = tr.writePoses(data, 11);
+  for (let i = 0; i < n * 11; i++) assert.ok(Number.isFinite(data[i]), `pose ${i}`);
   // ninguém atravessa o da frente na mesma faixa
   const c = tr.veh.cols;
   for (let i = 0; i < tr.microN; i++) {
@@ -129,7 +129,7 @@ test('pedestres: nascem, andam pelas calçadas, atravessam e chegam', () => {
   const { sim } = gridCity(5, 110);
   const peds = new Peds(sim);
   peds.density = 1 / 4;
-  const out = new Float32Array(10 * 20000);
+  const out = new Float32Array(11 * 20000);
   let maxCount = 0, written = 0;
   const first = new Map<number, number>();
   for (let k = 0; k < 20 * 120; k++) {
@@ -137,16 +137,20 @@ test('pedestres: nascem, andam pelas calçadas, atravessam e chegam', () => {
     if (k % 10 === 0) peds.checkWindow();
     maxCount = Math.max(maxCount, peds.count);
     if (k % 100 === 0) {
-      const n = peds.writePoses(out, 10, 0, 20000);
+      const n = peds.writePoses(out, 11, 0, 20000);
       written = Math.max(written, n);
-      for (let i = 0; i < n * 10; i++) assert.ok(Number.isFinite(out[i]), 'pose inválida');
+      for (let i = 0; i < n * 11; i++) assert.ok(Number.isFinite(out[i]), 'pose inválida');
       // ninguém longe da cidade nem acima/abaixo do chão das vias
+      const looks = new Set<number>();
       for (let i = 0; i < n; i++) {
-        const x = out[i * 10 + 4], y = out[i * 10 + 5], z = out[i * 10 + 6];
+        const x = out[i * 11 + 4], y = out[i * 11 + 5], z = out[i * 11 + 6];
         assert.ok(Math.abs(x) < 260 && Math.abs(z) < 260, `fora: ${x} ${z}`);
         assert.ok(y > 9.9 && y < 10.4, `altura ${y}`);
+        looks.add(out[i * 11 + 10]);
       }
-      if (k === 0) for (let i = 0; i < n; i++) first.set(i, out[i * 10 + 4]);
+      // aparência de 16 bits no fim da pose (sessão de pessoas): muito mais que as 16 cores
+      if (n > 40) assert.ok(looks.size > 30, `aparências distintas ${looks.size} de ${n}`);
+      if (k === 0) for (let i = 0; i < n; i++) first.set(i, out[i * 11 + 4]);
     }
   }
   assert.ok(maxCount > 50, `pedestres ${maxCount}`);
@@ -161,7 +165,7 @@ test('ônibus: rodam a linha, param nas paradas e levam gente', () => {
   tr.density = 0;
   // três paradas na calçada de vias diferentes (grade de −180 a 180)
   tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
-  assert.equal(tr.lines[0].stopLane.length, 3);
+  assert.equal(tr.lines[0].stopLane.length, 4); // ida (3) e volta pelo outro lado (1: as pontas são terminais)
   let served = 0, maxBuses = 0;
   for (let i = 0; i < 20 * 600; i++) {
     tr.step(0.05);

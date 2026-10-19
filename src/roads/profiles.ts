@@ -1,17 +1,17 @@
-// Perfis de via: a seção transversal, da borda direita (u negativo) à
-// esquerda (u positivo), olhando no sentido a → b. Mão de direção à direita.
-// O registro cresce em jogo (perfis feitos no editor): a página registra e
-// manda a lista para os workers; o trecho guarda só o id (Uint8).
+// Road profiles: the cross-section, from the right edge (negative u) to the
+// left (positive u), looking in the a → b direction. Right-hand traffic.
+// The registry grows in game (profiles made in the editor): the page registers them and
+// sends the list to the workers; a segment stores only the id (Uint8).
 
 import { ROAD_TUNING } from './tuning.ts';
 
 export type StripKind = 'sidewalk' | 'curb' | 'parking' | 'bike' | 'lane' | 'median' | 'shoulder' | 'barrier';
 
-/** Setas de conversão de uma faixa (bits); 0 = automático pela posição. */
+/** A lane's turn arrows (bits); 0 = automatic by position. */
 export const TurnBit = { Left: 1, Straight: 2, Right: 4 } as const;
-/** Piso da pista. */
+/** Carriageway surface. */
 export const Surface = { Asphalt: 0, Concrete: 1, Cobble: 2, Ballast: 3 } as const;
-/** Piso de calçada e canteiro. */
+/** Sidewalk and median paving. */
 export const Paving = { Concrete: 0, Pavers: 1, Stone: 2, Grass: 3 } as const;
 export type Centre = 'dashed' | 'solid' | 'double';
 export type Category = 'ruas' | 'avenidas' | 'rodovias' | 'especiais' | 'trilhos' | 'meus';
@@ -19,25 +19,25 @@ export type Category = 'ruas' | 'avenidas' | 'rodovias' | 'especiais' | 'trilhos
 export interface Strip {
   kind: StripKind;
   width: number;
-  /** Para faixas: +1 vai de a para b, -1 de b para a. */
+  /** For lanes: +1 goes from a to b, -1 from b to a. */
   dir?: 1 | -1;
-  /** Faixa só de ônibus. */
+  /** Bus-only lane. */
   bus?: boolean;
-  /** Setas (TurnBit); 0/ausente = automático. */
+  /** Arrows (TurnBit); 0/absent = automatic. */
   turns?: number;
-  /** Linha contínua à esquerda desta faixa (para a vizinha do mesmo sentido): sem troca. */
+  /** Solid line to the left of this lane (towards the neighbour in the same direction): no lane change. */
   solid?: boolean;
-  /** Piso de calçada/canteiro (Paving). */
+  /** Sidewalk/median paving (Paving). */
   pave?: number;
-  /** Calçada no nível da pista (rua compartilhada) ou canteiro só pintado. */
+  /** Sidewalk level with the carriageway (shared street) or a painted-only median. */
   flush?: boolean;
-  /** Faixa de trilho (só trens e metrô). */
+  /** Rail track (trains and metro only). */
   rail?: boolean;
 }
 
-/** Tipo de linha pintada. */
+/** Painted line type. */
 export const Line = { None: 0, Solid: 1, Dashed: 2, Double: 3 } as const;
-/** Cor da linha. */
+/** Line colour. */
 export const LineColor = { White: 0, Yellow: 1 } as const;
 
 export interface MarkLine { u: number; kind: number; color: number; width: number }
@@ -47,40 +47,40 @@ export interface Profile {
   name: string;
   strips: Strip[];
   oneWay: boolean;
-  /** Faz parte de rotatória (sem faixa de pedestre no próprio anel). */
+  /** Part of a roundabout (no crosswalk on the ring itself). */
   ring?: boolean;
-  /** Velocidade (km/h), para o trânsito. */
+  /** Speed (km/h), for traffic. */
   speed: number;
-  /** Preferência no cruzamento (0 = rua local … 5 = rodovia). */
+  /** Right of way at junctions (0 = local street … 5 = highway). */
   priority?: number;
-  /** Piso da pista (Surface). */
+  /** Carriageway surface (Surface). */
   surface?: number;
-  /** Linha entre os dois sentidos quando as faixas se encostam. */
+  /** Line between the two directions when the lanes touch. */
   centre?: Centre;
   category?: Category;
-  /** Feito pelo jogador (vai no salvamento). */
+  /** Made by the player (goes into the save). */
   custom?: boolean;
 }
 
 export interface LaneInfo { u: number; w: number; bus: boolean; turns: number; rail: boolean }
 
 export interface ProfileInfo extends Profile {
-  /** Bordas de cada faixa (u inicial e final). */
+  /** Edges of each strip (start and end u). */
   edges: Array<{ u0: number; u1: number; strip: Strip }>;
-  /** Meia largura total (até a borda da calçada) dos dois lados. */
+  /** Total half-width (to the sidewalk edge) on both sides. */
   right: number; left: number;
-  /** Meia largura do asfalto (faixas, estacionamento, ciclovia) dos dois lados. */
+  /** Asphalt half-width (lanes, parking, bike lane) on both sides. */
   asphaltRight: number; asphaltLeft: number;
   lines: MarkLine[];
   lanesFwd: number; lanesBack: number;
-  /** Faixas por sentido, índice 0 = a mais à direita no sentido. */
+  /** Lanes per direction, index 0 = the rightmost in that direction. */
   fwd: LaneInfo[]; back: LaneInfo[];
-  /** u do meio da calçada de cada lado (NaN = sem calçada). */
+  /** u of the middle of the sidewalk on each side (NaN = no sidewalk). */
   walkRight: number; walkLeft: number;
   walk: boolean;
-  /** Via de trilhos (só trens). */
+  /** Rail line (trains only). */
   rail: boolean;
-  /** Custo por metro (R$). */
+  /** Cost per metre (R$). */
   cost: number;
 }
 
@@ -92,13 +92,13 @@ const lane = (dir: 1 | -1, w = 3.2, extra: Partial<Strip> = {}): Strip => ({ kin
 const median = (w: number, pave: number = Paving.Grass): Strip => ({ kind: 'median', width: w, pave });
 const shoulder = (w: number): Strip => ({ kind: 'shoulder', width: w });
 const barrier = (w: number): Strip => ({ kind: 'barrier', width: w });
-/** n faixas num sentido, da direita para a esquerda de quem anda nele. */
+/** n lanes in one direction, from right to left as seen by someone driving in it. */
 const lanes = (dir: 1 | -1, n: number, w: number, bus: 'outer' | 'inner' | null = null): Strip[] => {
   const out: Strip[] = [];
   for (let i = 0; i < n; i++) out.push(lane(dir, w, bus && n > 1 && ((bus === 'outer' && i === 0) || (bus === 'inner' && i === n - 1)) ? { bus: true } : {}));
   return dir === 1 ? out : out.reverse();
 };
-/** Rua de mão dupla simétrica: calçada, [borda], faixas b→a… a→b, [borda], calçada (lista da direita para a esquerda). */
+/** Symmetric two-way street: sidewalk, [edge], lanes b→a… a→b, [edge], sidewalk (list from right to left). */
 const two = (walk: number, n: number, w: number, o: { edge?: Strip; med?: Strip; bus?: 'outer' | 'inner'; pave?: number; flush?: boolean } = {}): Strip[] => {
   const s: Strip[] = [];
   const walkStrip = { ...sw(walk, o.pave ?? Paving.Concrete), ...(o.flush ? { flush: true } : {}) };
@@ -117,7 +117,7 @@ const one = (walk: number, n: number, w: number, o: { right?: Strip; left?: Stri
   sw(walk), curb, ...(o.right ? [o.right] : []), ...lanes(1, n, w), ...(o.left ? [o.left] : []), curb, sw(walk),
 ];
 
-/** Perfis prontos. Os 7 primeiros mantêm o id dos salvamentos antigos. */
+/** Built-in profiles. The first 7 keep the ids of old saves. */
 const BUILTIN: Array<Omit<Profile, 'id'>> = [
   { name: 'Rua local', speed: 40, oneWay: false, priority: 0, category: 'ruas', centre: 'dashed',
     strips: [sw(2.6), curb, lane(1, 3.1), lane(-1, 3.1), curb, sw(2.6)] },
@@ -135,7 +135,7 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
       lane(-1, 3.6), lane(-1, 3.6), shoulder(2.5), barrier(0.5)] },
   { name: 'Rotatória', speed: 30, oneWay: true, ring: true, priority: 3, category: 'especiais',
     strips: [sw(3), curb, lane(1, 4), lane(1, 4), curb, median(1.5)] },
-  // ruas
+  // streets
   { name: 'Rua urbana', speed: 50, oneWay: false, priority: 1, category: 'ruas', strips: two(2.5, 1, 3.3) },
   { name: 'Mão única, 1 faixa', speed: 30, oneWay: true, priority: 0, category: 'ruas', strips: one(2, 1, 3.2) },
   { name: 'Mão única, 2 faixas', speed: 40, oneWay: true, priority: 1, category: 'ruas', strips: one(2, 2, 3) },
@@ -149,7 +149,7 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
     strips: two(3, 1, 3, { flush: true, pave: Paving.Stone }) },
   { name: 'Rua de paralelepípedo', speed: 30, oneWay: false, priority: 0, category: 'ruas', surface: Surface.Cobble, centre: 'dashed',
     strips: two(2, 1, 3) },
-  // avenidas
+  // avenues
   { name: 'Avenida 4 faixas', speed: 60, oneWay: false, priority: 2, category: 'avenidas', strips: two(3, 2, 3.2) },
   { name: 'Avenida 6 faixas com canteiro', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(3.5, 3, 3.3, { med: median(3) }) },
   { name: 'Avenida com estacionamento', speed: 50, oneWay: false, priority: 2, category: 'avenidas', strips: two(3, 2, 3.2, { edge: park }) },
@@ -159,7 +159,7 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
   { name: 'Avenida mão única, 3 faixas', speed: 60, oneWay: true, priority: 2, category: 'avenidas', strips: one(3, 3, 3.3) },
   { name: 'Avenida mão única, 4 faixas', speed: 60, oneWay: true, priority: 3, category: 'avenidas', strips: one(3.5, 4, 3.3) },
   { name: 'Bulevar', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(4, 2, 3.3, { med: median(6), pave: Paving.Pavers }) },
-  // rodovias
+  // highways
   { name: 'Rodovia 6 faixas', speed: 110, oneWay: false, priority: 5, category: 'rodovias',
     strips: [barrier(0.5), shoulder(3), ...lanes(1, 3, 3.7), shoulder(1), barrier(0.8), shoulder(1), ...lanes(-1, 3, 3.7), shoulder(3), barrier(0.5)] },
   { name: 'Rodovia mão única, 2 faixas', speed: 100, oneWay: true, priority: 5, category: 'rodovias',
@@ -170,7 +170,7 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
     strips: [shoulder(2), lane(1, 3.6), shoulder(0.6), barrier(0.8), shoulder(0.6), lane(-1, 3.6), shoulder(2)] },
   { name: 'Estrada simples', speed: 80, oneWay: false, priority: 3, category: 'rodovias', centre: 'dashed',
     strips: [shoulder(1.5), lane(1, 3.5), lane(-1, 3.5), shoulder(1.5)] },
-  // especiais
+  // special
   { name: 'Alça de acesso', speed: 60, oneWay: true, priority: 4, category: 'especiais',
     strips: [barrier(0.5), shoulder(1.5), lane(1, 4), shoulder(1), barrier(0.5)] },
   { name: 'Alça de acesso, 2 faixas', speed: 60, oneWay: true, priority: 4, category: 'especiais',
@@ -178,7 +178,7 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
   { name: 'Estrada rural de paralelepípedo', speed: 40, oneWay: false, priority: 0, category: 'especiais', surface: Surface.Cobble, centre: 'dashed',
     strips: [shoulder(0.8), lane(1, 3), lane(-1, 3), shoulder(0.8)] },
   { name: 'Estrada de concreto', speed: 60, oneWay: false, priority: 1, category: 'especiais', surface: Surface.Concrete, strips: two(2, 1, 3.8) },
-  // trilhos (trens e metrô; para metrô, construa abaixo do chão com Page Down)
+  // rails (trains and metro; for metro, build below ground with Page Down)
   { name: 'Ferrovia dupla', speed: 90, oneWay: false, priority: 6, category: 'trilhos', surface: Surface.Ballast,
     strips: [shoulder(1.6), lane(1, 4.3, { rail: true }), lane(-1, 4.3, { rail: true }), shoulder(1.6)] },
   { name: 'Ferrovia simples', speed: 80, oneWay: true, priority: 6, category: 'trilhos', surface: Surface.Ballast,
@@ -188,9 +188,9 @@ const BUILTIN: Array<Omit<Profile, 'id'>> = [
 ];
 
 export const RING_PROFILE = 6;
-/** O trecho guarda o perfil em um byte. */
+/** A segment stores its profile in one byte. */
 export const MAX_PROFILES = 256;
-/** Linhas pintadas e faixas por perfil na tabela do shader. */
+/** Painted lines and lanes per profile in the shader table. */
 export const MAX_LINES = 8;
 export const BUILTIN_COUNT = BUILTIN.length;
 
@@ -199,18 +199,18 @@ const ASPHALT: ReadonlySet<StripKind> = new Set(['lane', 'parking', 'bike', 'sho
 export const PROFILES: Profile[] = [];
 export const PROFILE_INFO: ProfileInfo[] = [];
 const byKey = new Map<string, number>();
-/** Muda a cada perfil registrado (tabelas do shader e do trânsito se refazem). */
+/** Changes with every registered profile (the shader and traffic tables are rebuilt). */
 export let profileRevision = 0;
 const listeners: Array<(id: number) => void> = [];
 export function onProfileAdded(fn: (id: number) => void): void { listeners.push(fn); }
 
-/** O que define o perfil (nome não entra). */
+/** What defines the profile (the name is not part of it). */
 export function profileKey(p: Omit<Profile, 'id' | 'name' | 'category' | 'custom'> & { name?: string }): string {
   return JSON.stringify([p.strips.map((s) => [s.kind, Math.round(s.width * 100), s.dir ?? 0, s.bus ? 1 : 0, s.turns ?? 0, s.solid ? 1 : 0, s.pave ?? 0, s.flush ? 1 : 0, s.rail ? 1 : 0]),
     p.oneWay, p.ring ?? false, p.speed, p.priority ?? 0, p.surface ?? 0, p.centre ?? 'double']);
 }
 
-/** Corrige o que o editor deixou torto (mão única sempre a → b). */
+/** Fixes what the editor left crooked (one-way is always a → b). */
 export function normalize(p: Omit<Profile, 'id'>): Omit<Profile, 'id'> {
   const strips = p.strips.map((s) => ({ ...s, width: Math.max(0.1, Math.min(20, s.width)) }));
   const dirs = new Set(strips.filter((s) => s.kind === 'lane').map((s) => s.dir ?? 1));
@@ -219,7 +219,7 @@ export function normalize(p: Omit<Profile, 'id'>): Omit<Profile, 'id'> {
   return { ...p, strips, oneWay };
 }
 
-/** Registra (ou acha) o perfil; devolve o id, ou -1 se o registro encheu. */
+/** Registers (or finds) the profile; returns the id, or -1 if the registry is full. */
 export function registerProfile(def: Omit<Profile, 'id'>, fixedId?: number): number {
   const p = normalize(def);
   const key = profileKey(p);
@@ -237,15 +237,15 @@ export function registerProfile(def: Omit<Profile, 'id'>, fixedId?: number): num
 }
 
 /**
- * O mesmo perfil com (ou sem) vagas de um lado: `right` = lado direito de quem anda de a para b
- * (começo da lista de faixas). Devolve o id do perfil (registrado se novo) ou -1.
+ * The same profile with (or without) parking on one side: `right` = the right-hand side going from a to b
+ * (start of the strip list). Returns the profile id (registered if new) or -1.
  */
 export function withParking(id: number, right: boolean, on: boolean): number {
   const p = PROFILES[id];
   if (!p || p.ring) return -1;
   const strips = p.strips.map((s) => ({ ...s }));
   const order = right ? strips : strips.slice().reverse();
-  // a vaga fica logo depois da calçada e do meio-fio daquele lado
+  // the parking strip goes right after the sidewalk and curb on that side
   let k = 0;
   while (k < order.length && (order[k].kind === 'sidewalk' || order[k].kind === 'curb')) k++;
   const has = order[k]?.kind === 'parking';
@@ -255,12 +255,12 @@ export function withParking(id: number, right: boolean, on: boolean): number {
   return registerProfile({ ...p, strips: list, name: `${p.name.replace(/ \(vagas.*\)$/, '')} (vagas ajustadas)`, custom: true, category: p.category });
 }
 
-/** Perfis feitos pelo jogador (para o salvamento e os workers). */
+/** Profiles made by the player (for the save and the workers). */
 export function customProfiles(): Profile[] { return PROFILES.filter((p) => p && p.custom); }
 
-/** Põe os perfis do jogador como estavam (carregar mapa, mensagem do worker). */
+/** Restores the player's profiles as they were (map load, worker message). */
 export function setCustomProfiles(list: Profile[]): void {
-  // volta só aos prontos e registra de novo nos mesmos ids
+  // go back to the built-ins only and register again under the same ids
   for (let i = BUILTIN_COUNT; i < PROFILES.length; i++) {
     const p = PROFILES[i];
     if (p) byKey.delete(profileKey(p));
@@ -268,7 +268,7 @@ export function setCustomProfiles(list: Profile[]): void {
   PROFILES.length = BUILTIN_COUNT; PROFILE_INFO.length = BUILTIN_COUNT;
   for (const p of list) {
     if (p.id < BUILTIN_COUNT || p.id >= MAX_PROFILES) continue;
-    // ids vagos no meio ficam com uma cópia da rua local (nunca usados)
+    // vacant ids in between get a copy of the local street (never used)
     while (PROFILES.length < p.id) { PROFILES.push({ ...PROFILES[0], id: PROFILES.length }); PROFILE_INFO.push(derive(PROFILES[PROFILES.length - 1])); }
     registerProfile({ ...p, custom: true }, p.id);
   }
@@ -305,7 +305,7 @@ function derive(p: Profile): ProfileInfo {
     const li = { u: (e.u0 + e.u1) / 2, w: e.u1 - e.u0, bus: !!e.strip.bus, turns: e.strip.turns ?? 0, rail: !!e.strip.rail };
     (e.strip.dir === -1 ? back : fwd).push(li);
   }
-  back.reverse(); // no sentido b → a, a direita é o u maior
+  back.reverse(); // in the b → a direction, right is the larger u
   const r = edges[0], l = edges[edges.length - 1];
   const walkRight = r && r.strip.kind === 'sidewalk' ? (r.u0 + r.u1) / 2 : NaN;
   const walkLeft = l && l.strip.kind === 'sidewalk' ? (l.u0 + l.u1) / 2 : NaN;
@@ -339,14 +339,14 @@ export function halfWidth(profile: number): number { return PROFILE_INFO[profile
 
 export function isAsphalt(kind: StripKind): boolean { return ASPHALT.has(kind); }
 
-/** Colunas da tabela do shader por perfil: 8 linhas, 8 faixas, postes, extra. */
+/** Shader table columns per profile: 8 lines, 8 lanes, lamp posts, extra. */
 export const TABLE_W = MAX_LINES * 2 + 2;
 
 /**
- * Tabela RGBA float do shader, uma linha por perfil:
- * [0..7] linhas (u, largura, tipo, cor); [8..15] faixas (u, sentido, largura, setas + 8·ônibus);
- * [16] postes (tem canteiro, u direita, u esquerda, u do canteiro); [17] (piso, u do meio-fio direito, u do
- * meio-fio esquerdo, 0).
+ * Float RGBA shader table, one row per profile:
+ * [0..7] lines (u, width, type, colour); [8..15] lanes (u, direction, width, arrows + 8·bus);
+ * [16] lamp posts (has median, right u, left u, median u); [17] (surface, right curb u, left
+ * curb u, 0).
  */
 export function writeProfileRow(t: Float32Array, id: number): void {
   const p = PROFILE_INFO[id];

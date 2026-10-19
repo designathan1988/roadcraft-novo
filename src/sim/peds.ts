@@ -1,10 +1,10 @@
-// Pedestres (worker de simulação). Mesmo esquema do trânsito: no mapa todo
-// só eventos (fim de cada trecho de caminhada, numa fila por tempo); perto da
-// câmera, posição a cada quadro, espera nas faixas de pedestre com semáforo.
-// Caminho = rota A* nos nós (só trechos com calçada); em cada nó, contorna as
-// esquinas e atravessa os braços pelas faixas. Nada percorre a multidão por
-// tick: cada pessoa fica na lista do nó para onde anda, e a janela lê só as
-// listas dos nós perto da câmera.
+// Pedestrians (simulation worker). Same scheme as traffic: across the whole map
+// only events (end of each walking leg, in a time-ordered queue); near the
+// camera, a position every frame, waiting at signalled crosswalks.
+// Path = A* route over the nodes (only segments with a sidewalk); at each node it
+// goes around the corners and crosses the arms at the crosswalks. Nothing walks the
+// crowd per tick: each person sits in the list of the node it is walking to, and the
+// window reads only the lists of the nodes near the camera.
 
 import { Table } from '../core/table.ts';
 import { Rng } from '../core/rng.ts';
@@ -17,25 +17,25 @@ import type { SimNet } from './lanes.ts';
 import { Router } from './routing.ts';
 
 const MAX_PEDS = 100000;
-/** Chance de nascer num nó pela zona das vias em volta (nenhuma, residencial, comercial, industrial, misto). */
+/** Chance of spawning at a node by the zone of the roads around it (none, residential, commercial, industrial, mixed). */
 const ZONE_PULL = [0.12, 0.4, 1, 0.15, 0.8];
 const ROUTE = 32;
 const WAYS = 12;
-const CROSS_AT = 2.15; // meio da faixa de pedestre, a partir do recuo
+const CROSS_AT = 2.15; // middle of the crosswalk, measured from the setback
 const WINDOW = 520;
 const CURB = 0.15;
-/** Parte das viagens que sai de bicicleta quando há ciclofaixa perto (roadcraft `vehicles/cycleLane.ts`). */
+/** Share of trips made by bicycle when there is a bike lane nearby (roadcraft `vehicles/cycleLane.ts`). */
 const BIKE_SHARE = 0.1;
-/** Trechos que um ciclista percorre (passeio pelas ciclofaixas, sem roteador). */
+/** Segments a cyclist rides (a wander along the bike lanes, no router). */
 const BIKE_LEGS = 24;
 
-/** u do meio da ciclofaixa de quem anda no sentido `dir` do trecho (mão direita; NaN = sem ciclofaixa). */
+/** u of the middle of the bike lane for someone riding in direction `dir` of the segment (right-hand traffic; NaN = no bike lane). */
 function bikeU(profile: number, dir: number): number {
   let best = NaN;
   for (const e of PROFILE_INFO[profile].edges) {
     if (e.strip.kind !== 'bike') continue;
     const u = (e.u0 + e.u1) / 2;
-    // a→b anda à direita (u < 0); b→a, à esquerda (u > 0); ciclofaixa de um lado só: serve aos dois sentidos
+    // a→b rides on the right (u < 0); b→a on the left (u > 0); a bike lane on one side only serves both directions
     if ((dir > 0 && u < 0) || (dir < 0 && u > 0)) return u;
     best = u;
   }
@@ -43,23 +43,25 @@ function bikeU(profile: number, dir: number): number {
 }
 
 const schema = {
-  // rota
+  // route
   rLen: Uint8Array, rIdx: Uint8Array,
-  // trecho atual (calçada): de da a db metros desde o nó a, no lado side (+1 = u+)
+  // current segment (sidewalk): from da to db metres from node a, on side `side` (+1 = u+)
   seg: Int32Array, side: Int8Array, da: Float32Array, db: Float32Array,
-  // passo atual: 0 calçada, 1 reta entre pontos, 2 esperando
+  // current step: 0 sidewalk, 1 straight line between points, 2 waiting
   mode: Uint8Array, wIdx: Uint8Array, wLen: Uint8Array,
   t0: Float64Array, dur: Float32Array, at: Float64Array,
-  // nó para onde anda (lista da janela)
+  // node it is walking to (window list)
   node: Int32Array, next: Int32Array, prev: Int32Array,
   speed: Float32Array, color: Uint8Array,
-  // última posição publicada (para interpolar)
+  // appearance id (16 bits) for the people renderer: drawn when the pedestrian is born, published at pose index 10
+  look: Uint16Array,
+  // last published position (for interpolation)
   px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array,
-  // viagem de ônibus: linha (-1 = só a pé), parada de embarque e de descida
+  // bus trip: line (-1 = on foot only), boarding stop and alighting stop
   tLine: Int16Array, tFrom: Uint8Array, tTo: Uint8Array,
-  // de bicicleta (anda pela ciclofaixa)
+  // by bicycle (rides on the bike lane)
   bike: Uint8Array,
-  // onde entra no primeiro trecho de calçada (0-1; quem sai de uma porta entra no meio)
+  // where it enters the first sidewalk segment (0-1; someone leaving a door enters mid-way)
   enter: Float32Array,
 };
 
@@ -70,10 +72,10 @@ export class Peds {
   private sim: SimNet;
   private router: Router;
   private routes = new Int32Array(4096 * ROUTE);
-  /** Pontos de passagem por pessoa: x, y, z, braço atravessado + 1 (0 = não é travessia). */
+  /** Waypoints per person: x, y, z, crossed arm + 1 (0 = not a crossing). */
   private ways = new Float32Array(4096 * WAYS * 4);
   private wayNode = new Int32Array(4096);
-  /** Ponto de partida da reta atual (ou onde está parado). */
+  /** Start point of the current straight line (or where it is standing). */
   private lineFrom = new Float32Array(4096 * 3);
   private pos3 = [0, 0, 0, 0];
   private head = new Int32Array(1 << 14).fill(-1);
@@ -83,15 +85,15 @@ export class Peds {
   private rng = new Rng(4242);
   private time = 0;
   private windowNodes: number[] = [];
-  /** Semáforo: carros do braço `arm` do nó `n` estão andando? (dado pelo trânsito) */
+  /** Traffic light: are the cars on arm `arm` of node `n` moving? (provided by traffic) */
   carsGo: (n: number, arm: number) => boolean = () => false;
-  /** Pessoas por metro de faixa de carro (demanda simples). */
+  /** People per metre of car lane (simple demand). */
   density = 1 / 30;
-  /** Porcentagem de pessoas escolhida pelo jogador. */
+  /** Share of people chosen by the player. */
   share = 1;
   camX = 0;
   camZ = 0;
-  /** Portas perto da câmera (x, z), da página. */
+  /** Doors near the camera (x, z), from the page. */
   doors: Float32Array = new Float32Array(0);
 
   constructor(sim: SimNet) {
@@ -110,7 +112,7 @@ export class Peds {
 
   get count(): number { return this.t.size; }
 
-  // ------------------------------------------------------------ fila de eventos
+  // ------------------------------------------------------------ event queue
 
   private schedule(p: number, at: number): void {
     this.t.cols.at[p] = at;
@@ -140,7 +142,7 @@ export class Peds {
     this.heapT[i] = lt; this.heapP[i] = lp;
   }
 
-  /** Alguém na faixa de pedestres do nó agora (andando no trecho de travessia)? */
+  /** Is anyone on the node's crosswalk right now (walking the crossing leg)? */
   crossing(n: number): boolean {
     const c = this.t.cols;
     for (let p = this.head[n]; p >= 0; p = c.next[p]) {
@@ -151,7 +153,7 @@ export class Peds {
     return false;
   }
 
-  // ------------------------------------------------------------ listas por nó
+  // ------------------------------------------------------------ per-node lists
 
   private link(p: number, n: number): void {
     const c = this.t.cols;
@@ -168,14 +170,14 @@ export class Peds {
     c.node[p] = -1;
   }
 
-  // ------------------------------------------------------------ nascer e sumir
+  // ------------------------------------------------------------ spawning and removal
 
   private randomNode(): number {
     const net = this.sim.net, t = net.nodes, sc = net.segs.cols;
     for (let i = 0; i < 12; i++) {
       const n = this.rng.int(0, t.end);
       if (!t.alive[n] || t.cols.deg[n] === 0) continue;
-      // mais gente onde há comércio
+      // more people where there is commerce
       let pull = 0;
       for (let k = 0; k < t.cols.deg[n]; k++) {
         const s = net.adj[n * MAX_DEG + k];
@@ -186,14 +188,14 @@ export class Peds {
     return -1;
   }
 
-  /** Viagem de ônibus ao acaso (do trânsito): [linha, embarque, descida, nó do embarque]. */
+  /** Random bus trip (from traffic): [line, boarding stop, alighting stop, boarding node]. */
   pickTrip: () => [number, number, number, number] | null = () => null;
-  /** Chegou na parada: passa a esperar o ônibus (na conta do trânsito). */
+  /** Reached the stop: starts waiting for the bus (tracked by traffic). */
   onStop: (line: number, from: number, to: number) => void = () => {};
-  /** Parte de quem anda vai pegar ônibus (quando há linhas). */
+  /** Share of walkers who take the bus (when there are lines). */
   transitShare = 0.3;
 
-  /** Desceram do ônibus no nó: seguem a pé até um destino perto. */
+  /** Got off the bus at the node: they walk on to a nearby destination. */
   spawnAt(node: number, count: number, color = -1): void {
     for (let k = 0; k < count && this.t.size < MAX_PEDS; k++) {
       this.nextColor = color;
@@ -202,12 +204,12 @@ export class Peds {
     this.nextColor = -1;
   }
 
-  /** Cor da próxima pessoa (criador de pessoas); −1 = sorteada. */
+  /** Colour of the next person (people creator); −1 = random. */
   private nextColor = -1;
 
   /**
-   * Tira de cena quem estiver a até `r` metros de (x, z), só nas listas dos nós perto (nunca a multidão
-   * inteira). Devolve quantos. `one`: só o mais perto (pistola).
+   * Removes everyone within `r` metres of (x, z), only in the lists of nearby nodes (never the whole
+   * crowd). Returns how many. `one`: only the closest (pistol).
    */
   hit(x: number, z: number, r: number, one: boolean): number {
     const net = this.sim.net, c = this.t.cols;
@@ -227,7 +229,7 @@ export class Peds {
   }
 
   private spawn(): void {
-    // parte vai a pé até uma parada, pega o ônibus e desce longe
+    // some walk to a stop, take the bus and get off far away
     if (this.rng.next() < this.transitShare) {
       const trip = this.pickTrip();
       if (trip) {
@@ -249,8 +251,8 @@ export class Peds {
   }
 
   /**
-   * Sai de uma porta perto da câmera (roadcraft `lotDoors`): anda reto da porta até a calçada do trecho mais perto e
-   * segue a rota dali (até um nó ao acaso a até 900 m).
+   * Leaves a door near the camera (roadcraft `lotDoors`): walks straight from the door to the sidewalk of the nearest
+   * segment and follows the route from there (to a random node up to 900 m away).
    */
   private spawnFromDoor(): boolean {
     const k = this.rng.int(0, this.doors.length >> 1);
@@ -267,11 +269,11 @@ export class Peds {
     const q = net.quad(s);
     bez(q, t, p2); bezD(q, t, d2);
     const l = Math.hypot(d2[0], d2[1]) || 1, dx = d2[0] / l, dz = d2[1] / l;
-    // lado da porta (u+ = esquerda de a→b) e o ponto da calçada daquele lado
+    // side of the door (u+ = left of a→b) and the sidewalk point on that side
     const sideSign = (x - p2[0]) * dz - (z - p2[1]) * dx > 0 ? 1 : -1;
     const [u, side] = this.sideU(sc.profile[s], sideSign);
     const L = sim.segLen(s), r0 = sim.segS0(s), r1 = sim.segS1(s), dA = Math.max(r0, Math.min(r1, t * L));
-    // anda para a ponta mais perto do destino
+    // walk towards the end closest to the destination
     const n0a = sc.a[s], n0b = sc.b[s];
     const cand: number[] = [];
     net.nodeIndex.query(x - 900, z - 900, x + 900, z + 900, (n) => { if (cand.length < 400) cand.push(n); });
@@ -292,13 +294,13 @@ export class Peds {
     if (len < 1 || this.routes[r + len] !== b) { this.t.release(p); return false; }
     c.rLen[p] = len + 1; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = 1.1 + this.rng.next() * 0.55;
-    c.color[p] = this.rng.int(0, 16);
+    c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = side;
     c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0;
     c.bike[p] = 0;
     c.seg[p] = s;
     c.enter[p] = Math.max(0, Math.min(0.98, (towardB ? dA - r0 : r1 - dA) / Math.max(0.5, r1 - r0)));
-    // reta da porta até a calçada
+    // straight line from the door to the sidewalk
     const y = nc.y[sc.a[s]] + (nc.y[sc.b[s]] - nc.y[sc.a[s]]) * (dA / Math.max(1e-6, L)) + CURB;
     this.lineFrom[p * 3] = x; this.lineFrom[p * 3 + 1] = y; this.lineFrom[p * 3 + 2] = z;
     const o = p * WAYS * 4;
@@ -313,8 +315,8 @@ export class Peds {
   }
 
   /**
-   * Ciclista: sai de `a` por um trecho com ciclofaixa e segue pelas ciclofaixas (de preferência em frente) até elas
-   * acabarem ou BIKE_LEGS trechos. Rota sem roteador: um passeio que cabe na lista de nós da pessoa.
+   * Cyclist: leaves `a` along a segment with a bike lane and follows the bike lanes (preferably straight on) until they
+   * end or BIKE_LEGS segments. Route without the router: a wander that fits in the person's node list.
    */
   private spawnBike(a: number): boolean {
     const net = this.sim.net, sc = net.segs.cols, nc = net.nodes.cols;
@@ -328,7 +330,7 @@ export class Peds {
     while (len < Math.min(ROUTE, BIKE_LEGS + 1)) {
       const next = sc.a[s] === at ? sc.b[s] : sc.a[s];
       this.routes[r + len++] = next;
-      // saída mais reta com ciclofaixa (um pouco de sorteio para espalhar)
+      // straightest exit with a bike lane (a little randomness to spread them out)
       const q = net.quad(s);
       const inx = sc.a[s] === next ? q.x0 - q.cx : q.x1 - q.cx, inz = sc.a[s] === next ? q.z0 - q.cz : q.z1 - q.cz;
       const il = Math.hypot(inx, inz) || 1;
@@ -346,7 +348,7 @@ export class Peds {
     if (len < 2 || !nc.deg[a]) { this.t.release(p); return false; }
     c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = 4 + this.rng.next() * 1.6;
-    c.color[p] = this.rng.int(0, 16);
+    c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = 1;
     c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0;
     c.bike[p] = 1; c.enter[p] = 0;
@@ -354,7 +356,7 @@ export class Peds {
     return true;
   }
 
-  /** Nasce em `a` e anda até um nó ao acaso a até `radius` metros. */
+  /** Spawns at `a` and walks to a random node up to `radius` metres away. */
   private spawnFrom(a: number, radius: number, li: number, from: number, to: number, frac: number): void {
     const net = this.sim.net, nc = net.nodes.cols;
     if (!net.nodes.alive[a]) return;
@@ -377,11 +379,11 @@ export class Peds {
     if (len < 2 || this.routes[p * ROUTE + len - 1] !== b) { this.t.release(p); return; }
     c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = 1.1 + this.rng.next() * 0.55;
-    c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16);
+    c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = this.rng.next() < 0.5 ? 1 : -1;
     c.tLine[p] = li; c.tFrom[p] = from; c.tTo[p] = to;
     c.bike[p] = 0; c.enter[p] = 0;
-    // `frac` > 0: começa no meio do primeiro trecho, para a cidade já nascer cheia
+    // `frac` > 0: starts part-way along the first segment, so the city starts out full
     if (!this.startSidewalk(p, frac)) { this.kill(p); return; }
   }
 
@@ -391,7 +393,7 @@ export class Peds {
     this.t.release(p);
   }
 
-  // ------------------------------------------------------------ caminhada
+  // ------------------------------------------------------------ walking
 
   private segBetween(a: number, b: number): number {
     const net = this.sim.net, sc = net.segs.cols;
@@ -403,17 +405,17 @@ export class Peds {
     return -1;
   }
 
-  /** u da calçada do lado pedido (ou do outro lado, se esse não tiver). */
+  /** u of the sidewalk on the requested side (or the other side, if that one has none). */
   private sideU(profile: number, side: number): [number, number] {
     const s = PROFILE_INFO[profile];
     if (side > 0) return Number.isNaN(s.walkLeft) ? [s.walkRight, -1] : [s.walkLeft, 1];
     return Number.isNaN(s.walkRight) ? [s.walkLeft, 1] : [s.walkRight, -1];
   }
 
-  /** Entra na calçada do trecho entre rota[rIdx] e rota[rIdx + 1]. `frac` > 0 começa no meio. */
+  /** Enters the sidewalk of the segment between route[rIdx] and route[rIdx + 1]. `frac` > 0 starts part-way. */
   private startSidewalk(p: number, frac = 0): boolean {
     const c = this.t.cols, sim = this.sim, sc = sim.net.segs.cols;
-    // quem saiu de uma porta entra no meio do trecho (onde a reta da porta chegou)
+    // someone who left a door enters mid-segment (where the line from the door arrived)
     if (frac === 0 && c.enter[p] > 0) { frac = c.enter[p]; c.enter[p] = 0; }
     const i = c.rIdx[p];
     if (i + 1 >= c.rLen[p]) return false;
@@ -440,13 +442,13 @@ export class Peds {
     return true;
   }
 
-  /** Chegou ao nó rota[rIdx + 1]: monta os pontos para contornar/atravessar até o próximo trecho. */
+  /** Reached node route[rIdx + 1]: builds the waypoints to go around/cross to the next segment. */
   private atNode(p: number): boolean {
     const c = this.t.cols, sim = this.sim, net = sim.net, sc = net.segs.cols;
     c.rIdx[p]++;
     const i = c.rIdx[p];
     if (i + 1 >= c.rLen[p]) {
-      // chegou: quem ia pegar ônibus fica esperando na parada
+      // arrived: those taking the bus wait at the stop
       if (c.tLine[p] >= 0) this.onStop(c.tLine[p], c.tFrom[p], c.tTo[p]);
       return false;
     }
@@ -454,12 +456,12 @@ export class Peds {
     const sIn = c.seg[p], sOut = this.segBetween(n, nNext);
     if (c.bike[p]) return this.bikeThrough(p, n, sIn, sOut);
     if (sOut < 0 || !net.segs.alive[sIn] || !PROFILE_INFO[sc.profile[sOut]].walk) return false;
-    // ponto de partida = fim da calçada que acabou
+    // start point = end of the sidewalk just finished
     const here = this.posNow(p);
     this.lineFrom[p * 3] = here[0]; this.lineFrom[p * 3 + 1] = here[1]; this.lineFrom[p * 3 + 2] = here[2];
     c.pyaw[p] = here[3];
     c.mode[p] = 3;
-    // braços do nó em ordem anti-horária (a mesma do trânsito e dos semáforos)
+    // node arms in counter-clockwise order (the same as traffic and the traffic lights)
     const segs = net.segsOf(n, []);
     const deg = segs.length;
     const angle = segs.map((s) => { const a = armOf(net.quad(s), sc.profile[s], sc.a[s] === n ? 0 : 1); return armAngle(a.dx, a.dz); });
@@ -470,12 +472,12 @@ export class Peds {
     const endIn = sc.a[sIn] === n ? 0 : 1;
     const armLeftIn = endIn === 0 ? c.side[p] > 0 : c.side[p] < 0;
     const ci = armLeftIn ? ai : (ai - 1 + deg) % deg;
-    // esquina de destino: à esquerda (aj) ou à direita (aj − 1) do braço de saída; menos travessias
+    // target corner: left (aj) or right (aj − 1) of the exit arm; fewest crossings
     const opts = [aj, (aj - 1 + deg) % deg].map((cj) => {
       const ccw = (cj - ci + deg) % deg, cw = (ci - cj + deg) % deg;
       return { cj, steps: Math.min(ccw, cw), dir: ccw <= cw ? 1 : -1 };
     });
-    // empate: sorteio fixo por pessoa (metade atravessa antes, metade depois); na faixa do meio da quadra, metade atravessa
+    // tie: fixed per-person draw (half cross before, half after); at a mid-block crosswalk, half cross
     const mid = deg === 2 && (sim.nodeCtl[n] === 9 || sim.nodeCtl[n] === 10);
     const want = mid && ((p + n) & 1) === 0;
     const pick = mid ? (opts.find((o) => (o.steps > 0) === want) ?? opts[0]) : opts[0].steps < opts[1].steps || (opts[0].steps === opts[1].steps && (p & 1) === 0) ? opts[0] : opts[1];
@@ -490,7 +492,7 @@ export class Peds {
     const tmp = new Float64Array(3);
     let cur = ci;
     for (let k = 0; k < pick.steps && w + 2 < WAYS; k++) {
-      // anti-horário: atravessa o braço cur+1 da direita para a esquerda; horário: o braço cur, da esquerda para a direita
+      // counter-clockwise: cross arm cur+1 from right to left; clockwise: arm cur, from left to right
       const arm = pick.dir > 0 ? (cur + 1) % deg : cur;
       const s = segs[order[arm]];
       const end = sc.a[s] === n ? 0 : 1;
@@ -500,7 +502,7 @@ export class Peds {
       this.armPoint(s, end, d, !fromLeft, tmp, false); put(tmp[0], tmp[1], tmp[2], arm + 1);
       cur = pick.dir > 0 ? (cur + 1) % deg : (cur - 1 + deg) % deg;
     }
-    // ponta da calçada de saída, no lado da esquina final
+    // end of the exit sidewalk, on the side of the final corner
     const endOut = sc.a[sOut] === n ? 0 : 1;
     const armLeftOut = pick.cj === aj;
     const dOut = endOut === 0 ? sim.segS0(sOut) : sim.segLen(sOut) - sim.segS1(sOut);
@@ -515,7 +517,7 @@ export class Peds {
     return this.nextWay(p);
   }
 
-  /** Ciclista no nó: uma reta do fim da ciclofaixa que chega ao começo da que sai (pelo cruzamento, como um carro). */
+  /** Cyclist at a node: a straight line from the end of the incoming bike lane to the start of the outgoing one (through the junction, like a car). */
   private bikeThrough(p: number, n: number, sIn: number, sOut: number): boolean {
     const c = this.t.cols, sim = this.sim, net = sim.net, sc = net.segs.cols;
     if (sOut < 0 || !net.segs.alive[sIn] || Number.isNaN(bikeU(sc.profile[sOut], 1))) return false;
@@ -540,12 +542,12 @@ export class Peds {
     return this.nextWay(p);
   }
 
-  /** Ponto na calçada (ou faixa de pedestre) de um braço, a d metros do nó, no lado esquerdo/direito do braço. */
+  /** Point on an arm's sidewalk (or crosswalk), d metres from the node, on the arm's left/right side. */
   private armPoint(s: number, end: 0 | 1, d: number, armLeft: boolean, out: Float64Array, sidewalk: boolean): void {
     const sim = this.sim, net = sim.net, sc = net.segs.cols, nc = net.nodes.cols;
     const L = sim.segLen(s);
     const fromA = end === 0 ? d : L - d;
-    // esquerda do braço em coordenadas do trecho (u+ = esquerda de a→b)
+    // arm's left in segment coordinates (u+ = left of a→b)
     const segLeft = end === 0 ? armLeft : !armLeft;
     const [u] = this.sideU(sc.profile[s], segLeft ? 1 : -1);
     const t = sim.tAt(s, Math.max(0, Math.min(L, fromA)));
@@ -558,13 +560,13 @@ export class Peds {
     out[1] = ya + (yb - ya) * (fromA / Math.max(1e-6, L)) + (sidewalk ? CURB : 0.02);
   }
 
-  /** Próximo ponto de passagem (ou a calçada, quando acabam). */
+  /** Next waypoint (or the sidewalk, when they run out). */
   private nextWay(p: number): boolean {
     const c = this.t.cols;
     if (c.wIdx[p] >= c.wLen[p]) return this.startSidewalk(p);
     const o = p * WAYS * 4 + c.wIdx[p] * 4;
     const cross = this.ways[o + 3];
-    // travessia com semáforo: espera os carros daquele braço pararem (só perto da câmera)
+    // signalled crossing: waits for the cars on that arm to stop (only near the camera)
     if (cross > 0 && this.carsGo(this.wayNode[p], cross - 1)) {
       c.mode[p] = 2;
       c.t0[p] = this.time; c.dur[p] = 1;
@@ -577,7 +579,7 @@ export class Peds {
     c.mode[p] = 1;
     c.t0[p] = this.time;
     c.dur[p] = Math.max(0.05, len / c.speed[p]);
-    // o ponto de partida fica guardado em px/py/pz da reta
+    // the start point is stored in the line's px/py/pz
     this.lineFrom[p * 3] = x0; this.lineFrom[p * 3 + 1] = y0; this.lineFrom[p * 3 + 2] = z0;
     c.wIdx[p]++;
     this.schedule(p, this.time + c.dur[p]);
@@ -585,7 +587,7 @@ export class Peds {
   }
 
 
-  /** Posição agora (x, y, z, rumo). Modos: 0 calçada, 1 reta, 2 esperando num ponto, 3 parado no ponto de partida. */
+  /** Current position (x, y, z, heading). Modes: 0 sidewalk, 1 straight line, 2 waiting at a point, 3 standing at the start point. */
   private posNow(p: number, time = this.time): number[] {
     const c = this.t.cols, sim = this.sim, out = this.pos3;
     out[3] = c.pyaw[p];
@@ -605,7 +607,7 @@ export class Peds {
       const l = Math.hypot(d2[0], d2[1]) || 1;
       const dx = d2[0] / l, dz = d2[1] / l;
       const dir = c.db[p] >= c.da[p] ? 1 : -1;
-      // ciclista: no meio da ciclofaixa da sua mão; pedestre: cada um num "trilho" um pouco diferente da calçada
+      // cyclist: in the middle of the bike lane on its side; pedestrian: each on a slightly different "track" along the sidewalk
       const uu = c.bike[p] ? bikeU(sc.profile[s], dir) : this.sideU(sc.profile[s], c.side[p])[0] + ((p * 0.618) % 1 - 0.5) * 0.9;
       out[0] = p2[0] + dz * uu; out[2] = p2[1] - dx * uu;
       const ya = nc.y[sc.a[s]], yb = nc.y[sc.b[s]];
@@ -613,11 +615,11 @@ export class Peds {
       out[3] = Math.atan2(dx * dir, dz * dir);
       return out;
     }
-    // reta (ou parado, esperando no último ponto)
+    // straight line (or standing, waiting at the last point)
     const k = c.mode[p] === 2 ? Math.max(0, c.wIdx[p] - 1) : c.wIdx[p] - 1;
     const o = p * WAYS * 4 + Math.max(0, k) * 4;
     if (c.mode[p] === 2) {
-      // parado no último ponto alcançado
+      // standing at the last point reached
       if (c.wIdx[p] > 0) { out[0] = this.ways[o]; out[1] = this.ways[o + 1]; out[2] = this.ways[o + 2]; }
       else { out[0] = this.lineFrom[p * 3]; out[1] = this.lineFrom[p * 3 + 1]; out[2] = this.lineFrom[p * 3 + 2]; }
       return out;
@@ -629,13 +631,13 @@ export class Peds {
     return out;
   }
 
-  /** Um evento: fim de trecho, fim de reta ou fim de espera. */
+  /** One event: end of a segment, end of a straight line or end of a wait. */
   private advance(p: number): void {
     const ok = this.t.cols.mode[p] === 0 ? this.atNode(p) : this.nextWay(p);
     if (!ok) this.kill(p);
   }
 
-  // ------------------------------------------------------------ passo
+  // ------------------------------------------------------------ step
 
   step(dt: number): void {
     this.time += dt;
@@ -646,21 +648,21 @@ export class Peds {
     while (this.heapN > 0 && this.heapT[0] <= this.time && budget-- > 0) {
       const p = this.heapP[0], at = this.heapT[0];
       this.popEvent();
-      if (!this.t.alive[p] || c.at[p] !== at) continue; // evento velho
+      if (!this.t.alive[p] || c.at[p] !== at) continue; // stale event
       if (c.mode[p] === 0 && !this.sim.net.segs.alive[c.seg[p]]) { this.kill(p); continue; }
       this.advance(p);
     }
   }
 
-  /** A câmera andou: nós cuja lista entra na janela. */
+  /** The camera moved: nodes whose lists enter the window. */
   checkWindow(): void {
     this.windowNodes.length = 0;
     this.sim.net.nodeIndex.query(this.camX - WINDOW, this.camZ - WINDOW, this.camX + WINDOW, this.camZ + WINDOW, (n) => this.windowNodes.push(n));
   }
 
-  /** Trechos removidos: quem estava neles some no próximo evento (checado em step). */
+  /** Removed segments: whoever was on them disappears at their next event (checked in step). */
 
-  /** Escreve as poses de quem está perto, a partir de `start`. Devolve quantos escreveu. */
+  /** Writes the poses of the people nearby, starting at `start`. Returns how many it wrote. */
   writePoses(data: Float32Array, stride: number, start: number, max: number): number {
     const c = this.t.cols;
     let n = 0;
@@ -676,6 +678,7 @@ export class Peds {
         data[o + 4] = q[0]; data[o + 5] = q[1]; data[o + 6] = q[2]; data[o + 7] = q[3];
         data[o + 8] = (c.bike[p] ? 5 : 3) * 256 + c.color[p];
         data[o + 9] = 1;
+        data[o + 10] = c.look[p];
         c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.pyaw[p] = q[3];
         n++;
       }

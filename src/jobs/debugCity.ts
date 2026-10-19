@@ -1,7 +1,7 @@
-// Carregador de pior caso: enche o mapa de ruas em grade e de prédios genéricos
-// nas quadras. Grade global (não por ladrilho), alturas pelo gerador do relevo
-// (determinístico, não depende da ordem dos workers). ~90 mil prédios e ~20 mil
-// trechos de via no mapa de 10 km.
+// Worst-case loader: fills the map with a grid of streets and generic buildings
+// in the blocks. Global grid (not per tile), heights from the terrain generator
+// (deterministic, independent of worker order). ~90k buildings and ~20k
+// road segments on the 10 km map.
 
 import { HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TILES, SEA_LEVEL } from '../config.ts';
 import { Rng, fbm, hash2 } from '../core/rng.ts';
@@ -11,11 +11,11 @@ import { baseHeight } from './terrainGen.ts';
 import { SHAPE_STRIDE, emptyBoxes, type BoxColumns } from './protocol.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 
-export const BLOCK = 96; // passo da grade (m)
-export const DEBUG_PROFILE = 1; // rua com estacionamento, ~16 m
-export const DEBUG_AVENUE = 3; // avenida a cada 5 linhas
+export const BLOCK = 96; // grid spacing (m)
+export const DEBUG_PROFILE = 1; // street with parking, ~16 m
+export const DEBUG_AVENUE = 3; // an avenue every 5 lines
 const HALF = PROFILE_INFO[DEBUG_PROFILE].right;
-/** Perfil da linha i da grade (vale para as duas direções). */
+/** Profile of grid line i (same for both directions). */
 export const lineProfile = (i: number): number => (i % 5 === 2 ? DEBUG_AVENUE : DEBUG_PROFILE);
 const halfOf = (i: number): number => PROFILE_INFO[lineProfile(i)].right;
 const LINES = Math.floor(MAP_SIZE / BLOCK); // 106
@@ -24,14 +24,14 @@ const PALETTE = [0xd8cfc0, 0xc9b79c, 0xb8bcc2, 0xe6e1d6, 0xa89880, 0x9fa8b0, 0xd
 
 const lineX = (i: number) => -MAP_HALF + BLOCK / 2 + i * BLOCK;
 
-/** Altura de um nó da grade (média suave do relevo gerado), ou NaN se não cabe rua. */
+/** Height of a grid node (smoothed average of the generated terrain), or NaN if no street fits. */
 export function gridNodeHeight(i: number, j: number, seed: number): number {
   const x = lineX(i), z = lineX(j);
   let h = 0;
   for (const [dx, dz] of [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6]]) h += baseHeight(x + dx, z + dz, seed);
   h /= 5;
   if (h < SEA_LEVEL + 1.2) return NaN;
-  if (Math.max(Math.abs(x), Math.abs(z)) > MAP_HALF - 300) return NaN; // serras da borda
+  if (Math.max(Math.abs(x), Math.abs(z)) > MAP_HALF - 300) return NaN; // edge mountains
   return h;
 }
 
@@ -40,11 +40,11 @@ function edgeOk(ha: number, hb: number): boolean {
 }
 
 export interface DebugRoads {
-  nodes: Float32Array; // i, j, x, z, y por nó
-  segs: Int32Array; // i1, j1, i2, j2 por trecho
+  nodes: Float32Array; // i, j, x, z, y per node
+  segs: Int32Array; // i1, j1, i2, j2 per segment
 }
 
-/** Nós e trechos da grade cujo nó inicial fica neste ladrilho. */
+/** Grid nodes and segments whose start node lies in this tile. */
 export function debugTileRoads(tile: number, seed: number): DebugRoads {
   const nodes: number[] = [], segs: number[] = [];
   const tx = tile % MAP_TILES, tz = (tile / MAP_TILES) | 0;
@@ -61,7 +61,7 @@ export function debugTileRoads(tile: number, seed: number): DebugRoads {
       if (tileId(tileX(x), tileX(z)) !== tile || tileX(x) !== tx || tileX(z) !== tz) continue;
       const h = H(i, j);
       if (!Number.isFinite(h)) continue;
-      // o nó só existe se tiver ao menos um trecho
+      // a node exists only if it has at least one segment
       const right = edgeOk(h, H(i + 1, j)), down = edgeOk(h, H(i, j + 1));
       const left = edgeOk(h, H(i - 1, j)), up = edgeOk(h, H(i, j - 1));
       if (!(right || down || left || up)) continue;
@@ -73,7 +73,7 @@ export function debugTileRoads(tile: number, seed: number): DebugRoads {
   return { nodes: new Float32Array(nodes), segs: new Int32Array(segs) };
 }
 
-/** Assenta o relevo do ladrilho sob as ruas da grade (escreve só nas amostras do ladrilho). */
+/** Settles the tile's terrain under the grid streets (writes only to the tile's samples). */
 export function conformTileToGrid(heights: Float32Array, tile: number, seed: number): { min: number; max: number } {
   const tx = tile % MAP_TILES, tz = (tile / MAP_TILES) | 0;
   const blend = 6;
@@ -94,7 +94,7 @@ export function conformTileToGrid(heights: Float32Array, tile: number, seed: num
       const idx = heightIndex(gx, gz);
       const old = heights[idx];
       let best = Infinity, target = 0;
-      // rua vertical (ao longo de z) mais próxima
+      // nearest vertical street (along z)
       const fi = (x + MAP_HALF - BLOCK / 2) / BLOCK, fj = (z + MAP_HALF - BLOCK / 2) / BLOCK;
       const i = Math.round(fi), j = Math.round(fj);
       const dX = Math.abs(x - lineX(i)), dZ = Math.abs(z - lineX(j));
@@ -124,7 +124,7 @@ export function conformTileToGrid(heights: Float32Array, tile: number, seed: num
 
 function smooth(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }
 
-/** Prédios das quadras cujo centro fica neste ladrilho. */
+/** Buildings of the blocks whose center lies in this tile. */
 export function debugTileBoxes(tile: number, seed: number): BoxColumns {
   const tx = tile % MAP_TILES, tz = (tile / MAP_TILES) | 0;
   const out = emptyBoxes(14 * 14 * 12);
@@ -136,7 +136,7 @@ export function debugTileBoxes(tile: number, seed: number): BoxColumns {
       const x0 = lineX(bi) + street / 2, z0 = lineX(bj) + street / 2;
       const cx = x0 + lot / 2, cz = z0 + lot / 2;
       if (tileX(cx) !== tx || tileX(cz) !== tz) continue;
-      // quadra só onde as quatro esquinas têm rua
+      // a block only where all four corners have a street
       const hs = [gridNodeHeight(bi, bj, seed), gridNodeHeight(bi + 1, bj, seed), gridNodeHeight(bi, bj + 1, seed), gridNodeHeight(bi + 1, bj + 1, seed)];
       if (hs.some((h) => !Number.isFinite(h))) continue;
       if (Math.max(...hs) - Math.min(...hs) > 12) continue;

@@ -1,6 +1,6 @@
-// Paisagismo (objetos na calçada ou no chão) e Muros (traços de muro, cerca,
-// sebe, defensa e gradil). Perto de uma via o ponto encaixa na calçada: os
-// objetos junto ao meio-fio, os muros nas costas da calçada.
+// Streetscape (objects on the sidewalk or the ground) and Barriers (runs of wall, fence,
+// hedge, guardrail and railing). Near a road the point snaps to the sidewalk:
+// objects next to the curb, barriers at the back of the sidewalk.
 
 import type * as THREE from 'three/webgpu';
 import type { Command, CommandStack } from '../core/commands.ts';
@@ -45,12 +45,12 @@ export class ItemTool {
   mode: 'streetscape' | 'barrier' = 'streetscape';
   item: number = Item.Tree;
   sign = 4;
-  /** Texto da próxima placa (nome da rua, informação, direção). */
+  /** Text of the next sign (street name, information, direction). */
   signText = '';
-  /** Chamado quando uma placa com texto é posta (texto, posição, trecho mais perto). */
+  /** Called when a sign with text is placed (text, position, nearest segment). */
   onText: ((text: string, x: number, z: number, seg: number, street: boolean) => void) | null = null;
   barrier: number = Item.Fence;
-  /** Luz dos postes com fios: 0 sem luz, 1 em postes alternados, 2 em todos. */
+  /** Lights on the wired poles: 0 none, 1 on alternate poles, 2 on all. */
   poleLights = 0;
   private last: { x: number; z: number } | null = null;
   private world: World;
@@ -76,7 +76,7 @@ export class ItemTool {
     else this.hud.setHint(this.last ? 'Clique para continuar o traço; Enter ou Esc termina, Backspace volta um ponto.' : 'Clique para começar o traço. Perto de uma via ele vai para as costas da calçada. Shift+clique remove.');
   }
 
-  /** Ponto encaixado: na calçada (meio-fio para objetos, costas para muros) ou livre no chão. */
+  /** Snapped point: on the sidewalk (curb side for objects, back for barriers) or free on the ground. */
   private spot(x: number, z: number, back: boolean): Spot {
     const net = this.world.roads, sc = net.segs.cols, nc = net.nodes.cols;
     const near = net.nearestSeg(x, z, 30);
@@ -94,7 +94,7 @@ export class ItemTool {
       if (Math.abs(u) < Math.abs(outer) + (back ? 5 : 1.5) && e.strip.kind === 'sidewalk') {
         const wu = back ? outer - Math.sign(u) * 0.25 : (u > 0 ? e.u0 + 0.5 : e.u1 - 0.5);
         const y = nc.y[sc.a[s]] + (nc.y[sc.b[s]] - nc.y[sc.a[s]]) * t + (e.strip.flush ? 0 : 0.15);
-        // objeto olha para a rua; placa olha para quem vem na mão daquele lado
+        // objects face the street; a sign faces traffic coming on that side
         const yaw = this.item === Item.Sign && !back ? (u > 0 ? Math.atan2(tx, tz) : Math.atan2(-tx, -tz)) : Math.atan2(-lx * Math.sign(u), -lz * Math.sign(u));
         return { x: p2[0] + lx * wu, z: p2[1] + lz * wu, y, yaw, onWalk: true };
       }
@@ -132,8 +132,8 @@ export class ItemTool {
     if (this.mode === 'streetscape') {
       const sp = this.spot(hit.x, hit.z, false);
       const c = new ItemsCommand(items, 'pôr item');
-      // objetos: x1 = rumo, z1 = altura (0 = do chão)
-      // elementos (fumaça, fogo…): variante = força
+      // objects: x1 = heading, z1 = height (0 = from the ground)
+      // elements (smoke, fire…): variant = strength
       c.add([sp.x, sp.z, sp.yaw, sp.onWalk ? sp.y : 0, this.item, this.item === Item.Sign ? this.sign : isElement(this.item) ? 4 : 0]);
       // "a sign is a rule": a Stop/Give-way sign next to a junction arm sets that arm's rule (one undo for both)
       const rule = this.item === Item.Sign ? signRuleCommand(this.world, sp.x, sp.z, this.sign, true) : '';
@@ -164,14 +164,14 @@ export class ItemTool {
     this.last = { x: sp.x, z: sp.z };
   }
 
-  /** Espaço entre itens de uma fileira (m), por tipo. */
+  /** Spacing between items in a row (m), by type. */
   private static spacing(t: number): number {
     const S: Record<number, number> = { [Item.Tree]: 9, [Item.Conifer]: 8, [Item.Palm]: 10, [Item.Bush]: 4, [Item.Bench]: 14, [Item.Bin]: 22, [Item.Lamp]: 25,
       [Item.Hydrant]: 60, [Item.Postbox]: 60, [Item.Phone]: 50, [Item.Drain]: 30, [Item.Bollard]: 2.5, [Item.Planter]: 6, [Item.Sign]: 40 };
     return S[t] ?? 10;
   }
 
-  /** Fileira do item escolhido de a até b, cada um encaixado na calçada (um comando só). */
+  /** Row of the chosen item from a to b, each snapped to the sidewalk (a single command). */
   row(ax: number, az: number, bx: number, bz: number): number {
     const L = Math.hypot(bx - ax, bz - az);
     const step = ItemTool.spacing(this.item);
@@ -187,14 +187,14 @@ export class ItemTool {
     return n;
   }
 
-  /** Pré-visualização da fileira: a linha e o primeiro ponto. */
+  /** Row preview: the line and the first point. */
   hoverRow(ax: number, az: number, hit: THREE.Vector3 | null): void {
     if (!hit) return;
     const a = this.spot(ax, az, false), b = this.spot(hit.x, hit.z, false);
     this.preview.show({ x0: a.x, z0: a.z, cx: (a.x + b.x) / 2, cz: (a.z + b.z) / 2, x1: b.x, z1: b.z }, 0.5, [0, 1], [a.y + 0.4, b.y + 0.4], true, 0x4cd28a);
   }
 
-  /** Backspace: desfaz o último trecho e volta o ponto. */
+  /** Backspace: undoes the last run and moves the point back. */
   back(): void {
     if (!this.last) return;
     this.commands.undo();

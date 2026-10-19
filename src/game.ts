@@ -1555,7 +1555,7 @@ export class Game {
     this.transitView.update(this.transit, this.world.roads, this.world.heights, v);
     if (v !== this.linesSent) {
       this.linesSent = v;
-      this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l) })) } satisfies ToSim);
+      this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l), loop: !!l.loop })) } satisfies ToSim);
     }
     if (this.tool === 'transit') {
       const ids = this.transit.lines.map((l) => l.id);
@@ -1754,6 +1754,11 @@ export class Game {
       },
       streetNameAt: (x, z) => { const a = addressAt(this.world, x, z, 30); return a ? a.name : ''; },
       mapPaint: (style) => { this.settings.paint = style; setPaintStyle(style); this.unsaved = true; },
+      lineColor: (color) => { const c = this.transit.setColor(this.lineSel, color); if (c) this.commands.run(c); },
+      lineLoop: (loop) => { const c = this.transit.setLoop(this.lineSel, loop); if (c) this.commands.run(c); },
+      impossibleNodes: () => this.world.impossible.count,
+      impossibleAngle: (n) => this.world.impossible.angleAt(n),
+      impossibleList: () => { const nc = this.world.roads.nodes.cols, out: number[] = []; for (const [n, a] of this.world.impossible.nodes) out.push(n, nc.x[n], nc.z[n], a); return out; },
     };
   }
 

@@ -1,21 +1,22 @@
-// Linhas de ônibus do jogador: paradas (pontos na calçada, em ordem) e
-// quantos ônibus rodam em cada linha. A simulação recebe a lista inteira a
-// cada mudança (é pequena). Edição é comando com desfazer.
+// The player's bus lines: stops (points on the sidewalk, in order) and
+// how many buses run on each line. The simulation receives the whole list on
+// every change (it is small). Editing is a command with undo.
 
 import type { Command } from '../core/commands.ts';
 
-/** Modo da linha: ônibus, trem ou metrô (trem e metrô andam nos trilhos). */
+/** Line mode: bus, train or metro (train and metro run on rails). */
 export const Mode = { Bus: 0, Train: 1, Metro: 2 } as const;
 export const MODE_NAMES = ['Ônibus', 'Trem', 'Metrô'];
 
-export interface Line { id: number; color: number; buses: number; stops: number[]; mode?: number }
+/** A line. Bus lines run out and back (Roadcraft) unless `loop` (a ring: last stop → first). */
+export interface Line { id: number; color: number; buses: number; stops: number[]; mode?: number; loop?: boolean }
 
-/** Cores das linhas (índices da paleta dos veículos: PAINTS em render/vehicles.ts). */
+/** Line colours (indices into the vehicle palette: PAINTS in render/vehicles.ts). */
 export const LINE_COLORS = [7, 5, 11, 8, 14, 15, 6, 4];
 
 export class Transit {
   readonly lines: Line[] = [];
-  /** Terminais: pontos (x, z) onde os ônibus esperam mais e dão a volta. */
+  /** Terminals: points (x, z) where buses wait longer and turn around. */
   terminals: number[] = [];
   private nextId = 1;
   version = 0;
@@ -24,7 +25,7 @@ export class Transit {
 
   private touch(): void { this.version++; }
 
-  /** Nova linha vazia (comando). */
+  /** New empty line (command). */
   addLine(mode: number = Mode.Bus): { cmd: Command; id: number } {
     const id = this.nextId++;
     const color = LINE_COLORS[(id - 1) % LINE_COLORS.length];
@@ -48,7 +49,7 @@ export class Transit {
     };
   }
 
-  /** Põe uma parada em (x, z) na posição `at` da linha (fim, por padrão). */
+  /** Puts a stop at (x, z) at position `at` in the line (the end, by default). */
   addStop(id: number, x: number, z: number, at = -1): Command | null {
     const l = this.line(id);
     if (!l) return null;
@@ -83,7 +84,30 @@ export class Transit {
     };
   }
 
-  /** Liga ou desliga o terminal no ponto (comando). */
+  /** Line colour (index into the vehicle palette, LINE_COLORS) as a command. */
+  setColor(id: number, color: number): Command | null {
+    const l = this.line(id);
+    if (!l || l.color === color) return null;
+    const before = l.color;
+    return {
+      label: 'cor da linha',
+      apply: () => { const x = this.line(id); if (x) x.color = color; this.touch(); },
+      invert: () => { const x = this.line(id); if (x) x.color = before; this.touch(); },
+    };
+  }
+
+  /** Ring line (last stop → first) or out and back, as a command. */
+  setLoop(id: number, loop: boolean): Command | null {
+    const l = this.line(id);
+    if (!l || !!l.loop === loop) return null;
+    return {
+      label: loop ? 'linha circular' : 'linha de ida e volta',
+      apply: () => { const x = this.line(id); if (x) x.loop = loop; this.touch(); },
+      invert: () => { const x = this.line(id); if (x) x.loop = !loop; this.touch(); },
+    };
+  }
+
+  /** Toggles the terminal at the point (command). */
   toggleTerminal(x: number, z: number): Command {
     const i = this.terminalNear(x, z, 9);
     const before = [...this.terminals];
@@ -95,20 +119,20 @@ export class Transit {
     };
   }
 
-  /** Terminal perto de (x, z), ou −1. */
+  /** Terminal near (x, z), or −1. */
   terminalNear(x: number, z: number, r: number): number {
     for (let k = 0; k * 2 < this.terminals.length; k++) if (Math.hypot(this.terminals[k * 2] - x, this.terminals[k * 2 + 1] - z) <= r) return k;
     return -1;
   }
 
-  /** Índices das paradas da linha que são terminais. */
+  /** Indices of the line's stops that are terminals. */
   terminalStops(l: Line): number[] {
     const out: number[] = [];
     for (let k = 0; k * 2 < l.stops.length; k++) if (this.terminalNear(l.stops[k * 2], l.stops[k * 2 + 1], 9) >= 0) out.push(k);
     return out;
   }
 
-  /** Parada mais perto de (x, z) dentro do raio: [linha, índice]. */
+  /** Nearest stop to (x, z) within the radius: [line, index]. */
   stopNear(x: number, z: number, r: number): [number, number] | null {
     let best: [number, number] | null = null, bd = r * r;
     for (const l of this.lines) {
@@ -122,11 +146,12 @@ export class Transit {
 
   clear(): void { this.lines.length = 0; this.terminals = []; this.nextId = 1; this.touch(); }
 
-  /** Binário simples para o salvamento: [n, (id, cor, ônibus, paradas, x, z...)...]. */
+  /** Simple binary for the save: [n, (id, colour, buses, stops, x, z...)...]. */
   encode(): Float64Array {
     const out: number[] = [this.lines.length, this.nextId];
-    // modo vai junto com a cor (cor + modo × 256): salvamentos antigos leem como ônibus
-    for (const l of this.lines) out.push(l.id, l.color + (l.mode ?? 0) * 256, l.buses, l.stops.length / 2, ...l.stops);
+    // mode is packed with the colour (colour + mode × 256): old saves read as bus
+    // ring lines add 4096 (older saves read as out-and-back)
+    for (const l of this.lines) out.push(l.id, l.color + (l.mode ?? 0) * 256 + (l.loop ? 4096 : 0), l.buses, l.stops.length / 2, ...l.stops);
     return new Float64Array(out);
   }
 
@@ -137,7 +162,7 @@ export class Transit {
     this.nextId = a[o++];
     for (let i = 0; i < n; i++) {
       const id = a[o++], color = a[o++], buses = a[o++], k = a[o++];
-      this.lines.push({ id, color: color % 256, mode: Math.floor(color / 256), buses, stops: Array.from(a.subarray(o, o + k * 2)) });
+      this.lines.push({ id, color: color % 256, mode: Math.floor(color / 256) % 16, loop: color >= 4096, buses, stops: Array.from(a.subarray(o, o + k * 2)) });
       o += k * 2;
     }
     this.touch();

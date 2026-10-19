@@ -47,7 +47,7 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
   const docks: number[] = [];
   for (const [x, z, yaw] of [[-200, -100, Math.PI / 2], [60, 200, Math.PI], [200, 40, -Math.PI / 2], [-100, 60, 0]]) docks.push(x, z, yaw);
   tr.setDocks(new Float32Array(docks));
-  const data = new Float32Array(10 * 20000);
+  const data = new Float32Array(11 * 20000);
   const c = tr.veh.cols, mc = tr.mvs.t.cols;
   let parkedChecked = 0, maxQueueBehindTruck = 0;
   const pose = new Float64Array(4);
@@ -57,8 +57,8 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
     if (rb.length) tr.nodesRebuilt(rb);
     if (step % 10 === 0) tr.checkWindow();
     if (step % 40 === 0) {
-      const n = tr.writePoses(data, 10);
-      for (let i = 0; i < n * 10; i++) assert.ok(Number.isFinite(data[i]), 'pose sem NaN');
+      const n = tr.writePoses(data, 11);
+      for (let i = 0; i < n * 11; i++) assert.ok(Number.isFinite(data[i]), 'pose sem NaN');
       // carros que terminaram de estacionar: o centro está na vaga (fora da faixa)
       for (let m = 0; m < tr.mvs.t.end; m++) {
         if (!tr.mvs.t.alive[m] || mc.d[m] < mc.total[m] - 1e-3) continue;
