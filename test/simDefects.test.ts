@@ -241,3 +241,30 @@ test('C4: trucks do not head for the warehouse docks near the camera more than f
   assert.ok(trucks > 30, `trucks ${trucks}`);
   assert.ok(toDock / trucks < Math.max(0.2, share * 3), `${(100 * toDock / trucks).toFixed(0)}% of the trucks went to the ${dockNodes.size} dock nodes near the camera (${(100 * share).toFixed(0)}% of the nodes)`);
 });
+
+test('C5: pedestrians are not born around the camera (doors only change where someone near the camera steps out)', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { sim } = gridCity(10, 100);
+  const peds = new Peds(sim);
+  peds.density = 1 / 4;
+  const cx = -400, cz = -400, R = 250;
+  // the page sends the doors of the buildings around the camera
+  const doors: number[] = [];
+  for (let i = 0; i < 2000; i++) { const a = i * 2.39996, r = 20 + (i % 97) * 4; doors.push(cx + Math.cos(a) * r, cz + Math.sin(a) * r); }
+  const P = inner(peds);
+  if (typeof P.setDoors === 'function') P.setDoors(new Float32Array(doors)); else P.doors = new Float32Array(doors);
+  peds.camX = cx; peds.camZ = cz;
+  const nc = sim.net.nodes.cols;
+  let nodes = 0, near = 0;
+  for (let n = 0; n < sim.net.nodes.end; n++) if (sim.net.nodes.alive[n] && nc.deg[n] > 0) { nodes++; if (Math.hypot(nc.x[n] - cx, nc.z[n] - cz) < R) near++; }
+  for (let i = 0; i < 20 * 2; i++) peds.step(0.05); // where they were born (2 s: nobody has walked far)
+  let all = 0, close = 0;
+  for (let p = 0; p < peds.t.end; p++) {
+    if (!peds.t.alive[p]) continue;
+    const q = P.posNow(p);
+    all++; if (Math.hypot(q[0] - cx, q[2] - cz) < R) close++;
+  }
+  const share = near / nodes;
+  assert.ok(all > 200, `pedestrians ${all}`);
+  assert.ok(close / all < share * 1.5 + 0.03, `${(100 * close / all).toFixed(0)}% of the pedestrians within ${R} m of the camera, where ${(100 * share).toFixed(0)}% of the nodes are`);
+});

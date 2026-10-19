@@ -20,6 +20,8 @@ const MAX_PEDS = 100000;
 /** Chance of spawning at a node by the zone of the roads around it (none, residential, commercial, industrial, mixed). */
 const ZONE_PULL = [0.12, 0.4, 1, 0.15, 0.8];
 const ROUTE = 32;
+/** A node near the camera lets its people out of a door within this distance (m). */
+const DOOR_CELL = 80;
 const WAYS = 12;
 const CROSS_AT = 2.15; // middle of the crosswalk, measured from the setback
 const WINDOW = 520;
@@ -95,8 +97,45 @@ export class Peds {
   share = 1;
   camX = 0;
   camZ = 0;
-  /** Doors near the camera (x, z), from the page. */
+  /** Doors near the camera (x, z), from the page, sorted into DOOR_CELL cells (`setDoors`). */
   doors: Float32Array = new Float32Array(0);
+  private doorX0 = 0; private doorZ0 = 0; private doorW = 0; private doorH = 0;
+  private doorStart = new Int32Array(1);
+  private doorIdx = new Int32Array(0);
+
+  /** Doors from the page: indexed by cell, so the door next to a node is found without scanning them all. */
+  setDoors(pts: Float32Array): void {
+    this.doors = pts;
+    const n = pts.length >> 1;
+    if (!n) { this.doorW = this.doorH = 0; return; }
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < n; i++) { x0 = Math.min(x0, pts[i * 2]); x1 = Math.max(x1, pts[i * 2]); z0 = Math.min(z0, pts[i * 2 + 1]); z1 = Math.max(z1, pts[i * 2 + 1]); }
+    const w = Math.floor((x1 - x0) / DOOR_CELL) + 1, h = Math.floor((z1 - z0) / DOOR_CELL) + 1;
+    this.doorX0 = x0; this.doorZ0 = z0; this.doorW = w; this.doorH = h;
+    const cell = (i: number) => Math.floor((pts[i * 2 + 1] - z0) / DOOR_CELL) * w + Math.floor((pts[i * 2] - x0) / DOOR_CELL);
+    const start = new Int32Array(w * h + 1);
+    for (let i = 0; i < n; i++) start[cell(i) + 1]++;
+    for (let c = 0; c < w * h; c++) start[c + 1] += start[c];
+    const fill = start.slice(0, w * h), idx = new Int32Array(n);
+    for (let i = 0; i < n; i++) idx[fill[cell(i)]++] = i;
+    this.doorStart = start; this.doorIdx = idx;
+  }
+
+  /** A door within DOOR_CELL of (x, z) (a random one of the nearest cells), or −1. */
+  private doorNear(x: number, z: number): number {
+    if (!this.doorW) return -1;
+    const cx = Math.floor((x - this.doorX0) / DOOR_CELL), cz = Math.floor((z - this.doorZ0) / DOOR_CELL);
+    let best = -1, bd = DOOR_CELL * DOOR_CELL, seen = 0;
+    for (let j = cz - 1; j <= cz + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
+      if (i < 0 || j < 0 || i >= this.doorW || j >= this.doorH) continue;
+      for (let k = this.doorStart[j * this.doorW + i]; k < this.doorStart[j * this.doorW + i + 1]; k++) {
+        const d = this.doorIdx[k], dd = (this.doors[d * 2] - x) ** 2 + (this.doors[d * 2 + 1] - z) ** 2;
+        // among the doors in reach, one at random (reservoir), so the same door is not the only one ever used
+        if (dd < bd && this.rng.next() * ++seen < 1) best = d;
+      }
+    }
+    return best;
+  }
 
   constructor(sim: SimNet) {
     this.sim = sim;
@@ -249,20 +288,14 @@ export class Peds {
         return;
       }
     }
+    // where someone is born is drawn over the whole city; near the camera, where the page sent the buildings' doors,
+    // they step out of a door next to that node (roadcraft `lotDoors`) instead of appearing on the sidewalk
     const a = this.randomNode();
     if (a < 0) return;
     if (this.rng.next() < BIKE_SHARE && this.spawnBike(a)) return;
-    if (this.doors.length && this.rng.next() < 0.5 && this.spawnFromDoor()) return;
+    const nc = this.sim.net.nodes.cols, door = this.doorNear(nc.x[a], nc.z[a]);
+    if (door >= 0 && this.spawnFromPoint(this.doors[door * 2], this.doors[door * 2 + 1])) return;
     this.spawnFrom(a, 900, -1, 0, 0, this.rng.next());
-  }
-
-  /**
-   * Leaves a door near the camera (roadcraft `lotDoors`): walks straight from the door to the sidewalk of the nearest
-   * segment and follows the route from there (to a random node up to 900 m away).
-   */
-  private spawnFromDoor(): boolean {
-    const k = this.rng.int(0, this.doors.length >> 1);
-    return this.spawnFromPoint(this.doors[k * 2], this.doors[k * 2 + 1]);
   }
 
   /** Someone starts walking at (x, z) (a door, or a passenger getting out of a car at the kerb): to the sidewalk, then on. */

@@ -151,7 +151,7 @@ scope.onmessage = (e) => {
       break;
     case 'speed': speed = m.value; break;
     case 'camera': traffic.camX = peds.camX = m.x; traffic.camZ = peds.camZ = m.z; break;
-    case 'doors': peds.doors = m.pts; break;
+    case 'doors': peds.setDoors(m.pts); break;
     case 'docks': traffic.setDocks(m.pts); break;
     case 'density': traffic.density = m.value; break;
     case 'demand': traffic.hour = m.hour; traffic.demand = m.demand; traffic.trafficShare = m.traffic; peds.share = m.people; break;
