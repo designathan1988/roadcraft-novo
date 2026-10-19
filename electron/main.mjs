@@ -5,6 +5,7 @@ import { app, BrowserWindow, protocol, net, ipcMain } from 'electron';
 import { initSteam, enableOverlay, steamInfo, unlock } from './steam.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -39,8 +40,16 @@ if (process.env.CIDADE_SOFTWARE) {
 }
 
 // One game at a time: a second copy would share the save storage (OPFS in the user data folder) and both would
-// fail to write. The second one hands over to the first and quits. Screenshot runs pass their own --user-data-dir.
+// fail to write. The second one hands over to the first and quits.
 app.setName('Roadcraft');
+// Screenshot and test runs get a user data folder of their own (CIDADE_USER_DATA, or a fresh one in the temp folder,
+// removed on exit): they edit, save and autosave, and must never touch the player's saves in the game's folder.
+if (shot) {
+  const own = process.env.CIDADE_USER_DATA ?? fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-shot-'));
+  app.setPath('userData', own);
+  console.log(`userData: ${own}`);
+  if (!process.env.CIDADE_USER_DATA) process.on('exit', () => { try { fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 }); } catch { /* left for the system to clean */ } });
+}
 if (!shot && !app.requestSingleInstanceLock()) app.exit(0);
 app.on('second-instance', () => {
   const w = BrowserWindow.getAllWindows()[0];

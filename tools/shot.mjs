@@ -15,7 +15,7 @@ const env = {
 };
 delete env.ELECTRON_RUN_AS_NODE;
 const p = spawn(exe, ['.'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
-const keep = /\[page\]|state:|photo:|script|error|Error|diff:/;
+const keep = /\[page\]|state:|photo:|script|error|Error|diff:|userData:/;
 const skip = /Security|unsafe-eval|electronjs|once the app|experimental on this/;
 for (const s of [p.stdout, p.stderr]) {
   let buf = '';
