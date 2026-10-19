@@ -5,7 +5,7 @@
 import { HEIGHT_MAP_RES, HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_TILES, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { Dirty } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
-import { heightAt, heightIndex, sampleCoord, worldOfSample } from './heights.ts';
+import { cellsOfSamples, heightAt, heightIndex, sampleCoord, worldOfSample } from './heights.ts';
 import type { World } from './world.ts';
 
 export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten' | 'mesa' | 'canyon' | 'escarpment' | 'sugarloaf' | 'gully';
@@ -163,9 +163,17 @@ export class BrushStroke implements Command {
     for (let j = 0; j < this.idx.length; j++) {
       h[this.idx[j]] = values[j];
       extendBounds(this.world, this.idx[j], values[j]);
+      this.world.layerDirty.add(this.idx[j] >> (2 * Math.log2(HEIGHT_TILE_RES)));
     }
-    touchSamples(this.world, this.gx0, this.gz0, this.gx1, this.gz1);
+    // only the cells of the samples the stroke touched (a long stroke's box would cover many more)
+    this.cells ??= cellsOfSamples(this.idx);
+    this.near ??= cellsOfSamples(this.idx, 40);
+    for (const c of this.cells) this.world.touchCell(c, Dirty.Terrain | TERRAIN_FOLLOWERS);
+    for (const c of this.near) this.world.touchCell(c, Dirty.Buildings);
   }
+  private cells: number[] | null = null;
+  /** Cells whose buildings may stand on the samples (a building reaches up to ~40 m from its centre's cell). */
+  private near: number[] | null = null;
 
   get bytes(): number { return this.idx.byteLength + this.old.byteLength + this.after.byteLength; }
 

@@ -6,6 +6,7 @@
 import {
   HEIGHT_MAP_RES, HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_TILES,
 } from '../config.ts';
+import { cellId, cellX } from '../core/grid.ts';
 
 export const LAYER_TEXELS = HEIGHT_TILE_RES * HEIGHT_TILE_RES;
 const SHIFT = Math.log2(HEIGHT_TILE_RES);
@@ -52,4 +53,25 @@ export function heightRange(h: Float32Array, minX: number, minZ: number, maxX: n
     }
   }
   out[0] = lo; out[1] = hi;
+}
+
+/** Global sample (gx, gz) of an index into the heights (inverse of heightIndex). */
+export function sampleOfIndex(i: number): [number, number] {
+  const tile = i >> (SHIFT * 2), local = i & (LAYER_TEXELS - 1);
+  return [(tile % MAP_TILES) * HEIGHT_TILE_RES + (local & MASK), ((tile / MAP_TILES) | 0) * HEIGHT_TILE_RES + (local >> SHIFT)];
+}
+
+/**
+ * The cells whose meshes read the samples `idx`: the cell of each sample and of the points `margin` metres away (one
+ * spacing for the terrain and roads on the next cell's edge; a building's half size for buildings). Only the touched
+ * cells, never a bounding box.
+ */
+export function cellsOfSamples(idx: ArrayLike<number>, margin = HEIGHT_SPACING): number[] {
+  const seen = new Set<number>();
+  for (let k = 0; k < idx.length; k++) {
+    const [gx, gz] = sampleOfIndex(idx[k]);
+    const x = worldOfSample(gx), z = worldOfSample(gz);
+    for (const dz of [-margin, margin]) for (const dx of [-margin, margin]) seen.add(cellId(cellX(x + dx), cellX(z + dz)));
+  }
+  return [...seen];
 }

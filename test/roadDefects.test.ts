@@ -984,3 +984,18 @@ test('D43: undo while a stroke is still open does nothing; after it closes it un
   for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) assert.ok(!sc.zl[s] && !sc.zr[s], 'the undo after the stroke did not take the zoning back');
   assert.equal(w.roads.segs.size, roads);
 });
+
+test('D29: a long diagonal road marks the cells it touches, not its whole bounding box', () => {
+  const w = flatWorld(1e9);
+  // bumpy ground so the road has terrain to settle along all its length
+  for (let i = 0; i < w.heights.length; i++) w.heights[i] = 10 + ((i * 2654435761) % 7) * 0.1;
+  for (const k of [Dirty.Terrain, Dirty.Buildings, Dirty.Roads]) w.dirty.drain(k);
+  road(w, -500, -500, 500, 500);
+  const marked = new Set(w.dirty.drain(Dirty.Terrain));
+  // the cells within 30 m of the line (half width, the 7 m blend and a sample of margin)
+  const near = new Set<number>();
+  for (let s = -520; s <= 520; s += 2) for (const [dx, dz] of [[-30, 30], [30, -30], [0, 0], [-21, -21], [21, 21]]) near.add(cellId(cellX(s + dx), cellX(s + dz)));
+  const extra = [...marked].filter((c) => !near.has(c));
+  assert.ok(marked.size > 0);
+  assert.equal(extra.length, 0, `${extra.length} of ${marked.size} cells marked for terrain lie away from the road`);
+});

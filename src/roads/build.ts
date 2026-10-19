@@ -7,7 +7,7 @@
 import { HEIGHT_MAP_RES, HEIGHT_TILE_RES, MAP_HALF, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { Dirty } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
-import { heightAt, heightIndex, sampleCoord, worldOfSample } from '../world/heights.ts';
+import { cellsOfSamples, heightAt, heightIndex, sampleCoord, worldOfSample } from '../world/heights.ts';
 import type { BuildingRec, World } from '../world/world.ts';
 import { arcTable, bez, bezD, bezLength, closestT, intersectQuads, splitQuad, subQuad, tAtLength, type Quad } from './geometry.ts';
 import { MAX_DEG, MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './network.ts';
@@ -34,7 +34,7 @@ type Op =
   | { t: 'name'; id: number; from: string | undefined; to: string | undefined }
   | { t: 'addBld'; rec: number[] }
   | { t: 'remBld'; rec: number[] }
-  | { t: 'terrain'; idx: Int32Array; before: Float32Array; after: Float32Array; x0: number; z0: number; x1: number; z1: number };
+  | { t: 'terrain'; idx: Int32Array; before: Float32Array; after: Float32Array; x0: number; z0: number; x1: number; z1: number; cells?: number[]; near?: number[] };
 
 export class RoadJournal implements Command {
   readonly label: string;
@@ -259,7 +259,11 @@ export class RoadJournal implements Command {
       if (values[k] > w.tileMax[tile]) w.tileMax[tile] = values[k];
       w.layerDirty.add(tile);
     }
-    w.touchRect(op.x0, op.z0, op.x1, op.z1, Dirty.Terrain | Dirty.Buildings | Dirty.Roads);
+    // the cells the samples are in, not the whole box (a long diagonal road would mark every cell of its square)
+    op.cells ??= cellsOfSamples(op.idx);
+    op.near ??= cellsOfSamples(op.idx, BUILDING_REACH);
+    for (const c of op.cells) w.touchCell(c, Dirty.Terrain | Dirty.Roads);
+    for (const c of op.near) w.touchCell(c, Dirty.Buildings);
   }
 
   private exec(op: Op, forward: boolean): void {
@@ -792,6 +796,9 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
   }
   if (idx.length) j.terrain(new Int32Array(idx), new Float32Array(before), new Float32Array(after), [minX - reach, minZ - reach, maxX + reach, maxZ + reach]);
 }
+
+/** How far into the next cell a building's base may reach from its centre's cell (m): heights there move it too. */
+const BUILDING_REACH = 40;
 
 /** Deck and girders under a road surface on a bridge (m): a roof must stay below this much under the road. */
 const DECK_DEPTH = 2;
