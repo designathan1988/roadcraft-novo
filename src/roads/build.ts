@@ -10,7 +10,8 @@ import type { Command } from '../core/commands.ts';
 import { heightAt, heightIndex, sampleCoord, worldOfSample } from '../world/heights.ts';
 import type { BuildingRec, World } from '../world/world.ts';
 import { arcTable, bez, bezD, closestT, intersectQuads, splitQuad, subQuad, tAtLength, type Quad } from './geometry.ts';
-import { MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './network.ts';
+import { MAX_DEG, MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './network.ts';
+import { t as text } from '../ui/i18n.ts';
 import { SegFlag } from './flags.ts';
 import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
@@ -199,6 +200,18 @@ export class RoadJournal implements Command {
       case 'addBld': if (doAdd) this.world.restoreBuilding(op.rec); else this.world.removeBuilding(op.rec[0]); break;
       case 'remBld': if (doAdd) this.world.removeBuilding(op.rec[0]); else this.world.restoreBuilding(op.rec); break;
       case 'terrain': this.writeTerrain(op, doAdd ? op.after : op.before); break;
+    }
+  }
+
+  /**
+   * Runs live operations. If they throw half way, everything this journal did goes back (it is left empty, nothing
+   * half built and nothing charged) and the error goes on.
+   */
+  guard<T>(fn: () => T): T {
+    try { return fn(); } catch (err) {
+      for (let i = this.ops.length - 1; i >= 0; i--) this.exec(this.ops[i], false);
+      this.ops.length = 0; this.value = 0; this.freeValue = 0;
+      throw err;
     }
   }
 
@@ -396,6 +409,16 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
     for (const [tn, s, to] of junctions) fixed.push({ at: arcAtT(table, tn), y: segHeightAt(net, s, to) });
     pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed);
   }
+  // no node may end up with more roads than it holds: an end on a node takes one more, a junction on a node two more
+  const extra = new Map<number, number>();
+  const more = (n: number, k: number) => extra.set(n, (extra.get(n) ?? 0) + k);
+  if (start.node >= 0) more(start.node, 1);
+  if (end.node >= 0) more(end.node, 1);
+  for (const [, s, to] of junctions) {
+    const sl = net.segs.cols.len[s];
+    if (to * sl < 6) more(net.segs.cols.a[s], 2); else if ((1 - to) * sl < 6) more(net.segs.cols.b[s], 2);
+  }
+  for (const [n, k] of extra) if (nc.deg[n] + k > MAX_DEG) return { ...fail(text('road.reason.fullNode', { max: MAX_DEG })), junctions };
   // fixed points too close together
   const ats = [0, ...junctions.map((j) => arcAtT(table, j[0])), len];
   for (let i = 1; i < ats.length; i++) if (ats[i] - ats[i - 1] < 6) return { ...fail('cruzamentos muito próximos'), junctions };
@@ -438,9 +461,15 @@ function anchorNode(j: RoadJournal, net: RoadNetwork, a: Anchor, y: number): num
   return j.addNode(a.x, a.z, y);
 }
 
+/** Builds a planned road. If anything throws half way, the whole build goes back before the error goes on. */
 export function buildRoad(world: World, plan: RoadPlan, start: Anchor, end: Anchor, profile: number, flags = 0, label = 'construir via'): RoadJournal {
-  const net = world.roads;
   const j = new RoadJournal(world, label);
+  j.guard(() => buildLive(j, world, plan, start, end, profile, flags));
+  return j;
+}
+
+function buildLive(j: RoadJournal, world: World, plan: RoadPlan, start: Anchor, end: Anchor, profile: number, flags: number): void {
+  const net = world.roads;
   const q = plan.quad;
   const table = arcTable(q, 64);
   const pr = plan.profile;
@@ -523,7 +552,6 @@ export function buildRoad(world: World, plan: RoadPlan, start: Anchor, end: Anch
   clearAndConform(j, world, q, profile, yLinear, table, (flags & SegFlag.Wall) !== 0);
   // dead ends with a turning bulb: the terrain settles under the circle
   for (const n of [stops[0].node, stops[stops.length - 1].node]) if (bulbAt(net, n)) conformDisc(j, world, nc.x[n], nc.z[n], BULB_R + BULB_WALK + 6, nc.y[n]);
-  return j;
 }
 
 export { bulbAt };

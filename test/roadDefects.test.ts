@@ -8,6 +8,7 @@ import { RoadJournal, buildRoad, demolishSeg, planRoad, snap } from '../src/road
 import { CommandStack, type Command } from '../src/core/commands.ts';
 import { demolishBox } from '../src/tools/demolish.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
+import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
 
 function flatWorld(money: number, y = 10): World {
@@ -143,4 +144,42 @@ test('A21: a redo that throws keeps the step to redo', () => {
   fail = false;
   assert.equal(commands.redo(), true);
   assert.equal(state, 1);
+});
+
+test('D4: a 9th road at a node is refused before building, never half built', () => {
+  const w = flatWorld(1e9);
+  for (let k = 0; k < MAX_DEG; k++) {
+    const a = (k / MAX_DEG) * Math.PI * 2;
+    road(w, 0, 0, Math.cos(a) * 100, Math.sin(a) * 100);
+  }
+  const centre = w.roads.nearestNode(0, 0, 1);
+  assert.equal(w.roads.nodes.cols.deg[centre], MAX_DEG);
+  const before = shape(w);
+  const money = w.money;
+  const ang = Math.PI / MAX_DEG; // half way between two roads
+  const a = snap(w.roads, 0, 0, 8);
+  const b = snap(w.roads, Math.cos(ang) * 100, Math.sin(ang) * 100, 8);
+  let plan: ReturnType<typeof planRoad> | null = null;
+  assert.doesNotThrow(() => { plan = planRoad(w, a, null, b, 0, 0); if (plan.ok) buildRoad(w, plan, a, b, 0); }, 'planning or building the 9th road threw');
+  assert.equal(plan!.ok, false, 'the plan refuses the 9th road');
+  assert.equal(shape(w), before, 'nothing was built');
+  // a straight road crossing the full node is refused too (it would take two more)
+  const c = snap(w.roads, -Math.cos(ang) * 30, -Math.sin(ang) * 30, 8), d = snap(w.roads, Math.cos(ang) * 30, Math.sin(ang) * 30, 8);
+  let cross: ReturnType<typeof planRoad> | null = null;
+  assert.doesNotThrow(() => { cross = planRoad(w, c, null, d, 0, 0); if (cross.ok) buildRoad(w, cross, c, d, 0); });
+  assert.equal(cross!.ok, false, 'the road through the full node is refused');
+  assert.equal(shape(w), before, 'nothing was built through the full node');
+  assert.equal(w.money, money);
+});
+
+test('D4: a build that fails half way puts back everything it did', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  const before = shape(w);
+  const j = new RoadJournal(w, 'test');
+  const s = w.roads.nearestSeg(0, 0, 3)![0];
+  assert.throws(() => j.guard(() => { j.removeSeg(s); j.addNode(0, 50, 10); throw new Error('broken'); }), /broken/);
+  assert.equal(shape(w), before, 'the half-built edit stayed');
+  assert.equal(j.empty, true);
+  assert.equal(j.price, 0);
 });

@@ -11,6 +11,8 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.money.unlimited': 'R$ ∞',
   'history.undoFailed': 'Não foi possível desfazer "{label}": {message}. Nada mudou; o passo continua lá para desfazer.',
   'history.redoFailed': 'Não foi possível refazer "{label}": {message}. Nada mudou; o passo continua lá para refazer.',
+  'tool.failed': 'A ferramenta não conseguiu terminar: {message}.',
+  'road.reason.fullNode': 'um nó ali ficaria com mais de {max} vias',
   'ui.stats.tip': '{residents} moradores · {jobs} empregos · {buildings} prédios · {speed} km/h de média perto daqui',
   'ui.cat.roads': 'Vias',
   'ui.cat.zones': 'Zoneamento e lotes',

@@ -11,6 +11,8 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.money.unlimited': 'R$ ∞',
   'history.undoFailed': 'Could not undo "{label}": {message}. Nothing was changed; the step is still there to undo.',
   'history.redoFailed': 'Could not redo "{label}": {message}. Nothing was changed; the step is still there to redo.',
+  'tool.failed': 'The tool could not finish: {message}.',
+  'road.reason.fullNode': 'a node there would have more than {max} roads',
   'ui.stats.tip': '{residents} residents · {jobs} jobs · {buildings} buildings · {speed} km/h average nearby',
   'ui.cat.roads': 'Roads',
   'ui.cat.zones': 'Zoning and lots',

@@ -896,7 +896,7 @@ export class Game {
       if (this.drag === 'rotate') this.rig.rotate(dx, dy);
       else if (this.drag === 'pan') this.rig.pan(this.ndcX(), this.ndcY());
     });
-    const end = (e: PointerEvent) => {
+    const finishDrag = (e: PointerEvent) => {
       if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
       const still = Math.hypot(e.offsetX - down.x, e.offsetY - down.y) <= 5;
       if (this.drag === 'brush' && this.elemStroke) {
@@ -954,6 +954,13 @@ export class Game {
       if (this.drag === 'rotate' && still && ROAD_TOOLS.includes(this.tool)) this.roadTool.cancel();
       if (this.drag === 'pan') this.rig.endPan();
       this.drag = 'none';
+    };
+    // whatever the tool does on release, the drag always ends (an error must not leave the next move panning the camera)
+    const end = (e: PointerEvent) => {
+      try { finishDrag(e); } catch (err) {
+        console.error(err);
+        this.hud.toast(t('tool.failed', { message: (err as Error)?.message ?? String(err) }));
+      } finally { this.drag = 'none'; }
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('dblclick', () => { if (this.tool === 'river') this.finishRiver(); if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly(); });
