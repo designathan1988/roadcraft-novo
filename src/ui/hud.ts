@@ -684,6 +684,8 @@ export class Hud {
     if (this.open && this.cat === 'build') this.render();
   }
   setElevation(e: number): void { this.s.elevation = e; }
+  /** The zone brush radius ([ and ] with the zone tool). */
+  setZoneRadius(r: number): void { this.s.zoneRadius = Math.round(r); if (this.cat === 'zones' && this.open) this.render(); }
   /** See inside: the floor shown (−1: off). */
   setInside(floor: number): void {
     this.insideFloor = floor;

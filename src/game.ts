@@ -1022,7 +1022,8 @@ export class Game {
     if (c === 'BracketLeft' || c === 'BracketRight') {
       const f = c === 'BracketLeft' ? 1 / 1.2 : 1.2;
       if (t === 'roundabout') { this.roadTool.ringBy(f); return true; }
-      if (TERRAIN_TOOLS.includes(t) || GROUND_TOOLS.includes(t) || t === 'sky' || t === 'zone') { this.setRadius(this.brush.radius * f); return true; }
+      if (t === 'zone') { this.zoneTool.radius = Math.max(10, Math.min(200, Math.round(this.zoneTool.radius * f / 5) * 5)); this.hud.setZoneRadius(this.zoneTool.radius); return true; }
+      if (TERRAIN_TOOLS.includes(t) || GROUND_TOOLS.includes(t) || t === 'sky') { this.setRadius(this.brush.radius * f); return true; }
     }
     return false;
   }
