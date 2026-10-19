@@ -19,6 +19,9 @@ const {
   smoothstep, max, min, clamp, screenUV, select, pow, sqrt, screenSize, cameraProjectionMatrix,
 } = T;
 
+/** How far the sun's shadows reach from the perspective camera (m). */
+const PERSP_SHADOW_FAR = 1600;
+
 /** CAS strength (Roadcraft's "high" quality: 0.35). */
 const SHARPEN = 0.35;
 
@@ -52,7 +55,7 @@ export class Post {
       sun.shadow.camera.far = 4000;
       sun.shadow.bias = -0.0004;
       sun.shadow.normalBias = 0.4;
-      const csm = new CSMShadowNode(sun, { cascades: 3, maxFar: 1600, mode: 'practical', lightMargin: 300 });
+      const csm = new CSMShadowNode(sun, { cascades: 3, maxFar: PERSP_SHADOW_FAR, mode: 'practical', lightMargin: 300 });
       csm.fade = true;
       sun.shadow.shadowNode = csm;
       this.csm = csm;
@@ -187,8 +190,30 @@ export class Post {
     if (this.scenePass.camera !== camera) {
       this.scenePass.camera = camera;
       for (const t of this.traas) t.camera = camera;
-      if (this.csm) this.csm.camera = camera as THREE.PerspectiveCamera;
     }
+    this.fitCascades(camera);
+  }
+
+  /** Projection the cascades were last split for. */
+  private cascadeProj = new THREE.Matrix4();
+  private cascadeCam: THREE.Camera | null = null;
+
+  /**
+   * The cascades are split from the camera's projection: three does it once, for the camera of the first frame. Again
+   * when the camera changes (the isometric camera sits 1.2-10 km from the ground, past the perspective camera's 1.6 km
+   * of shadow: no sun shadow at all) or its projection does (a resize: the sides of the view lost their shadow).
+   */
+  private fitCascades(camera: THREE.Camera): void {
+    const csm = this.csm as (CSMShadowNode & { mainFrustum: unknown }) | null;
+    if (!csm || !csm.mainFrustum) return;
+    if (this.cascadeCam === camera && this.cascadeProj.equals(camera.projectionMatrix)) return;
+    this.cascadeCam = camera;
+    this.cascadeProj.copy(camera.projectionMatrix);
+    csm.camera = camera as THREE.PerspectiveCamera;
+    // isometric: the whole depth of its view (the ground is `reach` away); perspective: shadows up to 1.6 km
+    const ortho = (camera as THREE.OrthographicCamera).isOrthographicCamera === true;
+    csm.maxFar = ortho ? (camera as THREE.OrthographicCamera).far : PERSP_SHADOW_FAR;
+    csm.updateFrustums();
   }
 
   render(): void {

@@ -229,3 +229,27 @@ test('E7: rebuilding the final image frees every render target the old one held'
     assert.equal(count('ShadowNode'), 3, 'the three cascade shadow maps freed');
   } finally { for (const r of restore) r(); }
 });
+
+test('E17: the shadow cascades follow the isometric camera and the window\'s shape', async () => {
+  const { Post } = await import('../src/render/post.ts');
+  const renderer = fakeRenderer();
+  const persp = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), sun = new THREE.DirectionalLight();
+  const scene = new THREE.Scene(); scene.add(sun);
+  const post = new Post(renderer, scene, persp, sun, { shadows: true, ao: false, bloom: false });
+  const csm = post.csm as unknown as { _init(b: unknown): void; frustums: Array<{ vertices: { far: THREE.Vector3[] } }>; maxFar: number; camera: THREE.Camera };
+  csm._init({ camera: persp, renderer });
+  // the isometric camera of render/cameraRig.ts: 3 km from what it looks at, 1 km of view across
+  const iso = new THREE.OrthographicCamera(-889, 889, 500, -500, 1, 6000);
+  iso.position.set(0, 2000, 2236); iso.lookAt(0, 0, 0); iso.updateMatrixWorld();
+  post.setCamera(iso);
+  const last = csm.frustums[csm.frustums.length - 1].vertices.far[0];
+  assert.ok(Math.min(csm.maxFar, iso.far) >= 3000 && last.z <= -3000, `the cascades end ${(-last.z).toFixed(0)} m from the isometric camera: the ground 3 km away has no sun shadow`);
+  assert.ok(Math.abs(last.x) >= 889, `the cascades cover ${Math.abs(last.x).toFixed(0)} m sideways of the 889 m view`);
+  // back to perspective, then the window gets twice as wide
+  post.setCamera(persp);
+  persp.aspect = 32 / 9; persp.updateProjectionMatrix();
+  post.setCamera(persp);
+  const f = csm.frustums[0].vertices.far[0];
+  const want = Math.tan(THREE.MathUtils.degToRad(25)) * persp.aspect;
+  assert.ok(Math.abs(Math.abs(f.x / f.z) - want) < 0.01, `after the resize the cascades span ${Math.abs(f.x / f.z).toFixed(2)} sideways per metre, the view ${want.toFixed(2)}`);
+});
