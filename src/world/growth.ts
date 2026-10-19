@@ -122,6 +122,12 @@ export class Growth {
     }
   }
 
+  /** One frame of growth at the game's speed (0 = paused: nothing grows; 2× and 4× grow that much faster). */
+  tick(dt: number, speed: number): void {
+    if (!(speed > 0)) return;
+    this.step(dt * speed, 8 * Math.ceil(speed));
+  }
+
   private grow(l: LotColumns, i: number, organic: boolean): void {
     this.world.growBuilding(this.recordFor(l, i, organic));
     this.markTaken(cellId(cellX(l.x[i]), cellX(l.z[i])), i);

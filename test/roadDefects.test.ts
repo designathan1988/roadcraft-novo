@@ -13,6 +13,8 @@ import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { Dirty, cellId, cellX } from '../src/core/grid.ts';
+import type { JobPool } from '../src/jobs/pool.ts';
+import type { LotColumns } from '../src/jobs/protocol.ts';
 import { decayTenths } from '../src/world/decay.ts';
 import { Ctl, Rule, type JunctionSpec } from '../src/roads/control.ts';
 import { laneExits } from '../src/roads/laneLinks.ts';
@@ -812,4 +814,29 @@ test('D26: lot edits never put a lot over a road or over another lot', async () 
   // curving the front side out over the road
   assert.equal(typeof curveLotSide(w, a, 0, 8, 0, 0), 'string', 'a side was curved over the road');
   assert.equal(w.buildings.alive[b], 1);
+});
+
+test('D27: growth follows the game speed: nothing while paused, twice as fast at 2×', async () => {
+  const { Growth } = await import('../src/world/growth.ts');
+  const lots = (n: number): LotColumns => ({ count: n, x: Float32Array.from({ length: n }, (_, i) => (i % 40) * 30 - 600), z: Float32Array.from({ length: n }, (_, i) => Math.floor(i / 40) * 40 + 40),
+    w: new Float32Array(n).fill(14), d: new Float32Array(n).fill(26), rot: new Float32Array(n), zone: new Uint8Array(n).fill(Zone.Residential),
+    seed: Uint32Array.from({ length: n }, (_, i) => i * 31 + 7), profile: new Uint8Array(n) });
+  const grown = (speed: number): number => {
+    const w = flatWorld(0);
+    const g = new Growth(w, null as unknown as JobPool);
+    const cells = new Map<number, LotColumns>();
+    const l = lots(200);
+    for (let i = 0; i < l.count; i++) {
+      const c = cellId(cellX(l.x[i]), cellX(l.z[i]));
+      if (!cells.has(c)) cells.set(c, l);
+    }
+    (g as unknown as { setLots(c: number, l: LotColumns): void }).setLots(cellId(cellX(0), cellX(100)), l);
+    g.rate = 5;
+    for (let f = 0; f < 60; f++) g.tick(1 / 60 * 10, speed);
+    return w.buildings.size;
+  };
+  assert.equal(grown(0), 0, 'buildings grew with the game paused');
+  const one = grown(1), two = grown(2);
+  assert.ok(one > 0);
+  assert.ok(two >= one * 1.8, `at 2× ${two} buildings grew, at 1× ${one}`);
 });

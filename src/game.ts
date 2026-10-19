@@ -666,7 +666,7 @@ export class Game {
     if (this.arrowNodes.size) this.updateArrows();
     const T1 = pf ? performance.now() : 0;
     if (!this.generating) this.growth.processDirty();
-    this.growth.step(dt);
+    this.growth.tick(dt, this.paused ? 0 : this.simSpeed);
     const T2 = pf ? performance.now() : 0;
     this.terrain.uploadDirtyLayers();
     this.terrain.update(cam, this.rig.eye);
