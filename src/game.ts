@@ -249,6 +249,8 @@ export class Game {
     this.trafficLook = createTrafficLook(this.occupancySab);
     this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook, this.world.heights);
     this.layers = [this.roads, this.city, this.cityDetail];
+    // the near levels are chosen by the 3D distance (from high up the cells under the camera are far)
+    for (const l of this.layers) l.groundAt = (x, z) => heightAt(this.world.heights, x, z);
 
     const posesSab = createPoseBuffers();
     this.poses = new PoseReader(viewPoseBuffers(posesSab));

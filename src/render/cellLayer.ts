@@ -54,6 +54,8 @@ interface Slot { mesh: THREE.Mesh | null; built: number; requested: number; minY
 const slot = (size: number, scope: SlotScope) => (_: unknown, id: number): Slot => ({ mesh: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size, scope, id });
 
 const FADE = 0.35;
+/** Height over the ground that counts as level with the cell (roofs and bridges up to it). */
+const DETAIL_HEADROOM = 60;
 const PLATE_COUNT = MAP_PLATES * MAP_PLATES;
 const TILES_PER_PLATE = PLATE_SIZE / TILE_SIZE;
 
@@ -107,6 +109,8 @@ export class CellLayer {
   private lastScale = 0;
   private lastSun = new THREE.Vector3();
   private frame = 0;
+  /** Ground height under a point (set by the game): the near level is chosen by the 3D distance. */
+  groundAt: ((x: number, z: number) => number) | null = null;
   /** What the layer draws changed in the last `update` (the shadow cascades are redrawn). */
   changed = true;
   /** Distance scale by resolution (1 = 1080p, 45°). */
@@ -378,13 +382,17 @@ export class CellLayer {
           const ci = tx * CELLS_PER_TILE + i, cj = tz * CELLS_PER_TILE + j;
           const c = cellId(ci, cj);
           const cd = this.distTo(cellOriginX(ci), cellOriginX(cj), CELL_SIZE);
-          const fine = levels === 1 || (this.cellFine[c] ? cd < detail * 1.15 : cd < detail * 0.85);
+          // the near level by the 3D distance: from high up the cell under the camera is far (its sills and small
+          // parts were drawn 300 m below the camera, under a pixel)
+          const up = this.groundAt ? Math.max(0, this.camPos.y - this.groundAt(cellOriginX(ci) + CELL_SIZE / 2, cellOriginX(cj) + CELL_SIZE / 2) - DETAIL_HEADROOM) : 0;
+          const cd3 = Math.hypot(cd, up);
+          const fine = levels === 1 || (this.cellFine[c] ? cd3 < detail * 1.15 : cd3 < detail * 0.85);
           this.cellFine[c] = fine ? 1 : 0;
           const want = fine ? 0 : 1;
           this.requestCell(c, want);
           if (!this.opt.sparse && !this.cells[want][c].mesh && !(levels > 1 && this.cells[1 - want][c].mesh) && this.src.hasContent(c)) cellsReady = false;
           // L0 far from the camera leaves the GPU (L1 covers it)
-          if (levels > 1 && cd > detail * 1.6) {
+          if (levels > 1 && cd3 > detail * 1.6) {
             const s0 = this.cells[0][c];
             if (s0.mesh || s0.requested) { this.setMesh(s0, null, 0); s0.requested = 0; }
           }
@@ -431,7 +439,9 @@ export class CellLayer {
           const c = cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j);
           const want = this.cellFine[c] || levels === 1 ? 0 : 1;
           let s = this.cells[want][c];
-          if (!s.mesh && levels > 1) s = this.cells[1 - want][c];
+          // the other level stands in only while the wanted one is not built yet (a level built empty, as the detail
+          // layer's far level, means nothing to draw: the near one stayed drawn from 300 m up)
+          if (!s.mesh && levels > 1 && s.built !== this.cellVer[c]) s = this.cells[1 - want][c];
           if (!s.mesh) continue;
           this.draw(s.mesh, cellOriginX(tx * CELLS_PER_TILE + i), cellOriginX(tz * CELLS_PER_TILE + j), CELL_SIZE, s);
         }

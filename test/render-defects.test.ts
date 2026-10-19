@@ -359,7 +359,9 @@ test('E14: a building outside the view whose shadow falls into it is drawn into 
   for (let i = 0; i < 2; i++) layer.update(camera, eye);
   const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   assert.equal(frustum.intersectsBox(new THREE.Box3(new THREE.Vector3(-1064, 0, -552), new THREE.Vector3(-728, 300, -216))), false, 'the tower is outside the view');
-  assert.ok(layer.group.children.includes(L.cells[0][c].mesh!), 'the tower west of the view, whose shadow falls into it, is a shadow caster');
+  try {
+    assert.ok(layer.group.children.includes(L.cells[0][c].mesh!), 'the tower west of the view, whose shadow falls into it, is a shadow caster');
+  } finally { sunDirection.set(0, 1, 0); }
 });
 
 test('E15: road cells with a bridge cast a sun shadow; flat road cells do not', async () => {
@@ -713,4 +715,32 @@ test('E23: an object moved by its matrix has the previous frame\'s matrix in its
   assert.equal(prev!(box, 11).elements[5], 1, 'the shadow passes of frame 11 see the same');
   box.scale.y = 0.25; box.updateMatrixWorld();
   assert.equal(prev!(box, 30).elements[5], 0.25, 'after frames not drawn it starts still (no jump)');
+});
+
+test('level of detail by the 3D distance: a camera 300 m over a cell does not draw its near detail', () => {
+  const w = new World();
+  const src = { ...recordingSource(), buildCell(c: number, level: number, _p: number, done: (m: PackedMesh | null) => void) { src.cells.push({ c, level, done }); } };
+  const layer = new CellLayer(src, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1100, evict: 1400, margin: 30, detail: 220, sparse: true });
+  (layer as unknown as { groundAt: (x: number, z: number) => number }).groundAt = () => 0;
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000);
+  const eye = new THREE.Vector3(10, 320, 10);
+  camera.position.copy(eye); camera.lookAt(300, 0, 300); camera.updateMatrixWorld();
+  layer.update(camera, eye);
+  const fine = src.cells.filter((r) => r.level === 0).length;
+  assert.equal(fine, 0, `${fine} cells asked at the near level 320 m up`);
+});
+
+test('a near-level mesh is not drawn in place of a far level that is built and empty (the detail layer from far)', () => {
+  const w = new World();
+  const src = recordingSource();
+  const layer = new CellLayer(src, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1100, evict: 1400, margin: 30, detail: 220, sparse: true });
+  const L = inside(layer) as LayerInside & { cellVer: Uint32Array; cellFine: Uint8Array };
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000);
+  const eye = new THREE.Vector3(-5120 + 128, 600, -5120 + 600);
+  camera.position.copy(eye); camera.lookAt(-5120 + 128, 0, -5120 + 128); camera.updateMatrixWorld();
+  const c = 0;
+  L.setMesh(L.cells[0][c], { ...triangle(), originX: -5120, originZ: -5120 }, L.cellVer[c]);
+  L.setMesh(L.cells[1][c], null, L.cellVer[c]); // the far level: built, nothing to draw
+  layer.update(camera, eye);
+  assert.ok(!layer.group.children.includes(L.cells[0][c].mesh!), 'the near level was drawn for the empty far one');
 });
