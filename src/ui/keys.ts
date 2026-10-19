@@ -65,7 +65,8 @@ export function gameKeyRules(d: GameKeyDeps): KeyRule[] {
     { code: 'KeyZ', ctrl: true, shift: true, run: () => d.redo() },
     { code: 'KeyY', ctrl: true, run: () => d.redo() },
     { code: 'KeyS', ctrl: true, run: () => d.save() },
-    { ctrl: true, prevent: false, run: () => 'pass' },
+    // any other Ctrl (or ⌘) key stops here: the browser keeps its own (copy, paste…), the game's letters never see it
+    { ctrl: true, prevent: false, run: () => 'done' },
     // the tool in hand reads its own keys first
     { ctrl: false, run: (e) => (d.toolKey(e) ? 'done' : 'pass') },
     { code: 'Space', run: () => d.pause() },
