@@ -46,7 +46,7 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
   const tr = new Traffic(sim);
   sim.onConnRemoved = (c) => tr.evacuateConn(c);
   tr.nodesRebuilt([...Array(sim.net.nodes.end).keys()]);
-  tr.camX = 0; tr.camZ = 0; tr.hour = 12; tr.demand = 1.5;
+  tr.camX = 0; tr.camZ = 0; tr.hour = 12; tr.demand = 1.5; tr.density = 1 / 50; // enough trucks in 6 min to reach the docks
   let drops = 0;
   tr.onDropOff = () => { drops++; };
   // docas de galpão junto às ruas (como a página manda: ponto, rumo de frente para a rua)

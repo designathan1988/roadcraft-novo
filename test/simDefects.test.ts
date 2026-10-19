@@ -1001,3 +1001,22 @@ test('the camera does not change how fast the city drives: the far model runs at
     assert.ok(Math.abs(far - near) <= 0.25 * near, `density 1/${Math.round(1 / d)}: ${near.toFixed(1)} km/h with the camera on it, ${far.toFixed(1)} km/h away`);
   }
 });
+
+test('turns at a junction are curves that leave the lane straight ahead and join the next one straight, not diagonals', () => {
+  const { sim } = gridCity(4, 120);
+  const k = sim.conns.cols, p = new Float64Array(4), q = new Float64Array(4);
+  let turns = 0, bad = 0, worst = 0;
+  for (let c = 0; c < sim.conns.end; c++) {
+    if (!sim.conns.alive[c] || (k.turn[c] !== 0 && k.turn[c] !== 2) || k.len[c] < 3) continue;
+    turns++;
+    // the curve's heading at its start against the incoming lane's, at its end against the outgoing lane's
+    sim.connPoint(c, 0.01, p); sim.lanePoint(k.from[c], sim.laneLen(k.from[c]), q);
+    const d0 = Math.abs(((p[3] - q[3] + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    sim.connPoint(c, k.len[c] - 0.01, p); sim.lanePoint(k.to[c], 0, q);
+    const d1 = Math.abs(((p[3] - q[3] + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    worst = Math.max(worst, d0, d1);
+    if (d0 > 0.2 || d1 > 0.2) bad++;
+  }
+  assert.ok(turns > 20, `turns ${turns}`);
+  assert.equal(bad, 0, `${bad} of ${turns} turns leave or join their lanes at an angle (up to ${(worst * 180 / Math.PI).toFixed(0)}°)`);
+});

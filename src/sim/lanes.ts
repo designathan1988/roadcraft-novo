@@ -396,7 +396,7 @@ export class SimNet {
           let cx = (pa[0] + pb[0]) / 2, cz = (pa[2] + pb[2]) / 2;
           if (Math.abs(den) > 0.05) {
             const wx = pb[0] - pa[0], wz = pb[2] - pa[2];
-            const t0 = (wx * d1z - wz * d1x) / den, t1 = (wx * d0z - wz * d0x) / den;
+            const t0 = (wx * d1z - wz * d1x) / den, t1 = (d0x * wz - d0z * wx) / den;
             if (t0 > 0 && t1 > 0 && t0 < 80 && t1 < 80) { cx = pa[0] + d0x * t0; cz = pa[2] + d0z * t0; }
           } else if (turn === Turn.UTurn) {
             // dead end with a turning bulb: the turn goes up to near the node (the lane ends at the bulb's setback)
