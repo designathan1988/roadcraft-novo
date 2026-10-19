@@ -539,17 +539,46 @@ function variantPart(g: THREE.BufferGeometry | null, keep: (variant: number) => 
   return out;
 }
 
+/**
+ * How far a kind's meshes reach from the instance's origin at scale 1 (m): the farthest vertex, plus the corner offset
+ * of the leaf cards (they turn to the camera round their centre). Impostor quads are the photo of the near mesh.
+ */
+function reachOf(lods: Array<THREE.BufferGeometry | null>): number {
+  let r = 0;
+  for (const g of lods) {
+    if (!g) continue;
+    const p = g.attributes.position as THREE.BufferAttribute, e = g.attributes.pext as THREE.BufferAttribute, c = g.attributes.pcol as THREE.BufferAttribute;
+    if (Math.round(c.getW(0) * 255) === PMAT.Impostor) continue;
+    for (let i = 0; i < p.count; i++) r = Math.max(r, Math.hypot(p.getX(i), p.getY(i), p.getZ(i)) + Math.hypot(e.getZ(i), e.getW(i)));
+  }
+  return r;
+}
+
+/** How a kind's scale bits stretch it: 0 uniform scale, 1 wire span (m), 2 wall length (dm). */
+export function propStretch(k: PropKind): number {
+  return k.type === PROP.Wire ? 1 : k.type === PROP.Barrier ? 2 : 0;
+}
+
+/**
+ * Cull radius of one instance (m), the same as the cull pass computes it: the kind's reach times the instance's scale,
+ * or plus the span for wires and walls (their z runs 0..1 and the shader stretches it).
+ */
+export function propCullRadius(k: PropKind, poseW: number): number {
+  const bits = (poseW >>> 16) & 63, mode = propStretch(k);
+  return mode === 1 ? k.radius + bits : mode === 2 ? k.radius + bits * 0.1 : k.radius * (bits / 42 + 0.5);
+}
+
 /** The kinds the renderer draws, in kind order (`propKindTable`). */
 export function buildPropKinds(defs: PropDef[]): { kinds: PropKind[]; kindOf: Uint32Array } {
   const { kindOf } = propKindTable();
   const kinds: PropKind[] = [];
   defs.forEach((d, type) => {
     const split = SPLIT[type];
-    if (!split) { kinds.push({ type, lods: d.lods, dist: d.dist, radius: d.radius }); return; }
+    if (!split) { kinds.push({ type, lods: d.lods, dist: d.dist, radius: reachOf(d.lods) }); return; }
     const subs = Math.max(...split) + 1;
     for (let s = 0; s < subs; s++) {
       const lods = d.lods.map((g) => variantPart(g, (v) => split[v] === s));
-      kinds.push({ type, lods, dist: d.dist, radius: d.radius });
+      kinds.push({ type, lods, dist: d.dist, radius: reachOf(lods) });
     }
   });
   return { kinds, kindOf };

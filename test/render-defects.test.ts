@@ -313,3 +313,30 @@ test('E26: props that lie on the ground cast no sun shadow', async () => {
   const palm = kinds.find((k) => k.type === PROP.Ground && (k.lods[0]?.attributes.position.count ?? 0) > 0 && (k.lods[0]!.computeBoundingBox(), k.lods[0]!.boundingBox!.max.y > 5));
   assert.ok(palm && casts(palm, 0), 'the ground palm (8 m) still casts');
 });
+
+test('E27: the cull sphere of every prop holds the whole piece at its largest scale', async () => {
+  const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
+  const { PROP } = await import('../src/jobs/props.ts');
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs());
+  // the radius the cull pass uses for an instance (before: the kind's radius, whatever the scale)
+  const cullRadius = (PM.propCullRadius as ((k: (typeof kinds)[number], w: number) => number) | undefined) ?? ((k) => k.radius);
+  const out: string[] = [];
+  for (const k of kinds) {
+    // the largest pose: scale bits at 63 (2× for pieces, a 63 m span for wires, 6.3 m for walls)
+    const w = 63 << 16, scale = 63 / 42 + 0.5;
+    for (const [l, g] of k.lods.entries()) {
+      if (!g || Math.round((g.attributes.pcol as THREE.BufferAttribute).getW(0) * 255) === PM.PMAT.Impostor) continue; // camera-facing photo of the near mesh
+      const p = g.attributes.position as THREE.BufferAttribute, e = g.attributes.pext as THREE.BufferAttribute;
+      let far = 0;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        const v = k.type === PROP.Wire ? [x, y, z * 63] : k.type === PROP.Barrier ? [x, y, z * 6.3] : [x * scale, y * scale, z * scale];
+        // leaf cards turn to the camera round their centre: their corner offset counts in any direction
+        far = Math.max(far, Math.hypot(v[0], v[1], v[2]) + Math.hypot(e.getZ(i), e.getW(i)) * scale);
+      }
+      const r = cullRadius(k, w);
+      if (far > r + 1e-3) out.push(`type ${k.type} level ${l}: reaches ${far.toFixed(1)} m, sphere ${r.toFixed(1)} m`);
+    }
+  }
+  assert.deepEqual(out, [], 'pieces that stick out of their cull sphere (cut at the screen edge)');
+});

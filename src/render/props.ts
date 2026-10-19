@@ -12,7 +12,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, buildPropKinds, propCastsShadow, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, propCastsShadow, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -81,6 +81,7 @@ export class PropRenderer {
   private distArr: number[] = new Array(DRAWS).fill(0);
   private distU: Node;
   private radiusU: Node;
+  private stretchU: Node;
   private reset: Node;
   private count: Node;
   private prefix: Node;
@@ -137,6 +138,7 @@ export class PropRenderer {
     this.planesU = uniformArray(this.planes, 'vec4');
     this.distU = uniformArray(this.distArr, 'float');
     this.radiusU = uniformArray(this.kinds.map((d) => d.radius), 'float');
+    this.stretchU = uniformArray(this.kinds.map((d) => propStretch(d)), 'float');
 
     // ---- compute. The visible list is compact: each draw's instances in one run, the runs back to back. Count (how
     // many each draw gets), prefix (where each run starts), fill. No draw has a cap of its own: a forest of 250,000
@@ -163,7 +165,12 @@ export class PropRenderer {
           // the kind: the type, or the type's variant when its variants are different meshes
           const variant = uint(pose.w).shiftRight(uint(12)).bitAnd(uint(15));
           const kind = kindOfC.element(type.mul(VARIANTS).add(variant)).toVar();
-          const r = this.radiusU.element(kind);
+          // the kind's reach times the instance's scale (or plus the span, for wires and walls): a fixed radius cut
+          // big trees and long wires at the edge of the screen
+          const rk = this.radiusU.element(kind);
+          const bits = float(uint(pose.w).shiftRight(uint(16)).bitAnd(uint(63)));
+          const mode = this.stretchU.element(kind);
+          const r = select(mode.lessThan(0.5), rk.mul(bits.div(42).add(0.5)), rk.add(bits.mul(select(mode.lessThan(1.5), float(1), float(0.1)))));
           let inside: Node = float(1);
           for (let k = 0; k < 6; k++) {
             const pl = this.planesU.element(k);
