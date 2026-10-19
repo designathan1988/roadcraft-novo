@@ -97,13 +97,16 @@ export function insidePlanOf(world: World, id: number, k: number): InsidePlan | 
 }
 
 /**
- * The building the inside view opens: the selected one when it is in view (within the camera's distance of the point
- * looked at, plus 60 m), otherwise the one at that point (-1: none). A selection left far away is not opened off screen.
+ * The building the inside view opens and whether the camera must go to it: the selected one when it is in view (within
+ * the camera's distance of the point looked at, plus 60 m); otherwise the one at that point; with none there, the
+ * selected one, brought into view (id -1: none at all). A building is never opened off screen.
  */
-export function insideTarget(world: World, selected: number, tx: number, tz: number, dist: number): number {
-  const col = world.buildings.cols;
-  if (selected >= 0 && world.buildings.alive[selected] && Math.hypot(col.x[selected] - tx, col.z[selected] - tz) < dist + 60) return selected;
-  return lotAt(world, tx, tz);
+export function insideTarget(world: World, selected: number, tx: number, tz: number, dist: number): { id: number; go: boolean } {
+  const col = world.buildings.cols, alive = selected >= 0 && !!world.buildings.alive[selected];
+  if (alive && Math.hypot(col.x[selected] - tx, col.z[selected] - tz) < dist + 60) return { id: selected, go: false };
+  const here = lotAt(world, tx, tz);
+  if (here >= 0 && col.floors[here] > 0) return { id: here, go: false };
+  return alive ? { id: selected, go: true } : { id: here, go: false };
 }
 
 export class InsideView {

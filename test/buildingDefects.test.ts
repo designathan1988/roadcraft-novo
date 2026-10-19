@@ -301,10 +301,12 @@ test('B12: the inside view opens the building in view, not a selection left far 
   const here = j.addBuilding({ x: 1000, z: 1000, w: 20, d: 30, h: 0, rot: 0, color: 0, seed: 2, zone: Zone.Commercial, floors: 6, style: 0 });
   j.settle();
   // looking at "here" from 200 m, with "far" still selected
-  assert.equal(insideTarget(w, far, 1000, 1000, 200), here);
+  assert.deepEqual(insideTarget(w, far, 1000, 1000, 200), { id: here, go: false });
   // the selection in view is the one opened, even off the centre
-  assert.equal(insideTarget(w, here, 1040, 980, 200), here);
-  assert.equal(insideTarget(w, -1, 1000, 1000, 200), here);
+  assert.deepEqual(insideTarget(w, here, 1040, 980, 200), { id: here, go: false });
+  assert.deepEqual(insideTarget(w, -1, 1000, 1000, 200), { id: here, go: false });
+  // nothing in view: the selected one, and the camera goes to it
+  assert.deepEqual(insideTarget(w, far, 0, 0, 200), { id: far, go: true });
 });
 
 test('B11: the inside view goes with its building (demolished, a new city) and follows its edits', async () => {

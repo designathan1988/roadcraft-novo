@@ -1862,8 +1862,10 @@ export class Game {
     const w = this.world, col = w.buildings.cols;
     if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); return; }
     if (c === 'toggle') {
-      // the selected building when it is in view; otherwise the one at the centre of the screen
-      const id = insideTarget(w, this.selected, this.rig.target.x, this.rig.target.z, this.rig.dist);
+      // the selected building when it is in view; otherwise the one at the centre of the screen; otherwise the
+      // selected one, and the camera goes to it
+      const { id, go } = insideTarget(w, this.selected, this.rig.target.x, this.rig.target.z, this.rig.dist);
+      if (go) { const s = this.rig.state(); s[0] = col.x[id]; s[1] = col.z[id]; this.rig.restore(s); }
       if (id < 0 || col.floors[id] === 0) { this.hud.toast('Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.'); return; }
       this.insideId = id;
       this.insideFloor = 0;
