@@ -696,19 +696,14 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
   const j = new RoadJournal(world, 'rotatória');
   const y = smoothGround(world.heights, cx, cz);
   const cut = radius;
-  const entries: Array<{ angle: number; node: number }> = [];
-  const approaches: number[] = [];
-  const victims: number[] = [];
-  net.forSegsNear(cx - cut, cz - cut, cx + cut, cz + cut, (s) => victims.push(s));
-  const q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
   const p = new Float64Array(2);
-  const created = new Set<number>(); // new ids may reuse victims' ids
-  for (const s of victims) {
-    if (!net.segs.alive[s] || created.has(s)) continue;
-    net.quad(s, q);
+  // every road the circle touches, before anything changes: an existing roundabout there refuses it untouched
+  const hits: Array<{ s: number; q: Quad; crossings: number[] }> = [];
+  let ringThere = false;
+  net.forSegsNear(cx - cut, cz - cut, cx + cut, cz + cut, (s) => {
+    const q = net.quad(s);
     const inside = (t: number) => { bez(q, t, p); return Math.hypot(p[0] - cx, p[1] - cz) < cut; };
-    const ia = inside(0), ib = inside(1);
-    // find crossings with the circle by sampling + bisection
+    // crossings with the circle by sampling + bisection
     const crossings: number[] = [];
     const N = 32;
     for (let k = 0; k < N; k++) {
@@ -719,9 +714,27 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
         crossings.push((lo + hi) / 2);
       }
     }
-    if (!ia && !ib && crossings.length === 0) continue;
+    if (!inside(0) && !inside(1) && crossings.length === 0) return;
+    if (net.segs.cols.flags[s] & SegFlag.Ring) ringThere = true;
+    hits.push({ s, q, crossings });
+  });
+  if (ringThere) return null;
+  j.guard(() => roundaboutLive(j, world, cx, cz, radius, y, hits));
+  return j;
+}
+
+function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, radius: number, y: number,
+  hits: Array<{ s: number; q: Quad; crossings: number[] }>): void {
+  const net = world.roads;
+  const cut = radius;
+  const entries: Array<{ angle: number; node: number }> = [];
+  const approaches: number[] = [];
+  const p = new Float64Array(2);
+  const created = new Set<number>(); // new ids may reuse victims' ids
+  for (const { s, q, crossings } of hits) {
+    if (!net.segs.alive[s] || created.has(s)) continue;
+    const inside = (t: number) => { bez(q, t, p); return Math.hypot(p[0] - cx, p[1] - cz) < cut; };
     const rec = net.segRec(s);
-    if (rec.flags & SegFlag.Ring) return null; // there is already a roundabout here
     j.removeSeg(s);
     // keep the outside parts
     const pts = [0, ...crossings, 1];
@@ -801,7 +814,6 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
     const L = t[t.length - 1];
     clearAndConform(j, world, sq, net.segs.cols.profile[s], (d) => ya + (yb - ya) * d / L, t);
   }
-  return j;
 }
 
 function conformDisc(j: RoadJournal, world: World, cx: number, cz: number, r: number, y: number): void {

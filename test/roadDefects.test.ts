@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
-import { RoadJournal, buildRoad, demolishSeg, planRoad, snap } from '../src/roads/build.ts';
+import { RoadJournal, buildRoad, buildRoundabout, demolishSeg, planRoad, snap } from '../src/roads/build.ts';
 import { CommandStack, type Command } from '../src/core/commands.ts';
 import { demolishBox } from '../src/tools/demolish.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
@@ -182,4 +182,24 @@ test('D4: a build that fails half way puts back everything it did', () => {
   assert.equal(shape(w), before, 'the half-built edit stayed');
   assert.equal(j.empty, true);
   assert.equal(j.price, 0);
+});
+
+test('D3: a refused roundabout leaves every road as it was', () => {
+  const w = flatWorld(1e9);
+  // an existing roundabout, and roads all around it that a second circle would cut
+  road(w, -120, 0, 120, 0);
+  road(w, 0, -120, 0, 120);
+  const first = buildRoundabout(w, 0, 0, 22);
+  assert.ok(first);
+  assert.ok(first.settle());
+  road(w, 60, -120, 60, 120);
+  road(w, -120, 50, 120, 50);
+  const before = shape(w);
+  const money = w.money;
+  for (const [x, z] of [[40, 20], [30, 30], [45, 10], [25, 35], [35, 25]]) {
+    const j = buildRoundabout(w, x, z, 30);
+    assert.ok(j === null, `a roundabout at ${x}, ${z} over the first one is refused`);
+    assert.equal(shape(w), before, `after refusing the roundabout at ${x}, ${z} the roads are cut`);
+    assert.equal(w.money, money);
+  }
 });
