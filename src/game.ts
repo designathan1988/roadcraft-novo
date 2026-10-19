@@ -2108,9 +2108,9 @@ export class Game {
       if (!auto) this.hud.toast(t('save.blocked'));
       return false;
     }
-    if (!await this.mayWrite()) return false;
-    if (this.busy) return false;
+    // busy is taken before anything is awaited, so an opening asked for right after is refused while this save runs
     this.busy = true;
+    if (!await this.mayWrite()) { this.busy = false; return false; }
     let slot: SaveSlot;
     try { slot = await this.slot(); await this.keepSlotForThisCity(slot); } catch (err) {
       this.busy = false;
@@ -2380,8 +2380,9 @@ export class Game {
    * generation of the slot and opened.
    */
   private async importMap(file: Blob): Promise<void> {
-    if (this.busy || !await this.mayWrite() || this.busy) return;
+    if (this.busy) return;
     this.busy = true;
+    if (!await this.mayWrite()) { this.busy = false; return; }
     let kept: string | null;
     try {
       const saved = await savedIn(await readPackage(file));
@@ -2436,8 +2437,9 @@ export class Game {
    * turn), then the previous city's save becomes a new generation of the slot.
    */
   private async openPreviousCity(folder: string): Promise<void> {
-    if (this.busy || !await this.mayWrite() || this.busy) return;
+    if (this.busy) return;
     this.busy = true;
+    if (!await this.mayWrite()) { this.busy = false; return; }
     let kept: string | null;
     try { kept = await restorePrevious(await this.slot(), folder); } catch (err) {
       this.hud.toast(t('save.previousFailed', { why: errorText(err) }));
