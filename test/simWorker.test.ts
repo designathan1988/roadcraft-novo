@@ -134,3 +134,42 @@ test('C30: at 2x and 4x the walk is played faster with the ground speed, so the 
   const b = pickLook(5 * 256, 20, true, 0, meta, out, 7);
   assert.ok(b.rate >= 3.5, `pedalling at ${b.rate}x for 4x the cycling speed`);
 });
+
+test('C7: drawing the vehicles and people reads only the poses of the part of the city in view, not every pose', async () => {
+  const THREE = await import('three/webgpu');
+  const { VehicleRenderer } = await import('../src/render/vehicles.ts');
+  fakeClock(true);
+  try {
+    // a grid city of 10 x 10 streets 150 m apart, the camera over it, busy traffic
+    const ops: NetOp[] = [{ t: 'clear' }];
+    const id = (i: number, j: number) => 100 + i * 10 + j;
+    for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) ops.push({ t: 'addNode', rec: { id: id(i, j), x: i * 150 - 675, z: j * 150 - 675, y: 10 } });
+    let s = 100;
+    for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) {
+      if (i < 9) ops.push({ t: 'addSeg', rec: { id: s++, a: id(i, j), b: id(i + 1, j), cx: i * 150 - 600, cz: j * 150 - 675, profile: 0, flags: 0, zl: 2, zr: 1 } });
+      if (j < 9) ops.push({ t: 'addSeg', rec: { id: s++, a: id(i, j), b: id(i, j + 1), cx: i * 150 - 675, cz: j * 150 - 600, profile: 0, flags: 0, zl: 1, zr: 2 } });
+    }
+    const extra: string[] = []; const e = encodeOps(ops, extra);
+    send({ type: 'ops', ops: e, extra });
+    send({ type: 'camera', x: 0, z: 0 });
+    send({ type: 'density', value: 1 / 12 });
+    for (let i = 0; i < 20 * 40; i++) fire();
+  } finally { fakeClock(false); }
+  const reader = new PoseReader(viewPoseBuffers(poseSab));
+  reader.acquire();
+  const n = reader.count;
+  assert.ok(n > 400, `poses published ${n}`);
+  const vr = new VehicleRenderer(reader);
+  // looking out of the city from its east edge: almost nothing in view
+  const cam = new THREE.PerspectiveCamera(50, 16 / 9, 1, 4000);
+  cam.position.set(700, 40, 0); cam.lookAt(2000, 0, 0); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+  // count the poses the drawing reads
+  const seen = new Set<number>();
+  const data = reader.data;
+  const counted = new Proxy(data, { get(t, p) { if (typeof p === 'string' && /^\d+$/.test(p)) seen.add(Math.floor(Number(p) / POSE_STRIDE)); const v = Reflect.get(t, p, t); return typeof v === 'function' ? v.bind(t) : v; } });
+  Object.defineProperty(reader, 'data', { get: () => counted, configurable: true });
+  Object.defineProperty(reader, 'acquire', { value: () => false, configurable: true });
+  vr.update(cam, cam.position);
+  const reads = seen.size;
+  assert.ok(reads < n * 0.3, `the drawing read ${reads} of ${n} poses with almost nothing in view`);
+});

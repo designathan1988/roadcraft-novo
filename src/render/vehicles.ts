@@ -6,7 +6,7 @@
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { POSE_STRIDE, type PoseReader } from '../sim/poses.ts';
+import { POSE_STRIDE, TILE, TILE_GRID, TILES, type PoseReader } from '../sim/poses.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
@@ -563,6 +563,7 @@ export class VehicleRenderer {
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   private sphere = new THREE.Sphere(new THREE.Vector3(), 7);
+  private tileBox = new THREE.Box3();
   /** Pedestres e ciclistas cozidos (src/render/people); até carregarem, os bonecos simples. */
   readonly people = new PeopleRenderer();
 
@@ -633,44 +634,59 @@ export class VehicleRenderer {
       const d = r.data;
       const fol = this.follow, fp = this.followPose;
       let fbest = 12 * 12;
-      for (let i = 0; i < n; i++) {
-        const o = i * POSE_STRIDE;
-        const x = d[o] + (d[o + 4] - d[o]) * t;
-        const y = d[o + 1] + (d[o + 5] - d[o + 1]) * t;
-        const z = d[o + 2] + (d[o + 6] - d[o + 2]) * t;
-        let dy = d[o + 7] - d[o + 3];
-        if (dy > Math.PI) dy -= Math.PI * 2; else if (dy < -Math.PI) dy += Math.PI * 2;
-        const yaw = d[o + 3] + dy * t;
-        const px = d[o] + (d[o + 4] - d[o]) * tp, py = d[o + 1] + (d[o + 5] - d[o + 1]) * tp, pz = d[o + 2] + (d[o + 6] - d[o + 2]) * tp;
-        const pyaw = d[o + 3] + dy * tp;
-        if (fol && followMatch(d, o, fol)) {
-          const dd = (x - fol.x) ** 2 + (z - fol.z) ** 2;
-          if (dd < fbest) { fbest = dd; fp[0] = x; fp[1] = y; fp[2] = z; fp[3] = yaw; }
+      // tile by tile (the worker sorts the records by tile around the camera): whole tiles out of view or beyond the
+      // drawing distance are skipped without reading their poses; the grid's edge tiles hold what lies beyond it
+      const tiled = r.tiled, tiles = r.tiles, gx = r.originX, gz = r.originZ, box = this.tileBox;
+      for (let tile = 0; tile < (tiled ? TILES : 1); tile++) {
+        const i0 = tiled ? tiles[tile] : 0, i1 = tiled ? tiles[tile + 1] : n;
+        if (i0 >= i1) continue;
+        if (tiled) {
+          const tx = tile % TILE_GRID, tz = (tile / TILE_GRID) | 0;
+          if (tx > 0 && tz > 0 && tx < TILE_GRID - 1 && tz < TILE_GRID - 1) {
+            box.min.set(gx + tx * TILE - 15, -500, gz + tz * TILE - 15);
+            box.max.set(gx + (tx + 1) * TILE + 15, 2500, gz + (tz + 1) * TILE + 15);
+            if (box.distanceToPoint(eye) > MID || !this.frustum.intersectsBox(box)) continue;
+          }
         }
-        this.sphere.center.set(x, y + 1, z);
-        this.sphere.radius = d[o + 8] % 65536 >= 4 * 256 ? 12 : 7;
-        if (!this.frustum.intersectsSphere(this.sphere)) continue;
-        const dist = Math.hypot(x - eye.x, y - eye.y, z - eye.z);
-        if (dist > MID) continue;
-        // tipo × 256 + cor (bits 0-3; estilo do carro nos bits 4-6; 128 = vagão da frente) + luzes × 65536
-        const info = d[o + 8], lights = Math.floor(info / 65536), base = info - lights * 65536;
-        const kind = Math.floor(base / 256), low = base - kind * 256;
-        const style = kind === 0 ? (low >> 4) & 7 : 0;
-        // com as pessoas cozidas o piloto da moto é uma delas: os lugares da moto apagam
-        const shown = people && kind === 0 && style === 5 ? lights & 7 : lights;
-        const color = (kind === 0 ? low & 15 : low & 127) + shown * 16 + (kind === 5 && !people ? 128 : 0);
-        // pessoas e bicicletas: pequenas, modelo só até PERSON_NEAR e caixa até PERSON_MID
-        const person = kind === 3, small = person || kind === 5;
-        if ((small && dist > PERSON_MID) || (person && this.hidePeople)) continue;
-        if (people && small) { people.push(d, o, x, y, z, yaw, px, py, pz, pyaw, dist, r.dt, !person); if (person) continue; }
-        if (people && kind <= 2 && dist < NEAR) people.occupants(kind, style, x, y, z, yaw, px, py, pz, pyaw, info, lights, dist, d[o + 10]);
-        // perto/meio com troca pontilhada numa faixa de 30 m (pessoas: 10 m)
-        const fadeNear = small ? Math.min(1, Math.max(0, (PERSON_NEAR + 5 - dist) / 10)) : Math.min(1, Math.max(0, (NEAR + 15 - dist) / 30));
-        const alpha = d[o + 9];
-        const mi = modelOf(kind, style);
-        if (fadeNear > 0) (kind < 3 && dist > SHADOW_NEAR ? this.nearFar[mi] : this.near[mi]).push(x, y, z, yaw, color, alpha, kind, fadeNear, px, py, pz, pyaw);
-        const farFade = small ? Math.min(1, Math.max(0, (PERSON_MID - dist) / 40)) : 1;
-        if (fadeNear < 1) this.mid.push(x, y, z, yaw, color, alpha * farFade, dimsOf(kind, style), -1 - fadeNear, px, py, pz, pyaw);
+        for (let i = i0; i < i1; i++) {
+          const o = i * POSE_STRIDE;
+          const x = d[o] + (d[o + 4] - d[o]) * t;
+          const y = d[o + 1] + (d[o + 5] - d[o + 1]) * t;
+          const z = d[o + 2] + (d[o + 6] - d[o + 2]) * t;
+          let dy = d[o + 7] - d[o + 3];
+          if (dy > Math.PI) dy -= Math.PI * 2; else if (dy < -Math.PI) dy += Math.PI * 2;
+          const yaw = d[o + 3] + dy * t;
+          const px = d[o] + (d[o + 4] - d[o]) * tp, py = d[o + 1] + (d[o + 5] - d[o + 1]) * tp, pz = d[o + 2] + (d[o + 6] - d[o + 2]) * tp;
+          const pyaw = d[o + 3] + dy * tp;
+          if (fol && followMatch(d, o, fol)) {
+            const dd = (x - fol.x) ** 2 + (z - fol.z) ** 2;
+            if (dd < fbest) { fbest = dd; fp[0] = x; fp[1] = y; fp[2] = z; fp[3] = yaw; }
+          }
+          this.sphere.center.set(x, y + 1, z);
+          this.sphere.radius = d[o + 8] % 65536 >= 4 * 256 ? 12 : 7;
+          if (!this.frustum.intersectsSphere(this.sphere)) continue;
+          const dist = Math.hypot(x - eye.x, y - eye.y, z - eye.z);
+          if (dist > MID) continue;
+          // tipo × 256 + cor (bits 0-3; estilo do carro nos bits 4-6; 128 = vagão da frente) + luzes × 65536
+          const info = d[o + 8], lights = Math.floor(info / 65536), base = info - lights * 65536;
+          const kind = Math.floor(base / 256), low = base - kind * 256;
+          const style = kind === 0 ? (low >> 4) & 7 : 0;
+          // com as pessoas cozidas o piloto da moto é uma delas: os lugares da moto apagam
+          const shown = people && kind === 0 && style === 5 ? lights & 7 : lights;
+          const color = (kind === 0 ? low & 15 : low & 127) + shown * 16 + (kind === 5 && !people ? 128 : 0);
+          // pessoas e bicicletas: pequenas, modelo só até PERSON_NEAR e caixa até PERSON_MID
+          const person = kind === 3, small = person || kind === 5;
+          if ((small && dist > PERSON_MID) || (person && this.hidePeople)) continue;
+          if (people && small) { people.push(d, o, x, y, z, yaw, px, py, pz, pyaw, dist, r.dt, !person); if (person) continue; }
+          if (people && kind <= 2 && dist < NEAR) people.occupants(kind, style, x, y, z, yaw, px, py, pz, pyaw, info, lights, dist, d[o + 10]);
+          // perto/meio com troca pontilhada numa faixa de 30 m (pessoas: 10 m)
+          const fadeNear = small ? Math.min(1, Math.max(0, (PERSON_NEAR + 5 - dist) / 10)) : Math.min(1, Math.max(0, (NEAR + 15 - dist) / 30));
+          const alpha = d[o + 9];
+          const mi = modelOf(kind, style);
+          if (fadeNear > 0) (kind < 3 && dist > SHADOW_NEAR ? this.nearFar[mi] : this.near[mi]).push(x, y, z, yaw, color, alpha, kind, fadeNear, px, py, pz, pyaw);
+          const farFade = small ? Math.min(1, Math.max(0, (PERSON_MID - dist) / 40)) : 1;
+          if (fadeNear < 1) this.mid.push(x, y, z, yaw, color, alpha * farFade, dimsOf(kind, style), -1 - fadeNear, px, py, pz, pyaw);
+        }
       }
       this.trackFollow(fbest < 12 * 12);
     }

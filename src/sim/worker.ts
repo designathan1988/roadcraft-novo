@@ -2,7 +2,7 @@
 // camera position; publishes poses (triple buffer) and road occupancy
 // (shared memory). The page only reads.
 
-import { PoseWriter, POSE_STRIDE, MAX_AGENTS, viewPoseBuffers } from './poses.ts';
+import { PoseWriter, POSE_STRIDE, MAX_AGENTS, TILES, sortByTile, tileOrigin, viewPoseBuffers } from './poses.ts';
 import { SimNet, decodeOp } from './lanes.ts';
 import { Traffic, type LineSpec } from './traffic.ts';
 import { Peds } from './peds.ts';
@@ -75,6 +75,10 @@ let next = 0;
 let windowTimer = 0;
 
 let statsTimer = 0;
+/** Poses as written, before sorting them by tile into the published buffer; scratch for the sort. */
+const raw = new Float32Array(MAX_AGENTS * POSE_STRIDE);
+const tileOf = new Int32Array(MAX_AGENTS + TILES);
+const origin = new Float64Array(2);
 /** The standing-still poses of the pause were published. */
 let pausedOut = false;
 /** Simulation clock at the last stats (boardings per hour are reckoned over simulated time). */
@@ -133,16 +137,19 @@ function stepInner(): void {
   let n = -1;
   // paused: published once more standing still (previous pose = current), so nobody walks in place
   if (speed > 0 || !pausedOut) {
-    n = Math.min(MAX_AGENTS, traffic.writePoses(writer.data, POSE_STRIDE));
-    n += traffic.writeStopPeople(writer.data, POSE_STRIDE, n, MAX_AGENTS);
-    n += peds.writePoses(writer.data, POSE_STRIDE, n, MAX_AGENTS);
+    const d = raw;
+    n = Math.min(MAX_AGENTS, traffic.writePoses(d, POSE_STRIDE));
+    n += traffic.writeStopPeople(d, POSE_STRIDE, n, MAX_AGENTS);
+    n += peds.writePoses(d, POSE_STRIDE, n, MAX_AGENTS);
     if (speed === 0) {
-      const d = writer.data;
       for (let i = 0; i < n; i++) { const o = i * POSE_STRIDE; d[o] = d[o + 4]; d[o + 1] = d[o + 5]; d[o + 2] = d[o + 6]; d[o + 3] = d[o + 7]; }
     }
     pausedOut = speed === 0;
+    // sorted by tile around the camera: the page reads only the tiles in view
+    tileOrigin(traffic.camX, traffic.camZ, origin);
+    sortByTile(d, n, writer.data, writer.tiles, origin[0], origin[1], tileOf);
   }
-  if (n >= 0) writer.publish(n, performance.timeOrigin + performance.now(), dtMs, tick);
+  if (n >= 0) writer.publish(n, performance.timeOrigin + performance.now(), dtMs, tick, origin[0], origin[1]);
   statsTimer += dtMs;
   if (statsTimer >= 1000) {
     statsTimer = 0;
