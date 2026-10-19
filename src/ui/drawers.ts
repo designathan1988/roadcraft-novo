@@ -199,11 +199,8 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
   }
   if (drawing || cur === 'upgrade') {
     const heightText = (): string => (s.elevation === 0 ? t('ui.height.ground') : `${s.elevation > 0 ? '+' : ''}${s.elevation} m`);
-    const hr = orow(t('v2.row.height'), stepper(t('palette.height'), heightText(), (d) => {
-      a.elevation(d * 4);
-      s.elevation = Math.max(-12, Math.min(16, s.elevation + d * 4));
-      return heightText();
-    }));
+    // the game answers with the height the road is drawn at (Hud.setElevation writes s.elevation)
+    const hr = orow(t('v2.row.height'), stepper(t('palette.height'), heightText(), (d) => { a.elevation(d * 4); return heightText(); }));
     hr.title = `${t('palette.height')} (${h.roadKeys()})`;
     p.options.append(hr);
     const seg = (items: Array<[string, boolean, () => void]>, data: string): HTMLElement => {
