@@ -190,6 +190,15 @@ export class Post {
     if (this.scenePass.camera !== camera) {
       this.scenePass.camera = camera;
       for (const t of this.traas) t.camera = camera;
+      // GTAO and its denoise hold the matrices (and near/far) of the camera they were made with: in the isometric
+      // view they unprojected the depth with the perspective camera's
+      type CamUniforms = { _cameraProjectionMatrix?: { value: unknown }; _cameraProjectionMatrixInverse?: { value: unknown }; _cameraNear?: { object: unknown }; _cameraFar?: { object: unknown } };
+      for (const n of this.owned as CamUniforms[]) {
+        if (n._cameraProjectionMatrix) n._cameraProjectionMatrix.value = camera.projectionMatrix;
+        if (n._cameraProjectionMatrixInverse) n._cameraProjectionMatrixInverse.value = camera.projectionMatrixInverse;
+        if (n._cameraNear) n._cameraNear.object = camera;
+        if (n._cameraFar) n._cameraFar.object = camera;
+      }
     }
     this.fitCascades(camera);
   }
