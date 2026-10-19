@@ -253,3 +253,19 @@ test('E17: the shadow cascades follow the isometric camera and the window\'s sha
   const want = Math.tan(THREE.MathUtils.degToRad(25)) * persp.aspect;
   assert.ok(Math.abs(Math.abs(f.x / f.z) - want) < 0.01, `after the resize the cascades span ${Math.abs(f.x / f.z).toFixed(2)} sideways per metre, the view ${want.toFixed(2)}`);
 });
+
+test('E18: the ambient occlusion reads the depth with the matrices of the camera in use', async () => {
+  const { Post } = await import('../src/render/post.ts');
+  const persp = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), sun = new THREE.DirectionalLight();
+  const post = new Post(fakeRenderer(), new THREE.Scene(), persp, sun, { shadows: false, ao: true, bloom: false });
+  const iso = new THREE.OrthographicCamera(-889, 889, 500, -500, 1, 6000);
+  post.setCamera(iso);
+  type U = { value: unknown };
+  const inner = post as unknown as { owned: Array<{ _cameraProjectionMatrix?: U; _cameraProjectionMatrixInverse?: U; _cameraNear?: { object: unknown } }> };
+  const aoNode = inner.owned.find((n) => n._cameraProjectionMatrix)!;
+  const denoiseNode = inner.owned.find((n) => n._cameraProjectionMatrixInverse && !n._cameraProjectionMatrix)!;
+  assert.ok(aoNode._cameraProjectionMatrix!.value === iso.projectionMatrix, 'GTAO projects with the isometric camera');
+  assert.ok(aoNode._cameraProjectionMatrixInverse!.value === iso.projectionMatrixInverse, 'GTAO unprojects with the isometric camera');
+  assert.ok(aoNode._cameraNear!.object === iso, 'GTAO reads the isometric camera\'s near and far');
+  assert.ok(denoiseNode._cameraProjectionMatrixInverse!.value === iso.projectionMatrixInverse, 'the denoise unprojects with the isometric camera');
+});
