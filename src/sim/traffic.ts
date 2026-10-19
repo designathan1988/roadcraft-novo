@@ -501,6 +501,8 @@ export class Traffic {
       if (c.kind[v] === 0 && this.tryParkManoeuvre(v, lane)) return 1;
     }
     if (toEnd >= 12) return 0;
+    // the same share of drop-offs away from the kerb animation: the trip ends and the car drives on to another
+    if (this.dropsOff(v) && this.dropOffTrip(v, this.sim.laneTo(lane))) return 0;
     return this.startParking(v, lane) ? 1 : 2;
   }
 
@@ -540,12 +542,28 @@ export class Traffic {
   }
 
   /** Some cars (4 in 10, by their id) stop at the kerb with the hazard lights on, a passenger gets out, and they go on. */
+  /** A car whose trip is dropping someone off (4 in 10, by vehicle and destination): the same rule near and far. */
+  private dropsOff(v: number): boolean {
+    const c = this.veh.cols;
+    return c.kind[v] === 0 && c.line[v] < 0 && ((Math.imul(v * 31 + c.dest[v], 2654435761) >>> 0) % 10) < 4;
+  }
+
+  /** The drop-off trip ends (counted) and the car starts another from `node`; false if there is nowhere to go. */
+  private dropOffTrip(v: number, node: number): boolean {
+    const c = this.veh.cols;
+    const b = this.zonedNode(this.zoneWeights(false));
+    if (b < 0 || b === node) return false;
+    this.arrived++; this.kerbStops++;
+    c.dest[v] = b;
+    this.replanFrom(v, node);
+    return !c.dying[v];
+  }
+
   private tryKerbStop(v: number, lane: number): boolean {
     const c = this.veh.cols;
-    if (laneIdx(lane) !== 0 || ((Math.imul(v, 2654435761) >>> 0) % 10) >= 4) return false;
+    if (laneIdx(lane) !== 0 || !this.dropsOff(v)) return false;
     if (!PROFILE_INFO[this.sim.net.segs.cols.profile[laneSeg(lane)]].walk) return false;
     c.dying[v] = 4; c.dwell[v] = 0; c.served[v] = 0;
-    this.kerbStops++;
     return true;
   }
 
@@ -574,11 +592,9 @@ export class Traffic {
       this.onDropOff(p[0], p[2]);
     }
     if (c.dwell[v] > 6) {
-      const b = this.zonedNode(this.zoneWeights(false));
-      c.dying[v] = 0; c.served[v] = 0; c.dwell[v] = 1.3; // the bay-leaving slide takes the car back to the lane
-      if (b < 0) { c.dying[v] = 1; return; }
-      c.dest[v] = b;
-      this.replanFrom(v, sim.laneTo(lane));
+      // the passenger is out: that trip ended; the car pulls out on another (the bay-leaving slide takes it back)
+      c.dying[v] = 0; c.served[v] = 0; c.dwell[v] = 1.3;
+      if (!this.dropOffTrip(v, sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; c.dying[v] = 1; }
     }
   }
 
@@ -1124,6 +1140,8 @@ export class Traffic {
     if (!sim.net.segs.alive[laneSeg(lane)]) { c.why[v] = End.Lost; this.finish(v); return; }
     if (c.dying[v]) { this.finish(v); return; }
     if (this.atDestination(v)) {
+      // a drop-off: the trip ends there and the car goes on to another after a moment at the kerb
+      if (this.dropsOff(v) && this.dropOffTrip(v, sim.laneTo(lane))) { this.schedule(v, this.time + 6); return; }
       if (c.line[v] < 0) { this.finish(v); return; }
       this.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
       if (c.dying[v]) { this.finish(v); return; }

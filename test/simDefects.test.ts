@@ -556,3 +556,18 @@ test('C10: a car that changed lanes just before a junction is drawn going on smo
   }
   assert.ok(worst < 1.2, `the car was drawn jumping ${worst.toFixed(2)} m in one step (driving 0.5 m a step)`);
 });
+
+test('C31: a car dropping someone off ends its trip (counted) and starts another, near the camera and far from it alike', () => {
+  const share = (camX: number) => {
+    const { sim } = gridCity(4, 120);
+    const tr = traffic(sim, camX, 0);
+    tr.density = 1 / 25;
+    for (let i = 0; i < 20 * 240; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
+    // trips that ended (arrivals) against vehicles that left: a drop-off ends a trip without the car leaving
+    return { arrived: tr.arrived, kerb: tr.kerbStops };
+  };
+  const near = share(0), far = share(8000);
+  assert.ok(near.kerb > 5, `drop-offs near the camera: ${near.kerb}`);
+  assert.ok(far.kerb > 5, `drop-offs far from the camera: ${far.kerb} (before: only near the camera)`);
+  assert.ok(near.kerb <= near.arrived, `near: ${near.kerb} drop-offs but ${near.arrived} trips ended`);
+});
