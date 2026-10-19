@@ -61,6 +61,7 @@ export function traffic(sim: SimNet, x = 0, z = 0): Traffic {
 /** What the worker does when the network changed between steps. */
 export function syncNet(sim: SimNet, tr: Traffic): void {
   tr.segsRemoved(sim.removedSegs.splice(0));
+  tr.segsReprofiled(sim.reprofiledSegs.splice(0));
   tr.nodesRebuilt(sim.rebuild());
 }
 

@@ -1385,11 +1385,14 @@ export class Traffic {
       this.unlink(v);
       c.conn[v] = -1;
       if (!sim.net.segs.alive[laneSeg(to)]) { c.why[v] = End.Lost; this.finish(v); v = next; continue; }
+      // the destination lane may be gone with a new profile: the outermost one left, or the trip is lost
+      const kept = this.keptLane(to);
+      if (kept < 0) { c.why[v] = End.Lost; this.finish(v); v = next; continue; }
       this.setLaneCount(c.lane[v], -1);
-      this.setLaneCount(to, 1);
-      c.lane[v] = to; c.s[v] = 0; c.rIdx[v]++;
-      if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== sim.laneTo(to)) this.replanFrom(v, sim.laneTo(to));
-      this.insert(v, false, to);
+      this.setLaneCount(kept, 1);
+      c.lane[v] = kept; c.s[v] = 0; c.rIdx[v]++;
+      if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== sim.laneTo(kept)) this.replanFrom(v, sim.laneTo(kept));
+      this.insert(v, false, kept);
       v = next;
     }
     this.connHead[conn] = -1; this.connTail[conn] = -1;
@@ -1427,6 +1430,43 @@ export class Traffic {
     }
     for (const s of segs) { this.segLoad[s * 2] = 0; this.segLoad[s * 2 + 1] = 0; }
     for (const s of segs) for (let k = 0; k < 16; k++) { this.laneCount[s * 16 + k] = 0; this.laneHead[s * 16 + k] = -1; this.laneTail[s * 16 + k] = -1; this.activeLanes.delete(s * 16 + k); }
+  }
+
+  /** The lane that takes over `lane` after its segment's profile changed: itself, the outermost one left, or −1 (no lanes that way). */
+  private keptLane(lane: number): number {
+    const seg = laneSeg(lane), dir = laneDir(lane), n = laneCount(this.sim.net.segs.cols.profile[seg], dir);
+    if (n === 0) return -1;
+    return laneIdx(lane) < n ? lane : laneId(seg, dir, n - 1);
+  }
+
+  /**
+   * Segments with a new profile (an upgrade, a lane more or less): the vehicles on lanes that are gone move to the
+   * outermost lane left in their direction (near ones keep their place in it); with no lane left that way, their trip is lost.
+   */
+  segsReprofiled(segs: number[]): void {
+    const c = this.veh.cols;
+    for (const s of segs) {
+      if (!this.sim.net.segs.alive[s]) continue;
+      for (const dir of [1, -1]) for (let i = 0; i < 8; i++) {
+        const lane = laneId(s, dir, i), to = this.keptLane(lane);
+        if (to === lane) continue;
+        for (let v = this.mesoHead[lane]; v >= 0;) {
+          const next = c.mnext[v];
+          if (to < 0) { c.why[v] = End.Lost; this.finish(v); }
+          else { this.setLaneCount(lane, -1); this.setLaneCount(to, 1); c.lane[v] = to; this.mesoLink(v, to); }
+          v = next;
+        }
+        for (let v = this.laneHead[lane]; v >= 0;) {
+          const next = c.next[v];
+          if (to < 0) { c.why[v] = End.Lost; this.finish(v); }
+          else { this.unlink(v); this.setLaneCount(lane, -1); this.setLaneCount(to, 1); c.lane[v] = to; c.lcT[v] = 1; this.insert(v, false, to); }
+          v = next;
+        }
+        this.laneCount[lane] = 0;
+      }
+    }
+    // pulled into a bay (out of the lists): only the drawing reads their lane
+    for (const v of this.parkers) if (c.lane[v] >= 0 && segs.includes(laneSeg(c.lane[v]))) { const to = this.keptLane(c.lane[v]); if (to >= 0) c.lane[v] = to; }
   }
 
   // ------------------------------------------------------------ micro

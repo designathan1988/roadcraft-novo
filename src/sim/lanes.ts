@@ -78,6 +78,8 @@ export class SimNet {
   private dirtyNodes = new Set<number>();
   /** Trechos removidos desde o último passo (os veículos neles saem). */
   readonly removedSegs: number[] = [];
+  /** Segments whose profile changed since the last step (the vehicles on lanes that are gone move over). */
+  readonly reprofiledSegs: number[] = [];
   /** Comprimento total de faixas (para a demanda). */
   laneMeters = 0;
 
@@ -137,7 +139,7 @@ export class SimNet {
         net.setProfile(op.id, op.profile);
         this.laneMeters += sc.len[op.id] * (laneCount(op.profile, 1) + laneCount(op.profile, -1));
         this.dirtyNodes.add(sc.a[op.id]); this.dirtyNodes.add(sc.b[op.id]);
-        this.removedSegs.push(op.id); // faixas podem ter mudado de número
+        this.reprofiledSegs.push(op.id); // the number of lanes may have changed
         break;
       }
       case 'zone': net.setZone(op.id, op.side, op.zone); break; // pedestres nascem mais no comércio
@@ -148,7 +150,7 @@ export class SimNet {
         this.nodePhases.fill(0); this.nodeRing.fill(0); this.dirtyNodes.clear(); this.laneMeters = 0;
         this.turnAll.fill(0); this.turnCar.fill(0);
         this.nodeCtl.fill(0); this.conflicts.clear(); this.nodeFlow.fill(0); this.armMain.fill(0); this.nodeAuto.fill(0);
-        this.removedSegs.length = 0;
+        this.removedSegs.length = 0; this.reprofiledSegs.length = 0;
         break;
     }
   }

@@ -333,3 +333,26 @@ test('C16: a new road that reuses a demolished one\'s id does not inherit its fa
   }
 });
 
+test('C17: upgrading a road keeps the vehicles that are on it', async () => {
+  const { recordOps, mirror, syncNet } = await import('./simCity.ts');
+  const { laneCount } = await import('../src/sim/lanes.ts');
+  for (const camX of [0, 8000]) {
+    const { w, sim } = gridCity(4, 120);
+    const ops = recordOps(w);
+    const tr = traffic(sim, camX, 0);
+    tr.density = 1 / 15;
+    for (let i = 0; i < 20 * 90; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
+    const seg = busiest(tr), cars = onSeg(tr, seg).all.filter((v) => !tr.veh.cols.dying[v]);
+    assert.ok(cars.length >= 2, `vehicles on the busiest segment: ${cars.length}`);
+    const to = sim.net.segs.cols.profile[seg] === 3 ? 0 : 3;
+    w.roads.setProfile(seg, to);
+    mirror(sim, ops.splice(0));
+    syncNet(sim, tr);
+    const c = tr.veh.cols;
+    for (const v of cars) {
+      assert.ok(tr.veh.alive[v] && !c.dying[v], `vehicle ${v} disappeared with the upgrade (camera ${camX ? 'away' : 'near'})`);
+      const l = c.conn[v] >= 0 ? sim.conns.cols.to[c.conn[v]] : c.lane[v];
+      assert.ok((l & 7) < laneCount(to, (l & 8) ? -1 : 1), `vehicle ${v} on lane ${l & 7} of ${laneCount(to, (l & 8) ? -1 : 1)}`);
+    }
+  }
+});

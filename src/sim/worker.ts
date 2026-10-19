@@ -114,6 +114,8 @@ function stepInner(): void {
   // network changed: rebuild only the touched nodes
   const removed = sim.removedSegs.splice(0);
   if (removed.length) traffic.segsRemoved(removed);
+  const reprofiled = sim.reprofiledSegs.splice(0);
+  if (reprofiled.length) traffic.segsReprofiled(reprofiled);
   const rebuilt = sim.rebuild();
   if (rebuilt.length) traffic.nodesRebuilt(rebuilt);
   for (let k = 0; k < speed; k++) {
