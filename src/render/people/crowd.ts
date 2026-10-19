@@ -13,7 +13,7 @@ import * as THREE from 'three/webgpu';
 import { T, withPrevious, type Node } from '../tsl.ts';
 import { rainU } from '../weather.ts';
 import { CLIP, CLIP_PROP, REGION, checkCooked, type CookedPeople } from './format.ts';
-import { hash32, pickLook, type LookChoice } from './looks.ts';
+import { hash32, pickLook, riderHash, type LookChoice } from './looks.ts';
 import { MOTO_PELVIS, aboard, seatsOf } from './occupants.ts';
 import { PeopleCreator, creatorCatalog, type PlacedPerson } from './creator.ts';
 
@@ -229,6 +229,12 @@ export class PeopleRenderer {
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.eye.setFromMatrixPosition(camera.matrixWorld);
+    // the people the player placed go first: a dense crowd filling the batches must not cut them
+    if (this.creator?.size) {
+      const t = performance.now() / 1000;
+      this.creator.forEach(this.eye.x, this.eye.z, 700, t, this.lastT > 0 ? Math.min(0.2, t - this.lastT) : 0, this.visible, this.drawPlaced);
+      this.lastT = t;
+    }
   }
 
   /**
@@ -241,7 +247,7 @@ export class PeopleRenderer {
     if (px1 < MIN_PX) return false;
     const speed = Math.hypot(d[o + 4] - d[o], d[o + 6] - d[o + 2]) / Math.max(1e-3, dtMs / 1000);
     const info = d[o + 8];
-    const l = pickLook(info, speed, bike, rainU.value as number, m, this.look);
+    const l = pickLook(info, speed, bike, rainU.value as number, m, this.look, d[o + 10]);
     const alpha = d[o + 9];
     // rise of the ground along the walk (the simulation's heights), for the feet
     const run = Math.hypot(d[o + 4] - d[o], d[o + 6] - d[o + 2]);
@@ -262,11 +268,11 @@ export class PeopleRenderer {
    * The people aboard a vehicle of the pose buffer: the motorcycle's rider always, the cabins' driver and
    * passengers (as many as the pose's light bits say) when `seatedInCabins`.
    */
-  occupants(kind: number, style: number, x: number, y: number, z: number, yaw: number, px: number, py: number, pz: number, pyaw: number, info: number, lights: number, dist: number): void {
+  occupants(kind: number, style: number, x: number, y: number, z: number, yaw: number, px: number, py: number, pz: number, pyaw: number, info: number, lights: number, dist: number, id = 0): void {
     const m = this.meta!;
     const c = Math.cos(yaw), s = Math.sin(yaw), pc = Math.cos(pyaw), ps = Math.sin(pyaw);
     const at = (lx: number, ly: number, lz: number, seat: number, clip: number, rate: number, phase: number) => {
-      const h = hash32((Math.floor(info) >>> 0) * 31 + seat * 7919 + 17);
+      const h = riderHash(info, id, seat);
       let v = h % m.variations.length;
       if (m.variations[v].band === 'child' && seat === 0) v = (v + 4) % m.variations.length;
       const l = this.look;
@@ -327,11 +333,6 @@ export class PeopleRenderer {
   }
 
   end(): void {
-    if (this.creator?.size) {
-      const t = performance.now() / 1000;
-      this.creator.forEach(this.eye.x, this.eye.z, 700, t, this.lastT > 0 ? Math.min(0.2, t - this.lastT) : 0, this.visible, this.drawPlaced);
-      this.lastT = t;
-    }
     for (let lod = 0; lod < this.geos.length; lod++) {
       const n = this.counts[lod];
       this.geos[lod].instanceCount = n;

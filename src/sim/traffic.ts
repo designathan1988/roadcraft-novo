@@ -16,16 +16,21 @@ import { Router } from './routing.ts';
 import { FlowAdvisor } from './advisor.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
+import { Signals } from './signals.ts';
+import { stripAt } from './probe.ts';
+import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver, driverSchema } from './drivers.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
 const WINDOW = 1500;
 // meso (far from the camera) at the pace of micro: the fleet is a single one, so if meso runs faster the cars
-// pile up in the window until it jams, and if it runs slower the window empties (that was the case: meso at
-// 6 km/h, micro at 20). Meso takes this factor times the `mesoEnter` estimate (free driving scaled by
-// occupancy + junction wait). Checked in scripts/transito.ts against the whole map in micro (JANELA=1e6): cars
-// within 1.5 km of the centre move along with those of the all-micro run (2.0 fills the window, 4.0 empties it)
-const MESO_ALPHA = 2.5;
+// pile up in the window until it jams, and if it runs slower the window empties; and the camera must not change how
+// fast the city drives. Meso takes MESO_ALPHA times the `mesoEnter` estimate: free driving slowed by occupancy
+// (1 + MESO_CROWD × occupancy²) plus the junction's wait (the lights and zebras themselves are simulated at the line).
+// Measured on a 6 × 6 grid at 8:00, the camera on it against 8 km away (test "the camera does not change how fast the
+// city drives"): 23.7 / 21.8, 11.0 / 11.0 and 5.9 / 6.3 km/h at densities 1/100, 1/30 and 1/15 (with the old 2.5 and 3,
+// set before the lights were simulated far away: 23.7 / 10.0 km/h in light traffic)
+const MESO_ALPHA = 0.85, MESO_CROWD = 12;
 const WINDOW_OUT = 1750;
 /** Stopped for this long (s), the driver reconsiders the route (roadcraft STUCK_SECONDS). */
 export const STUCK_SECONDS = 10;
@@ -58,20 +63,23 @@ const CROWD_OCC = 0.15, CROWD_SLOPE = 5;
 export const REGION = 400, REGION_OCC = 0.1, REGION_SLOPE = 7, REGION_EVERY = 4;
 const REGION_N = Math.ceil(MAP_SIZE / REGION);
 /**
- * Fleet governor (roadcraft `populationGovernor`, here driven by traffic rather than step cost): the average speed of
- * the micro window (what the player sees, stopped vehicles included) below GOV_SLOW gradually cuts the fleet target,
- * above GOV_FAST gives it back. Measured: the generated city's network cannot carry the peak fleet (all-micro drops
- * to 8.6 km/h and keeps falling); with the governor the peak has fewer cars and keeps moving.
+ * Fleet governor (roadcraft `populationGovernor`, here driven by traffic rather than step cost): the share of the
+ * whole city's fleet on jammed streets (a direction of a segment 80% full or more, near the camera or not) above
+ * GOV_FREE cuts the fleet target in proportion, down to GOV_MIN at GOV_JAM (approached gradually, without the jumps of
+ * an on/off rule at a threshold). It never reads the camera: looking at a jam
+ * must not change the city's traffic. Measured: the generated city's network cannot carry the peak fleet; with the
+ * governor the peak has fewer cars and keeps moving.
  */
-const GOV_SLOW = 15 / 3.6, GOV_FAST = 18 / 3.6, GOV_MIN = 0.75;
+const GOV_JAM = 0.5, GOV_FREE = 0.15, GOV_MIN = 0.75, JAMMED = 0.8;
 /** A reconsidering driver's detour rejoins the route up to this many nodes ahead. */
 const REJOIN = 6;
 
 /**
- * IDM. Cars accelerate at 2.8 m/s² (with 2.2 the centre was ~2 km/h slower, measured); buses, trucks and
- * trains, being heavy, at 2.2 (and stop at the right spot). 0.9 s headway.
+ * IDM figures for what is not a driver's own (sim/drivers.ts has each driver's): the standstill gap kept from a
+ * bus stop or the tail entering a lane, and the headway a vehicle entering the window is given. The fleet's sedan
+ * keeps these (2.8 m/s², 2.2 m/s², 2.2 m, 0.9 s; with 2.2 m/s² the centre was ~2 km/h slower, measured).
  */
-const A_MAX = 2.8, A_HEAVY = 2.2, B_COMF = 2.2, S0 = 2.2, T_HEAD = 0.9;
+const S0 = 2.2, T_HEAD = 0.9;
 
 const vehSchema = {
   lane: Int32Array, conn: Int32Array, s: Float32Array, v: Float32Array,
@@ -95,7 +103,24 @@ const vehSchema = {
   pk: Float32Array,
   // manoeuvre (sim/manoeuvres.ts, −1 = none) and the lane position (front) where it ends
   mv: Int32Array, ms: Float32Array,
+  // how the trip ends once it leaves (End)
+  why: Uint8Array,
+  // far model: the lane whose list it is in (−1 = none) and its neighbours in that list (in order of entry)
+  ml: Int32Array, mnext: Int32Array, mprev: Int32Array,
+  // when it entered its current lane and where (for the speed actually driven on each lane, near and far)
+  tIn: Float64Array, s0: Float32Array,
+  // the micro step it last moved in (one move per step, even after passing from a connection to a lane)
+  moved: Uint32Array,
+  // over the stop line with the way open: it goes through the junction without asking again (1)
+  pass: Uint8Array,
+  // the dock or bay it has reserved (Traffic.spots key; 0 = none)
+  spot: Float64Array,
+  // the driver (sim/drivers.ts): aggression, comfort figures, gap acceptance, politeness, patience
+  ...driverSchema,
 };
+
+/** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
+const End = { Arrived: 0, Lost: 1, NoTrip: 2 } as const;
 
 /** Bus line as the simulation sees it: stops resolved to lanes. */
 interface SimLine {
@@ -105,6 +130,8 @@ interface SimLine {
   stopLane: number[]; stopV: number[]; waiting: number[]; lastT: number[];
   /** Who is waiting at each stop, by destination stop (real people and background demand). */
   waitTo: Float64Array[];
+  /** Of those, the people who walked to the stop (pedestrians: they step off as pedestrians again). */
+  realTo: Float64Array[];
   /** Stop position on the sidewalk (to draw those waiting). */
   stopX: number[]; stopZ: number[]; stopY: number[]; stopYaw: number[];
   /** Boardings since the last report, and the hourly average. */
@@ -120,6 +147,31 @@ export interface LineSpec {
    *  stops on the other side of the street, and both ends are terminals. Trains always follow their stations in order. */
   loop?: boolean;
 }
+
+/** Where trucks start and end (none, residential, commercial, industrial, mixed): goods between industry and commerce. */
+const TRUCK_ZONES = [0.05, 0.1, 0.6, 1, 0.4];
+
+/** Cell of the stop index (m) and cells per side of the map. */
+const STOP_CELL = 600, STOP_CELLS = Math.ceil(MAP_SIZE / STOP_CELL);
+
+/** Dock index cell (m) and cells per side; a truck turns into a yard whose dock is this near its centre (m). */
+const DOCK_CELL = 64, DOCK_CELLS = Math.ceil(MAP_SIZE / DOCK_CELL), YARD_REACH = 28;
+
+/** Length of the crosswalk and its stop line at the end of a lane (m, as painted: jobs/roadMesh.ts CROSSWALK). */
+const CROSSWALK = 4.2;
+/** Seconds a vehicle stands at its line giving way to people stepping onto the zebra before it is its turn (roadcraft
+ *  sim/crossings/permission.ts:106). */
+const PED_COURTESY = 8;
+/** A walker steps off in front of an approaching vehicle only with this many seconds to spare (params.ts PED.criticalGap). */
+const PED_CRITICAL_GAP = 4;
+/** Half widths of the vehicle kinds (car, bus, truck, motorbike, train), m. */
+const BODY_HALF_W = [0.9, 1.27, 1.25, 0.4, 1.5];
+/** How near a walker on a zebra to where a vehicle's lane crosses it holds the vehicle (m): crossingSpans.ts:24, :29. */
+const SPAN_REACH = 2.55 / 2 + 0.9 + 0.6;
+
+/** Numbers per vehicle in `Traffic.inspect`, and why a vehicle there may stand still (bits). */
+export const INSPECT_STRIDE = 18;
+export const INSPECT_RED = 1, INSPECT_BAY = 2, INSPECT_LEAVING = 4, INSPECT_STOP = 8, INSPECT_CHANGING = 16, INSPECT_GATE = 32;
 
 const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
@@ -163,7 +215,13 @@ export class Traffic {
   /** Ordered list of micro vehicles per lane and per connection (head = the frontmost). */
   laneHead = new Int32Array((1 << 14) * 16).fill(-1);
   laneTail = new Int32Array((1 << 14) * 16).fill(-1);
+  /** Far-model vehicles per lane, in order of entry: an edit to a road finds the vehicles on it without a fleet pass. */
+  mesoHead = new Int32Array((1 << 14) * 16).fill(-1);
+  mesoTail = new Int32Array((1 << 14) * 16).fill(-1);
   connHead = new Int32Array(1 << 14).fill(-1);
+  /** Per connection: the vehicle that claimed it at its stop line (`pass`), and when. */
+  private connPass = new Int32Array(1 << 14).fill(-1);
+  private connPassT = new Float64Array(1 << 14);
   /** Whoever waits too long at a yield claims the turn (tenths of a second of the simulation clock). */
   private connClaim = new Int32Array(1 << 14).fill(-100);
   connTail = new Int32Array(1 << 14).fill(-1);
@@ -194,60 +252,125 @@ export class Traffic {
   private evT = new Float64Array(1 << 12);
   private evV = new Int32Array(1 << 12);
   private evN = 0;
-  // traffic signals
-  sigPhase = new Uint8Array(1 << 14);
-  sigTimer = new Float32Array(1 << 14);
-  sigGreen = new Float32Array(1 << 14);
-  sigState = new Uint8Array(1 << 14); // 0 green, 1 amber, 2 all-red
+  /** Traffic lights (plans, timed cycle, actuated near the camera). */
+  readonly sig: Signals;
   private signalNodes = new Set<number>();
   /** Signals near the camera (only these run; distant ones stay frozen). */
   private windowSignals = new Set<number>();
 
   /** Average speed of the cars near the camera (m/s). */
+  /**
+   * Average speed of the whole city (m/s): length driven over time taken by every vehicle that finished a lane since
+   * the last call, near the camera or not (smoothed). Also counts the city's stopped vehicles (`stopped`).
+   */
   avgSpeed(): number {
-    const c = this.veh.cols;
-    let s = 0, stopped = 0;
-    for (let i = 0; i < this.microN; i++) { const v = c.v[this.micro[i]]; s += v; if (v < 0.5) stopped++; }
+    if (this.timeSum > 0) { const sp = this.distSum / this.timeSum; this.cityV = this.cityV > 0 ? this.cityV * 0.7 + sp * 0.3 : sp; }
+    this.distSum = 0; this.timeSum = 0;
+    // stopped: everyone on a jammed street (whole city, from the last region pass), and near the camera those stopped
+    // on a street that is not jammed
+    const c = this.veh.cols, sc = this.sim.net.segs.cols;
+    let stopped = this.jammedNow;
+    for (let i = 0; i < this.microN; i++) {
+      const v = this.micro[i];
+      if (c.v[v] >= 0.5 || c.conn[v] >= 0 || c.lane[v] < 0 || c.dying[v] === 2) continue;
+      const sg = laneSeg(c.lane[v]), fwd = laneDir(c.lane[v]) > 0, lanes = laneCount(sc.profile[sg], fwd ? 1 : -1);
+      if (this.segLoad[sg * 2 + (fwd ? 0 : 1)] < JAMMED * lanes * sc.len[sg] / 7.5) stopped++;
+    }
     this.stopped = stopped;
-    return this.microN ? s / this.microN : 0;
+    return this.cityV;
   }
 
-  /** Stopped vehicles near the camera (counted along with the average speed). */
+  /** The city's stopped vehicles (counted along with the average speed). */
   stopped = 0;
+  /** Lane length driven and time taken since the last `avgSpeed`, and the smoothed city speed. */
+  private distSum = 0; private timeSum = 0; private cityV = 0;
+  /** Vehicles on jammed streets at the last region pass. */
+  private jammedNow = 0;
+  /** Speed actually driven on each lane by the last vehicles that finished it (m/s, smoothed), and when. */
+  laneVel = new Float32Array((1 << 14) * 16);
+  private laneVelT = new Float64Array((1 << 14) * 16);
+
+  /** The vehicle starts lane c.lane[v] at position `s`. */
+  private enterLane(v: number, s: number): void { const c = this.veh.cols; c.tIn[v] = this.time; c.s0[v] = Math.max(0, s); c.pass[v] = 0; }
+
+  /**
+   * How far before the end of `lane` its stop line is (m): at a junction with crosswalks (three arms or more, not a
+   * roundabout) and at a mid-block crossing, the crosswalk and the line take the last CROSSWALK m (as painted,
+   * jobs/roadMesh.ts); elsewhere 0.
+   */
+  private stopBack(lane: number): number {
+    const sim = this.sim, n = sim.laneTo(lane), deg = sim.net.nodes.cols.deg[n], seg = laneSeg(lane);
+    // no crosswalk on a roundabout's ring nor across a railway
+    if ((sim.net.segs.cols.flags[seg] & SegFlag.Ring) !== 0 || PROFILE_INFO[sim.net.segs.cols.profile[seg]].rail) return 0;
+    const ctl = sim.nodeCtl[n];
+    if (ctl === Ctl.Crossing) return 0; // a level crossing has its barrier, not a zebra
+    if (deg >= 3) return CROSSWALK;
+    return deg === 2 && (ctl === Ctl.Zebra || ctl === Ctl.PedSignal) ? CROSSWALK : 0;
+  }
+
+  /** The vehicle finishes `lane`: its speed on it goes into the lane's and the city's figures. */
+  private leaveLane(v: number, lane: number): void {
+    const c = this.veh.cols, dist = this.sim.laneLen(lane) - c.s0[v], t = this.time - c.tIn[v];
+    if (!(t > 0.2) || dist < 1) return;
+    const sp = dist / t;
+    this.laneVel[lane] = this.laneVel[lane] > 0 ? this.laneVel[lane] * 0.6 + sp * 0.4 : sp;
+    this.laneVelT[lane] = this.time;
+    this.distSum += dist; this.timeSum += t;
+  }
 
   /** A segment right now: vehicles (micro and meso), average speed of the visible ones, queue (stopped) and capacity. */
   probe(seg: number): { vehicles: number; speed: number; queue: number; capacity: number } {
     const sim = this.sim, c = this.veh.cols;
     if (!sim.net.segs.alive[seg]) return { vehicles: 0, speed: 0, queue: 0, capacity: 0 };
     const p = sim.net.segs.cols.profile[seg];
-    let vehicles = 0, seen = 0, sum = 0, queue = 0, capacity = 0;
+    let vehicles = 0, seen = 0, sum = 0, queue = 0, capacity = 0, far = 0, farSum = 0;
     for (const dir of [1, -1]) for (let i = 0; i < laneCount(p, dir); i++) {
-      const l = laneId(seg, dir, i);
+      const l = laneId(seg, dir, i), cap = Math.floor(sim.laneLen(l) / 7.5);
       vehicles += this.laneCount[l];
-      capacity += Math.floor(sim.laneLen(l) / 7.5);
+      capacity += cap;
+      // near the camera: the vehicles themselves
       for (let v = this.laneHead[l]; v >= 0; v = c.next[v]) { seen++; sum += c.v[v]; if (c.v[v] < 0.5) queue++; }
+      // far: a jammed lane is a queue; otherwise those held at the line (waiting for room or for the green)
+      if (this.mesoHead[l] < 0) continue;
+      let held = 0, n = 0;
+      for (let v = this.mesoHead[l]; v >= 0; v = c.mnext[v]) { n++; if (c.wait[v] > 0 || c.tExit[v] - this.time > 30) held++; }
+      queue += this.laneCount[l] >= JAMMED * cap ? n : held;
+      // the speed driven on the lane lately; nobody out of a full lane for a minute: standing still
+      const stale = this.time - this.laneVelT[l] > 60;
+      far += n; farSum += n * (stale ? (this.laneCount[l] >= JAMMED * cap ? 0 : laneSpeed(p) * 0.85) : this.laneVel[l]);
     }
-    return { vehicles, speed: seen ? sum / seen : laneSpeed(p) * 0.85, queue, capacity };
+    const speed = seen + far ? (sum + farSum) / (seen + far) : laneSpeed(p) * 0.85;
+    return { vehicles, speed, queue, capacity };
   }
 
   /** Network cleared (new map, load): all vehicles leave, queues and signals reset. */
   clearAll(): void {
     this.veh.clear();
     this.laneHead.fill(-1); this.laneTail.fill(-1); this.connHead.fill(-1); this.connTail.fill(-1); this.connClaim.fill(-100);
+    this.mesoHead.fill(-1); this.mesoTail.fill(-1);
     this.laneCount.fill(0); this.laneLastExit.fill(0); this.segLoad.fill(0);
     this.lastAdmit.fill(this.time); this.releaseAt.fill(0); this.jamAt.fill(0); this.exitClaim.fill(-1);
     this.microN = 0; this.evN = 0;
     this.activeLanes.clear(); this.activeConns.clear();
     this.signalNodes.clear();
     if (this.signals) for (const n of this.windowSignals) if (n < this.signals.length) this.signals[n] = 0;
+    for (const n of this.windowSignals) this.sig.setActive(n, false);
     this.windowSignals.clear();
     for (const set of this.busSets) set.clear();
-    this.riders.clear();
+    this.riders.clear(); this.realRiders.clear();
     this.wagonPrev.clear();
     if (this.occupancy) this.occupancy.fill(0);
     this.segWear.fill(0);
     this.parkers.clear();
     this.mvs.clear();
+    this.spots.clear();
+    // nothing of the old city: its jams, crossings, docks and bus lines (the page sends the new map's lines and docks)
+    this.gov = 1; this.jamShare = 0; this.jammedNow = 0; this.regionOcc.fill(0); this.regionT = -Infinity;
+    this.cityV = 0; this.distSum = 0; this.timeSum = 0; this.laneVel.fill(0);
+    this.crossingClosed.clear();
+    this.docks = new Float32Array(0);
+    this.lines = []; this.busSets = []; this.indexStops();
+    this.spawnCredit = 0; this.fleetFloor = 0;
   }
 
   /** New segment (the id may belong to a demolished one): fresh asphalt. */
@@ -260,14 +383,19 @@ export class Traffic {
   lines: SimLine[] = [];
   /** Buses of each line (so the fleet is not scanned). */
   private busSets: Array<Set<number>> = [];
-  /** Passengers of each bus by destination stop. */
+  /** Passengers of each bus by destination stop, and of them those who came on foot. */
   private riders = new Map<number, Float64Array>();
+  private realRiders = new Map<number, Float64Array>();
   /** People get off the bus at node `node` (the pedestrians carry on on foot). */
-  onAlight: (node: number, count: number) => void = () => {};
+  onAlight: (node: number, count: number, x: number, z: number) => void = () => {};
   private lineCheck = 0;
 
   /** Is someone walking on the node's crosswalk? (from the pedestrians) */
   pedCrossing: (n: number) => boolean = () => false;
+  /** Is someone walking a crossing over one of node `n`'s arms in `mask` (bit per arm)? (from the pedestrians) */
+  pedCrossingArms: (n: number, mask: number) => boolean = () => false;
+  /** Is someone walking a crossing over an arm of `n` in `mask` within `r` m of (x, z)? (from the pedestrians) */
+  pedCrossingNear: (n: number, mask: number, x: number, z: number, r: number) => boolean = () => false;
 
   /** Vehicles that went through each node (micro and meso), for the junction flow. */
   nodePass = new Uint32Array(1 << 14);
@@ -281,6 +409,8 @@ export class Traffic {
   crowdAvoid = true;
   /** Counters: reconsidered routes, junctions that jammed, vehicles released. */
   reroutes = 0; jams = 0; released = 0;
+  /** Vehicles that entered a signalled junction on red (near the camera; should stay 0). */
+  ranRed = 0;
   /** Meso: attempts to move on at the end of the lane and how many found the next one full (congestion far from the camera). */
   mesoTries = 0; mesoFull = 0;
   private routeBudget = 0;
@@ -294,6 +424,7 @@ export class Traffic {
       if (!c.has[v] || Math.hypot(c.px[v] - x, c.pz[v] - z) > r) continue;
       // parking: already out of the lane, just fade it (`stepParkers` finishes it)
       if (c.dying[v] !== 2) c.dying[v] = 1;
+      if (c.why[v] === End.Arrived) c.why[v] = End.Lost;
       c.fade[v] = Math.min(c.fade[v], 0.3); n++;
     }
     return n;
@@ -308,6 +439,10 @@ export class Traffic {
   private rng = new Rng(12345);
   private tmp = new Float64Array(4);
   private tmp2 = new Float64Array(4);
+  /** Meso pace factor (MESO_ALPHA; a field so measurements can try others). */
+  mesoAlpha = MESO_ALPHA;
+  /** How much a full lane slows the far model (the BPR term: 1 + mesoCrowd × occupancy²). */
+  mesoCrowd = MESO_CROWD;
   /** Target density (vehicles per metre of lane). */
   density = 1 / 100;
 
@@ -316,6 +451,9 @@ export class Traffic {
     this.router = new Router(sim);
     this.router.segLoad = this.segLoad;
     this.advisor = new FlowAdvisor(sim);
+    this.sig = new Signals(sim);
+    this.sig.queue = (n, mask) => this.armsQueue(n, mask);
+    this.sig.busNear = (n, mask) => this.busNearArms(n, mask);
     sim.onNodeReset = (n) => { this.advisor.reset(n); };
     this.veh.onGrow((cap) => {
       const r = new Int32Array(cap * ROUTE_CAP); r.set(this.routes); this.routes = r;
@@ -324,6 +462,10 @@ export class Traffic {
     sim.net.segs.onGrow((cap) => {
       this.laneHead = grow(this.laneHead, cap * 16, -1);
       this.laneTail = grow(this.laneTail, cap * 16, -1);
+      this.mesoHead = grow(this.mesoHead, cap * 16, -1);
+      this.mesoTail = grow(this.mesoTail, cap * 16, -1);
+      this.laneVel = grow(this.laneVel, cap * 16, 0);
+      this.laneVelT = grow(this.laneVelT, cap * 16, 0);
       this.laneCount = grow(this.laneCount, cap * 16, 0);
       this.laneLastExit = grow(this.laneLastExit, cap * 16, 0);
       this.exitClaim = grow(this.exitClaim, cap * 16, -1);
@@ -334,14 +476,12 @@ export class Traffic {
     });
     sim.conns.onGrow((cap) => {
       this.connHead = grow(this.connHead, cap, -1);
+      this.connPass = grow(this.connPass, cap, -1);
+      this.connPassT = grow(this.connPassT, cap, 0);
       this.connTail = grow(this.connTail, cap, -1);
       this.connClaim = grow(this.connClaim, cap, -100);
     });
     sim.net.nodes.onGrow((cap) => {
-      this.sigPhase = grow(this.sigPhase, cap, 0);
-      this.sigTimer = grow(this.sigTimer, cap, 0);
-      this.sigGreen = grow(this.sigGreen, cap, 0);
-      this.sigState = grow(this.sigState, cap, 0);
       this.nodePass = grow(this.nodePass, cap, 0);
       this.lastAdmit = grow(this.lastAdmit, cap, 0);
       this.releaseAt = grow(this.releaseAt, cap, 0);
@@ -374,7 +514,6 @@ export class Traffic {
   readonly mvs = new Manoeuvres();
   /** Loading docks near the camera from the page: (x, z, yaw facing the street) per warehouse; their nearest nodes. */
   docks: Float32Array<ArrayBufferLike> = new Float32Array(0);
-  private dockNodes: number[] = [];
   /** A passenger gets out at (x, z) on the kerb (the worker makes a pedestrian there). */
   onDropOff: (x: number, z: number) => void = () => {};
   /** Counters for the measurements: kerb drop-offs, trucks at docks. */
@@ -405,13 +544,46 @@ export class Traffic {
     return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked, crossings, trains };
   }
 
-  /** Docks sent by the page; each gets the node trucks drive to. */
+  /** Docks near the camera sent by the page: a truck arriving next to one backs into it (they never pick trips). */
   setDocks(pts: Float32Array): void {
     this.docks = pts;
-    const nodes = new Set<number>();
-    for (let k = 0; k + 2 < pts.length; k += 3) { const n = this.sim.net.nearestNode(pts[k], pts[k + 1], 80); if (n >= 0) nodes.add(n); }
-    this.dockNodes = [...nodes];
+    // by DOCK_CELL cell, so a truck finds the docks beside it without scanning them all
+    const n = Math.floor(pts.length / 3);
+    const start = new Int32Array(DOCK_CELLS * DOCK_CELLS + 1), idx = new Int32Array(n);
+    const cell = (k: number) => this.dockCell(pts[k * 3], pts[k * 3 + 1]);
+    for (let k = 0; k < n; k++) start[cell(k) + 1]++;
+    for (let i = 0; i < DOCK_CELLS * DOCK_CELLS; i++) start[i + 1] += start[i];
+    const fill = start.slice(0, DOCK_CELLS * DOCK_CELLS);
+    for (let k = 0; k < n; k++) idx[fill[cell(k)]++] = k * 3;
+    this.dockStart = start; this.dockIdx = idx;
   }
+  private dockStart = new Int32Array(DOCK_CELLS * DOCK_CELLS + 1);
+  private dockIdx = new Int32Array(0);
+  private dockCell(x: number, z: number): number {
+    const i = Math.min(DOCK_CELLS - 1, Math.max(0, Math.floor((x + MAP_HALF) / DOCK_CELL)));
+    const j = Math.min(DOCK_CELLS - 1, Math.max(0, Math.floor((z + MAP_HALF) / DOCK_CELL)));
+    return j * DOCK_CELLS + i;
+  }
+
+  /** A free dock within YARD_REACH of (x, z) (the docks' first number in `docks`), or −1. */
+  private dockNear(x: number, z: number, self: number): number {
+    const c = this.veh.cols, d = this.docks;
+    let best = -1, bd = YARD_REACH;
+    const ci = Math.floor((x + MAP_HALF) / DOCK_CELL), cj = Math.floor((z + MAP_HALF) / DOCK_CELL);
+    for (let j = cj - 1; j <= cj + 1; j++) for (let i = ci - 1; i <= ci + 1; i++) {
+      if (i < 0 || j < 0 || i >= DOCK_CELLS || j >= DOCK_CELLS) continue;
+      const cell = j * DOCK_CELLS + i;
+      for (let e = this.dockStart[cell]; e < this.dockStart[cell + 1]; e++) {
+        const k = this.dockIdx[e], dist = Math.hypot(d[k] - x, d[k + 1] - z);
+        if (dist >= bd) continue;
+        const key = this.dockKey(k), holder = this.spots.get(key);
+        if (holder !== undefined && holder !== self && this.veh.alive[holder] && c.spot[holder] === key) continue;
+        bd = dist; best = k;
+      }
+    }
+    return best;
+  }
+  private dockKey(k: number): number { const d = this.docks; return (Math.round(d[k]) + 20000) * 40000 + Math.round(d[k + 1]) + 20000 + 1; }
 
   private nearCam(lane: number): boolean {
     const sc = this.sim.net.segs.cols, sg = laneSeg(lane);
@@ -439,11 +611,34 @@ export class Traffic {
       if (c.kind[v] === 0 && this.tryKerbStop(v, lane)) return 1;
       if (c.kind[v] === 0 && this.tryParkManoeuvre(v, lane)) return 1;
     }
+    // the same share of drop-offs away from the kerb animation: the trip ends and the car drives on to another; decided
+    // with room to brake for wherever the new route turns (it stops at the kerb instead where it can)
+    if (this.dropsOff(v)) {
+      if (c.micro[v] && c.kind[v] === 0 && toEnd < 12 && this.tryKerbStop(v, lane)) return 1;
+      if ((toEnd >= 12 || !c.micro[v] || c.kind[v] !== 0 || laneIdx(lane) !== 0) && this.dropOffTrip(v, this.sim.laneTo(lane))) return 0;
+    }
     if (toEnd >= 12) return 0;
     return this.startParking(v, lane) ? 1 : 2;
   }
 
   /** Bay beside the right lane: drive into it along a Reeds-Shepp path; those behind wait while it is in the lane. */
+  /** Docks and bays taken (near the camera): key (a dock by its place, a bay by lane and 7 m slot) → vehicle. */
+  private spots = new Map<number, number>();
+
+  /** Takes the dock or bay `key` for `v`; false if another vehicle holds it. */
+  private reserve(v: number, key: number): boolean {
+    const c = this.veh.cols, holder = this.spots.get(key);
+    if (holder !== undefined && holder !== v && this.veh.alive[holder] && c.spot[holder] === key) return false;
+    this.spots.set(key, v); c.spot[v] = key;
+    return true;
+  }
+
+  private releaseSpot(v: number): void {
+    const c = this.veh.cols, key = c.spot[v];
+    if (key !== 0 && this.spots.get(key) === v) this.spots.delete(key);
+    c.spot[v] = 0;
+  }
+
   private tryParkManoeuvre(v: number, lane: number): boolean {
     const c = this.veh.cols, sim = this.sim;
     if (laneIdx(lane) !== 0) return false;
@@ -451,12 +646,13 @@ export class Traffic {
     if (Number.isNaN(pu)) return false;
     const len = c.len[v], bayFront = c.s[v] + len + 3;
     if (bayFront > sim.laneLen(lane) - 4) return false;
+    if (!this.reserve(v, -(lane * 4096 + Math.floor(bayFront / 7)) - 1)) return false;
     const du = (pu - sim.laneU(lane)) * laneDir(lane);
     const a = this.mvA, b = this.mvB;
     this.centrePose(lane, c.s[v], len, 0, a);
     this.centrePose(lane, bayFront, len, du, b);
     const m = this.mvs.start(v, MKind.Park, a[0], a[2], a[3], b[0], b[2], b[3], a[1], 5, 12);
-    if (m < 0) return false;
+    if (m < 0) { this.releaseSpot(v); return false; }
     c.mv[v] = m; c.ms[v] = bayFront; c.dying[v] = 3; c.dwell[v] = 0; c.pk[v] = 0;
     return true;
   }
@@ -467,32 +663,54 @@ export class Traffic {
     if (!d.length) return false;
     const a = this.mvA;
     this.centrePose(lane, c.s[v], len, 0, a);
-    let best = -1, bd = 70;
-    for (let k = 0; k + 2 < d.length; k += 3) { const dist = Math.hypot(d[k] - a[0], d[k + 1] - a[2]); if (dist < bd) { bd = dist; best = k; } }
-    if (best < 0) return false;
+    // the nearest free dock beside it (the yard's gate: within YARD_REACH)
+    const best = this.dockNear(a[0], a[2], v);
+    if (best < 0 || !this.reserve(v, this.dockKey(best))) return false;
     const yaw = d[best + 2], bx = d[best] + Math.sin(yaw) * len / 2, bz = d[best + 1] + Math.cos(yaw) * len / 2;
     const m = this.mvs.start(v, MKind.Dock, a[0], a[2], a[3], bx, bz, yaw, a[1], 9, 45);
-    if (m < 0) return false;
+    if (m < 0) { this.releaseSpot(v); return false; }
     c.mv[v] = m; c.ms[v] = -1; c.dying[v] = 3; c.dwell[v] = 0;
     this.docked++;
     return true;
   }
 
   /** Some cars (4 in 10, by their id) stop at the kerb with the hazard lights on, a passenger gets out, and they go on. */
+  /** A car whose trip is dropping someone off (4 in 10, by vehicle and destination): the same rule near and far. */
+  private dropsOff(v: number): boolean {
+    const c = this.veh.cols;
+    return c.kind[v] === 0 && c.line[v] < 0 && ((Math.imul(v * 31 + c.dest[v], 2654435761) >>> 0) % 10) < 4;
+  }
+
+  /** The drop-off trip ends (counted) and the car starts another from `node`; false if there is nowhere to go. */
+  private dropOffTrip(v: number, node: number): boolean {
+    const c = this.veh.cols;
+    const b = this.zonedNode(this.zoneWeights(false));
+    if (b < 0 || b === node) return false;
+    this.arrived++; this.kerbStops++;
+    c.dest[v] = b;
+    this.replanFrom(v, node);
+    return !c.dying[v];
+  }
+
   private tryKerbStop(v: number, lane: number): boolean {
     const c = this.veh.cols;
-    if (laneIdx(lane) !== 0 || ((Math.imul(v, 2654435761) >>> 0) % 10) >= 4) return false;
+    if (laneIdx(lane) !== 0 || !this.dropsOff(v)) return false;
     if (!PROFILE_INFO[this.sim.net.segs.cols.profile[laneSeg(lane)]].walk) return false;
     c.dying[v] = 4; c.dwell[v] = 0; c.served[v] = 0;
-    this.kerbStops++;
     return true;
   }
 
   /** At the kerb: brake, edge to the kerb, let the passenger out, then pick a new trip and pull out. */
   private kerbStep(v: number, lane: number, dt: number): void {
     const c = this.veh.cols, sim = this.sim;
-    const nv = Math.max(0, c.v[v] - 3 * dt);
-    c.s[v] = Math.min(sim.laneLen(lane) - 0.3, c.s[v] + (c.v[v] + nv) * 0.5 * dt);
+    // brakes gently, harder if the car ahead is close (it stops behind it, never inside it)
+    const lead = c.prev[v];
+    const room = lead >= 0 ? c.s[lead] - c.len[lead] - c.s[v] - 1 : 1e9;
+    const brake = Math.min(9, Math.max(3, (c.v[v] * c.v[v]) / (2 * Math.max(0.1, room))));
+    const nv = Math.max(0, c.v[v] - brake * dt);
+    let s = Math.min(sim.laneLen(lane) - 0.3, c.s[v] + (c.v[v] + nv) * 0.5 * dt);
+    if (lead >= 0) s = Math.min(s, Math.max(c.s[v], c.s[lead] - c.len[lead] - 0.5));
+    c.s[v] = s;
     c.v[v] = nv; c.brk[v] = 1;
     c.pk[v] = Math.min(1, c.pk[v] + dt / 2);
     if (nv > 0) return;
@@ -507,11 +725,9 @@ export class Traffic {
       this.onDropOff(p[0], p[2]);
     }
     if (c.dwell[v] > 6) {
-      const b = this.zonedNode(this.zoneWeights(false));
-      c.dying[v] = 0; c.served[v] = 0; c.dwell[v] = 1.3; // the bay-leaving slide takes the car back to the lane
-      if (b < 0) { c.dying[v] = 1; return; }
-      c.dest[v] = b;
-      this.replanFrom(v, sim.laneTo(lane));
+      // the passenger is out: that trip ended; the car pulls out on another (the bay-leaving slide takes it back)
+      c.dying[v] = 0; c.served[v] = 0; c.dwell[v] = 1.3;
+      if (!this.dropOffTrip(v, sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; c.dying[v] = 1; }
     }
   }
 
@@ -525,7 +741,7 @@ export class Traffic {
       const lane = c.lane[v];
       if (!c.micro[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) {
         this.mvs.end(m); c.mv[v] = -1;
-        if (c.dying[v] === 3) c.dying[v] = 1;
+        if (c.dying[v] === 3) this.lose(v);
         continue;
       }
       const kind = mc.kind[m];
@@ -570,14 +786,14 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim;
     for (const v of this.parkers) {
       const lane = c.lane[v];
-      if (!this.veh.alive[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) { this.parkers.delete(v); if (this.veh.alive[v]) this.despawn(v); continue; }
+      if (!this.veh.alive[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) { this.parkers.delete(v); if (this.veh.alive[v]) { c.why[v] = End.Lost; this.finish(v); } continue; }
       // on a manoeuvre: it drives itself (stepManoeuvres); once at the end it stays (a truck at the dock longer), then goes
       if (c.mv[v] >= 0) {
         if (this.mvs.moving(c.mv[v]) || this.mvs.t.cols.d[c.mv[v]] < this.mvs.t.cols.total[c.mv[v]] - 1e-3) continue;
         c.dwell[v] += dt;
         if (c.dwell[v] > (c.kind[v] === 2 ? 25 : PARK_STAY + 2)) {
           c.fade[v] -= dt * 1.2;
-          if (c.fade[v] <= 0) { this.parkers.delete(v); this.arrived++; this.despawn(v); }
+          if (c.fade[v] <= 0) { this.parkers.delete(v); this.finish(v); }
         }
         continue;
       }
@@ -589,7 +805,7 @@ export class Traffic {
       c.brk[v] = 1;
       if (nv === 0 && c.dwell[v] > PARK_SIDE_S + PARK_STAY) {
         c.fade[v] -= dt * 1.2;
-        if (c.fade[v] <= 0) { this.parkers.delete(v); this.arrived++; this.despawn(v); }
+        if (c.fade[v] <= 0) { this.parkers.delete(v); this.finish(v); }
       }
     }
   }
@@ -688,18 +904,23 @@ export class Traffic {
   private segBetween(a: number, b: number): number {
     const net = this.sim.net, sc = net.segs.cols;
     const o = a * MAX_DEG, d = net.nodes.cols.deg[a];
+    // two segments between the same nodes: the one with lanes from a to b (the shorter, if both)
+    let any = -1, best = -1;
     for (let k = 0; k < d; k++) {
       const s = net.adj[o + k];
-      if ((sc.a[s] === a && sc.b[s] === b) || (sc.b[s] === a && sc.a[s] === b)) return s;
+      const fwd = sc.a[s] === a && sc.b[s] === b, back = sc.b[s] === a && sc.a[s] === b;
+      if (!fwd && !back) continue;
+      if (any < 0) any = s;
+      if (laneCount(sc.profile[s], fwd ? 1 : -1) > 0 && (best < 0 || sc.len[s] < sc.len[best])) best = s;
     }
-    return -1;
+    return best >= 0 ? best : any;
   }
 
-  private plan(v: number, from: number, dest: number, allowBack = false): boolean {
+  /** Route from `from`, reached by the vehicle's current lane (if any): only movements the lanes make, U-turns too. */
+  private plan(v: number, from: number, dest: number): boolean {
     const c = this.veh.cols;
-    const ban = c.lane[v] >= 0 && !allowBack ? laneSeg(c.lane[v]) : -1;
-    let n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP, false, ban);
-    if (n < 2 && ban >= 0) n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP); // dead end: turn back
+    const inSeg = c.lane[v] >= 0 && this.sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
+    const n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP, false, inSeg);
     c.rLen[v] = n;
     c.rIdx[v] = 1;
     c.dest[v] = dest;
@@ -735,11 +956,11 @@ export class Traffic {
   }
 
   /** Replans with the current lane leading to `node` (rIdx = 0 points at it). */
-  private replanFrom(v: number, node: number, allowBack = false): void {
+  private replanFrom(v: number, node: number): void {
     const c = this.veh.cols;
     if (c.line[v] >= 0) { this.busPlan(v, node); return; }
     if (node === c.dest[v]) { this.routes[v * ROUTE_CAP] = node; c.rLen[v] = 1; c.rIdx[v] = 0; return; }
-    if (!this.plan(v, node, c.dest[v], allowBack)) { c.dying[v] = 1; return; }
+    if (!this.plan(v, node, c.dest[v])) { this.lose(v); return; }
     c.rIdx[v] = 0;
   }
 
@@ -755,9 +976,16 @@ export class Traffic {
     if (t.size === 0) return -1;
     for (let i = 0; i < 20; i++) {
       const n = this.rng.int(0, t.end);
-      if (t.alive[n] && t.cols.deg[n] > 0) return n;
+      if (t.alive[n] && t.cols.deg[n] > 0 && this.byRoad(n)) return n;
     }
     return -1;
+  }
+
+  /** Does a road (not only rails) reach node `n`? Car trips start and end only there. */
+  private byRoad(n: number): boolean {
+    const net = this.sim.net, sc = net.segs.cols;
+    for (let k = 0; k < net.nodes.cols.deg[n]; k++) if (!PROFILE_INFO[sc.profile[net.adj[n * MAX_DEG + k]]].rail) return true;
+    return false;
   }
 
   /** Hour of day (from the page) and the player's multipliers. */
@@ -809,30 +1037,32 @@ export class Traffic {
     this.regionT = this.time;
     const net = this.sim.net, sc = net.segs.cols, L = this.regionLoad, C = this.regionCap;
     L.fill(0); C.fill(0);
+    let fleet = 0, jammed = 0;
     for (let s = 0; s < net.segs.end; s++) {
       if (!net.segs.alive[s]) continue;
       const info = PROFILE_INFO[sc.profile[s]];
       if (info.rail) continue;
       const r = this.regionOf(sc.mx[s], sc.mz[s]);
-      L[r] += this.segLoad[s * 2] + this.segLoad[s * 2 + 1];
-      C[r] += sc.len[s] * (info.lanesFwd + info.lanesBack) / 7.5;
+      const fwd = this.segLoad[s * 2], back = this.segLoad[s * 2 + 1], slots = sc.len[s] / 7.5;
+      L[r] += fwd + back;
+      C[r] += slots * (info.lanesFwd + info.lanesBack);
+      fleet += fwd + back;
+      if (info.lanesFwd && fwd >= JAMMED * slots * info.lanesFwd) jammed += fwd;
+      if (info.lanesBack && back >= JAMMED * slots * info.lanesBack) jammed += back;
     }
     for (let r = 0; r < L.length; r++) this.regionOcc[r] = C[r] > 0 ? L[r] / C[r] : 0;
-    // governor: average speed of the micro window (only with enough vehicles to measure)
-    let sum = 0;
-    const cv = this.veh.cols.v;
-    for (let i = 0; i < this.microN; i++) sum += cv[this.micro[i]];
-    const avg = this.microN > 200 ? sum / this.microN : GOV_FAST;
-    this.windowSpeed = avg;
-    if (this.governed) {
-      if (avg < GOV_SLOW) this.gov = Math.max(GOV_MIN, this.gov - 0.02);
-      else if (avg > GOV_FAST) this.gov = Math.min(1, this.gov + 0.01);
+    // governor: the share of the whole city's fleet on jammed streets
+    this.jamShare = fleet > 0 ? jammed / fleet : 0;
+    this.jammedNow = jammed;
+    if (this.governed && fleet >= 200) {
+      const over = Math.min(1, Math.max(0, (this.jamShare - GOV_FREE) / (GOV_JAM - GOV_FREE)));
+      this.gov += (1 - over * (1 - GOV_MIN) - this.gov) * 0.1;
     }
   }
 
-  /** Fraction of the fleet the network carries now (governor) and the window's average speed (m/s). */
+  /** Fraction of the fleet the network carries now (governor) and the share of the fleet on jammed streets. */
   gov = 1;
-  windowSpeed = 0;
+  jamShare = 0;
   /** Turns off the governor (A/B measurement). */
   governed = true;
 
@@ -867,10 +1097,12 @@ export class Traffic {
 
   private spawn(): void {
     const net = this.sim.net, nc = net.nodes.cols;
-    const a = this.zonedNode(this.zoneWeights(true));
+    // the kind first: trucks carry goods between industry and commerce (anywhere in the city, never by the camera)
+    const r = this.rng.next(), kind = r < 0.88 ? 0 : r < 0.94 ? 1 : 2;
+    const a = this.zonedNode(kind === 2 ? TRUCK_ZONES : this.zoneWeights(true));
     if (a < 0) return;
     let b = -1;
-    const wd = this.zoneWeights(false);
+    const wd = kind === 2 ? TRUCK_ZONES : this.zoneWeights(false);
     for (let i = 0; i < 16; i++) {
       const cand = this.zonedNode(wd);
       if (cand < 0 || cand === a) continue;
@@ -880,12 +1112,7 @@ export class Traffic {
     }
     if (b < 0) return;
     const v = this.veh.alloc();
-    this.initVehicle(v);
-    // part of the trucks carry cargo to a warehouse dock near the camera (they back into it on arrival)
-    if (this.veh.cols.kind[v] === 2 && this.dockNodes.length && this.rng.next() < 0.6) {
-      const d = this.dockNodes[this.rng.int(0, this.dockNodes.length)];
-      if (d !== a && net.nodes.alive[d] && Math.hypot(nc.x[d] - nc.x[a], nc.z[d] - nc.z[a]) < 3000) b = d;
-    }
+    this.initVehicle(v, kind);
     if (!this.plan(v, a, b)) { this.veh.release(v); return; }
     const seg = this.segBetween(a, this.routeAt(v, 1));
     if (seg < 0) { this.veh.release(v); return; }
@@ -898,9 +1125,12 @@ export class Traffic {
     const c = this.veh.cols;
     c.lane[v] = lane; c.conn[v] = -1;
     c.s[v] = this.rng.next() * this.sim.laneLen(lane);
+    this.enterLane(v, c.s[v]);
     this.setLaneCount(lane, 1);
     if (this.leaveBay(v, lane)) return;
     this.mesoEnter(v, lane, true);
+    // born inside the window: drawn from the start
+    if (this.inWindow(lane)) this.materialize(lane);
   }
 
   /**
@@ -933,30 +1163,65 @@ export class Traffic {
     return true;
   }
 
-  private initVehicle(v: number): void {
+  private initVehicle(v: number, kind = 0): void {
     const c = this.veh.cols;
-    const r = this.rng.next();
-    const kind = r < 0.88 ? 0 : r < 0.94 ? 1 : 2;
     c.kind[v] = kind; c.len[v] = KIND_LEN[kind];
-    c.vf[v] = (kind === 0 ? 0.9 : 0.8) + this.rng.next() * 0.2;
     c.color[v] = this.rng.int(0, 16);
+    let style = 0;
     if (kind === 0) {
-      let u = this.rng.next(), style = 0;
+      let u = this.rng.next();
       while (style < CAR_STYLE_SHARE.length - 1 && u >= CAR_STYLE_SHARE[style]) u -= CAR_STYLE_SHARE[style++];
       c.color[v] |= style << 4;
       c.len[v] = CAR_STYLE_LEN[style];
     }
+    // the driver: its class's comfort figures and its own aggression; the share of the limit it drives at
+    c.vf[v] = drawDriver(c, v, archOf(kind, style), this.sample);
+    c.lane[v] = -1; c.conn[v] = -1;
     c.brk[v] = 0; c.exitC[v] = -1; c.pk[v] = 0; c.mv[v] = -1; c.ms[v] = 0;
     c.micro[v] = 0; c.dying[v] = 0; c.fade[v] = 1; c.has[v] = 0;
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
     c.v[v] = 0;
     c.line[v] = -1; c.stopI[v] = 0; c.dwell[v] = 0; c.load[v] = 0; c.served[v] = 0; c.wait[v] = 0;
-    c.held[v] = 0;
+    c.held[v] = 0; c.why[v] = End.Arrived; c.ml[v] = -1; c.mnext[v] = -1; c.mprev[v] = -1; c.spot[v] = 0;
+  }
+
+  /** The trip will not reach its destination: the vehicle fades out and is counted as lost. */
+  private lose(v: number): void {
+    const c = this.veh.cols;
+    if (c.why[v] === End.Arrived) c.why[v] = End.Lost;
+    if (c.dying[v] !== 2) c.dying[v] = 1;
+  }
+
+  /** The vehicle leaves the simulation and its trip is counted (arrived or lost; a bus is not a trip). */
+  private finish(v: number): void {
+    const c = this.veh.cols;
+    if (c.line[v] < 0 && c.why[v] !== End.NoTrip) { if (c.why[v] === End.Lost) this.lost++; else this.arrived++; }
+    this.despawn(v);
+  }
+
+  /** Puts a far-model vehicle at the end of its lane's list. */
+  private mesoLink(v: number, lane: number): void {
+    const c = this.veh.cols;
+    if (c.ml[v] === lane) return;
+    this.mesoUnlink(v);
+    c.ml[v] = lane; c.mnext[v] = -1; c.mprev[v] = this.mesoTail[lane];
+    if (this.mesoTail[lane] >= 0) c.mnext[this.mesoTail[lane]] = v; else this.mesoHead[lane] = v;
+    this.mesoTail[lane] = v;
+  }
+
+  private mesoUnlink(v: number): void {
+    const c = this.veh.cols, lane = c.ml[v];
+    if (lane < 0) return;
+    if (c.mprev[v] >= 0) c.mnext[c.mprev[v]] = c.mnext[v]; else this.mesoHead[lane] = c.mnext[v];
+    if (c.mnext[v] >= 0) c.mprev[c.mnext[v]] = c.mprev[v]; else this.mesoTail[lane] = c.mprev[v];
+    c.ml[v] = -1; c.mnext[v] = c.mprev[v] = -1;
   }
 
   private despawn(v: number): void {
     const c = this.veh.cols;
-    if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); }
+    this.mesoUnlink(v);
+    if (c.spot[v] !== 0) this.releaseSpot(v);
+    if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); this.realRiders.delete(v); }
     this.wagonPrev.delete(v);
     if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
     const parked = c.dying[v] === 2;
@@ -978,6 +1243,7 @@ export class Traffic {
   /** Vehicle switches to meso mode on the lane (schedules its exit). */
   private mesoEnter(v: number, lane: number, spawned = false): void {
     const c = this.veh.cols;
+    this.mesoLink(v, lane);
     const L = this.sim.laneLen(lane);
     const p = this.sim.net.segs.cols.profile[laneSeg(lane)];
     const lanes = Math.max(1, laneCount(p, laneDir(lane)));
@@ -993,14 +1259,16 @@ export class Traffic {
     }
     // the junction at the end of the lane: the same wait the router estimates (signal, stop, turn) and the
     // arm's throughput, as in micro
+    // (at a light the red itself is simulated when the vehicle reaches the line: only the turn's slowdown here, and the
+    // queue leaves at the saturation headway of a green)
     const ns = this.nextSeg(v);
-    const wait = ns >= 0 ? this.router.nodeCost(this.sim.laneTo(lane), laneSeg(lane), ns) : 0;
-    const node = this.sim.laneTo(lane);
-    const headway = this.sim.nodePhases[node] > 0 ? 3.4 : wait >= 6 ? 3.6 : wait >= 4 ? 2.6 : 1.8;
+    const node = this.sim.laneTo(lane), lit = this.sim.nodePhases[node] > 0;
+    const wait = ns >= 0 ? this.router.nodeCost(node, laneSeg(lane), ns, !lit) : 0;
+    const headway = lit ? 2 : wait >= 6 ? 3.6 : wait >= 4 ? 2.6 : 1.8;
     // time: free driving, slowed by occupancy (BPR curve), plus the junction wait; all times MESO_ALPHA
     const occ = Math.min(1, this.laneCount[lane] * 7.5 / (L * lanes));
-    const run = rest / (laneSpeed(p) * c.vf[v]) * (1 + 3 * occ * occ) + wait;
-    const t = Math.max(this.time + run * MESO_ALPHA + extra, this.laneLastExit[lane] + headway / lanes);
+    const run = rest / (laneSpeed(p) * c.vf[v]) * (1 + this.mesoCrowd * occ * occ) + wait;
+    const t = Math.max(this.time + run * this.mesoAlpha + extra, this.laneLastExit[lane] + headway / lanes);
     this.laneLastExit[lane] = t;
     this.schedule(v, t);
   }
@@ -1018,47 +1286,91 @@ export class Traffic {
   /** End of the lane in meso mode: picks the next one, waits if it is full. */
   private mesoAdvance(v: number): void {
     const c = this.veh.cols, sim = this.sim;
-    const lane = c.lane[v];
-    if (!sim.net.segs.alive[laneSeg(lane)] || c.dying[v]) { this.despawn(v); return; }
+    let lane = c.lane[v];
+    if (!sim.net.segs.alive[laneSeg(lane)]) { c.why[v] = End.Lost; this.finish(v); return; }
+    if (c.dying[v]) { this.finish(v); return; }
+    // on a lane inside the window, behind drawn vehicles: it waits to fit behind them (never passes them unseen)
+    if (this.laneHead[lane] >= 0 && this.inWindow(lane)) { this.materialize(lane); if (!c.micro[v]) this.schedule(v, this.time + 1); return; }
     if (this.atDestination(v)) {
-      if (c.line[v] < 0) { this.arrived++; this.despawn(v); return; }
+      // a drop-off: the trip ends there and the car goes on to another after a moment at the kerb
+      if (this.dropsOff(v) && this.dropOffTrip(v, sim.laneTo(lane))) { this.schedule(v, this.time + 6); return; }
+      if (c.line[v] < 0) { this.finish(v); return; }
       this.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
-      if (c.dying[v]) { this.despawn(v); return; }
+      if (c.dying[v]) { this.finish(v); return; }
     }
     let ns = this.nextSeg(v);
     if (ns < 0) {
       // route ended before the destination (truncated route): plan again from here
       this.replanFrom(v, sim.laneTo(lane));
-      if (c.dying[v]) { this.despawn(v); return; }
+      if (c.dying[v]) { this.finish(v); return; }
       ns = this.nextSeg(v);
-      if (ns < 0) { this.despawn(v); return; }
+      if (ns < 0) { this.lose(v); this.finish(v); return; }
     }
-    const conn = sim.connToward(lane, ns, c.line[v] >= 0);
-    const node = sim.laneTo(lane);
+    const bus = c.line[v] >= 0, node = sim.laneTo(lane);
+    let conn = sim.connToward(lane, ns, bus);
+    for (let tries = 0; conn < 0 && tries < 2; tries++) {
+      // its lane does not make the route's turn (the turn was banned, the lanes rearranged): another lane of this
+      // segment that makes it (the far model changes lanes at the end of the lane), else a new route from here
+      const alt = sim.laneToward(laneSeg(lane), laneDir(lane), ns, laneIdx(lane), bus);
+      if (alt >= 0 && alt !== lane) {
+        this.setLaneCount(lane, -1); this.setLaneCount(alt, 1);
+        c.lane[v] = lane = alt; this.mesoLink(v, alt);
+      } else {
+        this.replanFrom(v, node);
+        if (c.dying[v]) { this.finish(v); return; }
+        ns = this.nextSeg(v);
+        if (ns < 0) break;
+      }
+      conn = sim.connToward(lane, ns, bus);
+    }
+    if (conn < 0) { this.lose(v); this.finish(v); return; }
+    // a level crossing with the barrier down, or someone on the zebra: wait (the far model obeys them too)
+    const ctl = sim.nodeCtl[node];
+    if ((ctl === Ctl.Crossing && this.crossingDown(node) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(lane)]].rail) || (ctl === Ctl.Zebra && this.pedCrossing(node))) {
+      this.schedule(v, this.time + 1); return;
+    }
+    // the light: red for this arm, wait for its next green (the far model obeys the lights too)
+    if (sim.nodePhases[node] > 0) {
+      const arm = sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)];
+      if (!this.sig.go(node, arm)) { this.schedule(v, Math.max(this.time + 0.2, this.sig.nextGreen(node, arm, this.time))); return; }
+    }
     const dir = sim.net.segs.cols.a[ns] === node ? 1 : -1;
     // meso: enters the least full lane among those valid for the next turn (all lanes carry cars,
     // as in micro; otherwise everyone reaches the window in a single lane)
-    let to = conn >= 0 ? this.pickLane(ns, dir, this.segAfter(v, 1), c.line[v] >= 0, sim.conns.cols.to[conn]) : sim.laneToward(ns, dir, ns, 0);
-    if (to < 0 && ns === laneSeg(lane)) to = laneId(ns, dir, 0); // U-turn at a dead end
-    if (to < 0 || !sim.net.segs.alive[ns]) { this.despawn(v); return; }
-    // queue: a full lane holds the vehicle
-    const cap = sim.laneLen(to) / 7.5;
-    // queue: wait for room; stuck too long (deadlock far from the camera, where nobody sees), go anyway. Meso
-    // does not reconsider routes: detouring around full meso lanes sent the cars into the micro window
-    // (measured: the window filled up and the centre dropped from 16 to 8 km/h)
+    const to = this.pickLane(ns, dir, this.segAfter(v, 1), bus, sim.conns.cols.to[conn]);
+    if (to < 0 || !sim.net.segs.alive[ns]) { this.lose(v); this.finish(v); return; }
+    // queue: a full lane holds the vehicle. As in micro: stopped STUCK_SECONDS, the driver reconsiders the route (a
+    // local detour toward an exit with room); a junction jammed for JAM_SECONDS lets one vehicle in every
+    // RELEASE_EVERY s, but never more than physically fit (bumper to bumper)
     this.mesoTries++;
-    if (this.laneCount[to] >= cap && c.wait[v] < 40) { c.wait[v] += 2; this.mesoFull++; this.schedule(v, this.time + 2); return; }
-    c.wait[v] = 0;
-    this.admit(node, sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)]);
+    const L = sim.laneLen(to);
+    const room = Math.max(1, Math.floor(L / 7.5)), fit = Math.max(room, Math.floor(L / 6.6));
+    if (this.laneCount[to] >= room) {
+      c.wait[v] += 2; this.mesoFull++;
+      if (c.wait[v] >= c.patience[v] && !bus && this.routeBudget > 0 && c.held[v] < c.wait[v] - c.patience[v] + 1) {
+        c.held[v] = c.wait[v]; // (reconsiders once every patience)
+        if (this.reconsider(v, lane, ns)) { this.schedule(v, this.time + 0.5); return; }
+      }
+      const jammed = c.wait[v] >= JAM_SECONDS && this.time - this.lastAdmit[node] >= JAM_SECONDS && this.time >= this.releaseAt[node];
+      if (!jammed || this.laneCount[to] >= fit) { this.schedule(v, this.time + 2); return; }
+      this.released++; this.releaseAt[node] = this.time + RELEASE_EVERY;
+      if (this.jamAt[node] < this.lastAdmit[node]) { this.jamAt[node] = this.time; this.jams++; }
+    }
+    c.wait[v] = 0; c.held[v] = 0;
     const enterMicro = this.inWindow(to);
     const tail = this.laneTail[to];
     if (enterMicro && tail >= 0 && c.s[tail] < c.len[tail] + S0 + 4) { this.schedule(v, this.time + 0.6); return; }
+    // counted only once it really goes through (flow inspector, automatic control, jammed-junction detection)
+    this.admit(node, sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)]);
+    this.leaveLane(v, lane);
     this.setLaneCount(lane, -1);
     this.setLaneCount(to, 1);
     c.lane[v] = to;
+    this.enterLane(v, 0);
     c.rIdx[v]++;
     if (enterMicro) {
       // entered the window: becomes micro at the start of the lane
+      this.mesoUnlink(v);
       c.s[v] = 0;
       c.held[v] = 0;
       c.v[v] = Math.min(laneSpeed(sim.net.segs.cols.profile[ns]) * c.vf[v], tail >= 0 ? Math.max(2, (c.s[tail] - c.len[tail]) / T_HEAD) : 99);
@@ -1073,17 +1385,108 @@ export class Traffic {
 
   // ------------------------------------------------------------ junctions
 
+  /**
+   * Is a vehicle on the crosswalk over arm `arm` of node `n`, or about to drive over it (over its stop line with the
+   * way open, or coming at speed within 3 m of it, on a connection leaving by that arm, or still crossing it on the
+   * way out)? The pedestrians ask before stepping off the kerb (roadcraft crossings/permission). Near the camera only:
+   * the first vehicle of each lane and the connections of the node.
+   */
+  carsOnCrossing(n: number, arm: number): boolean {
+    const sim = this.sim, sc = sim.net.segs.cols, c = this.veh.cols, k = sim.conns.cols;
+    if (arm >= 8 || !sim.net.nodes.alive[n]) return false;
+    const seg = sim.armSeg[n * 8 + arm];
+    if (!sim.net.segs.alive[seg] || (sc.a[seg] !== n && sc.b[seg] !== n)) return false;
+    const back = CROSSWALK, inDir = sc.b[seg] === n ? 1 : -1, p = sc.profile[seg];
+    for (const dir of [1, -1]) for (let i = 0, m = laneCount(p, dir); i < m; i++) {
+      const lane = laneId(seg, dir, i);
+      if (dir === inDir) {
+        const h = this.laneHead[lane];
+        if (h < 0) continue;
+        const toLine = sim.laneLen(lane) - c.s[h] - back;
+        if (c.pass[h] || toLine < 0 || (toLine < 3 && c.v[h] > 0.5)) return true;
+        // its turn (roadcraft permission.ts:105-126, PED_COURTESY): standing at the line this long, with the way open
+        // to it but for the people stepping off in front of it, it goes next
+        if (toLine < 4 && this.courtesyOwed(h)) return true;
+      } else {
+        const t = this.laneTail[lane];
+        if (t >= 0 && c.s[t] - c.len[t] < back) return true;
+      }
+    }
+    for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
+      if (laneSeg(k.to[x]) !== seg) continue;
+      if (this.connHead[x] >= 0) return true;
+      // a car turning into this arm that has waited its share at its line (permission.ts:90-103), or coming to turn
+      // into it too soon to stop for someone stepping off (the critical gap, permission.ts:113-133)
+      const h = this.laneHead[k.from[x]];
+      if (h < 0 || c.exitC[h] !== x) continue;
+      const toLine = sim.laneLen(k.from[x]) - c.s[h] - this.stopBack(k.from[x]);
+      if ((toLine < 4 && this.courtesyOwed(h)) || (c.v[h] > 0.5 && toLine / c.v[h] < PED_CRITICAL_GAP)) return true;
+    }
+    return false;
+  }
+
+  /** Vehicle `v` at its line has stood PED_COURTESY s and its light, if any, is green: the people let it go. */
+  private courtesyOwed(v: number): boolean {
+    const c = this.veh.cols, conn = c.exitC[v];
+    if (conn < 0 || c.v[v] > 0.5 || c.wait[v] <= PED_COURTESY) return false;
+    return this.sim.nodePhases[this.sim.conns.cols.node[conn]] === 0 || this.stageGreen(conn);
+  }
+
+  /**
+   * For a vehicle over its stop line (committed at the line with the way open): the level crossing's barrier is up
+   * and nobody is on a connection crossing its own (roadcraft intersections/admission.ts: claims are held until the
+   * vehicle has gone through).
+   */
+  private boxClear(conn: number): boolean {
+    const sim = this.sim, n = sim.conns.cols.node[conn];
+    if (sim.nodeCtl[n] === Ctl.Crossing && this.crossingDown(n) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(sim.conns.cols.from[conn])]].rail) return false;
+    const list = sim.conflicts.get(conn);
+    if (list) for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      if (this.connHead[d] >= 0) return false;
+      // another one over its line for a crossing connection since before this one: it goes first
+      if (this.passHolder(d) >= 0 && (this.connPassT[d] < this.connPassT[conn] || (this.connPassT[d] === this.connPassT[conn] && this.connPass[d] < this.connPass[conn]))) return false;
+    }
+    return true;
+  }
+
+  /** The vehicle over its stop line that has claimed connection `d` and not yet entered it, or −1. */
+  private passHolder(d: number): number {
+    const u = this.connPass[d], c = this.veh.cols;
+    return u >= 0 && this.veh.alive[u] && c.pass[u] && c.conn[u] < 0 && c.exitC[u] === d ? u : -1;
+  }
+
+  /**
+   * People on the part of a zebra connection `conn` drives over (roadcraft crossingSpans.ts: within the heavy body's
+   * half width and 0.9 m of its path, :24, and the walker's 0.6 m, :29): where its lane in crosses the zebra of the arm
+   * it comes from, and where its lane out crosses the one of the arm it leaves by.
+   */
+  private pedsInWay(conn: number, ahead = 0, entry = true): boolean {
+    const sim = this.sim, k = sim.conns.cols, n = k.node[conn], p = this.tmp2;
+    const from = k.from[conn], to = k.to[conn];
+    sim.lanePoint(from, Math.max(0, sim.laneLen(from) - CROSSWALK / 2), p);
+    if (entry && this.pedCrossingNear(n, 1 << k.arm[conn], p[0], p[2], SPAN_REACH + ahead)) return true;
+    sim.lanePoint(to, Math.min(sim.laneLen(to), CROSSWALK / 2), p);
+    return this.pedCrossingNear(n, 1 << this.exitArm(conn), p[0], p[2], SPAN_REACH + ahead);
+  }
+
+  /** The arm of its node that connection `conn` leaves by. */
+  private exitArm(conn: number): number {
+    const sim = this.sim, to = sim.conns.cols.to[conn];
+    return sim.segArm[laneSeg(to) * 2 + (laneDir(to) > 0 ? 0 : 1)];
+  }
+
   /** Is the signal stage open for the connection's arm? */
   private stageGreen(conn: number, amberToo = false): boolean {
-    const sim = this.sim, k = sim.conns.cols, n = k.node[conn];
-    return sim.armStage[n * 8 + k.arm[conn]] === this.sigPhase[n] && (this.sigState[n] === 0 || (amberToo && this.sigState[n] === 1));
+    const k = this.sim.conns.cols;
+    return this.sig.go(k.node[conn], k.arm[conn], amberToo);
   }
 
   /** Can the connection be used now? (signal, ring priority) — without looking at right of way between vehicles. */
   gateOpen(conn: number): boolean {
     const sim = this.sim, k = sim.conns.cols;
     const n = k.node[conn];
-    if (sim.nodePhases[n] > 0) return this.windowSignals.has(n) ? this.stageGreen(conn) : true;
+    if (sim.nodePhases[n] > 0) return this.stageGreen(conn);
     if (sim.nodeRing[n]) {
       const from = k.from[conn];
       const fromRing = (sim.net.segs.cols.flags[laneSeg(from)] & SegFlag.Ring) !== 0;
@@ -1135,12 +1538,12 @@ export class Traffic {
     // the one with right of way is stopped because its exit is full: it will not go now, the other passes
     if (c.v[h] < 0.5 && !this.exitRoom(d, h)) return false;
     // impatience (roadcraft): whoever waits accepts a smaller gap, 0.06 s per second waited, up to 1.5 s (minimum 2.2 s)
-    const imp = Math.min(1.5, c.wait[me] * 0.06);
-    if (strict) return dist < 5 || dist / Math.max(1, c.v[h]) < Math.max(2.2, 3 - imp);
+    const imp = Math.min(1.5, c.wait[me] * 0.06), gf = c.gapF[me];
+    if (strict) return dist < 5 || dist / Math.max(1, c.v[h]) < Math.max(2.2, (3 - imp) * gf);
     // same rule, stopped at the line: first come, first served
     if (c.v[h] < 0.5 && dist < 5) return c.wait[h] > c.wait[me] + 0.3;
     if (sim.nodePhases[k.node[d]] > 0 && !this.stageGreen(d, true)) return false;
-    return dist < 6 || dist / Math.max(1, c.v[h]) < Math.max(2.2, 3.5 - imp);
+    return dist < 6 || dist / Math.max(1, c.v[h]) < Math.max(2.2, (3.5 - imp) * gf);
   }
 
   /** Is there room on the exit lane? (do not enter the junction only to get stuck in it) */
@@ -1213,10 +1616,19 @@ export class Traffic {
     this.lines.forEach((ln, li) => {
       if (!ln.mode) return;
       for (const v of this.busSets[li]) {
-        if (!this.veh.alive[v] || !c.micro[v]) continue;
+        if (!this.veh.alive[v]) continue;
         if (c.conn[v] >= 0) { const n = sim.conns.cols.node[c.conn[v]]; if (sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1); }
         if (c.lane[v] < 0) continue;
-        let d = sim.laneLen(c.lane[v]) - c.s[v];
+        // a far train has no position on its lane: where it should be by now, from when it entered and when it leaves
+        let s = c.s[v];
+        if (!c.micro[v]) {
+          const L = sim.laneLen(c.lane[v]), span = c.tExit[v] - c.tIn[v];
+          s = span > 0 ? L * Math.min(1, Math.max(0, (this.time - c.tIn[v]) / span)) : L;
+          // its tail is still on the crossing it just went through
+          const back = c.rIdx[v] > 0 ? this.routeAt(v, c.rIdx[v] - 1) : -1;
+          if (back >= 0 && s < c.len[v] && sim.nodeCtl[back] === Ctl.Crossing) this.crossingClosed.set(back, this.time + 1);
+        }
+        let d = sim.laneLen(c.lane[v]) - s;
         for (let k = c.rIdx[v]; k < c.rLen[v] && d < Traffic.CROSSING_REACH; k++) {
           const n = this.routeAt(v, k);
           if (n >= 0 && n < sim.nodeCtl.length && sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1);
@@ -1243,18 +1655,26 @@ export class Traffic {
     // level crossing with the barrier down: road traffic waits (the train goes through)
     if (sim.nodeCtl[n] === Ctl.Crossing && this.crossingDown(n) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(k.from[conn])]].rail) return false;
     if (sim.nodePhases[n] > 0) {
-      if (!this.windowSignals.has(n)) return true;
       if (!this.stageGreen(conn)) {
-        if (this.sigState[n] === 1 && this.stageGreen(conn, true)) { const sv = c.v[v]; if (toEnd < (sv * sv) / (2 * 3.5)) return true; }
+        if (this.sig.amberNow(n) && this.stageGreen(conn, true)) { const sv = c.v[v]; if (toEnd < (sv * sv) / (2 * 3.5)) return true; }
         return false;
       }
     } else if (sim.nodeRing[n]) return this.gateOpen(conn);
     // zebra: give way to whoever is crossing (the pedestrian only appears near the camera)
     else if (sim.nodeCtl[n] === Ctl.Zebra) return !this.pedCrossing(n);
+    // people on the crosswalks it drives over, the arm it comes from and the arm it leaves by: it waits for them
+    // (roadcraft crossings/permission; at a light, those still crossing as it turns green and those walking beside it
+    // when it turns)
+    // (and those who will be on it before it is across: a couple of seconds' walk more, crossingSpans.ts crossingReachedFirst)
+    // (a vehicle too close to stop comfortably goes on: those on foot wait for it, permission.ts:131)
+    if (sim.net.nodes.cols.deg[n] >= 3 && toEnd > (c.v[v] * c.v[v]) / (2 * 3) && this.pedsInWay(conn, 2.8)) return false;
     else if (sim.armRule[n * 8 + k.arm[conn]] === Rule.Stop && c.wait[v] < 1.2) return false; // stop sign: halt before going on
     // right of way: wait for those who go first (at a signal, only the permitted conflict, such as a left turn)
     const list = sim.conflicts.get(conn);
     if (!list) return true;
+    // someone over its line for a crossing connection holds it: wait for it to go through (not at a level crossing:
+    // a car there waits for the barrier, the train does not wait for the car)
+    if (sim.nodeCtl[n] !== Ctl.Crossing) for (let i = 0; i < list.length; i++) if (this.passHolder(list[i]) >= 0) return false;
     const stuck = c.wait[v] > 8; // nobody stays stuck forever: after 12 s only those already in the junction are respected
     const now = Math.round(this.time * 10);
     // and claims the turn: those on the priority road who can still stop comfortably let it through
@@ -1272,103 +1692,61 @@ export class Traffic {
     return true;
   }
 
+  /** Steps the actuated lights and writes the state of the lights near the camera for the drawing. */
   private updateSignals(dt: number): void {
     const sim = this.sim;
+    this.sig.step(dt);
     for (const n of this.windowSignals) {
-      const phases = sim.nodePhases[n];
-      if (!sim.net.nodes.alive[n] || phases === 0) { this.signalNodes.delete(n); this.windowSignals.delete(n); if (this.signals && n < this.signals.length) this.signals[n] = 0; continue; }
-      const spec = sim.net.junctions.get(n);
-      const pedSig = sim.nodeCtl[n] === Ctl.PedSignal;
-      if (spec?.fixed || pedSig) {
-        // fixed time: the cycle follows the clock (with the offset), for the green wave
-        const greens: number[] = [];
-        let cycle = 0;
-        for (let i = 0; i < phases; i++) { const g = Math.max(5, spec?.greens?.[i] ?? (pedSig ? (i === 0 ? 30 : 12) : 20)); greens.push(g); cycle += g + 4.5; }
-        let t = ((this.time + (spec?.offset ?? 0)) % cycle + cycle) % cycle;
-        let st = 0;
-        for (let i = 0; i < phases; i++) {
-          if (t < greens[i]) { st = 0; this.sigPhase[n] = i; break; }
-          t -= greens[i];
-          if (t < 3) { st = 1; this.sigPhase[n] = i; break; }
-          t -= 3;
-          if (t < 1.5) { st = 2; this.sigPhase[n] = i; break; }
-          t -= 1.5;
-        }
-        this.sigState[n] = st;
-      } else {
-        this.sigTimer[n] += dt;
-        const st = this.sigState[n];
-        // bus priority: a bus waiting at red shortens the others' green
-        const busWaiting = spec?.bus && st === 0 && this.sigTimer[n] > 6 && this.busWaitingAt(n);
-        // every second of green (after the minimum): an empty queue here with vehicles waiting on the other side cuts
-        // the green; nobody waiting on the other side holds the green
-        let endGreen = busWaiting || false;
-        const tg = this.sigTimer[n];
-        if (!endGreen && st === 0 && tg >= 6 && Math.floor(tg) !== Math.floor(tg - dt)) {
-          let others = 0;
-          for (let p = 0; p < phases && others === 0; p++) if (p !== this.sigPhase[n]) others += this.stageQueue(n, p);
-          if (others === 0) this.sigGreen[n] = Math.max(this.sigGreen[n], tg + 1.5);
-          else if (this.stageQueue(n, this.sigPhase[n]) === 0) endGreen = true;
-        }
-        if (st === 0 && (tg >= this.sigGreen[n] || endGreen)) { this.sigState[n] = 1; this.sigTimer[n] = 0; }
-        else if (st === 1 && this.sigTimer[n] >= 3) { this.sigState[n] = 2; this.sigTimer[n] = 0; }
-        else if (st === 2 && this.sigTimer[n] >= 1.5) {
-          // next stage with a queue (skips empty stages)
-          let next = this.sigPhase[n];
-          for (let k = 1; k <= phases; k++) {
-            const cand = (this.sigPhase[n] + k) % phases;
-            if (this.stageQueue(n, cand) > 0 || k === phases) { next = cand; break; }
-          }
-          this.sigPhase[n] = next;
-          this.sigState[n] = 0;
-          this.sigTimer[n] = 0;
-          // green adapts to the queue
-          this.sigGreen[n] = Math.min(40, Math.max(8, 5 + this.stageQueue(n, next) * 1.8));
-        }
-      }
+      if (!sim.net.nodes.alive[n] || sim.nodePhases[n] === 0) { this.signalNodes.delete(n); this.windowSignals.delete(n); this.sig.setActive(n, false); if (this.signals && n < this.signals.length) this.signals[n] = 0; continue; }
       if (this.signals && n < this.signals.length) {
         // 128 | amber << 6 | arms with green/amber
-        let mask = 0;
-        if (this.sigState[n] < 2) for (let a = 0; a < 8; a++) if (sim.armStage[n * 8 + a] === this.sigPhase[n] && a < sim.net.nodes.cols.deg[n]) mask |= 1 << a;
-        this.signals[n] = 128 | (this.sigState[n] === 1 ? 64 : 0) | (mask & 63);
+        const st = this.sig.state(n), mask = (st & 3) < 2 ? this.sig.arms[n * 8 + (st >> 2)] : 0;
+        this.signals[n] = 128 | ((st & 3) === 1 ? 64 : 0) | (mask & 63);
       }
     }
   }
 
-  /** Queue of a stage (sum over its arms). */
-  private stageQueue(n: number, stage: number): number {
+  /** A light's state as written for the drawing: 128 | amber << 6 | arms with green or amber (0: no light). */
+  lightState(n: number): number {
+    if (this.sim.nodePhases[n] === 0) return 0;
+    const st = this.sig.state(n), mask = (st & 3) < 2 ? this.sig.arms[n * 8 + (st >> 2)] : 0;
+    return 128 | ((st & 3) === 1 ? 64 : 0) | (mask & 63);
+  }
+
+  /** Vehicles waiting near the line on the arms of node `n` in `mask`. */
+  private armsQueue(n: number, mask: number): number {
     let q = 0;
     const deg = this.sim.net.nodes.cols.deg[n];
-    for (let a = 0; a < deg; a++) if (this.sim.armStage[n * 8 + a] === stage) q += this.armQueue(n, a);
+    for (let a = 0; a < deg && a < 8; a++) if (mask & (1 << a)) q += this.armQueue(n, a);
     return q;
   }
 
-  /** Is any bus stopped at red at this node? */
-  private busWaitingAt(n: number): boolean {
+  /** A bus within 40 m of the line on one of the arms in `mask`. */
+  private busNearArms(n: number, mask: number): boolean {
     const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
     for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
-      if (this.stageGreen(x)) continue;
+      if ((mask & (1 << k.arm[x])) === 0) continue;
       const h = this.laneHead[k.from[x]];
       if (h >= 0 && c.line[h] >= 0 && sim.laneLen(k.from[x]) - c.s[h] < 40) return true;
     }
     return false;
   }
 
-  /** Cars on arm `arm` of node `n` have green or amber (pedestrians wait). Only within the window. */
-  carsGo(n: number, arm: number): boolean {
-    return this.windowSignals.has(n) && this.sim.armStage[n * 8 + arm] === this.sigPhase[n] && this.sigState[n] < 2;
-  }
+  /** May pedestrians start crossing arm `arm` of node `n`? (every light, near the camera or not) */
+  walkOk(n: number, arm: number): boolean { return this.sig.walkOk(n, arm); }
 
-  /** Vehicles waiting on an arm (near the stop line). */
+  /** A pedestrian waits at the kerb of the crossing over arm `arm` of node `n`: calls the light. */
+  pedCall(n: number, arm: number): void { this.sig.pedCall(n, arm); }
+
+  /** Vehicles waiting on an arm (near the stop line; far ones counted up to 4 per lane). */
   private armQueue(n: number, arm: number): number {
-    const sim = this.sim, k = sim.conns.cols, c = this.veh.cols;
+    const sim = this.sim, c = this.veh.cols, sc = sim.net.segs.cols;
+    const seg = sim.armSeg[n * 8 + arm];
+    if (!sim.net.segs.alive[seg]) return 0;
+    const dir = sc.b[seg] === n ? 1 : -1; // lanes that arrive at n
     let q = 0;
-    const seen = new Set<number>();
-    for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
-      if (k.arm[x] !== arm || seen.has(k.from[x])) continue;
-      const lane = k.from[x];
-      seen.add(lane);
-      const L = sim.laneLen(lane);
+    for (let i = 0, m = laneCount(sc.profile[seg], dir); i < m; i++) {
+      const lane = laneId(seg, dir, i), L = sim.laneLen(lane);
       for (let v = this.laneHead[lane]; v >= 0 && L - c.s[v] < 80; v = c.next[v]) q++;
       if (this.laneHead[lane] < 0) q += Math.min(4, this.laneCount[lane]);
     }
@@ -1378,29 +1756,58 @@ export class Traffic {
   /** A connection is about to disappear (node rebuilt): those on it jump to the destination lane. */
   evacuateConn(conn: number): void {
     const c = this.veh.cols, sim = this.sim;
+    // those on it wait out the rebuild where they are (their exit lane kept in exitC); `nodesRebuilt` puts them on
+    // the new connection with the same lanes, at the same place
     for (let v = this.connHead[conn]; v >= 0;) {
       const next = c.next[v];
-      const to = sim.conns.cols.to[conn];
       this.unlink(v);
       c.conn[v] = -1;
-      if (!sim.net.segs.alive[laneSeg(to)]) { this.despawn(v); v = next; continue; }
-      this.setLaneCount(c.lane[v], -1);
-      this.setLaneCount(to, 1);
-      c.lane[v] = to; c.s[v] = 0; c.rIdx[v]++;
-      if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== sim.laneTo(to)) this.replanFrom(v, sim.laneTo(to));
-      this.insert(v, false, to);
+      c.exitC[v] = sim.conns.cols.to[conn];
+      this.inBox.push(v);
       v = next;
     }
     this.connHead[conn] = -1; this.connTail[conn] = -1;
     this.activeConns.delete(conn);
   }
 
-  /** Rebuilt nodes: signals restart. */
+  /** Vehicles that were inside a junction being rebuilt (`evacuateConn`). */
+  private inBox: number[] = [];
+
+  /** After a rebuild: each vehicle that was inside a junction goes back onto the connection with the same lanes. */
+  private resettleBox(): void {
+    const c = this.veh.cols, sim = this.sim, k = sim.conns.cols;
+    for (const v of this.inBox.splice(0)) {
+      if (!this.veh.alive[v] || c.conn[v] >= 0 || !c.micro[v]) continue;
+      const from = c.lane[v], to = c.exitC[v];
+      let conn = -1;
+      if (from >= 0 && sim.net.segs.alive[laneSeg(from)]) for (let x = sim.laneConn[from]; x >= 0; x = k.nextFromLane[x]) if (k.to[x] === to) { conn = x; break; }
+      if (conn >= 0) { c.conn[v] = conn; c.s[v] = Math.min(c.s[v], k.len[conn] - 0.1); this.insert(v, true, conn); continue; }
+      // that movement is gone: onto the exit lane (the outermost one left, after a new profile), behind whoever is there
+      if (!sim.net.segs.alive[laneSeg(to)]) { c.why[v] = End.Lost; this.finish(v); continue; }
+      const kept = this.keptLane(to);
+      if (kept < 0) { c.why[v] = End.Lost; this.finish(v); continue; }
+      this.setLaneCount(c.lane[v], -1);
+      this.setLaneCount(kept, 1);
+      const tail = this.laneTail[kept];
+      c.lane[v] = kept; c.s[v] = tail >= 0 ? Math.max(0, c.s[tail] - c.len[tail] - 1) : 0; c.rIdx[v]++;
+      this.enterLane(v, c.s[v]);
+      if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== sim.laneTo(kept)) this.replanFrom(v, sim.laneTo(kept));
+      this.insert(v, false, kept);
+    }
+  }
+
+  /** Rebuilt nodes: a new plan for their lights, which start their cycle again. */
   nodesRebuilt(nodes: number[]): void {
+    this.resettleBox();
     for (const n of nodes) {
-      if (!this.sim.net.nodes.alive[n] || this.sim.nodePhases[n] === 0) { this.signalNodes.delete(n); continue; }
+      this.sig.rebuild(n);
+      if (!this.sim.net.nodes.alive[n] || this.sim.nodePhases[n] === 0) {
+        this.signalNodes.delete(n);
+        if (this.windowSignals.delete(n) && this.signals && n < this.signals.length) this.signals[n] = 0;
+        continue;
+      }
       this.signalNodes.add(n);
-      this.sigPhase[n] = 0; this.sigState[n] = 0; this.sigTimer[n] = 0; this.sigGreen[n] = 12;
+      if (this.windowSignals.has(n)) this.sig.setActive(n, true);
     }
   }
 
@@ -1409,36 +1816,81 @@ export class Traffic {
     if (!segs.length) return;
     const dead = new Set(segs);
     const c = this.veh.cols;
-    // only micro vehicles are in lists; meso ones find out at their next event
+    // far vehicles on them leave now (from the lanes' lists), before a new segment can take the freed id
+    for (const s of segs) for (let k = 0; k < 16; k++) {
+      for (let v = this.mesoHead[s * 16 + k]; v >= 0;) { const next = c.mnext[v]; c.why[v] = End.Lost; this.finish(v); v = next; }
+    }
+    // near ones: on the lanes, or on a connection into them
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
       const lane = c.conn[v] >= 0 ? this.sim.conns.cols.to[c.conn[v]] : c.lane[v];
-      if (dead.has(laneSeg(lane)) || (c.lane[v] >= 0 && dead.has(laneSeg(c.lane[v])))) this.despawn(v);
+      if (dead.has(laneSeg(lane)) || (c.lane[v] >= 0 && dead.has(laneSeg(c.lane[v])))) { c.why[v] = End.Lost; this.finish(v); }
     }
     for (const s of segs) { this.segLoad[s * 2] = 0; this.segLoad[s * 2 + 1] = 0; }
     for (const s of segs) for (let k = 0; k < 16; k++) { this.laneCount[s * 16 + k] = 0; this.laneHead[s * 16 + k] = -1; this.laneTail[s * 16 + k] = -1; this.activeLanes.delete(s * 16 + k); }
   }
 
+  /** The lane that takes over `lane` after its segment's profile changed: itself, the outermost one left, or −1 (no lanes that way). */
+  private keptLane(lane: number): number {
+    const seg = laneSeg(lane), dir = laneDir(lane), n = laneCount(this.sim.net.segs.cols.profile[seg], dir);
+    if (n === 0) return -1;
+    return laneIdx(lane) < n ? lane : laneId(seg, dir, n - 1);
+  }
+
+  /**
+   * Segments with a new profile (an upgrade, a lane more or less): the vehicles on lanes that are gone move to the
+   * outermost lane left in their direction (near ones keep their place in it); with no lane left that way, their trip is lost.
+   */
+  segsReprofiled(segs: number[]): void {
+    const c = this.veh.cols;
+    for (const s of segs) {
+      if (!this.sim.net.segs.alive[s]) continue;
+      for (const dir of [1, -1]) for (let i = 0; i < 8; i++) {
+        const lane = laneId(s, dir, i), to = this.keptLane(lane);
+        if (to === lane) continue;
+        for (let v = this.mesoHead[lane]; v >= 0;) {
+          const next = c.mnext[v];
+          if (to < 0) { c.why[v] = End.Lost; this.finish(v); }
+          else { this.setLaneCount(lane, -1); this.setLaneCount(to, 1); c.lane[v] = to; this.mesoLink(v, to); }
+          v = next;
+        }
+        for (let v = this.laneHead[lane]; v >= 0;) {
+          const next = c.next[v];
+          if (to < 0) { c.why[v] = End.Lost; this.finish(v); }
+          else { this.unlink(v); this.setLaneCount(lane, -1); this.setLaneCount(to, 1); c.lane[v] = to; c.lcT[v] = 1; this.insert(v, false, to); }
+          v = next;
+        }
+        this.laneCount[lane] = 0;
+      }
+    }
+    // pulled into a bay (out of the lists): only the drawing reads their lane
+    for (const v of this.parkers) if (c.lane[v] >= 0 && segs.includes(laneSeg(c.lane[v]))) { const to = this.keptLane(c.lane[v]); if (to >= 0) c.lane[v] = to; }
+  }
+
   // ------------------------------------------------------------ micro
 
-  /** IDM acceleration with a leader `gap` metres ahead moving at `vl`. */
-  private idm(v: number, v0: number, gap: number, vl: number, am = A_MAX): number {
+  /** Uniform in [0, 1) from the simulation's generator (for drawing drivers). */
+  private readonly sample = () => this.rng.next();
+
+  /** IDM acceleration of driver `u` at speed `v` (its own comfort figures) with a leader `gap` metres ahead at `vl`. */
+  private idm(u: number, v: number, v0: number, gap: number, vl: number): number {
+    const c = this.veh.cols, am = c.da[u], b = c.db[u];
     const dv = v - vl;
     // queue discharge (roadcraft): the one ahead has left and I am still slow → keep a shorter gap and react
     // faster (up to 60%, gone at 4 m/s); the queue moves off together, without an accordion effect
     const rel = vl > 0.3 && v < 4 ? 0.6 * (1 - v / 4) * Math.min(1, vl / 1.5) : 0;
-    const sStar = S0 * (1 - rel) + Math.max(0, v * T_HEAD * (1 - rel) + (v * dv) / (2 * Math.sqrt(am * B_COMF)));
+    const sStar = c.ds0[u] * (1 - rel) + Math.max(0, v * c.dT[u] * (1 - rel) + (v * dv) / (2 * Math.sqrt(am * b)));
     const g = Math.max(0.1, gap);
     return am * (1 - Math.pow(v / Math.max(0.1, v0), 4) - (sStar / g) * (sStar / g));
   }
 
   private stepMicro(dt: number): void {
-    const c = this.veh.cols, sim = this.sim;
+    const c = this.veh.cols, sim = this.sim, step = ++this.microStep;
     // connections first (they are ahead of the lanes that feed them)
     for (const conn of [...this.activeConns]) {
       for (let v = this.connHead[conn]; v >= 0;) {
         const next = c.next[v];
-        this.moveOnConn(v, conn, dt);
+        if (c.moved[v] !== step) { c.moved[v] = step; this.moveOnConn(v, conn, dt); }
         v = next;
       }
     }
@@ -1446,10 +1898,51 @@ export class Traffic {
       if (!sim.net.segs.alive[laneSeg(lane)]) continue;
       for (let v = this.laneHead[lane]; v >= 0;) {
         const next = c.next[v];
-        this.moveOnLane(v, lane, dt);
+        if (c.moved[v] !== step) { c.moved[v] = step; this.moveOnLane(v, lane, dt); }
         v = next;
       }
     }
+  }
+  private microStep = 0;
+
+  /**
+   * Braking for the bends ahead (roadcraft 4.0 `curveSpeedCap`): connection `conn` starts `d` m ahead, and after it
+   * and its lane the route's next turn. For each bend slower than the vehicle, the steady deceleration that reaches
+   * its speed at its start, applied once it reaches 80 % of the driver's comfortable braking (up to the emergency one).
+   * Returns the acceleration limit (Infinity: none).
+   */
+  private bendBrake(v: number, conn: number, d: number): number {
+    const c = this.veh.cols, sim = this.sim, k = sim.conns.cols, heavy = c.kind[v] !== 0, speed = c.v[v];
+    let limit = Infinity, at = d, x = conn;
+    const horizon = (speed * speed) / (2 * c.db[v]) + 20;
+    for (let i = 0; i < 2 && x >= 0 && at < horizon; i++) {
+      const vb = bendSpeed(c, v, this.bendK(v, x), heavy);
+      if (speed > vb) {
+        const need = (speed * speed - vb * vb) / (2 * Math.max(0.5, at - 0.5));
+        if (need >= c.db[v] * 0.8) limit = Math.min(limit, -Math.min(c.dbe[v], Math.max(need, c.db[v] * 0.8)));
+      }
+      // and the turn after: past this connection and the lane it leads to (its exit along the route)
+      if (i > 0) break;
+      const after = this.segAfter(v, 1), to = k.to[x];
+      if (after < 0) break;
+      at += k.len[x] + sim.laneLen(to);
+      x = this.connAfter(to, after, c.line[v] >= 0);
+    }
+    return limit;
+  }
+
+  /** Curvature of a connection for vehicle `v`: a train reverses at the end of its line (drawn as a loop), so none there. */
+  private bendK(v: number, conn: number): number {
+    const k = this.sim.conns.cols;
+    return this.veh.cols.kind[v] === 4 && k.turn[conn] === Turn.UTurn ? 0 : k.k[conn];
+  }
+
+  /** The connection from `lane` (or the lane of its segment it will change to) toward segment `seg`; −1 if none. */
+  private connAfter(lane: number, seg: number, bus: boolean): number {
+    const sim = this.sim;
+    let x = sim.connToward(lane, seg, bus);
+    if (x < 0) { const l2 = sim.laneToward(laneSeg(lane), laneDir(lane), seg, laneIdx(lane), bus); if (l2 >= 0) x = sim.connToward(l2, seg, bus); }
+    return x;
   }
 
   /** Distance to the rearmost vehicle on the connection/lane ahead (to follow through the node). */
@@ -1469,8 +1962,11 @@ export class Traffic {
     if (c.dying[v] === 4) { this.kerbStep(v, lane, dt); return; }
     const L = sim.laneLen(lane);
     const p = sim.net.segs.cols.profile[laneSeg(lane)];
-    const v0 = laneSpeed(p) * c.vf[v];
+    // the limit, and the lane's own bend (a sharply curved road is driven slower)
+    let v0 = Math.min(desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time), bendSpeed(c, v, sim.segK[laneSeg(lane)], c.kind[v] !== 0));
     let gap = 1e9, vl = 99;
+    /** Where it must have stopped by, whatever its comfort (a bus or train stop: no further than just past it). */
+    let stopRoom = 1e9;
     const lead = c.prev[v];
     if (lead >= 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
     // end of the lane: destination, signal or whatever comes after the node
@@ -1487,14 +1983,19 @@ export class Traffic {
             if (c.dwell[v] >= (ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL)) { c.dwell[v] = 0; this.serve(v); }
             else atStop = true;
           }
-          if (lead < 0 || sg + S0 < gap) { gap = Math.min(gap, Math.max(0, sg) + S0); vl = 0; }
+          if (lead < 0 || sg + c.ds0[v] < gap) { gap = Math.min(gap, Math.max(0, sg) + c.ds0[v]); vl = 0; } // (its own standstill gap: it halts at the stop)
+          stopRoom = Math.max(0, sg) + 0.5;
         }
       }
     }
     if (c.dying[v]) { /* leaving */ }
+    // a truck bound for a yard turns in at its gate as it drives past (tried every second: planning the reverse costs)
+    else if (this.atDestination(v) && c.line[v] < 0 && c.kind[v] === 2 && this.docks.length && (this.microStep + v) % 20 === 0 && this.nearCam(lane) && this.tryDock(v, lane)) return;
     else if (this.atDestination(v) && c.line[v] < 0) {
       // near the camera cars and trucks decide 30 m before the end (room for the manoeuvre); the rest at 12 m
-      const room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.nearCam(lane) ? 30 : 12;
+      // (a drop-off that drives straight on decides with room to brake for the next turn)
+      let room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.nearCam(lane) ? 30 : 12;
+      if (this.dropsOff(v)) room = Math.max(room, (c.v[v] * c.v[v]) / (2 * c.db[v]) + 25);
       if (L - c.s[v] < room) { const r = this.arrive(v, lane, L - c.s[v]); if (r === 1) return; if (r === 2) c.dying[v] = 1; }
     } else {
       let ns = this.nextSeg(v);
@@ -1506,19 +2007,24 @@ export class Traffic {
         conn = sim.laneConn[lane];
         if (conn < 0 && lead < 0 && c.lane[v] === lane) this.escapeLane(v, lane);
       }
+      // it just moved to the next lane over: it goes on from there in the next step (this lane's leader, length and
+      // connection no longer apply)
+      if (c.lane[v] !== lane) return;
       // stopped for 10 s in the queue of a full lane (not at the red of a lane with room): reconsider the
       // route, avoiding what is full (roadcraft reconsiderRoute). At the line it is too late to change (as in
       // roadcraft): there `detour` handles it, and only toward an exit with room
-      if (c.held[v] >= STUCK_SECONDS && lead >= 0 && c.line[v] < 0 && this.routeBudget > 0) {
+      if (c.held[v] >= c.patience[v] && lead >= 0 && c.line[v] < 0 && this.routeBudget > 0) {
         c.held[v] = 0;
         if (this.laneCount[lane] >= 0.6 * L / 7.5 && this.reconsider(v, lane, -1)) {
           const ns2 = this.nextSeg(v);
           if (ns2 >= 0 && sim.connToward(lane, ns2, false) < 0) this.mandatoryChange(v, lane, ns2);
+          if (c.lane[v] !== lane) return;
         }
       }
       if (lead < 0) {
-        const toEnd = L - c.s[v];
-        if (toEnd < 6 && c.v[v] < 0.5) c.wait[v] += dt;
+        // the stop line is before the crosswalk (roadcraft): the last metres of the lane are the zebra, kept clear
+        const toEnd = L - c.s[v], back = this.stopBack(lane), toLine = toEnd - back;
+        if (toLine < 6 && c.v[v] < 0.5) c.wait[v] += dt;
         // exit blocked for a while: the driver detours via another free exit of this lane
         if (conn >= 0 && c.wait[v] > 6 && c.lcCool[v] <= 0 && !this.exitRoom(conn, v)) {
           c.lcCool[v] = 5;
@@ -1526,26 +2032,54 @@ export class Traffic {
           if (alt >= 0) conn = alt;
         }
         // waiting for the full exit for a long time: reserve its next free spot (the longest waiter wins)
-        if (conn >= 0 && toEnd < 6 && c.wait[v] > STARVE_SECONDS) {
+        if (conn >= 0 && toLine < 6 && c.wait[v] > STARVE_SECONDS) {
           const to = sim.conns.cols.to[conn], cl = this.exitClaim[to];
           if (cl === v || cl < 0 || this.time - this.exitClaimT[to] >= 1 || !this.veh.alive[cl] || c.wait[cl] < c.wait[v]) { this.exitClaim[to] = v; this.exitClaimT[to] = this.time; }
         }
         // jammed junction (nobody through for 20 s and this one waiting 20 s): one at a time, with the box clear
-        if (conn >= 0 && toEnd < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
-        if (conn < 0 || !(release || this.gateFor(conn, v, toEnd))) { gap = Math.min(gap, toEnd - 1); vl = 0; }
-        else { const [g2, v2] = this.aheadThrough(conn); if (toEnd + g2 < gap) { gap = toEnd + g2; vl = v2; } } // (does not override the bus stop)
+        if (conn >= 0 && toLine < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
+        // over the stop line with the way open, it goes on through (it is not left standing on the zebra); short of it
+        // it stops at the line (on it already, at the end of the lane)
+        let open = c.pass[v] === 1;
+        if (!open) {
+          open = conn >= 0 && (release || this.gateFor(conn, v, Math.max(0, toLine)));
+          // at the line it goes only into a clear box (nobody crossing its way inside, the barrier up): what it crosses
+          // over after the line, it does not stop on
+          if (open && !release && toLine < 0.3 && !this.boxClear(conn)) open = false;
+          // (just over it when the way closed: still at the line, it has stopped there; well over it, at the end)
+          if (!open) { gap = Math.min(gap, toLine > -1 ? Math.max(0, toLine - 0.3) : toEnd - 1); vl = 0; }
+          else if (toLine < 0.3) {
+            c.pass[v] = 1;
+            // the connection is its own from here (roadcraft claims.ts grantAll at admission): crossing ones wait for it
+            this.connPass[conn] = v; this.connPassT[conn] = this.time;
+            if (sim.nodePhases[sim.laneTo(lane)] > 0 && !this.stageGreen(conn, true)) this.ranRed++;
+          }
+        }
+        // over the line, the light no longer stops it; a barrier coming down, someone in the box or somebody stepping
+        // into its way on the zebra ahead (the one it leaves by: it is over its own already) still does (roadcraft
+        // admission.ts stoppedForWalker)
+        if (open && c.pass[v] && conn >= 0 && (!this.boxClear(conn) || this.pedsInWay(conn, 0, false))) { gap = Math.min(gap, toEnd - 1); vl = 0; }
+        else if (open && conn >= 0) { const [g2, v2] = this.aheadThrough(conn); if (toEnd + g2 < gap) { gap = toEnd + g2; vl = v2; } } // (does not override the bus stop)
         // bus and train: a stop just past the node already counts for braking (a fast train cannot stop in 20 m)
         const sg = this.stopAhead(v, conn);
         if (sg >= 0 && toEnd + sg < gap) { gap = toEnd + sg; vl = 0; }
+        if (sg >= 0) stopRoom = Math.min(stopRoom, toEnd + sg + 0.5);
       }
     }
-    let a = this.idm(c.v[v], v0, gap, vl, c.kind[v] ? A_HEAVY : A_MAX);
+    // the turn ahead: slow enough by the line to take its bend within the driver's lateral comfort (braking on time)
+
+    // what the car ahead is doing, when it is the obstacle (the stop line, a stop or a red stand still)
+    const al = lead >= 0 && gap === c.s[lead] - c.len[lead] - c.s[v] ? c.acc[lead] : 0;
+    let a = driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, stopRoom);
+    // the bends ahead (this junction's turn, and the next one's after a short lane): braked for in time
+    if (conn >= 0) a = Math.min(a, this.bendBrake(v, conn, L - c.s[v]));
     if (c.dying[v]) a = Math.min(a, 0); // an arrived vehicle disappears without braking in front of others
     if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // in the bay, waiting to pull out
     if (c.mv[v] >= 0) a = -9; // pulling out of the bay: held until the manoeuvre is back in the lane
     if (atStop) a = Math.min(a, -2);
     a = Math.max(-9, a);
     const nv = Math.max(0, c.v[v] + a * dt);
+    c.acc[v] = (nv - c.v[v]) / dt;
     c.exitC[v] = conn;
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;
     // pulling out of the bay: the drawing slides from the kerb to the lane (the simulation already has it in the lane)
@@ -1554,21 +2088,25 @@ export class Traffic {
     c.v[v] = nv;
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2);
     c.lcCool[v] -= dt;
-    if (c.dying[v]) { c.fade[v] -= dt * 1.5; if (c.fade[v] <= 0) { this.arrived++; this.despawn(v); } return; }
+    if (c.dying[v]) { c.fade[v] -= dt * 1.5; if (c.fade[v] <= 0) this.finish(v); return; }
     if (c.fade[v] < 1) c.fade[v] = Math.min(1, c.fade[v] + dt * 1.2);
     if (nv < 0.5) c.held[v] += dt; else c.held[v] = 0;
     if (c.s[v] >= L) {
       // lane with no exit at all (the turn was from another lane and the change failed): stop at the line and change
       // lanes when there is room (`escapeLane`), instead of disappearing
       if (conn < 0) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
-      if (!release && !this.gateFor(conn, v, 0)) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
+      if (!release && (c.pass[v] ? !this.boxClear(conn) : !this.gateFor(conn, v, 0))) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
       // enter the connection
+      this.leaveLane(v, lane);
       this.unlink(v);
       c.s[v] -= L;
       c.conn[v] = conn;
       c.wait[v] = 0;
       c.held[v] = 0;
       const k = sim.conns.cols;
+      // an invariant kept as a count (roadcraft invariants.ts): nobody enters a junction on red (amber is a go for
+      // whoever cannot stop); one that crossed the stop line with the way open was counted there
+      if (!c.pass[v] && sim.nodePhases[k.node[conn]] > 0 && !this.stageGreen(conn, true)) this.ranRed++;
       if (release) { this.released++; this.releaseAt[k.node[conn]] = this.time + RELEASE_EVERY; this.nodePass[k.node[conn]]++; this.advisor.pass[k.node[conn] * 8 + k.arm[conn]]++; }
       else this.admit(k.node[conn], k.arm[conn]);
       this.insert(v, true, conn);
@@ -1596,7 +2134,7 @@ export class Traffic {
     if (this.time - this.lastAdmit[n] < JAM_SECONDS || this.time < this.releaseAt[n]) return false;
     if (this.veh.cols.wait[v] < JAM_SECONDS) return false;
     if (this.jamAt[n] < this.lastAdmit[n]) { this.jamAt[n] = this.time; this.jams++; } // new jam
-    if (sim.nodePhases[n] > 0 && (!this.windowSignals.has(n) || !this.stageGreen(conn, true))) return false;
+    if (sim.nodePhases[n] > 0 && !this.stageGreen(conn, true)) return false;
     if (this.connHead[conn] >= 0 && this.veh.cols.s[this.connTail[conn]] < this.veh.cols.len[this.connTail[conn]] + 2) return false;
     if (this.pedCrossing(n)) return false;
     const list = sim.conflicts.get(conn);
@@ -1695,7 +2233,8 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim, k = sim.conns.cols;
     const L = k.len[conn];
     const to = k.to[conn];
-    const v0 = Math.min(laneSpeed(sim.net.segs.cols.profile[laneSeg(to)]), k.turn[conn] === Turn.Straight ? 99 : 8) * c.vf[v];
+    // through the junction at the limit, or at the speed its bend allows within the driver's lateral comfort
+    const v0 = Math.min(desiredSpeed(c, v, laneSpeed(sim.net.segs.cols.profile[laneSeg(to)]) * c.vf[v], this.time), bendSpeed(c, v, this.bendK(v, conn), c.kind[v] !== 0));
     let gap = 1e9, vl = 99;
     const lead = c.prev[v];
     if (lead >= 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
@@ -1715,8 +2254,15 @@ export class Traffic {
     }
     const sg = this.stopAhead(v, conn);
     if (sg >= 0 && sg - c.s[v] < gap) { gap = Math.max(0, sg - c.s[v]); vl = 0; }
-    const a = Math.max(-9, this.idm(c.v[v], v0, gap, vl, c.kind[v] ? A_HEAVY : A_MAX));
+    if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2); // a lane change finishing on the way through
+    const al = lead >= 0 && gap === c.s[lead] - c.len[lead] - c.s[v] ? c.acc[lead] : 0;
+    let a = Math.max(-9, driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, sg >= 0 ? Math.max(0, sg - c.s[v]) + 0.5 : 1e9));
+    if (c.v[v] > v0 + 0.3) a = Math.min(a, -c.db[v]); // in the bend too fast (it came in late): brakes, not coasts
+    // the next junction's turn, after the lane this connection leads to
+    const next = this.segAfter(v, 1);
+    if (next >= 0) { const c2 = this.connAfter(to, next, c.line[v] >= 0); if (c2 >= 0) a = Math.min(a, this.bendBrake(v, c2, L - c.s[v] + sim.laneLen(to))); }
     const nv = Math.max(0, c.v[v] + a * dt);
+    c.acc[v] = (nv - c.v[v]) / dt;
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
     c.v[v] = nv;
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;
@@ -1730,11 +2276,17 @@ export class Traffic {
     this.setLaneCount(to, 1);
     c.lane[v] = to;
     c.s[v] -= L;
+    this.enterLane(v, c.s[v]);
+    // a lane change still under way goes on along the new segment (the lane on the same side of the new one)
+    if (c.lcT[v] < 1 && c.lcFrom[v] >= 0 && laneSeg(c.lcFrom[v]) === laneSeg(from)) {
+      const idx = laneIdx(to) + laneIdx(c.lcFrom[v]) - laneIdx(from), sg = laneSeg(to), dr = laneDir(to);
+      if (idx >= 0 && idx < laneCount(sim.net.segs.cols.profile[sg], dr)) c.lcFrom[v] = laneId(sg, dr, idx); else c.lcT[v] = 1;
+    }
     c.rIdx[v]++;
     // the route may have been broken (wrong lane): replan from the end of this lane;
-    // heading to a median U-turn, replan allowing turning back (whoever overshot the destination turns there)
+    // heading to a median U-turn, replan (whoever overshot the destination turns there: the U-turn is a connection)
     const endNode = sim.laneTo(to);
-    if (sim.nodeCtl[endNode] === Ctl.UTurn && c.line[v] < 0) this.replanFrom(v, endNode, true);
+    if (sim.nodeCtl[endNode] === Ctl.UTurn && c.line[v] < 0) this.replanFrom(v, endNode);
     else if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== endNode) this.replanFrom(v, endNode);
     if (!this.inWindowOut(to)) {
       // left the window: back to meso
@@ -1767,16 +2319,15 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim;
     const [lead, follow] = this.around(target, c.s[v]);
     const p = sim.net.segs.cols.profile[laneSeg(target)];
-    const v0 = laneSpeed(p) * c.vf[v];
+    const v0 = desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time);
     const gapF = lead >= 0 ? c.s[lead] - c.len[lead] - c.s[v] : 1e9;
     const gapB = follow >= 0 ? c.s[v] - c.len[v] - c.s[follow] : 1e9;
     if (gapF < 2 || gapB < 3) return false;
     // safety: the new follower does not brake hard
-    const am = c.kind[v] ? A_HEAVY : A_MAX;
-    if (follow >= 0 && this.idm(c.v[follow], v0, gapB, c.v[v], c.kind[follow] ? A_HEAVY : A_MAX) < -3.5) return false;
-    const aNew = this.idm(c.v[v], v0, gapF, lead >= 0 ? c.v[lead] : 99, am);
+    if (follow >= 0 && this.idm(follow, c.v[follow], v0, gapB, c.v[v]) < -3.5) return false;
+    const aNew = this.idm(v, c.v[v], v0, gapF, lead >= 0 ? c.v[lead] : 99);
     const oldLead = c.prev[v];
-    const aOld = oldLead >= 0 ? this.idm(c.v[v], v0, c.s[oldLead] - c.len[oldLead] - c.s[v], c.v[oldLead], am) : am;
+    const aOld = oldLead >= 0 ? this.idm(v, c.v[v], v0, c.s[oldLead] - c.len[oldLead] - c.s[v], c.v[oldLead]) : c.da[v];
     return aNew - aOld + bias > 0.25;
   }
 
@@ -1853,68 +2404,157 @@ export class Traffic {
 
   // ------------------------------------------------------------ buses
 
-  /** Replaces the set of lines. Buses of changed lines leave; new ones spawn at the stops. */
+  /**
+   * Replaces the set of lines (the page sends them again after every road edit, so the stops follow the roads). A line
+   * that is still there keeps its buses, their riders and the people waiting, stop by stop (matched by position): only
+   * a removed stop loses those waiting for it, and riders bound for it get off at the bus's next stop. Buses of removed
+   * lines (or a line that changed mode) leave; missing buses spawn at the stops; extra ones leave.
+   */
   setLines(specs: LineSpec[]): void {
-    const c = this.veh.cols, net = this.sim.net, sc = net.segs.cols;
-    // remove the current buses (only those in the lines' lists)
-    for (const set of this.busSets) {
-      for (const v of [...set]) {
-        if (!this.veh.alive[v]) continue;
-        if (c.micro[v]) { set.delete(v); c.dying[v] = 1; c.line[v] = -1; } else this.despawn(v);
+    const old = this.lines, oldSets = this.busSets;
+    const byId = new Map<number, number>();
+    old.forEach((ln, i) => byId.set(ln.id, i));
+    const keptOld = new Set<number>();
+    const lines: SimLine[] = [], sets: Array<Set<number>> = [];
+    for (const sp of specs) {
+      const ln = this.resolveLine(sp), li = lines.length, set = new Set<number>();
+      const oi = byId.get(sp.id);
+      if (oi !== undefined && !keptOld.has(oi) && old[oi].mode === ln.mode) {
+        keptOld.add(oi);
+        this.carryLine(old[oi], oldSets[oi], ln, li, set);
       }
+      lines.push(ln); sets.push(set);
     }
-    this.lines = specs.map((sp) => {
-      const rail = (sp.mode ?? 0) > 0;
-      const ln: SimLine = { id: sp.id, color: sp.color, buses: sp.buses, mode: sp.mode ?? 0, stopLane: [], stopV: [], waiting: [], lastT: [],
-        stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
-      /** One stop at (x, z); `flip`: the stop of the return trip, across the street. False if no road there. */
-      const addStop = (x: number, z: number, i: number, flip: boolean): boolean => {
-        // bus: nearest ordinary road; train and metro: nearest rail
-        const hit = net.nearestSeg(x, z, 40, (sg) => PROFILE_INFO[sc.profile[sg]].rail === rail);
-        if (!hit) return false;
-        const [seg, t] = hit;
-        const q = net.quad(seg);
-        const pp = new Float64Array(2), dd = new Float64Array(2);
-        bez(q, t, pp); bezD(q, t, dd);
-        // return trip: the same stop mirrored across the street's centre line
-        if (flip) { x = 2 * pp[0] - x; z = 2 * pp[1] - z; }
-        // side: u+ (left of a→b) is the sidewalk of those driving from b to a
-        const u = (x - pp[0]) * dd[1] - (z - pp[1]) * dd[0];
-        let dir = u > 0 ? -1 : 1;
-        if (rail) {
-          // station: the line heads to the next station on the track of its direction
-          const ni = (i + 2) % sp.stops.length, nx = sp.stops[ni] - x, nz = sp.stops[ni + 1] - z;
-          dir = nx * dd[0] + nz * dd[1] >= 0 ? 1 : -1;
-        }
-        if (laneCount(sc.profile[seg], dir) === 0) dir = -dir;
-        if (laneCount(sc.profile[seg], dir) === 0) return false;
-        const lane = laneId(seg, dir, 0);
-        const L = this.sim.laneLen(lane);
-        const along = this.sim.sAlong(seg, t);
-        const v = dir > 0 ? along - this.sim.segS0(seg) : this.sim.segS1(seg) - along;
-        if (sp.term?.includes(i / 2)) ln.term.add(ln.stopLane.length);
-        ln.stopLane.push(lane);
-        ln.stopV.push(Math.max(Math.min(8, L * 0.4), Math.min(L - 14, v)));
-        ln.waiting.push(0); ln.lastT.push(this.time);
-        const lp = new Float64Array(4);
-        this.sim.lanePoint(lane, ln.stopV[ln.stopV.length - 1], lp);
-        ln.stopX.push(x); ln.stopZ.push(z); ln.stopY.push(lp[1] + 0.15);
-        ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // facing the road
-        return true;
-      };
-      const kept: number[] = [];
-      for (let i = 0; i + 1 < sp.stops.length; i += 2) if (addStop(sp.stops[i], sp.stops[i + 1], i, false)) kept.push(i);
-      // Roadcraft bus lines go out and back: the stops of the return trip on the other side, the two ends terminals
-      if (!rail && !sp.loop && kept.length >= 2) {
-        ln.term.add(0); ln.term.add(ln.stopLane.length - 1);
-        for (let k = kept.length - 2; k >= 1; k--) addStop(sp.stops[kept[k]], sp.stops[kept[k] + 1], kept[k], true);
-      }
-      ln.waitTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
-      return ln;
+    // buses of lines that are gone leave (only those in the lines' lists)
+    oldSets.forEach((set, oi) => { if (!keptOld.has(oi)) for (const v of set) this.retireBus(v); });
+    this.lines = lines;
+    this.busSets = sets;
+    // a line with fewer buses now: the extra ones leave
+    sets.forEach((set, li) => {
+      let extra = set.size - lines[li].buses;
+      for (const v of [...set]) { if (extra <= 0) break; set.delete(v); this.retireBus(v); extra--; }
     });
-    this.busSets = this.lines.map(() => new Set<number>());
-    this.riders.clear();
     this.keepBuses();
+    this.indexStops();
+  }
+
+  /** Stops by STOP_CELL cell of the map (first entry of each cell, then line and stop of each entry). */
+  private stopStart = new Int32Array(STOP_CELLS * STOP_CELLS + 1);
+  private stopLine = new Int32Array(0);
+  private stopIdx = new Int32Array(0);
+
+  /** Sorts every stop into its cell (when the lines change), so the drawing reads only the cells near the camera. */
+  private indexStops(): void {
+    const cellOf = (x: number, z: number) => {
+      const i = Math.min(STOP_CELLS - 1, Math.max(0, Math.floor((x + MAP_HALF) / STOP_CELL)));
+      const j = Math.min(STOP_CELLS - 1, Math.max(0, Math.floor((z + MAP_HALF) / STOP_CELL)));
+      return j * STOP_CELLS + i;
+    };
+    let n = 0;
+    for (const ln of this.lines) n += ln.stopX.length;
+    const start = this.stopStart.fill(0), line = new Int32Array(n), idx = new Int32Array(n);
+    this.lines.forEach((ln) => { for (let i = 0; i < ln.stopX.length; i++) start[cellOf(ln.stopX[i], ln.stopZ[i]) + 1]++; });
+    for (let c = 0; c < STOP_CELLS * STOP_CELLS; c++) start[c + 1] += start[c];
+    const fill = start.slice(0, STOP_CELLS * STOP_CELLS);
+    this.lines.forEach((ln, li) => { for (let i = 0; i < ln.stopX.length; i++) { const k = fill[cellOf(ln.stopX[i], ln.stopZ[i])]++; line[k] = li; idx[k] = i; } });
+    this.stopLine = line; this.stopIdx = idx;
+  }
+
+  /** A bus leaves its line: fades out where it is (near the camera) or goes at once (far). Not a trip. */
+  private retireBus(v: number): void {
+    const c = this.veh.cols;
+    if (!this.veh.alive[v] || c.line[v] < 0) return;
+    this.riders.delete(v); this.realRiders.delete(v);
+    c.why[v] = End.NoTrip;
+    if (c.micro[v]) { c.dying[v] = 1; c.line[v] = -1; } else { c.line[v] = -1; this.despawn(v); }
+  }
+
+  /** The new version `ln` (index `li`) of line `prev`: its buses, riders and those waiting, stop by stop. */
+  private carryLine(prev: SimLine, prevSet: Set<number>, ln: SimLine, li: number, set: Set<number>): void {
+    const c = this.veh.cols, n = ln.stopLane.length, m = prev.stopLane.length;
+    // the same stop: the same place on the sidewalk (the return trip's stops are mirrored, so they differ)
+    const toNew = new Int32Array(m).fill(-1);
+    for (let j = 0; j < m; j++) {
+      for (let i = 0; i < n; i++) if (Math.abs(ln.stopX[i] - prev.stopX[j]) < 1 && Math.abs(ln.stopZ[i] - prev.stopZ[j]) < 1) { toNew[j] = i; break; }
+    }
+    for (let j = 0; j < m; j++) {
+      const i = toNew[j];
+      if (i < 0) continue;
+      ln.lastT[i] = prev.lastT[j];
+      let w = 0;
+      for (let k = 0; k < m; k++) if (toNew[k] >= 0) { ln.waitTo[i][toNew[k]] += prev.waitTo[j][k]; ln.realTo[i][toNew[k]] += prev.realTo[j][k]; w += prev.waitTo[j][k]; }
+      ln.waiting[i] = w;
+    }
+    ln.boardings = prev.boardings; ln.perHour = prev.perHour;
+    /** The first stop from old index `j` on (in the line's order) that is still there. */
+    const nextKept = (j: number): number => { for (let k = 0; k < m; k++) { const i = toNew[(j + k) % m]; if (i >= 0) return i; } return 0; };
+    for (const v of prevSet) {
+      if (!this.veh.alive[v] || c.dying[v] || c.line[v] < 0) continue;
+      set.add(v);
+      c.line[v] = li;
+      const next = nextKept(c.stopI[v]);
+      for (const map of [this.riders, this.realRiders]) {
+        const r = map.get(v);
+        if (!r) continue;
+        const nr = new Float64Array(n);
+        for (let k = 0; k < r.length && k < m; k++) nr[toNew[k] >= 0 ? toNew[k] : next] += r[k];
+        map.set(v, nr);
+      }
+      c.stopI[v] = next;
+    }
+  }
+
+  /** A line from the page with its stops resolved to lanes. */
+  private resolveLine(sp: LineSpec): SimLine {
+    const net = this.sim.net, sc = net.segs.cols;
+    const rail = (sp.mode ?? 0) > 0;
+    const ln: SimLine = { id: sp.id, color: sp.color, buses: sp.buses, mode: sp.mode ?? 0, stopLane: [], stopV: [], waiting: [], lastT: [],
+      stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], realTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
+    /** One stop at (x, z); `flip`: the stop of the return trip, across the street. False if no road there. */
+    const addStop = (x: number, z: number, i: number, flip: boolean): boolean => {
+      // bus: nearest ordinary road; train and metro: nearest rail
+      const hit = net.nearestSeg(x, z, 40, (sg) => PROFILE_INFO[sc.profile[sg]].rail === rail);
+      if (!hit) return false;
+      const [seg, t] = hit;
+      const q = net.quad(seg);
+      const pp = new Float64Array(2), dd = new Float64Array(2);
+      bez(q, t, pp); bezD(q, t, dd);
+      // return trip: the same stop mirrored across the street's centre line
+      if (flip) { x = 2 * pp[0] - x; z = 2 * pp[1] - z; }
+      // side: u+ (left of a→b) is the sidewalk of those driving from b to a
+      const u = (x - pp[0]) * dd[1] - (z - pp[1]) * dd[0];
+      let dir = u > 0 ? -1 : 1;
+      if (rail) {
+        // station: the line heads to the next station on the track of its direction
+        const ni = (i + 2) % sp.stops.length, nx = sp.stops[ni] - x, nz = sp.stops[ni + 1] - z;
+        dir = nx * dd[0] + nz * dd[1] >= 0 ? 1 : -1;
+      }
+      if (laneCount(sc.profile[seg], dir) === 0) dir = -dir;
+      if (laneCount(sc.profile[seg], dir) === 0) return false;
+      const lane = laneId(seg, dir, 0);
+      const L = this.sim.laneLen(lane);
+      const along = this.sim.sAlong(seg, t);
+      const v = dir > 0 ? along - this.sim.segS0(seg) : this.sim.segS1(seg) - along;
+      if (sp.term?.includes(i / 2)) ln.term.add(ln.stopLane.length);
+      ln.stopLane.push(lane);
+      ln.stopV.push(Math.max(Math.min(8, L * 0.4), Math.min(L - 14, v)));
+      ln.waiting.push(0); ln.lastT.push(this.time);
+      const lp = new Float64Array(4);
+      this.sim.lanePoint(lane, ln.stopV[ln.stopV.length - 1], lp);
+      ln.stopX.push(x); ln.stopZ.push(z); ln.stopY.push(lp[1] + 0.15);
+      ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // facing the road
+      return true;
+    };
+    const kept: number[] = [];
+    for (let i = 0; i + 1 < sp.stops.length; i += 2) if (addStop(sp.stops[i], sp.stops[i + 1], i, false)) kept.push(i);
+    // Roadcraft bus lines go out and back: the stops of the return trip on the other side, the two ends terminals
+    if (!rail && !sp.loop && kept.length >= 2) {
+      ln.term.add(0); ln.term.add(ln.stopLane.length - 1);
+      for (let k = kept.length - 2; k >= 1; k--) addStop(sp.stops[kept[k]], sp.stops[kept[k] + 1], kept[k], true);
+    }
+    ln.waitTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
+    ln.realTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
+    return ln;
   }
 
   /** Keeps the number of buses on each line (those that vanished respawn at a stop). */
@@ -1938,7 +2578,9 @@ export class Traffic {
     this.initVehicle(v);
     const c = this.veh.cols;
     const train = ln.mode > 0;
-    c.kind[v] = train ? 4 : 1; c.len[v] = KIND_LEN[train ? 4 : 1]; c.vf[v] = train ? 1 : 0.9;
+    c.kind[v] = train ? 4 : 1; c.len[v] = KIND_LEN[train ? 4 : 1];
+    c.vf[v] = train ? 1 : drawDriver(c, v, archOf(1, 0), this.sample);
+    if (train) drawDriver(c, v, archOf(4, 0), this.sample);
     c.color[v] = ln.color & 15;
     c.line[v] = li; c.stopI[v] = stop; c.served[v] = 0;
     this.busSets[li].add(v);
@@ -1947,6 +2589,7 @@ export class Traffic {
     c.rLen[v] = 2; c.rIdx[v] = 1; c.dest[v] = sim.laneTo(lane);
     c.lane[v] = lane; c.conn[v] = -1;
     c.s[v] = this.rng.next() * Math.max(0, ln.stopV[stop] - 6);
+    this.enterLane(v, c.s[v]);
     this.setLaneCount(lane, 1);
     this.mesoEnter(v, lane, true);
   }
@@ -1969,11 +2612,12 @@ export class Traffic {
     if (!ln || from >= ln.waitTo.length || to >= ln.waitTo.length) return;
     this.accrue(ln, from);
     ln.waitTo[from][to] += 1;
+    ln.realTo[from][to] += 1;
     ln.waiting[from] += 1;
   }
 
-  /** For pedestrians: a random bus trip (line, boarding stop, alighting stop, boarding node). */
-  pickTrip(): [number, number, number, number] | null {
+  /** For pedestrians: a random bus trip (line, boarding stop, alighting stop, boarding node, the stop on the sidewalk). */
+  pickTrip(): [number, number, number, number, number, number] | null {
     if (this.lines.length === 0) return null;
     const li = this.rng.int(0, this.lines.length);
     const ln = this.lines[li];
@@ -1982,7 +2626,7 @@ export class Traffic {
     const a = this.rng.int(0, n);
     let b = this.rng.int(0, n - 1);
     if (b >= a) b++;
-    return [li, a, b, this.sim.laneFrom(ln.stopLane[a])];
+    return [li, a, b, this.sim.laneFrom(ln.stopLane[a]), ln.stopX[a], ln.stopZ[a]];
   }
 
   private serve(v: number): void {
@@ -1990,20 +2634,26 @@ export class Traffic {
     const i = c.stopI[v];
     const n = ln.stopLane.length;
     this.accrue(ln, i);
-    let r = this.riders.get(v);
+    let r = this.riders.get(v), rr = this.realRiders.get(v);
     if (!r || r.length !== n) { r = new Float64Array(n); this.riders.set(v, r); }
-    // those bound for this stop get off (and carry on on foot)
-    const off = r[i];
-    r[i] = 0;
-    if (off >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(off)); // from a train people leave through the station (no sidewalk on the rails)
+    if (!rr || rr.length !== n) { rr = new Float64Array(n); this.realRiders.set(v, rr); }
+    // those bound for this stop get off; the people who came on foot step off at the stop and walk on (the background
+    // demand only rides: it never becomes extra pedestrians). From a train people leave through the station.
+    const realOff = rr[i];
+    r[i] = 0; rr[i] = 0;
+    if (realOff >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(realOff), ln.stopX[i], ln.stopZ[i]);
     let load = 0;
     for (let j = 0; j < n; j++) load += r[j];
-    // those waiting get on, until full
+    // those waiting get on, until full: the people who walked there first (whole persons), then the background
     const room = Math.max(0, (ln.mode ? 600 : BUS_CAP) - load);
     const take = Math.min(Math.floor(ln.waiting[i]), room);
     if (take > 0 && ln.waiting[i] > 0) {
-      const f = take / ln.waiting[i];
-      for (let j = 0; j < n; j++) { const m = ln.waitTo[i][j] * f; r[j] += m; ln.waitTo[i][j] -= m; }
+      let real = 0, total = 0;
+      for (let j = 0; j < n; j++) { real += ln.realTo[i][j]; total += ln.waitTo[i][j]; }
+      const realTake = Math.min(real, take), fr = real > 0 ? realTake / real : 0;
+      for (let j = 0; j < n; j++) { const m = ln.realTo[i][j] * fr; rr[j] += m; r[j] += m; ln.realTo[i][j] -= m; ln.waitTo[i][j] -= m; }
+      const bg = total - real, fb = bg > 0 ? Math.min(1, (take - realTake) / bg) : 0;
+      for (let j = 0; j < n; j++) { const m = (ln.waitTo[i][j] - ln.realTo[i][j]) * fb; r[j] += m; ln.waitTo[i][j] -= m; }
       ln.waiting[i] -= take;
     }
     c.load[v] = Math.min(255, Math.round(load + take));
@@ -2019,36 +2669,46 @@ export class Traffic {
     if (!ln) { c.line[v] = -1; c.dying[v] = 1; return; }  // (line gone: the set has already been replaced)
     const target = ln.stopLane[c.stopI[v]];
     if (!sim.net.segs.alive[laneSeg(target)]) { c.dying[v] = 1; return; }
-    const a = sim.laneFrom(target), b = sim.laneTo(target);
+    const b = sim.laneTo(target);
     const o = v * ROUTE_CAP;
-    let n: number;
-    if (from === a) { this.routes[o] = a; n = 1; }
-    else {
-      const ban = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
-      const rail = ln.mode > 0;
-      n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, ban, rail);
-      if (n < 2 && ban >= 0) n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, -1, rail); // dead end: turn back
-      if (n < 2) { c.dying[v] = 1; return; }
-      if (this.routes[o + n - 1] !== a) { c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = a; return; } // truncated route: go on and replan at the end
-    }
-    this.routes[o + n] = b;
-    c.rLen[v] = n + 1; c.rIdx[v] = 0; c.dest[v] = b;
+    // already on the stop's lane (not served yet): it stays on it; the stop comes before the lane's end
+    if (c.lane[v] === target && c.conn[v] < 0) { this.routes[o] = b; c.rLen[v] = 1; c.rIdx[v] = 0; c.dest[v] = b; return; }
+    // to the end of the stop's lane, driving that lane: the last movement into it must be one the junction makes
+    // (planning only to its start node could leave the bus unable to turn into it, circling for ever)
+    const inSeg = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
+    const n = this.router.route(from, b, this.routes, o, ROUTE_CAP, false, inSeg, ln.mode > 0, -1, true, laneSeg(target));
+    if (n < 2) { c.dying[v] = 1; return; }
+    // (a truncated route goes on and is planned again at its end)
+    c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = this.routes[o + n - 1];
   }
 
   /** Those waiting at stops near the camera (standing people, up to 14 per stop). */
   writeStopPeople(data: Float32Array, stride: number, start: number, max: number): number {
     let n = 0;
-    for (const ln of this.lines) {
-      for (let i = 0; i < ln.stopX.length; i++) {
+    // only the cells within 600 m of the camera (the stop index), never every stop of every line
+    const i0 = Math.max(0, Math.floor((this.camX - 600 + MAP_HALF) / STOP_CELL)), i1 = Math.min(STOP_CELLS - 1, Math.floor((this.camX + 600 + MAP_HALF) / STOP_CELL));
+    const j0 = Math.max(0, Math.floor((this.camZ - 600 + MAP_HALF) / STOP_CELL)), j1 = Math.min(STOP_CELLS - 1, Math.floor((this.camZ + 600 + MAP_HALF) / STOP_CELL));
+    // the stops of several lines at one place share it: each person gets the next free place there
+    const placed = this.stopPlaced;
+    placed.clear();
+    for (let cj = j0; cj <= j1; cj++) for (let ci = i0; ci <= i1; ci++) {
+      const cell = cj * STOP_CELLS + ci;
+      for (let e = this.stopStart[cell]; e < this.stopStart[cell + 1]; e++) {
+        const ln = this.lines[this.stopLine[e]], i = this.stopIdx[e];
         const x = ln.stopX[i], z = ln.stopZ[i];
         if (Math.abs(x - this.camX) > 600 || Math.abs(z - this.camZ) > 600) continue;
         const w = Math.min(14, Math.floor(Math.min(120, ln.waiting[i] + (this.time - ln.lastT[i]) * WAIT_RATE)));
         const yaw = ln.stopYaw[i];
         const ax = Math.cos(yaw), az = -Math.sin(yaw); // along the sidewalk
+        const spot = Math.round(x / 3) * 100003 + Math.round(z / 3);
+        const first = placed.get(spot) ?? 0;
+        placed.set(spot, first + w);
         for (let k = 0; k < w && start + n < max; k++) {
           const h = ((i * 7 + k * 13 + ln.id * 31) % 97) / 97;
-          const along = (k - w / 2) * 0.75 + (h - 0.5) * 0.4;
-          const back = -0.6 + ((k * 5) % 3) * 0.45;
+          // places in three rows, 0.8 m apart along the kerb, spreading out both ways from the stop's sign
+          const j = first + k, col = Math.floor(j / 3), row = j % 3;
+          const along = (col % 2 ? -1 : 1) * Math.ceil(col / 2) * 0.8 + (h - 0.5) * 0.12;
+          const back = -0.6 + row * 0.7;
           const px = x + ax * along + Math.sin(yaw) * back, pz = z + az * along + Math.cos(yaw) * back;
           const o = (start + n) * stride;
           const fy = yaw + (h - 0.5) * 0.9;
@@ -2064,13 +2724,18 @@ export class Traffic {
     return n;
   }
 
+  private stopPlaced = new Map<number, number>();
+
   /** Line figures for the interface (passengers per hour). */
   lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> {
     return this.lines.map((ln, i) => {
       const have = this.busSets[i].size;
-      const rate = ln.boardings / Math.max(1e-3, dtReport) * 3600;
-      ln.perHour = ln.perHour === 0 ? rate : ln.perHour * 0.9 + rate * 0.1;
-      ln.boardings = 0;
+      // per simulated hour (paused: nothing to measure, the figure stays)
+      if (dtReport > 0) {
+        const rate = ln.boardings / dtReport * 3600;
+        ln.perHour = ln.perHour === 0 ? rate : ln.perHour * 0.9 + rate * 0.1;
+        ln.boardings = 0;
+      }
       let w = 0;
       for (let k = 0; k < ln.waiting.length; k++) w += Math.min(120, ln.waiting[k] + (this.time - ln.lastT[k]) * WAIT_RATE);
       return { id: ln.id, buses: have, perHour: Math.round(ln.perHour), waiting: Math.round(w) };
@@ -2088,16 +2753,66 @@ export class Traffic {
     sim.net.nodeIndex.query(this.camX - r, this.camZ - r, this.camX + r, this.camZ + r, (n) => {
       if (sim.nodePhases[n] > 0 && this.signalNodes.has(n)) this.windowSignals.add(n);
     });
-    // those that left the window go back to "unknown" in the drawing
-    if (this.signals) for (const n of old) if (!this.windowSignals.has(n) && n < this.signals.length) this.signals[n] = 0;
+    // those that left the window go back to "unknown" in the drawing and to their timed cycle
+    for (const n of old) if (!this.windowSignals.has(n)) { this.sig.setActive(n, false); if (this.signals && n < this.signals.length) this.signals[n] = 0; }
+    for (const n of this.windowSignals) this.sig.setActive(n, true);
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
       if (c.conn[v] >= 0 || c.dying[v] === 2) continue;
       const lane = c.lane[v];
       if (this.inWindowOut(lane)) continue;
+      // what only exists near the camera ends here, counted: a drop-off at the kerb finishes its trip and the car goes
+      // on to the next; a car or truck manoeuvring into its bay or dock has arrived; one fading out leaves
+      if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
+      if (c.dying[v] === 3 || c.dying[v] === 1) { this.finish(v); continue; }
+      if (c.dying[v] === 4) {
+        c.dying[v] = 0; c.served[v] = 0;
+        if (!this.dropOffTrip(v, this.sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; this.finish(v); continue; }
+      }
+      c.pk[v] = 0;
       this.unlink(v);
       this.removeMicro(v);
       this.mesoEnter(v, lane, true);
+    }
+    // far-model vehicles on lanes now inside the window become drawn ones (the window came to them, or they were born
+    // there): nobody inside the window is invisible, holding a queue or an exit's room unseen
+    const sc = sim.net.segs.cols, w = this.window;
+    sim.net.segIndex.query(this.camX - w, this.camZ - w, this.camX + w, this.camZ + w, (s) => {
+      if (!sim.net.segs.alive[s] || Math.hypot(sc.mx[s] - this.camX, sc.mz[s] - this.camZ) >= w) return;
+      for (let k = 0; k < 16; k++) if (this.mesoHead[s * 16 + k] >= 0) this.materialize(s * 16 + k);
+    });
+  }
+
+  /**
+   * The far-model vehicles of a lane become near ones, in their order on it: each where its timing says it is by now,
+   * behind the vehicles already drawn and at least a car length plus 2 m behind the one ahead (a queue fills from the
+   * line backwards). Those that do not fit stay in the far model until they move on.
+   */
+  private materialize(lane: number): void {
+    const c = this.veh.cols, sim = this.sim, L = sim.laneLen(lane);
+    const tail = this.laneTail[lane];
+    let limit = tail >= 0 ? c.s[tail] - c.len[tail] - 2 : L - 0.5;
+    const free = laneSpeed(sim.net.segs.cols.profile[laneSeg(lane)]);
+    for (let v = this.mesoHead[lane]; v >= 0;) {
+      const next = c.mnext[v];
+      if (c.dying[v]) { this.finish(v); v = next; continue; }
+      const span = c.tExit[v] - c.tIn[v];
+      const est = span > 0 ? c.s0[v] + (L - c.s0[v]) * Math.min(1, Math.max(0, (this.time - c.tIn[v]) / span)) : L;
+      // (one that has just come in stands at the start of the lane, whole)
+      if (limit < c.len[v]) break;
+      const s = Math.max(c.len[v], Math.min(est, limit));
+      this.mesoUnlink(v);
+      c.s[v] = s; c.conn[v] = -1; c.held[v] = 0; c.wait[v] = 0;
+      // in a queue it stands; otherwise it drives at what the lane has been driving at
+      c.v[v] = s < est - 1 ? 0 : Math.min(free * c.vf[v], this.laneVel[lane] > 0 ? this.laneVel[lane] : free * 0.7);
+      // never faster than what still stops comfortably at the line (whatever the junction asks of it there)
+      c.v[v] = Math.min(c.v[v], Math.sqrt(2 * c.db[v] * Math.max(0, L - s - 1)));
+      c.acc[v] = 0;
+      c.fade[v] = 0;
+      this.addMicro(v);
+      this.insert(v, false, lane);
+      limit = s - c.len[v] - 2;
+      v = next;
     }
   }
 
@@ -2180,52 +2895,86 @@ export class Traffic {
     return lights;
   }
 
+  /**
+   * The vehicles within `r` m of (x, z), as the motion probe reads them (tools/check-sim.mjs): INSPECT_STRIDE numbers
+   * each (id, kind, middle x, z, yaw, length, speed, connection, node ahead, why it may stand (INSPECT_* bits), gap
+   * to the vehicle ahead, its speed, distance to the stop line, time waited at the line, time stopped, position on the lane or connection, strip of the street under its middle (sim/probe.ts STRIP_KINDS)
+   * and the distance from the street's nearer end), and the pairs
+   * inside the same junction on paths that cross, both over the crossing point (id, id, x, z). Only the micro window
+   * is looked at, and only on request.
+   */
+  inspect(x: number, z: number, r: number): { vehicles: Float32Array; clashes: Float32Array } {
+    const c = this.veh.cols, sim = this.sim, k = sim.conns.cols, p = this.tmp;
+    const out: number[] = [], onConn: number[] = [];
+    for (let i = 0; i < this.microN; i++) {
+      const v = this.micro[i];
+      if (c.kind[v] === 4) this.headOf(v, p); else this.centreOf(v, p);
+      if (Math.hypot(p[0] - x, p[2] - z) > r) continue;
+      const conn = c.conn[v], lane = c.lane[v];
+      let flags = 0, gap = 999, vl = 0, toEnd = 0, node = -1;
+      if (conn >= 0) { node = k.node[conn]; onConn.push(v); }
+      else if (lane >= 0) {
+        node = sim.laneTo(lane);
+        toEnd = sim.laneLen(lane) - c.s[v];
+        const arm = sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)];
+        if (sim.nodePhases[node] > 0 && !this.sig.go(node, arm, true)) flags |= INSPECT_RED;
+        const lead = c.prev[v];
+        if (lead >= 0 && c.lane[lead] === lane && c.conn[lead] < 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
+        if (toEnd < 8 && c.wait[v] > 0) flags |= INSPECT_GATE;
+        const ctl = sim.nodeCtl[node];
+        if ((ctl === Ctl.Crossing && this.crossingDown(node)) || (ctl === Ctl.Zebra && this.pedCrossing(node))) flags |= INSPECT_GATE;
+      }
+      if (c.pk[v] > 0 || c.mv[v] >= 0) flags |= INSPECT_BAY;
+      if (c.dying[v]) flags |= INSPECT_LEAVING;
+      if (c.line[v] >= 0 && c.dwell[v] > 0) flags |= INSPECT_STOP;
+      if (c.lcT[v] < 1) flags |= INSPECT_CHANGING;
+      const [strip, fromEnd] = stripAt(sim, p[0], p[2]);
+      out.push(v, c.kind[v], p[0], p[2], p[3], c.len[v], c.v[v], conn, node, flags, gap, vl, toEnd, c.wait[v], c.held[v], c.s[v], strip, fromEnd);
+    }
+    // paths that cross inside a junction: both bodies over the crossing point at once
+    const clashes: number[] = [];
+    for (let a = 0; a < onConn.length; a++) for (let b = a + 1; b < onConn.length; b++) {
+      const va = onConn[a], vb = onConn[b], ca = c.conn[va], cb = c.conn[vb];
+      if (ca === cb || k.node[ca] !== k.node[cb]) continue;
+      const list = sim.conflicts.get(ca);
+      if (!list || !list.includes(cb)) continue;
+      const hit = this.crossAt(ca, cb);
+      if (!hit) continue;
+      const over = (v: number, s: number) => c.s[v] + 0.5 >= s && c.s[v] - c.len[v] - 0.5 <= s;
+      if (over(va, hit[0]) && over(vb, hit[1])) clashes.push(va, vb, hit[2], hit[3]);
+    }
+    return { vehicles: Float32Array.from(out), clashes: Float32Array.from(clashes) };
+  }
+
+  /** Where connections a and b cross: [position along a, along b, x, z] (the end of both when they merge), or null. */
+  private crossAt(a: number, b: number): [number, number, number, number] | null {
+    const k = this.sim.conns.cols, P = 16;
+    const pt = (x: number, t: number) => {
+      const s = 1 - t;
+      return [s * s * k.x0[x] + 2 * s * t * k.cx[x] + t * t * k.x1[x], s * s * k.z0[x] + 2 * s * t * k.cz[x] + t * t * k.z1[x]];
+    };
+    for (let i = 0; i < P; i++) {
+      const [ax, az] = pt(a, i / P), [bx, bz] = pt(a, (i + 1) / P);
+      for (let j = 0; j < P; j++) {
+        const [cx, cz] = pt(b, j / P), [dx, dz] = pt(b, (j + 1) / P);
+        const den = (bx - ax) * (dz - cz) - (bz - az) * (dx - cx);
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den, u = ((cx - ax) * (bz - az) - (cz - az) * (bx - ax)) / den;
+        if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+        return [k.len[a] * (i + t) / P, k.len[b] * (j + u) / P, ax + (bx - ax) * t, az + (bz - az) * t];
+      }
+    }
+    if (k.to[a] === k.to[b]) return [k.len[a], k.len[b], k.x1[a], k.z1[a]];
+    return null;
+  }
+
   writePoses(data: Float32Array, stride: number): number {
-    const c = this.veh.cols, sim = this.sim, p = this.tmp, q = this.tmp2;
+    const c = this.veh.cols, p = this.tmp;
     let n = 0;
     for (let i = 0; i < this.microN; i++) {
       const v = this.micro[i];
-      let lights = 0;
-      if (c.conn[v] >= 0) sim.connPoint(c.conn[v], c.s[v], p);
-      else {
-        const lane = c.lane[v];
-        const L = sim.laneLen(lane);
-        sim.lanePoint(lane, Math.min(L, c.s[v]), p);
-        // smooth lane change: blend with the origin lane
-        if (c.lcT[v] < 1 && c.lcFrom[v] >= 0 && sim.net.segs.alive[laneSeg(c.lcFrom[v])]) {
-          sim.lanePoint(c.lcFrom[v], Math.min(L, c.s[v]), q);
-          // lane-change indicator: toward the new lane's side (driver's right = (−cos, sin) of the heading)
-          if (c.lcT[v] < 0.8) lights |= -Math.cos(p[3]) * (p[0] - q[0]) + Math.sin(p[3]) * (p[2] - q[2]) > 0 ? LIGHT_RIGHT : LIGHT_LEFT;
-          const t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
-          p[0] += (q[0] - p[0]) * k; p[2] += (q[2] - p[2]) * k;
-        }
-      }
-      if (c.kind[v] === 4) { n = this.writeTrain(v, data, stride, n, p); continue; }
-      let centred = false;
-      if (c.mv[v] >= 0) {
-        // on a manoeuvre: the pose is the vehicle centre on the Reeds-Shepp path; signal towards where it goes
-        const mp = this.mvA;
-        this.mvs.pose(c.mv[v], mp);
-        p[0] = mp[0]; p[2] = mp[1]; p[3] = mp[2];
-        centred = true;
-        lights |= this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT;
-      } else if (c.dying[v] === 4 && c.conn[v] < 0) {
-        // at the kerb: 0.9 m to the right, hazard lights while stopped
-        const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
-        p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
-        if (c.v[v] < 0.1 && ((this.time * 1.5) % 1) < 0.5) lights |= LIGHT_LEFT | LIGHT_RIGHT;
-      }
-      // in the bay or on the way to it (offset in u, along the segment direction): pulling in, right indicator; pulling out, left
-      if (!centred && c.dying[v] !== 4 && c.pk[v] > 0 && c.conn[v] < 0) {
-        const lane = c.lane[v], dir = laneDir(lane);
-        const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
-        const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
-        if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
-        if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
-      }
-      // reference point at the middle of the vehicle
-      const back = centred ? 0 : c.len[v] / 2;
-      p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
+      if (c.kind[v] === 4) { this.headOf(v, p); n = this.writeTrain(v, data, stride, n, p); continue; }
+      const lights = this.centreOf(v, p);
       const o = n * stride;
       if (!c.has[v]) { c.px[v] = p[0]; c.py[v] = p[1]; c.pz[v] = p[2]; c.pyaw[v] = p[3]; c.has[v] = 1; }
       data[o] = c.px[v]; data[o + 1] = c.py[v]; data[o + 2] = c.pz[v]; data[o + 3] = c.pyaw[v];
@@ -2240,16 +2989,121 @@ export class Traffic {
     }
     return n;
   }
+
+  /**
+   * The bodies of the vehicles within `r` m of (x, z), for the walkers to keep off (roadcraft walk.ts CarZone): x, z,
+   * yaw, half length, half width each into `bodyBuf` (grown when full). Only the micro window. Returns how many.
+   */
+  writeBodies(x: number, z: number, r: number): number {
+    const c = this.veh.cols, p = this.tmp;
+    let n = 0;
+    for (let i = 0; i < this.microN; i++) {
+      const v = this.micro[i];
+      if (c.kind[v] === 4) continue;
+      this.centreOf(v, p);
+      if (Math.abs(p[0] - x) > r || Math.abs(p[2] - z) > r) continue;
+      if ((n + 1) * 5 > this.bodyBuf.length) { const b = new Float32Array(this.bodyBuf.length * 2); b.set(this.bodyBuf); this.bodyBuf = b; }
+      const o = n * 5;
+      this.bodyBuf[o] = p[0]; this.bodyBuf[o + 1] = p[2]; this.bodyBuf[o + 2] = p[3];
+      this.bodyBuf[o + 3] = c.len[v] / 2; this.bodyBuf[o + 4] = BODY_HALF_W[c.kind[v]] ?? 0.9;
+      n++;
+    }
+    return n;
+  }
+  bodyBuf = new Float32Array(5 * 1024);
+
+  /**
+   * Front of vehicle `v` on its lane or connection (x, y, z, yaw into `p`), mid lane change if one is under way.
+   * Returns the lane-change indicator bits.
+   */
+  private headOf(v: number, p: Float64Array): number {
+    const c = this.veh.cols, sim = this.sim, q = this.tmp2;
+    let lights = 0;
+    // a lane change still under way (only between lanes of the same segment as the lane it is on or came from)
+    const changing = c.lcT[v] < 1 && c.lcFrom[v] >= 0 && c.lane[v] >= 0 && laneSeg(c.lcFrom[v]) === laneSeg(c.lane[v]) && sim.net.segs.alive[laneSeg(c.lcFrom[v])];
+    if (c.conn[v] >= 0) {
+      sim.connPoint(c.conn[v], c.s[v], p);
+      // into the junction mid-change: the sideways offset left at the end of the lane fades out on the way
+      if (changing) {
+        const lane = c.lane[v], L = sim.laneLen(lane), t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
+        sim.lanePoint(c.lcFrom[v], L, q); const qx = q[0], qz = q[2];
+        sim.lanePoint(lane, L, q);
+        p[0] += (qx - q[0]) * k; p[2] += (qz - q[2]) * k;
+      }
+    } else {
+      const lane = c.lane[v];
+      const L = sim.laneLen(lane);
+      sim.lanePoint(lane, Math.min(L, c.s[v]), p);
+      // smooth lane change: blend with the origin lane
+      if (changing) {
+        sim.lanePoint(c.lcFrom[v], Math.min(L, c.s[v]), q);
+        // lane-change indicator: toward the new lane's side (driver's right = (−cos, sin) of the heading)
+        if (c.lcT[v] < 0.8) lights |= -Math.cos(p[3]) * (p[0] - q[0]) + Math.sin(p[3]) * (p[2] - q[2]) > 0 ? LIGHT_RIGHT : LIGHT_LEFT;
+        const t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
+        p[0] += (q[0] - p[0]) * k; p[2] += (q[2] - p[2]) * k;
+      }
+    }
+    return lights;
+  }
+
+  /**
+   * Middle of vehicle `v` as drawn (x, y, z, yaw into `p`): on its lane or connection, in the bay, at the kerb or on a
+   * manoeuvre's path. Returns the indicator bits. Not for trains (their wagons: `writeTrain`).
+   */
+  private centreOf(v: number, p: Float64Array): number {
+    const c = this.veh.cols, sim = this.sim;
+    let lights = this.headOf(v, p);
+    let centred = false;
+    if (c.mv[v] >= 0) {
+      // on a manoeuvre: the pose is the vehicle centre on the Reeds-Shepp path; signal towards where it goes
+      const mp = this.mvA;
+      this.mvs.pose(c.mv[v], mp);
+      p[0] = mp[0]; p[2] = mp[1]; p[3] = mp[2];
+      centred = true;
+      lights |= this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT;
+    } else if (c.dying[v] === 4 && c.conn[v] < 0) {
+      // at the kerb: 0.9 m to the right, hazard lights while stopped
+      const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
+      p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
+      if (c.v[v] < 0.1 && ((this.time * 1.5) % 1) < 0.5) lights |= LIGHT_LEFT | LIGHT_RIGHT;
+    }
+    // in the bay or on the way to it (offset in u, along the segment direction): pulling in, right indicator; pulling out, left
+    if (!centred && c.dying[v] !== 4 && c.pk[v] > 0 && c.conn[v] < 0) {
+      const lane = c.lane[v], dir = laneDir(lane);
+      const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
+      const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
+      if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
+      if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
+    }
+    // reference point at the middle of the vehicle
+    const back = centred ? 0 : c.len[v] / 2;
+    p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
+    return lights;
+  }
 }
 
 /** Point `d` metres behind the vehicle's front (continues onto the previous lane along a straight line if needed). */
-function backAlong(sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array): void {
-  if (conn >= 0) {
-    if (s - d >= 0) { sim.connPoint(conn, s - d, out); return; }
-    const from = sim.conns.cols.from[conn];
-    lane = from; s = sim.laneLen(from) + (s - d); d = 0;
-  } else s -= d;
-  if (s >= 0) { sim.lanePoint(lane, s, out); return; }
+/**
+ * Point `d` metres behind the vehicle's front (a wagon): back along the connection and lanes it came by, through the
+ * connections into each lane (a train's rear wagons follow the track round a bend); only past what is known, along a
+ * straight line.
+ */
+export function backAlong(sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array): void {
+  const k = sim.conns.cols;
+  s -= d;
+  for (let guard = 0; guard < 6; guard++) {
+    if (conn >= 0) {
+      if (s >= 0) { sim.connPoint(conn, s, out); return; }
+      lane = k.from[conn]; s += sim.laneLen(lane); conn = -1;
+      continue;
+    }
+    if (s >= 0) { sim.lanePoint(lane, s, out); return; }
+    // the connection that leads into this lane (on rails there is one per lane, except at a switch)
+    let into = -1;
+    for (let x = sim.nodeConn[sim.laneFrom(lane)]; x >= 0; x = k.nextAtNode[x]) if (k.to[x] === lane) { into = x; break; }
+    if (into < 0) break;
+    conn = into; s += k.len[into];
+  }
   sim.lanePoint(lane, 0, out);
   out[0] += Math.sin(out[3]) * s; out[2] += Math.cos(out[3]) * s;
 }

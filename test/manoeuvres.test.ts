@@ -10,6 +10,9 @@ import { PROFILES } from '../src/roads/profiles.ts';
 import { Zone } from '../src/roads/zones.ts';
 import type { NetOp } from '../src/roads/network.ts';
 
+/** Warehouse loading docks next to the streets (as the page sends them: point, heading facing the street). */
+const DOCKS = [[-200, -100, Math.PI / 2], [60, 200, Math.PI], [200, 40, -Math.PI / 2], [-100, 60, 0]];
+
 /** A grid of streets with kerbside parking, zoned (trips start and end there). */
 function parkingGrid(n = 4, step = 160): SimNet {
   const w = new World();
@@ -28,6 +31,9 @@ function parkingGrid(n = 4, step = 160): SimNet {
     buildRoad(w, p, a, b, prof);
   }
   for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { w.roads.setZone(s, 0, Zone.Residential); w.roads.setZone(s, 1, Zone.Commercial); }
+  // the warehouses with docks (the test's docks) stand on industrial streets: trucks carry goods to industry
+  const sc = w.roads.segs.cols;
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && DOCKS.some(([x, z]) => Math.hypot(sc.mx[s] - x, sc.mz[s] - z) < 120)) { w.roads.setZone(s, 0, Zone.Industrial); w.roads.setZone(s, 1, Zone.Industrial); }
   const sim = new SimNet();
   const enc = encodeOps(ops);
   for (let i = 0; i < ops.length; i++) sim.apply(decodeOp(enc, i));
@@ -40,12 +46,23 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
   const tr = new Traffic(sim);
   sim.onConnRemoved = (c) => tr.evacuateConn(c);
   tr.nodesRebuilt([...Array(sim.net.nodes.end).keys()]);
-  tr.camX = 0; tr.camZ = 0; tr.hour = 12; tr.demand = 1.5;
+  tr.camX = 0; tr.camZ = 0; tr.hour = 12; tr.demand = 1.5; tr.density = 1 / 50; // enough trucks in 6 min to reach the docks
   let drops = 0;
   tr.onDropOff = () => { drops++; };
   // docas de galpão junto às ruas (como a página manda: ponto, rumo de frente para a rua)
   const docks: number[] = [];
-  for (const [x, z, yaw] of [[-200, -100, Math.PI / 2], [60, 200, Math.PI], [200, 40, -Math.PI / 2], [-100, 60, 0]]) docks.push(x, z, yaw);
+  // a warehouse on each side of every industrial street (around the DOCKS points), its dock 16 m back from the kerb
+  // at the street's middle, facing it: trucks carry goods to industry, so they drive past them
+  const sc = sim.net.segs.cols;
+  for (let sg = 0; sg < sim.net.segs.end; sg++) {
+    if (!sim.net.segs.alive[sg] || !DOCKS.some(([x, z]) => Math.hypot(sc.mx[sg] - x, sc.mz[sg] - z) < 120)) continue;
+    const q = sim.net.quad(sg), px = (q.x0 + 2 * q.cx + q.x1) / 4, pz = (q.z0 + 2 * q.cz + q.z1) / 4;
+    const tx = q.x1 - q.x0, tz = q.z1 - q.z0, tl = Math.hypot(tx, tz);
+    for (const side of [1, -1]) {
+      const nx = side * tz / tl, nz = -side * tx / tl;
+      docks.push(px + nx * 16, pz + nz * 16, Math.atan2(-nx, -nz));
+    }
+  }
   tr.setDocks(new Float32Array(docks));
   const data = new Float32Array(11 * 20000);
   const c = tr.veh.cols, mc = tr.mvs.t.cols;

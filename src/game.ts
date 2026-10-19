@@ -283,6 +283,8 @@ export class Game {
       else if (e.data.type === 'hit') this.onHit(e.data.people, e.data.vehicles);
       else if (e.data.type === 'autoControl') this.world.roads.setFlow(e.data.node, e.data.flow);
       else if (e.data.type === 'manoeuvres') { const r = this.manoeuvreWait; this.manoeuvreWait = null; r?.(e.data); }
+      else if (e.data.type === 'resync') this.resyncSim(e.data.reason);
+      else if (e.data.type === 'inspect') { /* read by the motion probe's own listener (tools/check-sim.mjs) */ }
       else { console.error('simulação:', e.data.message); this.health?.add('erro', `simulação: ${e.data.message.split(String.fromCharCode(10))[0]}`); }
     };
     this.sim.postMessage({ type: 'init', poses: posesSab, heights: this.world.heightsSab, occupancy: this.occupancySab, signals: this.signalsSab, tickHz: 20 } satisfies ToSim);
@@ -798,8 +800,9 @@ export class Game {
   private lastTrips: { t: number; arrived: number; lost: number } | null = null;
   private trackTrips(st: Extract<FromSim, { type: 'stats' }>): void {
     this.simStats = st;
-    const t = performance.now();
-    if (!this.lastTrips || st.arrived < this.lastTrips.arrived) { this.lastTrips = { t, arrived: st.arrived, lost: st.lost }; return; }
+    // per simulated minute (at 2x and 4x as at 1x; paused, the figures stay)
+    const t = st.simTime * 1000;
+    if (!this.lastTrips || st.arrived < this.lastTrips.arrived || t < this.lastTrips.t) { this.lastTrips = { t, arrived: st.arrived, lost: st.lost }; return; }
     if (t - this.lastTrips.t < 10000) return;
     const k = 60000 / (t - this.lastTrips.t);
     this.tripsPerMin = (st.arrived - this.lastTrips.arrived) * k;
@@ -860,10 +863,30 @@ export class Game {
     this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
   }
 
+  /**
+   * The simulation's mirror of the network failed to apply a change: send it the whole network again (a 'clear', then
+   * every node, segment and junction; pending changes are already in it). Its vehicles start over, and the flow-based
+   * controls it had chosen are forgotten on both sides.
+   */
+  private resyncSim(reason: string): void {
+    const net = this.world.roads, nc = net.nodes.cols, ops: NetOp[] = [{ t: 'clear' }];
+    for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n]) ops.push({ t: 'addNode', rec: { id: n, x: nc.x[n], z: nc.z[n], y: nc.y[n] } });
+    for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) ops.push({ t: 'addSeg', rec: net.segRec(s) });
+    for (const [id, spec] of net.junctions) ops.push({ t: 'junction', id, spec });
+    for (const id of [...net.flow.keys()]) net.setFlow(id, 0);
+    this.netOps.length = 0;
+    const extra: string[] = [];
+    const enc = encodeOps(ops, extra);
+    this.sim.postMessage({ type: 'ops', ops: enc, extra } satisfies ToSim, [enc.buffer]);
+    this.roadsVersion++;
+    console.error('simulação: rede reenviada inteira', reason);
+  }
+
   /** Sends the network changes and the camera position to the simulation. */
   private syncSim(now: number): void {
     if (this.netOps.length) {
-      if (this.transit.lines.length) this.roadsVersion++;
+      // the stops follow the roads: resend the lines only when segments changed (a zone dab or a junction control does not)
+      if (this.transit.lines.length && this.netOps.some((op) => op.t === 'addSeg' || op.t === 'remSeg' || op.t === 'profile' || op.t === 'clear')) this.roadsVersion++;
       const extra: string[] = [];
       const ops = encodeOps(this.netOps, extra);
       this.netOps.length = 0;
