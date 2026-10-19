@@ -180,6 +180,17 @@ const SCENARIOS = {
     env: { CIDADE_DIFF: '1000', CIDADE_SETTLE: '3' },
     diff: (pct) => [pct > 3, 'with a strong wind the trees and the grass move (' + pct + '% of the pixels in 1 s)', 'only ' + pct + '% of the pixels changed'],
   },
+  // E30: a far forest, camera still and no wind: the trees' photos do not shimmer (two captures 1 s apart)
+  'far-forest': {
+    body: `
+      g.weather.windFixed = 0;
+      await g.view(2500, -2500, 35, 14, 700, 11);
+      await g.settle(10);
+      await frames(30);
+    `,
+    env: { CIDADE_DIFF: '1000', CIDADE_SETTLE: '3' },
+    diff: (pct) => [pct < 0.5, 'a far forest seen still changes under 0.5% of the pixels in 1 s (' + pct + '%)', pct + '% of the pixels changed'],
+  },
 };
 
 const pick = process.argv.slice(2);

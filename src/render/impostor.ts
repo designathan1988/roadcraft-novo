@@ -66,6 +66,16 @@ export function upFor(d: [number, number, number]): THREE.Vector3 {
 }
 
 /** Photographs the trees: one target with the colour (alpha = cutout) and another with the normal. */
+/**
+ * One atlas target (colour or normal). With mipmaps: far trees are a few pixels and, read at full size, each pixel
+ * picked a different leaf every frame (the forests shimmered).
+ */
+export function impostorTarget(w: number, h: number): THREE.RenderTarget {
+  const rt = new THREE.RenderTarget(w, h, { type: THREE.UnsignedByteType, depthBuffer: true });
+  rt.texture.minFilter = THREE.LinearMipmapLinearFilter; rt.texture.magFilter = THREE.LinearFilter; rt.texture.generateMipmaps = true;
+  return rt;
+}
+
 export function bakeImpostors(renderer: THREE.WebGPURenderer, geos: THREE.BufferGeometry[], leafAtlas: THREE.Texture): { color: THREE.Texture; normal: THREE.Texture; targets: THREE.RenderTarget[] } {
   const W = SIZE * IMP_G;
   const pcol = attribute('pcol', 'vec4');
@@ -85,11 +95,7 @@ export function bakeImpostors(renderer: THREE.WebGPURenderer, geos: THREE.Buffer
   normalMat.positionNode = pos;
   normalMat.colorNode = vec4(normalWorld.mul(0.5).add(0.5), 1);
   normalMat.maskNode = mask;
-  const targets = [colorMat, normalMat].map(() => {
-    const rt = new THREE.RenderTarget(W * IMP_TYPES, W, { type: THREE.UnsignedByteType, depthBuffer: true });
-    rt.texture.minFilter = THREE.LinearFilter; rt.texture.magFilter = THREE.LinearFilter; rt.texture.generateMipmaps = false;
-    return rt;
-  });
+  const targets = [colorMat, normalMat].map(() => impostorTarget(W * IMP_TYPES, W));
   const scene = new THREE.Scene();
   // copies without the props' indirect draw (there the count comes from the GPU)
   const meshes = geos.map((src) => { const g = src.clone(); g.indirect = null; const m = new THREE.Mesh(g, colorMat); m.frustumCulled = false; scene.add(m); return m; });
@@ -105,6 +111,8 @@ export function bakeImpostors(renderer: THREE.WebGPURenderer, geos: THREE.Buffer
     renderer.setRenderTarget(rt);
     rt.viewport.set(0, 0, W * IMP_TYPES, W);
     renderer.clear();
+    // the mipmaps are made once, after the last photo (each render into the atlas would make them again)
+    rt.texture.generateMipmaps = false;
     for (let t = 0; t < geos.length; t++) {
       meshes.forEach((m, k) => { m.visible = k === t; });
       const { cy, r } = IMP_FRAME[t];
@@ -116,6 +124,7 @@ export function bakeImpostors(renderer: THREE.WebGPURenderer, geos: THREE.Buffer
         cam.lookAt(0, cy, 0);
         cam.updateMatrixWorld();
         rt.viewport.set(t * W + i * SIZE, j * SIZE, SIZE, SIZE);
+        if (t === geos.length - 1 && j === IMP_G - 1 && i === IMP_G - 1) rt.texture.generateMipmaps = true;
         renderer.render(scene, cam);
       }
     }

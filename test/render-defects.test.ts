@@ -633,3 +633,12 @@ test('E3: moving, the tiles of far plates that stand in for them are not visited
   // the 10 km map has 100 tiles; from the corner, the plates beyond 4.6 km stand in for theirs
   assert.ok(visits < 70, `a moving frame visited ${visits} of 100 tiles`);
 });
+
+test('E30: the far trees\' photo atlas has mipmaps (no shimmer far away)', async () => {
+  const imp = await import('../src/render/impostor.ts') as Record<string, unknown>;
+  const make = imp.impostorTarget as ((w: number, h: number) => THREE.RenderTarget) | undefined;
+  assert.ok(make, 'the atlas targets are made by one function');
+  const rt = make!(1024, 256);
+  assert.equal(rt.texture.generateMipmaps, true, 'mipmaps are generated after the bake');
+  assert.equal(rt.texture.minFilter, THREE.LinearMipmapLinearFilter, 'minification reads the mipmaps');
+});
