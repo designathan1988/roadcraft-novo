@@ -840,3 +840,27 @@ test('D27: growth follows the game speed: nothing while paused, twice as fast at
   assert.ok(one > 0);
   assert.ok(two >= one * 1.8, `at 2× ${two} buildings grew, at 1× ${one}`);
 });
+
+test('D28: changing a junction\'s control redraws the roads there but does not redo any lots', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  road(w, 0, -100, 0, 100);
+  const c = w.roads.nearestNode(0, 0, 1);
+  for (const k of [Dirty.Roads, Dirty.RoadPaint, Dirty.Lots]) w.dirty.drain(k);
+  const j = new RoadJournal(w, 'control');
+  j.setJunction(c, { ctl: Ctl.Signal });
+  assert.ok(w.dirty.drain(Dirty.RoadPaint).length > 0, 'the paint was not redrawn');
+  assert.equal(w.dirty.drain(Dirty.Lots).length, 0, 'changing the control redid lots');
+});
+
+test('D30: painting the ground does not rebuild the props; planting a forest does', async () => {
+  const { GroundStroke, Ground } = await import('../src/world/ground.ts');
+  const w = flatWorld(0);
+  w.dirty.drain(Dirty.Props);
+  const paint = new GroundStroke(w);
+  paint.dab(0, 0, 20, 'paint', Ground.Sand, 1, 0.1);
+  assert.equal(w.dirty.drain(Dirty.Props).length, 0, 'a dab of ground paint marked the props');
+  const forest = new GroundStroke(w);
+  forest.dab(0, 0, 20, 'forest', 0, 1, 0.1);
+  assert.ok(w.dirty.drain(Dirty.Props).length > 0, 'planting trees must rebuild the props');
+});

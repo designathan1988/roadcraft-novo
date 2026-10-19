@@ -165,7 +165,7 @@ export class RoadNetwork {
   setFlow(id: number, flow: number): void {
     if (!this.nodes.alive[id] || (this.flow.get(id) ?? 0) === flow) return;
     if (flow) this.flow.set(id, flow); else this.flow.delete(id);
-    this.touchNode(id);
+    this.touchRules(id);
   }
 
   /** Junction control chosen by the player (null = automatic). */
@@ -175,7 +175,7 @@ export class RoadNetwork {
     if (spec) this.junctions.set(id, spec); else this.junctions.delete(id);
     // new choice: the simulation measures again
     this.flow.delete(id);
-    this.touchNode(id);
+    this.touchRules(id);
     this.emit({ t: 'junction', id, spec });
   }
 
@@ -241,6 +241,17 @@ export class RoadNetwork {
     const x0 = cellX(Math.min(nc.x[a], nc.x[b], sc.cx[s]) - LOT_REACH), x1 = cellX(Math.max(nc.x[a], nc.x[b], sc.cx[s]) + LOT_REACH);
     const z0 = cellX(Math.min(nc.z[a], nc.z[b], sc.cz[s]) - LOT_REACH), z1 = cellX(Math.max(nc.z[a], nc.z[b], sc.cz[s]) + LOT_REACH);
     for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) this.world.touchCell(cellId(cx, cz), Dirty.Lots);
+  }
+
+  /**
+   * A junction's control changed: the road meshes there (paint, signs, signals) are redrawn; its shape is the same,
+   * so no lot is redone.
+   */
+  private touchRules(n: number): void {
+    const nc = this.nodes.cols, sc = this.segs.cols, k = Dirty.Roads | Dirty.RoadPaint;
+    this.world.touchCell(cellId(cellX(nc.x[n]), cellX(nc.z[n])), k);
+    const o = n * MAX_DEG;
+    for (let i = 0; i < nc.deg[n]; i++) { const s = this.adj[o + i]; this.world.touchCell(cellId(cellX(sc.mx[s]), cellX(sc.mz[s])), k); }
   }
 
   /** A node changed: its cell and the cell of each connected segment (their setback changes). */

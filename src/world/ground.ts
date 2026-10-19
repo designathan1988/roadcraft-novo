@@ -74,6 +74,8 @@ export class GroundStroke implements Command {
   private old = new Uint32Array(0);
   private after = new Uint32Array(0);
   private box = [Infinity, Infinity, -Infinity, -Infinity];
+  /** The stroke planted or cleared trees (the props change); plain paint only recolours the ground layer. */
+  private trees = false;
 
   constructor(world: World) { this.world = world; }
 
@@ -102,7 +104,8 @@ export class GroundStroke implements Command {
     }
     this.box[0] = Math.min(this.box[0], gx0); this.box[1] = Math.min(this.box[1], gz0);
     this.box[2] = Math.max(this.box[2], gx1); this.box[3] = Math.max(this.box[3], gz1);
-    touchGround(this.world, gx0, gz0, gx1, gz1);
+    if (mode !== 'paint') this.trees = true;
+    touchGround(this.world, gx0, gz0, gx1, gz1, mode !== 'paint');
   }
 
   finish(): boolean {
@@ -118,7 +121,7 @@ export class GroundStroke implements Command {
   private write(v: Uint32Array): void {
     const g = this.world.ground32;
     for (let j = 0; j < this.idx.length; j++) g[this.idx[j]] = v[j];
-    touchGround(this.world, this.box[0], this.box[1], this.box[2], this.box[3]);
+    touchGround(this.world, this.box[0], this.box[1], this.box[2], this.box[3], this.trees);
   }
 
   apply(): void { this.write(this.after); }
@@ -126,10 +129,13 @@ export class GroundStroke implements Command {
 }
 
 /** Camadas e células do chão tocadas (a floresta muda as peças; a pintura, o terreno). */
-function touchGround(world: World, gx0: number, gz0: number, gx1: number, gz1: number): void {
-  for (let tz = gz0 >> WSHIFT; tz <= gz1 >> WSHIFT; tz++) for (let tx = gx0 >> WSHIFT; tx <= gx1 >> WSHIFT; tx++) world.groundDirty.add(tz * MAP_TILES + tx);
+function touchGround(world: World, gx0: number, gz0: number, gx1: number, gz1: number, props: boolean): void {
+  for (let tz = gz0 >> WSHIFT; tz <= gz1 >> WSHIFT; tz++) for (let tx = gx0 >> WSHIFT; tx <= gx1 >> WSHIFT; tx++) {
+    world.groundDirty.add(tz * MAP_TILES + tx);
+    world.markSave(tz * MAP_TILES + tx);
+  }
   const w = (g: number) => g * WATER_SPACING - MAP_HALF;
-  world.touchRect(w(gx0) - 8, w(gz0) - 8, w(gx1) + 8, w(gz1) + 8, Dirty.Props);
+  if (props) world.touchRect(w(gx0) - 8, w(gz0) - 8, w(gx1) + 8, w(gz1) + 8, Dirty.Props);
 }
 
 /**
