@@ -1,7 +1,7 @@
 // Electron shell. Serves the project through its own protocol with COOP/COEP,
 // so the page gets SharedArrayBuffer, and turns on WebGPU where it needs a flag.
 // CIDADE_SHOT=file.png takes a screenshot when the game is ready and exits.
-import { app, BrowserWindow, protocol, net, ipcMain } from 'electron';
+import { app, BrowserWindow, Menu, protocol, net, ipcMain } from 'electron';
 import { initSteam, enableOverlay, steamInfo, unlock } from './steam.mjs';
 import { fileStore } from './files.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -80,6 +80,20 @@ function createWindow() {
     webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, offscreen: false, preload: path.join(here, 'preload.cjs') },
   });
   win.loadURL(devUrl ?? `app://cidade/index.html${query}`);
+  // The window's own keys (there is no menu, so none of Electron's default shortcuts: reload, which would throw away
+  // what is not saved, page zoom, DevTools). F11 toggles full screen; DevTools only in development (?dev or the dev
+  // server). Closing (the X, Alt+F4) goes through the close below, which saves first.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    const k = input.key.toLowerCase(), ctrl = input.control || input.meta;
+    if (k === 'f11') { e.preventDefault(); win.setFullScreen(!win.isFullScreen()); return; }
+    if ((ctrl && input.shift && k === 'i') || k === 'f12') {
+      e.preventDefault();
+      if (devUrl || /[?&]dev(?:[&=]|$)/.test(query)) win.webContents.toggleDevTools();
+      return;
+    }
+    if (k === 'f5' || (ctrl && k === 'r') || (ctrl && ['+', '=', '-', '0'].includes(k))) e.preventDefault();
+  });
   // Closing saves first: the page is asked, saves what is not saved yet and answers; past the time limit the window
   // closes anyway. Screenshot runs close without it unless CIDADE_CLOSE_SAVES is set (the save checks set it).
   if (!shot || process.env.CIDADE_CLOSE_SAVES) {
@@ -150,8 +164,34 @@ const saves = fileStore(path.join(app.getPath('userData'), 'saves'));
 for (const op of ['read', 'write', 'list', 'remove', 'folders', 'removeFolder']) ipcMain.handle(`files:${op}`, (_e, ...args) => saves[op](...args));
 // the game's own Quit: closes the window the normal way, so it saves first
 ipcMain.on('app:quit', (e) => BrowserWindow.fromWebContents(e.sender)?.close());
+// Screenshot and test runs only: a key pressed as the keyboard presses it. The key goes to the window (the page and
+// before-input-event see it); when nothing there stopped it, the menu item with that shortcut runs, as the system
+// does for a real key. Answers what happened (the save checks press Ctrl+R, F11, Ctrl+Shift+I…).
+if (shot) ipcMain.handle('test:key', async (e, key) => {
+  const wc = e.sender, win = BrowserWindow.fromWebContents(wc);
+  let prevented = false;
+  const spy = (ev, input) => { if (input.type === 'keyDown') prevented = ev.defaultPrevented; };
+  wc.on('before-input-event', spy);
+  wc.sendInputEvent({ type: 'keyDown', keyCode: key.keyCode, modifiers: key.modifiers });
+  wc.sendInputEvent({ type: 'keyUp', keyCode: key.keyCode, modifiers: key.modifiers });
+  await new Promise((r) => setTimeout(r, 200));
+  wc.off('before-input-event', spy);
+  const want = new Set(key.modifiers.map((m) => (m === 'ctrl' ? 'control' : m)));
+  const same = (acc) => {
+    const parts = acc.split('+').map((x) => x.toLowerCase());
+    const mods = new Set(parts.slice(0, -1).map((m) => (['cmdorctrl', 'commandorcontrol', 'ctrl', 'control'].includes(m) ? 'control' : m)));
+    return parts[parts.length - 1] === key.keyCode.toLowerCase() && mods.size === want.size && [...mods].every((m) => want.has(m));
+  };
+  const find = (m) => { for (const i of m?.items ?? []) { if (i.accelerator && same(i.accelerator)) return i; const f = find(i.submenu); if (f) return f; } return null; };
+  const item = prevented ? null : find(Menu.getApplicationMenu());
+  item?.click(undefined, win, wc);
+  await new Promise((r) => setTimeout(r, 500));
+  return { prevented, menu: item?.label ?? null, devtools: wc.isDevToolsOpened(), fullscreen: !!win?.isFullScreen() };
+});
 
 app.whenReady().then(() => {
+  // no menu bar and no default menu: its shortcuts (Ctrl+R reload, zoom, DevTools) are not the game's
+  Menu.setApplicationMenu(null);
   protocol.handle('app', async (request) => {
     const url = new URL(request.url);
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';

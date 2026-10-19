@@ -405,6 +405,30 @@ const SCENARIOS = {
     check('the city that was in the save is now a previous city', after.some((c) => c.gameId !== list[0].gameId), JSON.stringify(after));
     check('and the save works', await g.save(false) === true, 'save() did not complete');
   `,
+  // Reload keys of the desktop window (Ctrl+R, F5, Ctrl+Shift+R) never throw away work that was not saved: the edit is
+  // there at the next opening (two sessions over the same user data folder)
+  ...Object.fromEntries([['reload-ctrl-r', 'R', ['control']], ['reload-f5', 'F5', []], ['reload-ctrl-shift-r', 'R', ['control', 'shift']]].map(([name, key, mods]) => [name, [`
+    road(1500, 1500, 1700, 1500);
+    check('there is something unsaved', g.unsaved === true, 'unsaved=' + g.unsaved);
+    console.log('CHECK END');
+    window.roadcraftApp.testKey(${JSON.stringify(key)}, ${JSON.stringify(mods)});
+    await wait(15000);
+  `, `
+    const r = await within(g.load(), 30000);
+    check('the road built before the key is there', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500) + ', toasts: ' + toasts.join(' | '));
+  `]])),
+  // The desktop window's other shortcuts: DevTools only with ?dev, no page zoom on Ctrl +, F11 still toggles full screen
+  'window-keys': `
+    let r = await window.roadcraftApp.testKey('I', ['control', 'shift']);
+    check('Ctrl+Shift+I does not open DevTools without ?dev', !r.devtools, JSON.stringify(r));
+    const ratio = devicePixelRatio;
+    r = await window.roadcraftApp.testKey('Plus', ['control']);
+    check('Ctrl + does not zoom the page', devicePixelRatio === ratio, 'pixel ratio ' + ratio + ' → ' + devicePixelRatio + ' ' + JSON.stringify(r));
+    r = await window.roadcraftApp.testKey('F11', []);
+    check('F11 turns full screen on', r.fullscreen === true, JSON.stringify(r));
+    r = await window.roadcraftApp.testKey('F11', []);
+    check('F11 again turns it off', r.fullscreen === false, JSON.stringify(r));
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);
