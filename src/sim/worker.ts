@@ -60,7 +60,7 @@ traffic.sig.pedsOn = (n, mask) => peds.crossingArms(n, mask);
 // buses and pedestrians: bus riders walk to the stop, wait, ride and get off on foot
 peds.pickTrip = () => traffic.pickTrip();
 peds.onStop = (l, a, b) => traffic.pedAtStop(l, a, b);
-traffic.onAlight = (node, n) => peds.spawnAt(node, n);
+traffic.onAlight = (_node, n, x, z) => peds.spawnFromStop(x, z, n);
 // a car stopping at the kerb lets a passenger out: a pedestrian from that point
 traffic.onDropOff = (x, z) => { peds.spawnFromPoint(x, z); };
 traffic.advisor.onChange = (node, flow) => scope.postMessage({ type: 'autoControl', node, flow });

@@ -338,7 +338,7 @@ export class Traffic {
   /** Passengers of each bus by destination stop. */
   private riders = new Map<number, Float64Array>();
   /** People get off the bus at node `node` (the pedestrians carry on on foot). */
-  onAlight: (node: number, count: number) => void = () => {};
+  onAlight: (node: number, count: number, x: number, z: number) => void = () => {};
   private lineCheck = 0;
 
   /** Is someone walking on the node's crosswalk? (from the pedestrians) */
@@ -2293,8 +2293,8 @@ export class Traffic {
     ln.waiting[from] += 1;
   }
 
-  /** For pedestrians: a random bus trip (line, boarding stop, alighting stop, boarding node). */
-  pickTrip(): [number, number, number, number] | null {
+  /** For pedestrians: a random bus trip (line, boarding stop, alighting stop, boarding node, the stop on the sidewalk). */
+  pickTrip(): [number, number, number, number, number, number] | null {
     if (this.lines.length === 0) return null;
     const li = this.rng.int(0, this.lines.length);
     const ln = this.lines[li];
@@ -2303,7 +2303,7 @@ export class Traffic {
     const a = this.rng.int(0, n);
     let b = this.rng.int(0, n - 1);
     if (b >= a) b++;
-    return [li, a, b, this.sim.laneFrom(ln.stopLane[a])];
+    return [li, a, b, this.sim.laneFrom(ln.stopLane[a]), ln.stopX[a], ln.stopZ[a]];
   }
 
   private serve(v: number): void {
@@ -2316,7 +2316,8 @@ export class Traffic {
     // those bound for this stop get off (and carry on on foot)
     const off = r[i];
     r[i] = 0;
-    if (off >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(off)); // from a train people leave through the station (no sidewalk on the rails)
+    // they step off at the stop and walk on (from a train people leave through the station: no sidewalk on the rails)
+    if (off >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(off), ln.stopX[i], ln.stopZ[i]);
     let load = 0;
     for (let j = 0; j < n; j++) load += r[j];
     // those waiting get on, until full

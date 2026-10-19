@@ -65,8 +65,8 @@ const schema = {
   look: Uint16Array,
   // last published position (for interpolation) and the publication it was in
   px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array, wf: Uint32Array,
-  // bus trip: line (-1 = on foot only), boarding stop and alighting stop
-  tLine: Int16Array, tFrom: Uint8Array, tTo: Uint8Array,
+  // bus trip: line (-1 = on foot only), boarding stop and alighting stop, and the boarding stop on the sidewalk
+  tLine: Int16Array, tFrom: Uint8Array, tTo: Uint8Array, tx: Float32Array, tz: Float32Array,
   // by bicycle (rides on the bike lane)
   bike: Uint8Array,
   // where it enters the first sidewalk segment (0-1; someone leaving a door enters mid-way)
@@ -240,9 +240,14 @@ export class Peds {
   }
 
   /** Random bus trip (from traffic): [line, boarding stop, alighting stop, boarding node]. */
-  pickTrip: () => [number, number, number, number] | null = () => null;
-  /** Reached the stop: starts waiting for the bus (tracked by traffic). */
-  onStop: (line: number, from: number, to: number) => void = () => {};
+  pickTrip: () => [number, number, number, number, number, number] | null = () => null;
+  /** Reached the stop at (x, z): starts waiting for the bus (tracked by traffic). */
+  onStop: (line: number, from: number, to: number, x: number, z: number) => void = () => {};
+
+  /** People stepping off a bus at the stop (x, z): each walks from there to the sidewalk and on. */
+  spawnFromStop(x: number, z: number, count: number): void {
+    for (let k = 0; k < count; k++) this.spawnFromPoint(x, z);
+  }
   /** Share of walkers who take the bus (when there are lines). */
   transitShare = 0.3;
 
@@ -284,11 +289,11 @@ export class Peds {
     if (this.rng.next() < this.transitShare) {
       const trip = this.pickTrip();
       if (trip) {
-        const [li, from, to, stopNode] = trip;
+        const [li, from, to, stopNode, sx, sz] = trip;
         const net = this.sim.net, nc = net.nodes.cols;
         if (!net.nodes.alive[stopNode]) return;
         const a = this.nodeAround(nc.x[stopNode], nc.z[stopNode], 60, 500);
-        if (a >= 0 && a !== stopNode) this.spawnRoute(a, stopNode, li, from, to);
+        if (a >= 0 && a !== stopNode) { const p = this.spawnRoute(a, stopNode, li, from, to); if (p >= 0) { this.t.cols.tx[p] = sx; this.t.cols.tz[p] = sz; } }
         return;
       }
     }
@@ -332,7 +337,7 @@ export class Peds {
     c.speed[p] = 1.1 + this.rng.next() * 0.55;
     c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = side;
-    c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0;
+    c.tLine[p] = -1; c.tFrom[p] = 0; c.tTo[p] = 0; c.tx[p] = NaN; c.tz[p] = NaN;
     c.bike[p] = 0;
     c.seg[p] = s;
     c.enter[p] = Math.max(0, Math.min(0.98, (towardB ? dA - r0 : r1 - dA) / Math.max(0.5, r1 - r0)));
@@ -418,19 +423,21 @@ export class Peds {
     this.spawnRoute(a, b, li, from, to, frac);
   }
 
-  private spawnRoute(a: number, b: number, li: number, from: number, to: number, frac = 0): void {
+  /** A person walking from `a` to `b` (for a bus trip when `li` >= 0); returns its id, or −1. */
+  private spawnRoute(a: number, b: number, li: number, from: number, to: number, frac = 0): number {
     const p = this.t.alloc();
     const c = this.t.cols;
     const len = this.router.route(a, b, this.routes, p * ROUTE, ROUTE, true);
-    if (len < 2 || this.routes[p * ROUTE + len - 1] !== b) { this.t.release(p); return; }
+    if (len < 2 || this.routes[p * ROUTE + len - 1] !== b) { this.t.release(p); return -1; }
     c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = 1.1 + this.rng.next() * 0.55;
     c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = this.rng.next() < 0.5 ? 1 : -1;
-    c.tLine[p] = li; c.tFrom[p] = from; c.tTo[p] = to;
+    c.tLine[p] = li; c.tFrom[p] = from; c.tTo[p] = to; c.tx[p] = NaN; c.tz[p] = NaN;
     c.bike[p] = 0; c.enter[p] = 0;
     // `frac` > 0: starts part-way along the first segment, so the city starts out full
-    if (!this.startSidewalk(p, frac)) { this.kill(p); return; }
+    if (!this.startSidewalk(p, frac)) { this.kill(p); return -1; }
+    return p;
   }
 
   private kill(p: number): void {
@@ -494,8 +501,16 @@ export class Peds {
     c.rIdx[p]++;
     const i = c.rIdx[p];
     if (i + 1 >= c.rLen[p]) {
-      // arrived: those taking the bus wait at the stop
-      if (c.tLine[p] >= 0) this.onStop(c.tLine[p], c.tFrom[p], c.tTo[p]);
+      // arrived at the stop's corner: those taking the bus walk the last metres to the stop and wait there
+      if (c.tLine[p] >= 0 && !Number.isNaN(c.tx[p])) {
+        const here = this.posNow(p);
+        this.lineFrom[p * 3] = here[0]; this.lineFrom[p * 3 + 1] = here[1]; this.lineFrom[p * 3 + 2] = here[2];
+        const o = p * WAYS * 4;
+        this.ways[o] = c.tx[p]; this.ways[o + 1] = here[1]; this.ways[o + 2] = c.tz[p]; this.ways[o + 3] = 0;
+        c.mode[p] = 3; c.wIdx[p] = 0; c.wLen[p] = 1;
+        return this.nextWay(p);
+      }
+      if (c.tLine[p] >= 0) { const q = this.posNow(p); this.onStop(c.tLine[p], c.tFrom[p], c.tTo[p], q[0], q[2]); }
       return false;
     }
     const n = this.routes[p * ROUTE + i], nNext = this.routes[p * ROUTE + i + 1];
@@ -609,7 +624,11 @@ export class Peds {
   /** Next waypoint (or the sidewalk, when they run out). */
   private nextWay(p: number): boolean {
     const c = this.t.cols;
-    if (c.wIdx[p] >= c.wLen[p]) return this.startSidewalk(p);
+    if (c.wIdx[p] >= c.wLen[p]) {
+      // at the end of the route a bus rider has reached the stop: waits for the bus (tracked by traffic)
+      if (c.rIdx[p] + 1 >= c.rLen[p] && c.tLine[p] >= 0) { const q = this.posNow(p); this.onStop(c.tLine[p], c.tFrom[p], c.tTo[p], q[0], q[2]); return false; }
+      return this.startSidewalk(p);
+    }
     const o = p * WAYS * 4 + c.wIdx[p] * 4;
     const cross = this.ways[o + 3];
     // signalled crossing: waits for the light to let them walk (and calls it)

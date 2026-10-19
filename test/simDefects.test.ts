@@ -756,3 +756,27 @@ test('C45: with two segments between the same nodes, a car takes the one it may 
   assert.equal(inner(tr).segBetween(0, 1), 1, 'from node 0 to node 1 by the street that runs that way');
   assert.equal(inner(tr).segBetween(1, 0), 0, 'and back by the other');
 });
+
+test('C25: bus riders walk to the stop itself to board and step off the bus at the stop, not at the junction', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const peds = new Peds(sim);
+  peds.density = 1 / 6; peds.transitShare = 0.6;
+  const P = inner(peds);
+  peds.pickTrip = () => tr.pickTrip();
+  let boarded = 0, boardFar = 0, alighted = 0, alightFar = 0;
+  const near = (x: number, z: number) => tr.lines[0].stopX.some((sx, i) => Math.hypot(sx - x, tr.lines[0].stopZ[i] - z) < 4);
+  peds.onStop = ((l: number, a: number, b: number, x?: number, z?: number) => { boarded++; if (x === undefined || !near(x, z!)) boardFar++; tr.pedAtStop(l, a, b); }) as typeof peds.onStop;
+  tr.onAlight = ((node: number, n: number, x?: number, z?: number) => {
+    const before = new Set<number>(); for (let p = 0; p < peds.t.end; p++) if (peds.t.alive[p]) before.add(p);
+    if (x !== undefined && typeof P.spawnFromStop === 'function') P.spawnFromStop(x, z, n); else peds.spawnAt(node, n);
+    for (let p = 0; p < peds.t.end; p++) if (peds.t.alive[p] && !before.has(p)) { alighted++; const q = P.posNow(p); if (!near(q[0], q[2])) alightFar++; }
+  }) as typeof tr.onAlight;
+  tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
+  for (let i = 0; i < 20 * 600; i++) { tr.step(0.05); peds.step(0.05); if (i % 20 === 0) tr.checkWindow(); }
+  assert.ok(boarded > 5 && alighted > 5, `boarded ${boarded}, alighted ${alighted}`);
+  assert.equal(boardFar, 0, `${boardFar} of ${boarded} boarded away from the stop`);
+  assert.equal(alightFar, 0, `${alightFar} of ${alighted} stepped off away from the stop`);
+});
