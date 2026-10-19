@@ -390,7 +390,7 @@ export class SimNet {
           kc.from[c] = from; kc.to[c] = to; kc.node[c] = n;
           kc.x0[c] = pa[0]; kc.y0[c] = pa[1]; kc.z0[c] = pa[2];
           kc.x1[c] = pb[0]; kc.y1[c] = pb[1]; kc.z1[c] = pb[2];
-          // controle: cruzamento das tangentes, se fizer sentido
+          // control point: where the tangents cross, if that makes sense
           const d0x = Math.sin(pa[3]), d0z = Math.cos(pa[3]), d1x = Math.sin(pb[3]), d1z = Math.cos(pb[3]);
           const den = d0x * d1z - d0z * d1x;
           let cx = (pa[0] + pb[0]) / 2, cz = (pa[2] + pb[2]) / 2;

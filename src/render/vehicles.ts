@@ -182,7 +182,7 @@ interface CarSpec {
   width: number; half: number;
   /** Wheels: distance from the axle to the centre (z), radius. */
   axle: number; wheel: number;
-  /** Altura das luzes. */
+  /** Height of the lights. */
   lamp: number;
   /** The pickup's bed: z0, z1, y0, y1. */
   bed?: [number, number, number, number];
@@ -237,7 +237,7 @@ function carModel(k: CarSpec = CAR_SPECS[0]): THREE.BufferGeometry {
   box(W * 0.37, k.lamp + 0.06, -H - 0.01, 0.36, 0.12, 0.02, RED); box(-W * 0.37, k.lamp + 0.06, -H - 0.01, 0.36, 0.12, 0.02, RED);
   // indicators at the four corners (+x = the driver's left), 3 cm in front of the lights (nothing in the same plane)
   for (const zz of [H + 0.04, -H - 0.04]) { box(W / 2 - 0.09, k.lamp - 0.02, zz, 0.18, 0.14, 0.02, AMBER_L); box(-W / 2 + 0.09, k.lamp - 0.02, zz, 0.18, 0.14, 0.02, AMBER_R); }
-  // motorista nas janelas dos dois lados (lugar 1)
+  // the driver in the windows on both sides (seat 1)
   const gy = k.lamp + 0.22, gz = k.glass[1][0] - 0.35;
   for (const side of [1, -1]) occupant(parts, side * (W / 2 + 0.03), gy, gz, side, 1);
   for (const z of [k.axle, -k.axle]) for (const x of [W / 2 - 0.08, -W / 2 + 0.08]) wheel(parts, x, k.wheel, z, k.wheel, 0.22, z > 0);
