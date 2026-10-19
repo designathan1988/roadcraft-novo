@@ -1678,6 +1678,9 @@ export class Traffic {
         conn = sim.laneConn[lane];
         if (conn < 0 && lead < 0 && c.lane[v] === lane) this.escapeLane(v, lane);
       }
+      // it just moved to the next lane over: it goes on from there in the next step (this lane's leader, length and
+      // connection no longer apply)
+      if (c.lane[v] !== lane) return;
       // stopped for 10 s in the queue of a full lane (not at the red of a lane with room): reconsider the
       // route, avoiding what is full (roadcraft reconsiderRoute). At the line it is too late to change (as in
       // roadcraft): there `detour` handles it, and only toward an exit with room
@@ -1686,6 +1689,7 @@ export class Traffic {
         if (this.laneCount[lane] >= 0.6 * L / 7.5 && this.reconsider(v, lane, -1)) {
           const ns2 = this.nextSeg(v);
           if (ns2 >= 0 && sim.connToward(lane, ns2, false) < 0) this.mandatoryChange(v, lane, ns2);
+          if (c.lane[v] !== lane) return;
         }
       }
       if (lead < 0) {

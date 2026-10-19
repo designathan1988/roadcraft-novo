@@ -650,3 +650,35 @@ test('C34: a car leaving a junction moves once per step, not twice', () => {
   assert.equal(c.lane[v], k.to[conn], 'onto the next lane');
   assert.ok(c.s[v] < 0.6, `${(c.s[v] + 0.1).toFixed(2)} m driven in a 0.05 s step at 10 m/s`);
 });
+
+test('C35: a car that changes lane in its last step before the junction goes on from the new lane', async () => {
+  const { laneCount, laneId } = await import('../src/sim/lanes.ts');
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const k = sim.conns.cols, sc = sim.net.segs.cols;
+  // a left turn that only the second lane of a two-lane approach makes
+  let conn = -1;
+  for (let x = 0; x < sim.conns.end && conn < 0; x++) {
+    if (!sim.conns.alive[x] || k.turn[x] !== 2) continue;
+    const f = k.from[x], seg = f >> 4, dir = (f & 8) ? -1 : 1;
+    if ((f & 7) === 1 && laneCount(sc.profile[seg], dir) === 2) {
+      const right = laneId(seg, dir, 0);
+      let rightToo = false;
+      for (let y = sim.laneConn[right]; y >= 0; y = k.nextFromLane[y]) rightToo ||= (k.to[y] >> 4) === (k.to[x] >> 4);
+      if (!rightToo) conn = x;
+    }
+  }
+  assert.ok(conn >= 0, 'a left turn from the second lane only');
+  const left = k.from[conn], right = laneId(left >> 4, (left & 8) ? -1 : 1, 0);
+  const v = place(tr, right, sim.laneLen(right) - 0.2, k.to[conn], true);
+  const c = tr.veh.cols, T = inner(tr);
+  c.v[v] = 6; c.wait[v] = 6; c.lcCool[v] = 0;
+  for (let i = 0; i < 3; i++) {
+    tr.step(0.05);
+    const where = c.conn[v] >= 0 ? k.from[c.conn[v]] : -1;
+    if (c.conn[v] >= 0) assert.equal(where, c.lane[v], `in the junction by a connection of lane ${where & 7} while on lane ${c.lane[v] & 7}`);
+    else { let inList = false; for (let u = tr.laneHead[c.lane[v]]; u >= 0; u = c.next[u]) inList ||= u === v; assert.ok(inList, 'not in its lane\'s list'); }
+  }
+  void T;
+});
