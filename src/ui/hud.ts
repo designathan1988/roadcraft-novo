@@ -14,7 +14,7 @@ import { mountCompass, type Compass } from './compass.ts';
 import { AboutBox } from './about.ts';
 import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
 import {
-  CATS, ShellState, categoriesOf, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
+  CATS, ShellState, categoriesOf, lineInfo, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
   type BuilderTab, type BuilderTabRender, type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
 } from './drawers.ts';
 
@@ -261,6 +261,7 @@ export class Hud {
   private loadingText: HTMLElement;
   private rows: LineRow[] = [];
   private rowsKey = '';
+  private rowsNums = '';
   private lineNow = 0;
   private picked: BuildingInfo | null = null;
   private peopleShown = false;
@@ -676,12 +677,23 @@ export class Hud {
 
   // ================================================================ what the game tells
   setLines(rows: LineRow[], current: number): void {
-    const key = `${current}|${rows.map((r) => `${r.id},${r.mode},${r.color},${r.loop},${r.buses},${r.stops},${Math.round(r.perHour / 10)}`).join(';')}`;
-    if (key === this.rowsKey) return;
-    this.rowsKey = key;
+    // the passengers an hour change all the time: only their text is written; the panel is rebuilt when lines change
+    const key = `${current}|${rows.map((r) => `${r.id},${r.mode},${r.color},${r.loop},${r.buses},${r.stops}`).join(';')}`;
     this.rows = rows;
     this.lineNow = current;
-    if (this.cat === 'transit' && this.open) this.render();
+    if (key !== this.rowsKey) {
+      this.rowsKey = key;
+      if (this.cat === 'transit' && this.open) this.render();
+      return;
+    }
+    const nums = rows.map((r) => Math.round(r.perHour)).join(',');
+    if (nums === this.rowsNums) return;
+    this.rowsNums = nums;
+    for (const r of rows) {
+      const info = this.drawer.querySelector(`.v2-transit-line[data-line="${r.id}"] .v2-transit-info`);
+      const text = lineInfo(r);
+      if (info && info.textContent !== text) info.textContent = text;
+    }
   }
 
   setRadius(r: number): void { this.s.radius = Math.round(r); if (this.cat === 'landscape' && this.open) this.render(); }

@@ -525,6 +525,11 @@ function elementRows(h: DrawerHost, p: DrawerParts): void {
 // ------------------------------------------------------------------ transit
 const RAIL = { trainTrack: 'Ferrovia dupla', metroTrack: 'Metrô (duplo)' } as const; // not for the player: profile names are ids
 
+/** A line's mode, stops and passengers an hour, as its row shows them. */
+export function lineInfo(l: LineRow): string {
+  return `${t(`transit.mode.${['bus', 'train', 'metro'][l.mode] ?? 'bus'}`)} · ${plural(l.mode ? 'ui.transit.stations' : 'ui.transit.stops', l.stops)} · ${t('ui.transit.perHour', { n: fmtInt(l.perHour) })}`;
+}
+
 export function transitTabOf(tool: Tool, s: ShellState): TransitTab {
   if (tool === 'road') return s.transitTab === 'metroTrack' ? 'metroTrack' : 'trainTrack';
   return s.transitTab === 'trainTrack' || s.transitTab === 'metroTrack' ? 'stop' : s.transitTab;
@@ -555,10 +560,11 @@ export function renderTransit(h: DrawerHost, p: DrawerParts): void {
   const items = section(p.strip, t('transit.lines'));
   for (const l of rows) {
     const row = el('div', `v2-transit-line${l.id === current ? ' on' : ''}`);
+    row.dataset.line = String(l.id);
     const sw = el('i');
     sw.style.background = hex(PAINTS[l.color & 15]);
     const name = el('b', '', t('ui.transit.line', { n: l.id }));
-    const info = el('span', '', `${t(`transit.mode.${['bus', 'train', 'metro'][l.mode] ?? 'bus'}`)} · ${plural(l.mode ? 'ui.transit.stations' : 'ui.transit.stops', l.stops)} · ${t('ui.transit.perHour', { n: fmtInt(l.perHour) })}`);
+    const info = el('span', 'v2-transit-info', lineInfo(l));
     const count = el('span', 'v2-transit-count', String(l.buses));
     count.title = t('transit.vehicles');
     const pickLine = (): void => { a.line(l.id); };
