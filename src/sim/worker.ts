@@ -38,7 +38,10 @@ export type FromSim =
   | { type: 'autoControl'; node: number; flow: number }
   | { type: 'stats'; cars: number; micro: number; peds: number; arrived: number; lost: number; speed: number; stopped: number;
       lines: Array<{ id: number; buses: number; perHour: number; waiting: number }> }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  /** A network change failed and the worker's mirror of the network may differ from the page's: the page sends the
+   *  whole network again (a 'clear' followed by every node, segment and junction). */
+  | { type: 'resync'; reason: string };
 
 import { setCustomProfiles, type Profile } from '../roads/profiles.ts';
 
@@ -69,14 +72,29 @@ let next = 0;
 let windowTimer = 0;
 
 let statsTimer = 0;
-let failed = false;
+
+/** When each distinct error was last reported (by its first line). */
+const reported = new Map<string, number>();
+/** The same error is reported again after this long (ms), so the page knows it is still happening. */
+const REPORT_AGAIN_MS = 10000;
+/** Last request for the whole network (a failing snapshot must not ask again in a loop). */
+let resyncAt = -Infinity;
+
+/** Tells the page about an error: every distinct one, each again at most every REPORT_AGAIN_MS. */
+function report(where: string, err: unknown): void {
+  const message = `${where}: ${String((err as Error)?.stack ?? err)}`;
+  const key = message.split(String.fromCharCode(10))[0];
+  const t = performance.now(), last = reported.get(key);
+  if (last !== undefined && t - last < REPORT_AGAIN_MS) return;
+  if (reported.size >= 256) reported.clear();
+  reported.set(key, t);
+  scope.postMessage({ type: 'error', message });
+}
 
 function step(): void {
   if (!writer) return;
-  try { stepInner(); } catch (err) {
-    // simulation error: tell the page once and carry on (the next step tries again)
-    if (!failed) { failed = true; scope.postMessage({ type: 'error', message: String((err as Error)?.stack ?? err) }); }
-  }
+  // simulation error: tell the page and carry on (the next step tries again)
+  try { stepInner(); } catch (err) { report('simulation step', err); }
   next += dtMs;
   // behind the clock (a slow step, the tab in the background): catch up at most MAX_LAG_MS; the rest of the lost time
   // is dropped (the simulation runs slower for a moment) instead of running steps back to back until it catches up
@@ -143,11 +161,21 @@ scope.onmessage = (e) => {
     case 'probeManoeuvres': scope.postMessage({ type: 'manoeuvres', ...traffic.manoeuvreList() }); break;
     case 'probeNode': scope.postMessage({ type: 'probeNode', node: m.node, passed: traffic.nodePass[m.node] ?? 0, time: traffic.time }); break;
     case 'ops': {
+      // every op is tried (one failing must not drop the ones after it); any failure means this mirror may now differ
+      // from the page's network, so the page is asked for the whole network (at most every REPORT_AGAIN_MS)
       const n = m.ops.length / 8;
+      let failure: unknown = null;
       for (let i = 0; i < n; i++) {
-        const op = decodeOp(m.ops, i, m.extra);
-        if (op.t === 'clear') { peds.clear(); traffic.clearAll(); }
-        sim.apply(op);
+        try {
+          const op = decodeOp(m.ops, i, m.extra);
+          if (op.t === 'clear') { peds.clear(); traffic.clearAll(); }
+          sim.apply(op);
+        } catch (err) { failure ??= err; report('network change', err); }
+      }
+      const t = performance.now();
+      if (failure !== null && t - resyncAt > REPORT_AGAIN_MS) {
+        resyncAt = t;
+        scope.postMessage({ type: 'resync', reason: String((failure as Error)?.message ?? failure) });
       }
       break;
     }

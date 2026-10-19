@@ -258,6 +258,7 @@ export class Game {
       else if (e.data.type === 'hit') this.onHit(e.data.people, e.data.vehicles);
       else if (e.data.type === 'autoControl') this.world.roads.setFlow(e.data.node, e.data.flow);
       else if (e.data.type === 'manoeuvres') { const r = this.manoeuvreWait; this.manoeuvreWait = null; r?.(e.data); }
+      else if (e.data.type === 'resync') this.resyncSim(e.data.reason);
       else { console.error('simulação:', e.data.message); this.health?.add('erro', `simulação: ${e.data.message.split(String.fromCharCode(10))[0]}`); }
     };
     this.sim.postMessage({ type: 'init', poses: posesSab, heights: this.world.heightsSab, occupancy: this.occupancySab, signals: this.signalsSab, tickHz: 20 } satisfies ToSim);
@@ -735,6 +736,25 @@ export class Game {
   private cycleClock(): void {
     const speeds = [0, 1, 4, 16];
     this.clockSpeed = speeds[(speeds.indexOf(this.clockSpeed) + 1) % speeds.length];
+  }
+
+  /**
+   * The simulation's mirror of the network failed to apply a change: send it the whole network again (a 'clear', then
+   * every node, segment and junction; pending changes are already in it). Its vehicles start over, and the flow-based
+   * controls it had chosen are forgotten on both sides.
+   */
+  private resyncSim(reason: string): void {
+    const net = this.world.roads, nc = net.nodes.cols, ops: NetOp[] = [{ t: 'clear' }];
+    for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n]) ops.push({ t: 'addNode', rec: { id: n, x: nc.x[n], z: nc.z[n], y: nc.y[n] } });
+    for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) ops.push({ t: 'addSeg', rec: net.segRec(s) });
+    for (const [id, spec] of net.junctions) ops.push({ t: 'junction', id, spec });
+    for (const id of [...net.flow.keys()]) net.setFlow(id, 0);
+    this.netOps.length = 0;
+    const extra: string[] = [];
+    const enc = encodeOps(ops, extra);
+    this.sim.postMessage({ type: 'ops', ops: enc, extra } satisfies ToSim, [enc.buffer]);
+    this.roadsVersion++;
+    console.error('simulação: rede reenviada inteira', reason);
   }
 
   /** Sends the network changes and the camera position to the simulation. */
