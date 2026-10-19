@@ -104,3 +104,17 @@ test('B34: the help lists every key of the table, Ctrl+S as Save, and no bundle 
   assert.equal(h.game.find(([k]) => k === 'Ctrl + S')?.[1], t('keys.do.save'));
   assert.ok(!keys.includes('1 Z H T O B I'));
 });
+
+test('the in-game interface checks (tools/check-interface.mjs) all compile', async () => {
+  const tool = '../tools/check-interface.mjs';
+  const { SCENARIOS, PRELUDE } = await import(tool) as { SCENARIOS: Record<string, unknown>; PRELUDE: string };
+  const bad: string[] = [];
+  for (const [name, body] of Object.entries(SCENARIOS)) {
+    for (const x of ([] as unknown[]).concat(body)) {
+      const code = typeof x === 'object' ? (x as { script: string }).script : String(x);
+      try { new Function(`return (async () => {${PRELUDE}\n${code}\n})`); } catch (e) { bad.push(`${name}: ${(e as Error).message}`); }
+    }
+  }
+  assert.deepEqual(bad, []);
+  assert.ok(Object.keys(SCENARIOS).length > 40);
+});
