@@ -2088,6 +2088,13 @@ export class Game {
   /** In the browser, only the tab holding the slot's lock writes it (another tab of the game only reads). */
   private readonly slotLock = new SlotLock(SLOT, () => this.hud.toast(t('save.nowWriter')));
 
+  /** Whether this tab writes the save (says why not when it does not). */
+  private async mayWrite(): Promise<boolean> {
+    await this.slotLock.ready;
+    if (!this.slotLock.writer) this.hud.toast(t('save.otherTab'));
+    return this.slotLock.writer;
+  }
+
   /**
    * Writes a new generation of the save: the changed tiles, the map's description and the manifest, then the commit
    * (saveFiles.ts); until the commit the save before stays the one that opens. Everything is copied at the start, in
@@ -2101,8 +2108,7 @@ export class Game {
       if (!auto) this.hud.toast(t('save.blocked'));
       return false;
     }
-    await this.slotLock.ready;
-    if (!this.slotLock.writer) { this.hud.toast(t('save.otherTab')); return false; }
+    if (!await this.mayWrite()) return false;
     if (this.busy) return false;
     this.busy = true;
     let slot: SaveSlot;
@@ -2374,7 +2380,7 @@ export class Game {
    * generation of the slot and opened.
    */
   private async importMap(file: Blob): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || !await this.mayWrite() || this.busy) return;
     this.busy = true;
     let kept: string | null;
     try {

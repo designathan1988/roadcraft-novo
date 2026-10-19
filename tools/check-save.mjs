@@ -437,6 +437,10 @@ const BROWSER = {
       const same = sameFiles(before, await files.snapshot());
       check('a second tab does not write the same save', r === false && same, 'save() ' + r + ', files ' + (same ? 'same' : 'changed'));
       check('it says why', toasts.some((m) => /outra aba|another tab/.test(m)), 'toasts: ' + toasts.join(' | '));
+      // opening a map file writes the save too: refused the same way
+      await g.importMap(await a.packMap());
+      const same2 = sameFiles(before, await files.snapshot());
+      check('a second tab does not open a map file over the save', same2, 'files changed');
     ` },
     { tab: 0, body: `
       road(1500, 1600, 1700, 1600);
