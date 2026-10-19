@@ -117,3 +117,26 @@ test('water (4.0 port): see-through, its depth read per pixel, and the sea uses 
   const sea = (terrain as unknown as { createSeaMaterial?(): THREE.MeshStandardNodeMaterial }).createSeaMaterial?.();
   assert.ok(sea && sea.transparent && sea.opacityNode, 'the sea plane has the same water');
 });
+
+test('ecology (4.0 port): ground by a lake is wet, a ridge far from water is dry, a cliff is bare', async () => {
+  const { ecologyTile, ECO_RES } = await import('../src/render/ecology.ts');
+  const { HEIGHT_TILE_RES, MAP_TILES } = await import('../src/config.ts');
+  const { WATER_TILE_RES } = await import('../src/world/ground.ts');
+  const w = new World();
+  // tile (5, 5): a lake on the west third, a ridge in the east, a cliff in the north-east corner
+  const t = 5 * MAP_TILES + 5, HR = HEIGHT_TILE_RES, WR = WATER_TILE_RES;
+  for (let j = 0; j < HR; j++) for (let i = 0; i < HR; i++) {
+    const x = i * 4, z = j * 4;
+    let hgt = 20 + 30 * Math.exp(-(((x - 800) / 60) ** 2));
+    if (x > 900 && z < 120) hgt += (x - 900) * 1.5;
+    w.heights[t * HR * HR + j * HR + i] = hgt;
+  }
+  for (let j = 0; j < WR; j++) for (let i = 0; i < WR; i++) w.water[t * WR * WR + j * WR + i] = i < 40 ? 21 : -1000;
+  const out = new Uint8Array(ECO_RES * ECO_RES * 4);
+  ecologyTile(w.heights, w.water, t, out);
+  const at = (x: number, z: number, c: number) => out[(Math.floor(z / 8) * ECO_RES + Math.floor(x / 8)) * 4 + c];
+  assert.ok(at(340, 500, 1) > 150, `beside the lake the ground is wet (${at(340, 500, 1)})`);
+  assert.ok(at(800, 600, 1) < 40, `on the ridge it is not (${at(800, 600, 1)})`);
+  assert.ok(at(800, 600, 0) > at(500, 600, 0), `the ridge is drier than the plain (${at(800, 600, 0)} vs ${at(500, 600, 0)})`);
+  assert.ok(at(990, 40, 2) > 80, `the cliff is bare (${at(990, 40, 2)})`);
+});

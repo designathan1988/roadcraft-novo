@@ -10,10 +10,11 @@ import { T, withPrevious, type Node } from './tsl.ts';
 import { GRASS_TEX, GRASS_TILE, ROCK_NORMAL, ROCK_TEX, ROCK_TILE, TERRAIN_NOISE, WATER_TEX } from './surfaceBake.ts';
 import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
 import {
-  HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TILES, PLATE_SIZE, SEA_LEVEL, TILE_SIZE,
+  HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TAG, MAP_TILES, PLATE_SIZE, SEA_LEVEL, TILE_SIZE,
 } from '../config.ts';
 import { tileX, tileId } from '../core/grid.ts';
 import { PAINT_COARSE } from '../jobs/roadPaint.ts';
+import { ECO_RES } from './ecology.ts';
 import { GROUND_COLORS, NO_WATER, WATER_SPACING, WATER_TILE_RES } from '../world/ground.ts';
 import type { World } from '../world/world.ts';
 import { heightAt } from '../world/heights.ts';
@@ -59,6 +60,12 @@ export class TerrainRenderer {
   readonly paintCoarse: THREE.DataArrayTexture;
   /** Painted ground (kind, strength, forest, clearing) per 4 m sample. */
   readonly groundTex: THREE.DataArrayTexture;
+  /** The ecology field per tile (render/ecology.ts: dry grass, wet ground, bare ground), from its own worker. */
+  readonly ecoTex: THREE.DataArrayTexture;
+  private ecoWorker: Worker | null = null;
+  /** Tiles waiting for the ecology worker, and the one it is computing. */
+  private ecoQueue = new Set<number>();
+  private ecoBusy = -1;
   /** Water level (8 m) and its mesh (only on the tiles with water). */
   readonly waterTex: THREE.DataArrayTexture;
   readonly waterMesh: THREE.Mesh;
@@ -146,6 +153,25 @@ export class TerrainRenderer {
     this.waterTex.magFilter = THREE.NearestFilter;
     this.waterTex.generateMipmaps = false;
     this.waterTex.needsUpdate = true;
+
+    const ecoSab = new SharedArrayBuffer(ECO_RES * ECO_RES * 4 * MAP_TILES * MAP_TILES);
+    this.ecoTex = new THREE.DataArrayTexture(new Uint8Array(ecoSab), ECO_RES, ECO_RES, MAP_TILES * MAP_TILES);
+    this.ecoTex.format = THREE.RGBAFormat;
+    this.ecoTex.type = THREE.UnsignedByteType;
+    this.ecoTex.minFilter = THREE.LinearFilter;
+    this.ecoTex.magFilter = THREE.LinearFilter;
+    this.ecoTex.generateMipmaps = false;
+    this.ecoTex.needsUpdate = true;
+    if (typeof Worker !== 'undefined') {
+      this.ecoWorker = new Worker(new URL('./ecologyWorker.ts', import.meta.url), { type: 'module', name: `ecology ${MAP_TAG}` });
+      this.ecoWorker.postMessage({ heights: world.heightsSab, water: world.waterSab, field: ecoSab });
+      this.ecoWorker.onmessage = (e: MessageEvent<number>) => {
+        this.ecoTex.addLayerUpdate(e.data);
+        this.ecoTex.needsUpdate = true;
+        this.ecoBusy = -1;
+        this.nextEcology();
+      };
+    }
 
     // unit grid (u, v) in [0, 1]
     const g = new THREE.InstancedBufferGeometry();
@@ -415,6 +441,21 @@ export class TerrainRenderer {
       c = mix(c, rockC, blend.rockW);
       const scree = mix(rockC.mul(0.7), dirtC.mul(0.8), 0.4).mul(mix(float(0.75), float(1.2), texture(TERRAIN_NOISE, p.xz.mul(1.325 / 8)).b));
       c = mix(c, scree, blend.talus.mul(0.75));
+      // the ecology field (Roadcraft 4.0 terrain.ts:937-957): straw on dry grass in patches, sodden ground near the
+      // water, bare soil where little grows
+      {
+        const tileE = clamp(floor(p.xz.add(float(MAP_HALF)).div(float(TILE_SIZE))), 0, float(MAP_TILES - 1));
+        const eco = texture(this.ecoTex, p.xz.add(float(MAP_HALF)).div(float(TILE_SIZE)).sub(tileE)).depth(int(tileE.y.mul(MAP_TILES).add(tileE.x)));
+        // patches of ~92 m and ~22 m (the noise's g channel has 8 periods per tile, b 16)
+        const patchy = texture(TERRAIN_NOISE, p.xz.div(92 * 8)).g;
+        const lift = texture(TERRAIN_NOISE, p.xz.div(22 * 16)).b;
+        const golden = clamp(eco.x.mul(0.55).mul(patchy.mul(0.9).add(0.35)), 0, 1);
+        const gold = smoothstep(0.35, 0.8, golden.add(lift.sub(0.5).mul(0.3))).mul(0.25);
+        const luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = mix(c, vec3(1.32, 1.04, 0.46).mul(luma).mul(1.05), gold.mul(float(1).sub(blend.rockW)));
+        c = mix(c, c.mul(vec3(0.55, 0.72, 0.55)), eco.y.mul(0.85).mul(smoothstep(float(SEA_LEVEL + 0.4), float(SEA_LEVEL + 2.5), p.y)));
+        c = mix(c, dirt, eco.z.mul(0.4).mul(float(1).sub(blend.rockW)));
+      }
       c = mix(c, sand, smoothstep(float(SEA_LEVEL + 2.5), float(SEA_LEVEL + 0.5), p.y));
       // painted ground: 4 neighbouring samples, each its own kind, blended (edge broken by noise)
       {
@@ -699,9 +740,27 @@ export class TerrainRenderer {
     this.paintCoarse.needsUpdate = true;
   }
 
+  /** Asks the ecology worker for a tile and its 8 neighbours (the field reads 128 m past the tile's edge). */
+  private queueEcology(t: number): void {
+    const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
+    for (let j = Math.max(0, tz - 1); j <= Math.min(MAP_TILES - 1, tz + 1); j++) for (let i = Math.max(0, tx - 1); i <= Math.min(MAP_TILES - 1, tx + 1); i++) this.ecoQueue.add(tileId(i, j));
+  }
+
+  private nextEcology(): void {
+    if (this.ecoBusy >= 0 || !this.ecoWorker || this.ecoQueue.size === 0) return;
+    const t = this.ecoQueue.values().next().value as number;
+    this.ecoQueue.delete(t);
+    this.ecoBusy = t;
+    this.ecoWorker.postMessage(t);
+  }
+
   /** Re-sends to the GPU only the changed layers (tiles). */
   uploadDirtyLayers(): void {
     const w = this.world;
+    // the ecology follows the ground and the water of the tiles that changed (bounded by the edit, never the map)
+    for (const l of w.layerDirty) this.queueEcology(l);
+    for (const l of w.waterDirty) this.queueEcology(l);
+    this.nextEcology();
     if (w.groundDirty.size) { for (const l of w.groundDirty) this.groundTex.addLayerUpdate(l); w.groundDirty.clear(); this.groundTex.needsUpdate = true; }
     if (w.waterDirty.size) {
       for (const l of w.waterDirty) this.waterTex.addLayerUpdate(l);
