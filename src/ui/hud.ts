@@ -38,6 +38,8 @@ export interface SimSettings { traffic: number; people: number; demand: 'baixa' 
 export interface CityStatus {
   cars: number; peds: number; residents: number; jobs: number; buildings: number;
   speedKmh: number; tripsPerMin: number; lostPerMin: number; stopped: number; roads: number; nodes: number;
+  /** Junctions that cannot be built (two roads under 25°). */
+  impossible: number;
 }
 
 /**
@@ -65,6 +67,8 @@ export interface OptionalActions {
   lineColor?(color: number): void;
   /** The chosen bus line as a ring (true) or out and back. */
   lineLoop?(loop: boolean): void;
+  /** Points the camera at the next impossible junction and inspects it (the top bar's warning). */
+  showImpossible?(): void;
   /** The people creator's choices (people front, src/render/people/creator.ts). */
   personOptions?(o: Partial<PersonOptions>): void;
   /** What the people creator offers; null until the cooked people load. */
@@ -216,6 +220,9 @@ export class Hud {
   private clockText = document.createTextNode('');
   private moneyText = document.createTextNode('');
   private statsText = document.createTextNode('');
+  private impossibleB: HTMLButtonElement;
+  private impossibleText = document.createTextNode('');
+  private impossibleShown = 0;
   private stats: HTMLElement;
   private skyButtons: HTMLButtonElement[] = [];
   private speedButtons: HTMLButtonElement[] = [];
@@ -284,7 +291,11 @@ export class Hud {
     moneyEl.title = t('ui.money.tip');
     this.stats = el('div', 'v2-stats');
     this.stats.append(this.statsText);
-    city.append(sky, clock, moneyEl, this.stats);
+    // junctions that cannot be built: their count, and a click visits them one by one
+    this.impossibleB = button('v2-warn', '', () => a.showImpossible?.(), svg('warn', 16));
+    this.impossibleB.append(this.impossibleText);
+    this.impossibleB.hidden = true;
+    city.append(sky, clock, moneyEl, this.impossibleB, this.stats);
 
     const speed = el('div', 'v2-speed');
     for (const n of [0, 1, 2, 4]) {
@@ -728,6 +739,14 @@ export class Hud {
     const tip = t('ui.stats.tip', { residents: fmtCount(s.residents), jobs: fmtCount(s.jobs), buildings: fmtCount(s.buildings), speed: fmtInt(s.speedKmh) });
     if (this.stats.title !== tip && !this.stats.dataset.tip) this.stats.title = tip; else if (this.stats.dataset.tip) this.stats.dataset.tip = tip;
     this.syncMetrics();
+    if (s.impossible !== this.impossibleShown) {
+      this.impossibleShown = s.impossible;
+      this.impossibleB.hidden = s.impossible === 0;
+      this.impossibleText.data = fmtInt(s.impossible);
+      const tip = `${plural('status.impossible', s.impossible)} · ${t('ui.impossible.visit')}`;
+      this.impossibleB.title = tip; this.impossibleB.dataset.tip = tip;
+      this.impossibleB.querySelector('span')!.textContent = tip;
+    }
   }
 
   setTrafficView(on: boolean): void { this.layers.traffic = on; if (this.popId === 'layers') this.fillPop('layers'); }

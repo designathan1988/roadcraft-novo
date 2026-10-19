@@ -194,6 +194,26 @@ export const SCENARIOS = {
     key('KeyZ', { ctrlKey: true }); await frames(2);
     check('undo takes the ring back', !l.loop, 'loop ' + l.loop);
   `,
+  // B40: an impossible junction shows a warning in the top bar; its click takes the camera there and inspects it
+  'B40-impossible-warning': `
+    road(-300, 0, 0, 0);
+    road(0, 0, 300, 0);
+    road(0, 0, 300, 70);
+    const n = A.impossibleNodes();
+    check('the junction is impossible (under 25°)', n > 0, 'impossible nodes ' + n);
+    await wait(1200);
+    const warn = Q('.v2-warn');
+    check('the top bar shows the warning with the count', warn && !warn.hidden && warn.textContent.includes(String(n)), 'warning ' + (warn ? (warn.hidden ? 'hidden' : '"' + warn.textContent + '"') : 'missing'));
+    await g.view(3000, 3000, 0, 40, 300);
+    if (warn) click(warn);
+    await wait(1500);
+    const d = Math.hypot(g.rig.target.x, g.rig.target.z);
+    check('its click points the camera at the node', d < 30, 'camera target ' + g.rig.target.x.toFixed(0) + ', ' + g.rig.target.z.toFixed(0));
+    check('and inspects it', g.tool === 'inspect' && g.inspector.isOpen, 'tool ' + g.tool + ', inspector open ' + g.inspector.isOpen);
+    g.commands.undo();
+    await wait(1200);
+    check('the warning goes when the junction is fixed', !Q('.v2-warn') || Q('.v2-warn').hidden, 'count now ' + A.impossibleNodes());
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

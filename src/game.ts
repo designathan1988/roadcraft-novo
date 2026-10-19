@@ -373,6 +373,16 @@ export class Game {
       itemRemove: (on) => { this.itemRemove = on; },
       cameraNumbers: () => ({ dist: this.rig.dist, x: this.rig.target.x, z: this.rig.target.z }),
       health: () => this.health.toggle(),
+      showImpossible: () => {
+        // the next one after the last visited (the set is small: only the nodes under 25°)
+        const ids = [...this.world.impossible.nodes.keys()];
+        if (!ids.length) return;
+        const n = ids[(ids.indexOf(this.impossibleVisit) + 1) % ids.length], nc = this.world.roads.nodes.cols;
+        this.impossibleVisit = n;
+        this.setTool('inspect');
+        this.rig.restore(new Float64Array([nc.x[n], nc.z[n], this.rig.yaw, Math.max(0.5, this.rig.pitch), Math.min(this.rig.dist, 160), this.rig.mode === 'iso' ? 1 : 0]));
+        this.inspector.pick(nc.x[n], nc.z[n]);
+      },
     } satisfies HudActions));
     this.roadTool = new RoadTool(this.world, this.commands, this.preview, this.hud);
     this.itemTool = new ItemTool(this.world, this.commands, this.preview, this.hud);
@@ -721,7 +731,7 @@ export class Game {
     this.hud.setStatus({
       cars: st?.cars ?? 0, peds: st?.peds ?? 0, residents: w.residents, jobs: w.jobs, buildings: w.buildings.size,
       speedKmh: st ? st.speed * 3.6 : 0, tripsPerMin: this.tripsPerMin, lostPerMin: this.lostPerMin, stopped: st?.stopped ?? 0,
-      roads: w.roads.segs.size, nodes: w.roads.nodes.size,
+      roads: w.roads.segs.size, nodes: w.roads.nodes.size, impossible: w.impossible.count,
     });
   }
 
@@ -1521,6 +1531,8 @@ export class Game {
   }
 
   private lineMode = 0;
+  /** The impossible junction the top bar's warning showed last. */
+  private impossibleVisit = -1;
 
   private newLine(): void {
     achieve('PRIMEIRA_LINHA');

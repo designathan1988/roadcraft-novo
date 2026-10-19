@@ -57,6 +57,7 @@ export const ENGINE_PT: Record<string, string> = {
   'ui.transit.stops.other': '{count} paradas',
   'ui.transit.stations.one': '{count} estação',
   'ui.transit.stations.other': '{count} estações',
+  'ui.impossible.visit': 'clique para ver o próximo',
   'ui.transit.colour': 'Cor da linha',
   'ui.transit.route': 'Percurso',
   'ui.transit.outBack': 'Ida e volta',
