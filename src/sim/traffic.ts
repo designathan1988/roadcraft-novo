@@ -17,6 +17,7 @@ import { FlowAdvisor } from './advisor.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
+import { stripAt } from './probe.ts';
 import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver, driverSchema } from './drivers.ts';
 
 export const ROUTE_CAP = 96;
@@ -153,6 +154,10 @@ const STOP_CELL = 600, STOP_CELLS = Math.ceil(MAP_SIZE / STOP_CELL);
 
 /** Dock index cell (m) and cells per side; a truck turns into a yard whose dock is this near its centre (m). */
 const DOCK_CELL = 64, DOCK_CELLS = Math.ceil(MAP_SIZE / DOCK_CELL), YARD_REACH = 28;
+
+/** Numbers per vehicle in `Traffic.inspect`, and why a vehicle there may stand still (bits). */
+export const INSPECT_STRIDE = 18;
+export const INSPECT_RED = 1, INSPECT_BAY = 2, INSPECT_LEAVING = 4, INSPECT_STOP = 8, INSPECT_CHANGING = 16, INSPECT_GATE = 32;
 
 const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
@@ -368,6 +373,8 @@ export class Traffic {
   crowdAvoid = true;
   /** Counters: reconsidered routes, junctions that jammed, vehicles released. */
   reroutes = 0; jams = 0; released = 0;
+  /** Vehicles that entered a signalled junction on red (near the camera; should stay 0). */
+  ranRed = 0;
   /** Meso: attempts to move on at the end of the lane and how many found the next one full (congestion far from the camera). */
   mesoTries = 0; mesoFull = 0;
   private routeBudget = 0;
@@ -1561,6 +1568,13 @@ export class Traffic {
     }
   }
 
+  /** A light's state as written for the drawing: 128 | amber << 6 | arms with green or amber (0: no light). */
+  lightState(n: number): number {
+    if (this.sim.nodePhases[n] === 0) return 0;
+    const st = this.sig.state(n), mask = (st & 3) < 2 ? this.sig.arms[n * 8 + (st >> 2)] : 0;
+    return 128 | ((st & 3) === 1 ? 64 : 0) | (mask & 63);
+  }
+
   /** Vehicles waiting near the line on the arms of node `n` in `mask`. */
   private armsQueue(n: number, mask: number): number {
     let q = 0;
@@ -1931,6 +1945,9 @@ export class Traffic {
       c.wait[v] = 0;
       c.held[v] = 0;
       const k = sim.conns.cols;
+      // an invariant kept as a count (roadcraft invariants.ts): nobody enters a junction on red (amber is a go for
+      // whoever cannot stop)
+      if (sim.nodePhases[k.node[conn]] > 0 && !this.stageGreen(conn, true)) this.ranRed++;
       if (release) { this.released++; this.releaseAt[k.node[conn]] = this.time + RELEASE_EVERY; this.nodePass[k.node[conn]]++; this.advisor.pass[k.node[conn] * 8 + k.arm[conn]]++; }
       else this.admit(k.node[conn], k.arm[conn]);
       this.insert(v, true, conn);
@@ -2709,62 +2726,86 @@ export class Traffic {
     return lights;
   }
 
+  /**
+   * The vehicles within `r` m of (x, z), as the motion probe reads them (tools/check-sim.mjs): INSPECT_STRIDE numbers
+   * each (id, kind, middle x, z, yaw, length, speed, connection, node ahead, why it may stand (INSPECT_* bits), gap
+   * to the vehicle ahead, its speed, distance to the stop line, time waited at the line, time stopped, position on the lane or connection, strip of the street under its middle (sim/probe.ts STRIP_KINDS)
+   * and the distance from the street's nearer end), and the pairs
+   * inside the same junction on paths that cross, both over the crossing point (id, id, x, z). Only the micro window
+   * is looked at, and only on request.
+   */
+  inspect(x: number, z: number, r: number): { vehicles: Float32Array; clashes: Float32Array } {
+    const c = this.veh.cols, sim = this.sim, k = sim.conns.cols, p = this.tmp;
+    const out: number[] = [], onConn: number[] = [];
+    for (let i = 0; i < this.microN; i++) {
+      const v = this.micro[i];
+      if (c.kind[v] === 4) this.headOf(v, p); else this.centreOf(v, p);
+      if (Math.hypot(p[0] - x, p[2] - z) > r) continue;
+      const conn = c.conn[v], lane = c.lane[v];
+      let flags = 0, gap = 999, vl = 0, toEnd = 0, node = -1;
+      if (conn >= 0) { node = k.node[conn]; onConn.push(v); }
+      else if (lane >= 0) {
+        node = sim.laneTo(lane);
+        toEnd = sim.laneLen(lane) - c.s[v];
+        const arm = sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)];
+        if (sim.nodePhases[node] > 0 && !this.sig.go(node, arm, true)) flags |= INSPECT_RED;
+        const lead = c.prev[v];
+        if (lead >= 0 && c.lane[lead] === lane && c.conn[lead] < 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
+        if (toEnd < 8 && c.wait[v] > 0) flags |= INSPECT_GATE;
+        const ctl = sim.nodeCtl[node];
+        if ((ctl === Ctl.Crossing && this.crossingDown(node)) || (ctl === Ctl.Zebra && this.pedCrossing(node))) flags |= INSPECT_GATE;
+      }
+      if (c.pk[v] > 0 || c.mv[v] >= 0) flags |= INSPECT_BAY;
+      if (c.dying[v]) flags |= INSPECT_LEAVING;
+      if (c.line[v] >= 0 && c.dwell[v] > 0) flags |= INSPECT_STOP;
+      if (c.lcT[v] < 1) flags |= INSPECT_CHANGING;
+      const [strip, fromEnd] = stripAt(sim, p[0], p[2]);
+      out.push(v, c.kind[v], p[0], p[2], p[3], c.len[v], c.v[v], conn, node, flags, gap, vl, toEnd, c.wait[v], c.held[v], c.s[v], strip, fromEnd);
+    }
+    // paths that cross inside a junction: both bodies over the crossing point at once
+    const clashes: number[] = [];
+    for (let a = 0; a < onConn.length; a++) for (let b = a + 1; b < onConn.length; b++) {
+      const va = onConn[a], vb = onConn[b], ca = c.conn[va], cb = c.conn[vb];
+      if (ca === cb || k.node[ca] !== k.node[cb]) continue;
+      const list = sim.conflicts.get(ca);
+      if (!list || !list.includes(cb)) continue;
+      const hit = this.crossAt(ca, cb);
+      if (!hit) continue;
+      const over = (v: number, s: number) => c.s[v] + 0.5 >= s && c.s[v] - c.len[v] - 0.5 <= s;
+      if (over(va, hit[0]) && over(vb, hit[1])) clashes.push(va, vb, hit[2], hit[3]);
+    }
+    return { vehicles: Float32Array.from(out), clashes: Float32Array.from(clashes) };
+  }
+
+  /** Where connections a and b cross: [position along a, along b, x, z] (the end of both when they merge), or null. */
+  private crossAt(a: number, b: number): [number, number, number, number] | null {
+    const k = this.sim.conns.cols, P = 16;
+    const pt = (x: number, t: number) => {
+      const s = 1 - t;
+      return [s * s * k.x0[x] + 2 * s * t * k.cx[x] + t * t * k.x1[x], s * s * k.z0[x] + 2 * s * t * k.cz[x] + t * t * k.z1[x]];
+    };
+    for (let i = 0; i < P; i++) {
+      const [ax, az] = pt(a, i / P), [bx, bz] = pt(a, (i + 1) / P);
+      for (let j = 0; j < P; j++) {
+        const [cx, cz] = pt(b, j / P), [dx, dz] = pt(b, (j + 1) / P);
+        const den = (bx - ax) * (dz - cz) - (bz - az) * (dx - cx);
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den, u = ((cx - ax) * (bz - az) - (cz - az) * (bx - ax)) / den;
+        if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+        return [k.len[a] * (i + t) / P, k.len[b] * (j + u) / P, ax + (bx - ax) * t, az + (bz - az) * t];
+      }
+    }
+    if (k.to[a] === k.to[b]) return [k.len[a], k.len[b], k.x1[a], k.z1[a]];
+    return null;
+  }
+
   writePoses(data: Float32Array, stride: number): number {
-    const c = this.veh.cols, sim = this.sim, p = this.tmp, q = this.tmp2;
+    const c = this.veh.cols, p = this.tmp;
     let n = 0;
     for (let i = 0; i < this.microN; i++) {
       const v = this.micro[i];
-      let lights = 0;
-      // a lane change still under way (only between lanes of the same segment as the lane it is on or came from)
-      const changing = c.lcT[v] < 1 && c.lcFrom[v] >= 0 && c.lane[v] >= 0 && laneSeg(c.lcFrom[v]) === laneSeg(c.lane[v]) && sim.net.segs.alive[laneSeg(c.lcFrom[v])];
-      if (c.conn[v] >= 0) {
-        sim.connPoint(c.conn[v], c.s[v], p);
-        // into the junction mid-change: the sideways offset left at the end of the lane fades out on the way
-        if (changing) {
-          const lane = c.lane[v], L = sim.laneLen(lane), t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
-          sim.lanePoint(c.lcFrom[v], L, q); const qx = q[0], qz = q[2];
-          sim.lanePoint(lane, L, q);
-          p[0] += (qx - q[0]) * k; p[2] += (qz - q[2]) * k;
-        }
-      } else {
-        const lane = c.lane[v];
-        const L = sim.laneLen(lane);
-        sim.lanePoint(lane, Math.min(L, c.s[v]), p);
-        // smooth lane change: blend with the origin lane
-        if (changing) {
-          sim.lanePoint(c.lcFrom[v], Math.min(L, c.s[v]), q);
-          // lane-change indicator: toward the new lane's side (driver's right = (−cos, sin) of the heading)
-          if (c.lcT[v] < 0.8) lights |= -Math.cos(p[3]) * (p[0] - q[0]) + Math.sin(p[3]) * (p[2] - q[2]) > 0 ? LIGHT_RIGHT : LIGHT_LEFT;
-          const t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
-          p[0] += (q[0] - p[0]) * k; p[2] += (q[2] - p[2]) * k;
-        }
-      }
-      if (c.kind[v] === 4) { n = this.writeTrain(v, data, stride, n, p); continue; }
-      let centred = false;
-      if (c.mv[v] >= 0) {
-        // on a manoeuvre: the pose is the vehicle centre on the Reeds-Shepp path; signal towards where it goes
-        const mp = this.mvA;
-        this.mvs.pose(c.mv[v], mp);
-        p[0] = mp[0]; p[2] = mp[1]; p[3] = mp[2];
-        centred = true;
-        lights |= this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT;
-      } else if (c.dying[v] === 4 && c.conn[v] < 0) {
-        // at the kerb: 0.9 m to the right, hazard lights while stopped
-        const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
-        p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
-        if (c.v[v] < 0.1 && ((this.time * 1.5) % 1) < 0.5) lights |= LIGHT_LEFT | LIGHT_RIGHT;
-      }
-      // in the bay or on the way to it (offset in u, along the segment direction): pulling in, right indicator; pulling out, left
-      if (!centred && c.dying[v] !== 4 && c.pk[v] > 0 && c.conn[v] < 0) {
-        const lane = c.lane[v], dir = laneDir(lane);
-        const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
-        const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
-        if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
-        if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
-      }
-      // reference point at the middle of the vehicle
-      const back = centred ? 0 : c.len[v] / 2;
-      p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
+      if (c.kind[v] === 4) { this.headOf(v, p); n = this.writeTrain(v, data, stride, n, p); continue; }
+      const lights = this.centreOf(v, p);
       const o = n * stride;
       if (!c.has[v]) { c.px[v] = p[0]; c.py[v] = p[1]; c.pz[v] = p[2]; c.pyaw[v] = p[3]; c.has[v] = 1; }
       data[o] = c.px[v]; data[o + 1] = c.py[v]; data[o + 2] = c.pz[v]; data[o + 3] = c.pyaw[v];
@@ -2778,6 +2819,75 @@ export class Traffic {
       n++;
     }
     return n;
+  }
+
+  /**
+   * Front of vehicle `v` on its lane or connection (x, y, z, yaw into `p`), mid lane change if one is under way.
+   * Returns the lane-change indicator bits.
+   */
+  private headOf(v: number, p: Float64Array): number {
+    const c = this.veh.cols, sim = this.sim, q = this.tmp2;
+    let lights = 0;
+    // a lane change still under way (only between lanes of the same segment as the lane it is on or came from)
+    const changing = c.lcT[v] < 1 && c.lcFrom[v] >= 0 && c.lane[v] >= 0 && laneSeg(c.lcFrom[v]) === laneSeg(c.lane[v]) && sim.net.segs.alive[laneSeg(c.lcFrom[v])];
+    if (c.conn[v] >= 0) {
+      sim.connPoint(c.conn[v], c.s[v], p);
+      // into the junction mid-change: the sideways offset left at the end of the lane fades out on the way
+      if (changing) {
+        const lane = c.lane[v], L = sim.laneLen(lane), t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
+        sim.lanePoint(c.lcFrom[v], L, q); const qx = q[0], qz = q[2];
+        sim.lanePoint(lane, L, q);
+        p[0] += (qx - q[0]) * k; p[2] += (qz - q[2]) * k;
+      }
+    } else {
+      const lane = c.lane[v];
+      const L = sim.laneLen(lane);
+      sim.lanePoint(lane, Math.min(L, c.s[v]), p);
+      // smooth lane change: blend with the origin lane
+      if (changing) {
+        sim.lanePoint(c.lcFrom[v], Math.min(L, c.s[v]), q);
+        // lane-change indicator: toward the new lane's side (driver's right = (−cos, sin) of the heading)
+        if (c.lcT[v] < 0.8) lights |= -Math.cos(p[3]) * (p[0] - q[0]) + Math.sin(p[3]) * (p[2] - q[2]) > 0 ? LIGHT_RIGHT : LIGHT_LEFT;
+        const t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
+        p[0] += (q[0] - p[0]) * k; p[2] += (q[2] - p[2]) * k;
+      }
+    }
+    return lights;
+  }
+
+  /**
+   * Middle of vehicle `v` as drawn (x, y, z, yaw into `p`): on its lane or connection, in the bay, at the kerb or on a
+   * manoeuvre's path. Returns the indicator bits. Not for trains (their wagons: `writeTrain`).
+   */
+  private centreOf(v: number, p: Float64Array): number {
+    const c = this.veh.cols, sim = this.sim;
+    let lights = this.headOf(v, p);
+    let centred = false;
+    if (c.mv[v] >= 0) {
+      // on a manoeuvre: the pose is the vehicle centre on the Reeds-Shepp path; signal towards where it goes
+      const mp = this.mvA;
+      this.mvs.pose(c.mv[v], mp);
+      p[0] = mp[0]; p[2] = mp[1]; p[3] = mp[2];
+      centred = true;
+      lights |= this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT;
+    } else if (c.dying[v] === 4 && c.conn[v] < 0) {
+      // at the kerb: 0.9 m to the right, hazard lights while stopped
+      const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
+      p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
+      if (c.v[v] < 0.1 && ((this.time * 1.5) % 1) < 0.5) lights |= LIGHT_LEFT | LIGHT_RIGHT;
+    }
+    // in the bay or on the way to it (offset in u, along the segment direction): pulling in, right indicator; pulling out, left
+    if (!centred && c.dying[v] !== 4 && c.pk[v] > 0 && c.conn[v] < 0) {
+      const lane = c.lane[v], dir = laneDir(lane);
+      const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
+      const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
+      if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
+      if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
+    }
+    // reference point at the middle of the vehicle
+    const back = centred ? 0 : c.len[v] / 2;
+    p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
+    return lights;
   }
 }
 

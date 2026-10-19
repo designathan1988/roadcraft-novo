@@ -23,6 +23,8 @@ export type ToSim =
   | { type: 'profiles'; list: Profile[] }
   | { type: 'probe'; seg: number }
   | { type: 'probeNode'; node: number }
+  /** The motion probe (tools/check-sim.mjs): vehicles and people within r m of (x, z), as they are now. */
+  | { type: 'inspect'; x: number; z: number; r: number }
   | { type: 'people'; x: number; z: number; count: number; color: number }
   | { type: 'hit'; x: number; z: number; r: number; one: boolean };
 
@@ -31,6 +33,9 @@ export type FromSim =
   | { type: 'probe'; seg: number; vehicles: number; speed: number; queue: number; capacity: number }
   | { type: 'probeNode'; node: number; passed: number; time: number }
   | { type: 'hit'; people: number; vehicles: number }
+  /** Answer to 'inspect': Traffic.inspect and Peds.inspect records, the lights within reach (node, state as in the
+   *  signals buffer) and the count of vehicles that entered a junction on red. */
+  | { type: 'inspect'; time: number; vehicles: Float32Array; clashes: Float32Array; peds: Float32Array; lights: number[]; ranRed: number }
   /** Manoeuvres going on (answer to 'probeManoeuvres'): [x, z, kind (sim/manoeuvres MKind), share done] each; counters. */
   | { type: 'manoeuvres'; list: number[]; planned: number; kerbStops: number; docked: number; crossings: number[]; trains: number[] }
   /** Automatic mode switched the node's control based on measured flow (Flow: 1 traffic light, 2 signs). The page can
@@ -183,6 +188,12 @@ scope.onmessage = (e) => {
     case 'people': { const n = sim.net.nearestNode(m.x, m.z, 200); if (n >= 0) peds.spawnAt(n, m.count, m.color); break; }
     case 'hit': scope.postMessage({ type: 'hit', people: peds.hit(m.x, m.z, m.r, m.one), vehicles: m.one ? 0 : traffic.blast(m.x, m.z, m.r) }); break;
     case 'probeManoeuvres': scope.postMessage({ type: 'manoeuvres', ...traffic.manoeuvreList() }); break;
+    case 'inspect': {
+      const tv = traffic.inspect(m.x, m.z, m.r), lights: number[] = [];
+      sim.net.nodeIndex.query(m.x - m.r, m.z - m.r, m.x + m.r, m.z + m.r, (n) => { if (sim.nodePhases[n] > 0) lights.push(n, traffic.lightState(n)); });
+      scope.postMessage({ type: 'inspect', time: traffic.time, vehicles: tv.vehicles, clashes: tv.clashes, peds: peds.inspect(m.x, m.z, m.r), lights, ranRed: traffic.ranRed });
+      break;
+    }
     case 'probeNode': scope.postMessage({ type: 'probeNode', node: m.node, passed: traffic.nodePass[m.node] ?? 0, time: traffic.time }); break;
     case 'ops': {
       // every op is tried (one failing must not drop the ones after it); any failure means this mirror may now differ

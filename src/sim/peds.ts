@@ -15,6 +15,7 @@ import { baseZone } from '../roads/zones.ts';
 import { MAX_DEG } from '../roads/network.ts';
 import type { SimNet } from './lanes.ts';
 import { Router } from './routing.ts';
+import { stripAt } from './probe.ts';
 
 /**
  * Guard against a runaway only (2 million people, ~1 GB): the number of pedestrians is the demand (street length ×
@@ -76,6 +77,9 @@ const schema = {
 };
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
+
+/** Numbers per person in `Peds.inspect`. */
+export const PED_INSPECT_STRIDE = 11;
 
 export class Peds {
   readonly t = new Table(schema, 4096);
@@ -790,6 +794,30 @@ export class Peds {
       }
     }
     return n;
+  }
+
+  /**
+   * The people within  m of (x, z), as the motion probe reads them (tools/check-sim.mjs): PED_INSPECT_STRIDE
+   * numbers each (id, x, z, yaw, speed, mode, arm being crossed + 1 (0: not crossing), node it walks to, bicycle, strip
+   * of the street under it (STRIP_KINDS index), distance from the street's nearer end). Only the window's nodes, on
+   * request.
+   */
+  inspect(x: number, z: number, r: number): Float32Array {
+    const c = this.t.cols, net = this.sim.net, out: number[] = [];
+    for (const node of this.windowNodes) {
+      if (!net.nodes.alive[node]) continue;
+      for (let p = this.head[node]; p >= 0; p = c.next[p]) {
+        if (c.mode[p] === 0 && !net.segs.alive[c.seg[p]]) continue;
+        const [px, , pz, yaw] = this.posNow(p);
+        if (Math.hypot(px - x, pz - z) > r) continue;
+        const m = c.mode[p];
+        const speed = m === 0 ? Math.abs(c.db[p] - c.da[p]) / Math.max(1e-3, c.dur[p]) : m === 1 ? c.speed[p] : 0;
+        const arm = m === 1 && c.wIdx[p] > 0 ? this.ways[p * WAYS * 4 + (c.wIdx[p] - 1) * 4 + 3] : 0;
+        const [strip, fromEnd] = stripAt(this.sim, px, pz);
+        out.push(p, px, pz, yaw, speed, m, arm, node, c.bike[p], strip, fromEnd);
+      }
+    }
+    return Float32Array.from(out);
   }
 
   clear(): void {
