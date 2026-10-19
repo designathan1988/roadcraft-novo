@@ -37,8 +37,25 @@ export function layerCover(xz: Node): Node {
 
 const RAIN_DROPS = 14000;
 /** Raio: 40 trechos, cada um com 4 triângulos (borda, miolo, borda: o miolo brilha, as bordas são o halo). */
-const BOLT_SEGS = 40;
+/** Room for the channel (128 pieces) and up to 6 branches (32 each), 12 vertices per piece. */
+const BOLT_SEGS = 128 + 6 * 32;
 const BOLT_VERTS = BOLT_SEGS * 12;
+
+/** Midpoint displacement from a to b: 2^gens pieces, each generation kicked sideways by kick × its length, halved. */
+function boltPath(a: [number, number, number], b: [number, number, number], gens: number, kick: number, rng: () => number): number[][] {
+  let pts: number[][] = [a, b];
+  let k = kick * Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  for (let g = 0; g < gens; g++) {
+    const next: number[][] = [pts[0]];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const p = pts[i], q = pts[i + 1];
+      next.push([(p[0] + q[0]) / 2 + (rng() - 0.5) * 2 * k, (p[1] + q[1]) / 2 + (rng() - 0.5) * k * 0.5, (p[2] + q[2]) / 2 + (rng() - 0.5) * 2 * k], q);
+    }
+    pts = next;
+    k *= 0.5;
+  }
+  return pts;
+}
 const RAIN_BOX = 70;
 /** Height of the weather's cloud layer (m). */
 export const CLOUD_Y = 2200;
@@ -195,23 +212,36 @@ export class Weather {
     const p = this.boltPos.array as Float32Array;
     // lado da fita: perpendicular à direção da câmera
     const sx = -Math.sin(a), sz = Math.cos(a);
-    let cx = x + (this.rng() - 0.5) * (at ? 120 : 300), cz = z + (this.rng() - 0.5) * (at ? 120 : 300);
-    const segs = BOLT_SEGS;
+    const top0: [number, number, number] = [x + (this.rng() - 0.5) * (at ? 120 : 300), top, z + (this.rng() - 0.5) * (at ? 120 : 300)];
     // halo mais largo de longe (alguns pixels na tela até a 4 km)
     const width = 6 + d * 0.004;
-    let k = 0;
-    for (let i = 0; i < segs; i++) {
-      const y0 = top + (ground - top) * (i / segs), y1 = top + (ground - top) * ((i + 1) / segs);
-      const t = (i + 1) / segs;
-      const nx = i === segs - 1 ? x : cx + (this.rng() - 0.5) * 60 + (x - cx) * 0.12 * t;
-      const nz = i === segs - 1 ? z : cz + (this.rng() - 0.5) * 60 + (z - cz) * 0.12 * t;
-      const w0 = width * (1 - 0.4 * (i / segs)), w1 = width * (1 - 0.4 * t);
-      // esquerda-miolo e miolo-direita (padrão de miolo/borda no atributo 'core')
-      const L0 = [cx - sx * w0, y0, cz - sz * w0], C0 = [cx, y0, cz], R0 = [cx + sx * w0, y0, cz + sz * w0];
-      const L1 = [nx - sx * w1, y1, nz - sz * w1], C1 = [nx, y1, nz], R1 = [nx + sx * w1, y1, nz + sz * w1];
-      p.set([...L0, ...C0, ...C1, ...L0, ...C1, ...L1, ...C0, ...R0, ...R1, ...C0, ...R1, ...C1], k); k += 36;
-      cx = nx; cz = nz;
+    // Roadcraft 4.0's branching bolt (lightning.ts): the channel by midpoint displacement, 7 generations (128 pieces),
+    // kick 0.2 × length halved each generation; 3-6 branches leave it 10-70 % down, ~30° off its axis, reaching
+    // (1 − f) × length × (0.25..0.55), 5 generations with kick 0.18 × reach; branches thinner than the channel
+    const main = boltPath(top0, [x, ground, z], 7, 0.2, this.rng);
+    const pieces: Array<{ a: number[]; b: number[]; w0: number; w1: number }> = [];
+    const n = main.length - 1;
+    for (let i = 0; i < n; i++) pieces.push({ a: main[i], b: main[i + 1], w0: width * (1 - 0.4 * i / n), w1: width * (1 - 0.4 * (i + 1) / n) });
+    const branches = 3 + Math.floor(this.rng() * 4);
+    const len = Math.hypot(main[n][0] - main[0][0], main[n][1] - main[0][1], main[n][2] - main[0][2]);
+    for (let k = 0; k < branches; k++) {
+      const f = 0.1 + this.rng() * 0.6, from = main[Math.floor(f * n)];
+      const reach = (1 - f) * len * (0.25 + this.rng() * 0.3);
+      const turn = this.rng() * Math.PI * 2, off = 0.52;
+      const to = [from[0] + Math.cos(turn) * Math.sin(off) * reach, from[1] - Math.cos(off) * reach, from[2] + Math.sin(turn) * Math.sin(off) * reach];
+      const path = boltPath(from as [number, number, number], to as [number, number, number], 5, 0.18, this.rng);
+      for (let i = 0; i + 1 < path.length; i++) pieces.push({ a: path[i], b: path[i + 1], w0: width * 0.7 * (1 - 0.5 * i / path.length), w1: width * 0.7 * (1 - 0.5 * (i + 1) / path.length) });
     }
+    let k = 0;
+    for (const { a: A, b: B, w0, w1 } of pieces) {
+      if (k + 36 > p.length) break;
+      // esquerda-miolo e miolo-direita (padrão de miolo/borda no atributo 'core')
+      const L0 = [A[0] - sx * w0, A[1], A[2] - sz * w0], C0 = A, R0 = [A[0] + sx * w0, A[1], A[2] + sz * w0];
+      const L1 = [B[0] - sx * w1, B[1], B[2] - sz * w1], C1 = B, R1 = [B[0] + sx * w1, B[1], B[2] + sz * w1];
+      p.set([...L0, ...C0, ...C1, ...L0, ...C1, ...L1, ...C0, ...R0, ...R1, ...C0, ...R1, ...C1], k); k += 36;
+    }
+    p.fill(0, k);
+    (this.bolt.geometry as THREE.BufferGeometry).setDrawRange(0, k / 3);
     this.boltPos.needsUpdate = true;
     this.bolt.visible = true;
     this.flashT = 0;
