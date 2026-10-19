@@ -75,3 +75,13 @@ test('B56: a game that fails to start says why, in words for the player', async 
   await bootGame({ isolated: true, create: () => ({ start: () => Promise.reject(new Error('shader')) }), show: (s) => shown.push(s), failed: () => undefined });
   assert.ok(shown.some((s) => s.includes('shader')), `a failure starting the game shows: ${JSON.stringify(shown)}`);
 });
+
+test('B59: each language writes money with one currency (the unlimited money too)', async () => {
+  const { t, initLang } = await import('../src/ui/i18n.ts');
+  for (const l of ['pt-BR', 'en'] as const) {
+    initLang(l);
+    const symbol = t('economy.money', { value: '' }).trim();
+    assert.ok(t('ui.money.unlimited').startsWith(symbol), `${l}: money is "${symbol} …" but unlimited money is "${t('ui.money.unlimited')}"`);
+  }
+  initLang('pt-BR');
+});

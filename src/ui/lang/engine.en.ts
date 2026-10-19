@@ -8,7 +8,7 @@ export const ENGINE_EN: Record<string, string> = {
   'fmt.thousands': '{n}k',
   'ui.perMin': '{n}/min',
   'ui.money.tip': 'Cash. Roads cost by width and length; bridges and tunnels cost more. Demolishing gives back {refund} % of the price.',
-  'ui.money.unlimited': 'R$ ∞',
+  'ui.money.unlimited': '$ ∞',
   'ui.stats.tip': '{residents} residents · {jobs} jobs · {buildings} buildings · {speed} km/h average nearby',
   'ui.cat.roads': 'Roads',
   'ui.cat.zones': 'Zoning and lots',
