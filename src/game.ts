@@ -31,7 +31,7 @@ import { PropRenderer } from './render/props.ts';
 import { TransitRenderer } from './render/transit.ts';
 import { Post } from './render/post.ts';
 import { achieve } from './steam.ts';
-import { OptionsPanel, loadSettings, saveSettings, type Settings } from './ui/options.ts';
+import { OptionsPanel, keepOverAddress, loadSettings, saveSettings, type Settings } from './ui/options.ts';
 import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
@@ -507,6 +507,7 @@ export class Game {
     if (this.props.enabled) this.props.update(renderer, this.rig.persp, this.rig.eye, performance.now());
     // options (quality): from last time, or by the GPU; ?simples etc. override them for photos
     this.settings = loadSettings(this.parts.isWebGPU);
+    const asStored = { ...this.settings };
     if (params.has('simples')) Object.assign(this.settings, { shadows: false, ao: false, bloom: false });
     if (params.has('semsombra')) this.settings.shadows = false;
     // measurements: turn parts of the rendering on and off
@@ -518,6 +519,8 @@ export class Game {
     if (params.has('chuva')) this.settings.weather = 'chuva';
     if (params.has('limpo')) this.settings.weather = 'limpo';
     if (params.has('tempestade')) this.settings.weather = 'tempestade';
+    // the address's photo parameters hold for this run only: the player's options keep their own values
+    keepOverAddress(asStored, this.settings);
     this.health = new HealthPanel(document.getElementById('hud')!);
     this.creator = new Creator({ apply: (d, fl) => this.applyDesign(d, fl) });
     this.hud.buildingSlot.append(this.creator.el);

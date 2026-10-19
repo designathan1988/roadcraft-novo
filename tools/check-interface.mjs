@@ -432,6 +432,15 @@ export const SCENARIOS = {
     c.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 1, bubbles: true })); await frames(3);
     check('the line from the first click shows', g.preview.mesh.visible, 'no preview');
   `,
+  // B53: a photo parameter in the address (?semsombra) is not written into the player's options
+  'B53-url-not-saved': { query: '?vazio&hora=11&workers=3&semsombra', script: `
+    check('the photo parameter applies', g.settings.shadows === false, 'shadows ' + g.settings.shadows);
+    click('[data-cat=roads]'); await frames(2);
+    click(byText('[data-furniture]', 'Básico|Basic')); await frames(2);
+    const kept = JSON.parse(localStorage.getItem('cidade.opcoes') || '{}');
+    check('the furniture choice is kept', kept.furniture === 1, 'stored ' + JSON.stringify(kept));
+    check('the shadows of the address are not kept', kept.shadows !== false, 'stored shadows ' + kept.shadows);
+  ` },
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

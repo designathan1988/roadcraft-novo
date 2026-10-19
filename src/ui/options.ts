@@ -58,8 +58,17 @@ export function loadSettings(webgpu: boolean): Settings {
   return base;
 }
 
+/** The player's own values of the options a photo parameter in the address replaced (they are what is kept). */
+let fromAddress: Partial<Settings> = {};
+
+/** After the address changed some options for this run (?simples, ?semsombra…): those are never stored. */
+export function keepOverAddress(before: Settings, after: Settings): void {
+  fromAddress = {};
+  for (const k of Object.keys(after) as Array<keyof Settings>) if (after[k] !== before[k]) (fromAddress as Record<string, unknown>)[k] = before[k];
+}
+
 export function saveSettings(s: Settings): void {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignored */ }
+  try { localStorage.setItem(KEY, JSON.stringify({ ...s, ...fromAddress })); } catch { /* ignored */ }
 }
 
 /** The options dialog. `apply` receives the new options; `current` gives the game's options as they are now. */
