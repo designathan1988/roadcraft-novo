@@ -1,7 +1,7 @@
-// Espelho da rede viária no worker de simulação: faixas e conexões nos nós.
-// Faixa não é objeto: o id é (trecho * 16 + sentido * 8 + índice) e a forma
-// sai da curva do trecho com o deslocamento lateral do perfil. Conexões
-// (movimentos dentro do nó) ficam numa tabela SoA, refeitas só nos nós tocados.
+// Mirror of the road network in the simulation worker: lanes and the connections at the nodes.
+// A lane is not an object: its id is (segment * 16 + direction * 8 + index) and its shape comes
+// from the segment's curve with the profile's sideways offset. Connections (movements inside the
+// node) live in an SoA table, rebuilt only at the nodes touched.
 
 import { RoadNetwork, type NetOp } from '../roads/network.ts';
 import { Ctl, Rule, banned, effectiveControl, mainLegs, signalStages, type JunctionSpec } from '../roads/control.ts';
@@ -19,7 +19,7 @@ export const laneDir = (l: number) => ((l & 8) !== 0 ? -1 : 1);
 export const laneIdx = (l: number) => l & 7;
 
 export const laneCount = (profile: number, dir: number) => (dir > 0 ? PROFILE_INFO[profile].lanesFwd : PROFILE_INFO[profile].lanesBack);
-/** Faixa só de ônibus. */
+/** Bus-only lane. */
 export const laneBus = (profile: number, dir: number, idx: number) => (dir > 0 ? PROFILE_INFO[profile].fwd : PROFILE_INFO[profile].back)[idx]?.bus ?? false;
 export const laneSpeed = (profile: number) => PROFILES[profile].speed / 3.6;
 
@@ -41,20 +41,20 @@ export class SimNet {
   readonly conns = new Table(connSchema, 1 << 14);
   arc = new Float32Array((1 << 14) * (ARC_STEPS + 1));
   retreat = new Float32Array((1 << 14) * 2);
-  /** Primeira conexão de cada nó / que sai de cada faixa (listas encadeadas). */
+  /** First connection of each node / leaving each lane (linked lists). */
   nodeConn = new Int32Array(1 << 14).fill(-1);
   laneConn = new Int32Array((1 << 14) * 16).fill(-1);
-  /** Nó com semáforo: número de fases; 0 = sem semáforo. */
+  /** Node with traffic lights: number of stages; 0 = no lights. */
   nodePhases = new Uint8Array(1 << 14);
-  /** Controle efetivo do nó (Ctl). */
+  /** The node's effective control (Ctl). */
   nodeCtl = new Uint8Array(1 << 14);
-  /** Por nó e braço (n * 8 + braço): fase do semáforo e regra (Rule). */
+  /** Per node and arm (n * 8 + arm): the light's stage and the rule (Rule). */
   armStage = new Uint8Array((1 << 14) * 8);
   armRule = new Uint8Array((1 << 14) * 8);
-  /** Direção de saída de cada braço (para a preferência de quem vem pela direita). */
+  /** Outward direction of each arm (for the priority of whoever comes from the right). */
   armDx = new Float32Array((1 << 14) * 8);
   armDz = new Float32Array((1 << 14) * 8);
-  /** Braço de cada ponta de trecho no seu nó (trecho * 2 + ponta; 0 = ponta a). Para a rota pesar o cruzamento. */
+  /** Arm of each segment end at its node (segment * 2 + end; 0 = end a). So the route can weigh the junction. */
   segArm = new Uint8Array((1 << 14) * 2);
   /**
    * Movements the node's connections make, per node and incoming arm (n * 8 + arm): bit k = some lane goes out by arm
@@ -65,22 +65,22 @@ export class SimNet {
   turnCar = new Uint8Array((1 << 14) * 8);
   /** Segment of each arm (n * 8 + arm). */
   armSeg = new Int32Array((1 << 14) * 8);
-  /** Conexões que cruzam ou juntam com cada conexão (refeitas com o nó). */
+  /** Connections that cross or merge with each connection (rebuilt with the node). */
   readonly conflicts = new Map<number, Int32Array>();
-  /** Nó de rotatória (entradas dão preferência ao anel). */
+  /** Roundabout node (entries give way to the ring). */
   nodeRing = new Uint8Array(1 << 14);
-  /** O que o fluxo medido pede no nó automático (Flow; 0 = ainda não mediu: vale a importância das vias). */
+  /** What the measured flow asks for at an automatic node (Flow; 0 = not measured yet: the roads' importance decides). */
   nodeFlow = new Uint8Array(1 << 14);
-  /** Braços da via principal do nó (bit por braço), para medir o fluxo principal e o secundário. */
+  /** Arms of the node's main road (bit per arm), to measure the main and the minor flow. */
   armMain = new Uint8Array(1 << 14);
-  /** O controle do nó ainda pode ser trocado pelo fluxo (automático, cruzamento comum de 3+ braços). */
+  /** The node's control may still be changed by the flow (automatic, an ordinary junction of 3+ arms). */
   nodeAuto = new Uint8Array(1 << 14);
   private dirtyNodes = new Set<number>();
-  /** Trechos removidos desde o último passo (os veículos neles saem). */
+  /** Segments removed since the last step (the vehicles on them leave). */
   readonly removedSegs: number[] = [];
   /** Segments whose profile changed since the last step (the vehicles on lanes that are gone move over). */
   readonly reprofiledSegs: number[] = [];
-  /** Comprimento total de faixas (para a demanda). */
+  /** Total length of lanes (for the demand). */
   laneMeters = 0;
 
   constructor() {
@@ -142,8 +142,8 @@ export class SimNet {
         this.reprofiledSegs.push(op.id); // the number of lanes may have changed
         break;
       }
-      case 'zone': net.setZone(op.id, op.side, op.zone); break; // pedestres nascem mais no comércio
-      // o jogador escolheu o controle: o automático volta a medir do zero
+      case 'zone': net.setZone(op.id, op.side, op.zone); break; // pedestrians are born more where there is commerce
+      // the player chose the control: the automatic one starts measuring again
       case 'junction': net.setJunction(op.id, op.spec); this.nodeFlow[op.id] = 0; this.onNodeReset(op.id); this.dirtyNodes.add(op.id); break;
       case 'clear':
         net.clear(); this.conns.clear(); this.nodeConn.fill(-1); this.laneConn.fill(-1);
@@ -155,22 +155,22 @@ export class SimNet {
     }
   }
 
-  /** Nó novo, apagado ou com controle escolhido (ids são reaproveitados): quem mede o fluxo zera o dele. */
+  /** A node new, removed or with its control chosen (ids are reused): whoever measures the flow resets its own. */
   onNodeReset: (n: number) => void = () => {};
 
-  /** O fluxo pede outro controle para o nó automático: guarda e refaz o nó no próximo passo. */
+  /** The flow asks for another control at an automatic node: stored, and the node is rebuilt at the next step. */
   setFlow(n: number, flow: number): void {
     if (this.nodeFlow[n] === flow) return;
     this.nodeFlow[n] = flow;
     this.dirtyNodes.add(n);
   }
 
-  /** Chamado antes de cada conexão sumir (quem estiver nela precisa sair). */
+  /** Called before each connection goes (whoever is on it has to leave it). */
   onConnRemoved: (conn: number) => void = () => {};
-  /** Trecho novo entrou na rede (o id pode ser reaproveitado). */
+  /** A new segment joined the network (the id may be reused). */
   onSegAdded: (seg: number) => void = () => {};
 
-  /** Refaz recuos e conexões dos nós tocados. Devolve os nós refeitos. */
+  /** Rebuilds the setbacks and connections of the nodes touched. Returns the nodes rebuilt. */
   rebuild(): number[] {
     const done: number[] = [];
     for (const n of this.dirtyNodes) {
@@ -181,9 +181,9 @@ export class SimNet {
     return done;
   }
 
-  // ------------------------------------------------------------ geometria
+  // ------------------------------------------------------------ geometry
 
-  /** Distância de s (comprimento ao longo do trecho) para t da curva. */
+  /** From s (length along the segment) to t of the curve. */
   private tOf(seg: number, s: number): number {
     const o = seg * (ARC_STEPS + 1);
     const tab = this.arc.subarray(o, o + ARC_STEPS + 1);
@@ -192,7 +192,7 @@ export class SimNet {
 
   segLen(seg: number): number { return this.net.segs.cols.len[seg]; }
 
-  /** Metros desde o nó a até o ponto de parâmetro t da curva. */
+  /** Metres from node a to the point at parameter t of the curve. */
   sAlong(seg: number, t: number): number {
     const o = seg * (ARC_STEPS + 1);
     const f = Math.max(0, Math.min(1, t)) * ARC_STEPS;
@@ -200,10 +200,10 @@ export class SimNet {
     return this.arc[o + i] + (this.arc[o + i + 1] - this.arc[o + i]) * (f - i);
   }
 
-  /** t da curva a s metros do nó a. */
+  /** t of the curve s metres from node a. */
   tAt(seg: number, s: number): number { return this.tOf(seg, s); }
 
-  /** Início e fim úteis do trecho (descontados os recuos dos nós). */
+  /** Usable start and end of the segment (less the nodes' setbacks). */
   segS0(seg: number): number { return this.retreat[seg * 2]; }
   segS1(seg: number): number { return this.segLen(seg) - this.retreat[seg * 2 + 1]; }
 
@@ -218,13 +218,13 @@ export class SimNet {
     return u[Math.min(laneIdx(lane), u.length - 1)]?.u ?? 0;
   }
 
-  /** Nó de saída e de chegada da faixa. */
+  /** The lane's start and end nodes. */
   laneFrom(lane: number): number { const s = laneSeg(lane); return laneDir(lane) > 0 ? this.net.segs.cols.a[s] : this.net.segs.cols.b[s]; }
   laneTo(lane: number): number { const s = laneSeg(lane); return laneDir(lane) > 0 ? this.net.segs.cols.b[s] : this.net.segs.cols.a[s]; }
 
   /**
-   * Ponto a d metros do começo da faixa: out = [x, y, z, rumo].
-   * Rumo = ângulo em torno de y (0 = +z), como o yaw de um Object3D.
+   * Point d metres from the start of the lane: out = [x, y, z, heading].
+   * Heading = angle about y (0 = +z), as an Object3D's yaw.
    */
   lanePoint(lane: number, d: number, out: Float64Array): void {
     const seg = laneSeg(lane), dir = laneDir(lane);
@@ -244,7 +244,7 @@ export class SimNet {
     out[3] = Math.atan2(dx * dir, dz * dir);
   }
 
-  /** Ponto na conexão (curva) a d metros do começo. */
+  /** Point on the connection (curve) d metres from its start. */
   connPoint(c: number, d: number, out: Float64Array): void {
     const k = this.conns.cols;
     const t = Math.max(0, Math.min(1, d / Math.max(0.01, k.len[c])));
@@ -262,7 +262,7 @@ export class SimNet {
   private q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
   private quadOf(seg: number): Quad { return this.net.quad(seg, this.q); }
 
-  // ------------------------------------------------------------ nós
+  // ------------------------------------------------------------ nodes
 
   private clearNode(n: number): void {
     const k = this.conns.cols;
@@ -270,7 +270,7 @@ export class SimNet {
       const next = k.nextAtNode[c];
       this.onConnRemoved(c);
       this.conflicts.delete(c);
-      // tira da lista da faixa de origem
+      // out of the list of its lane of origin
       const from = k.from[c];
       let prev = -1;
       for (let x = this.laneConn[from]; x >= 0; x = k.nextFromLane[x]) {
@@ -293,7 +293,7 @@ export class SimNet {
     return ((bus ? this.turnAll : this.turnCar)[n * 8 + ai] & (1 << ao)) !== 0;
   }
 
-  /** Trecho novo: as pontas sem saída perto dele refazem o balão (pode sumir com a via ao lado). */
+  /** A new segment: the dead ends near it redo their turning bulb (it may go, with the road beside it). */
   private dirtyDeadEndsNear(seg: number): void {
     const net = this.net, sc = net.segs.cols, nc = net.nodes.cols;
     const r = sc.len[seg] / 2 + BULB_R + 20;
@@ -317,14 +317,14 @@ export class SimNet {
     this.nodeRing[n] = ring ? 1 : 0;
     const armIndex = new Map<number, number>();
     order.forEach((i, k) => armIndex.set(i, k));
-    // controle: regra de cada braço e, no semáforo, as fases (braços opostos juntos)
+    // control: each arm's rule and, with lights, the stages (opposite arms together)
     const ctl = effectiveControl(net, n, net.junctions.get(n), this.nodeFlow[n]);
     this.nodeCtl[n] = ctl.ctl;
-    // só cruzamento comum no automático troca pelo fluxo (rotatória, trilho e faixa no meio da quadra não)
+    // only an ordinary automatic junction changes with the flow (not a roundabout, a rail crossing or a mid-block crossing)
     this.nodeAuto[n] = ctl.auto && deg >= 3 && (ctl.ctl === Ctl.Signal || ctl.ctl === Ctl.Priority || ctl.ctl === Ctl.None) ? 1 : 0;
     const main = mainLegs(net, n);
     const stageOf: number[] = [];
-    // faixa com semáforo: fase 0 carros (os dois braços), fase 1 pedestres (nenhum braço)
+    // crossing with lights: stage 0 the cars (both arms), stage 1 the pedestrians (no arm)
     const nStages = ctl.ctl === Ctl.Signal ? signalStages(order.map((i) => [arms[i].dx, arms[i].dz]), stageOf) : ctl.ctl === Ctl.PedSignal ? (order.forEach((_, k) => { stageOf[k] = 0; }), 2) : 0;
     this.nodePhases[n] = nStages;
     order.forEach((i, k) => {
@@ -342,18 +342,18 @@ export class SimNet {
     const pa = new Float64Array(4), pb = new Float64Array(4);
     for (let i = 0; i < deg; i++) {
       const si = segs[i], ei = ends[i];
-      const inDir = ei === 1 ? 1 : -1; // faixas que chegam ao nó
+      const inDir = ei === 1 ? 1 : -1; // lanes that arrive at the node
       const m = laneCount(sc.profile[si], inDir);
       if (m === 0) continue;
-      // rumo de chegada = contrário do braço
+      // arriving heading = opposite of the arm
       const hx = -arms[i].dx, hz = -arms[i].dz;
       for (let j = 0; j < deg; j++) {
-        // retorno no canteiro: a faixa da esquerda volta pelo mesmo trecho
+        // U-turn in the median: the left lane goes back along the same segment
         if (j === i && deg > 1 && ctl.ctl !== Ctl.UTurn) continue;
         const sj = segs[j], ej = ends[j];
         if (banned(spec, si, sj)) continue;
-        if (PROFILE_INFO[sc.profile[si]].rail !== PROFILE_INFO[sc.profile[sj]].rail) continue; // trilho só liga com trilho
-        const outDir = ej === 0 ? 1 : -1; // faixas que saem do nó
+        if (PROFILE_INFO[sc.profile[si]].rail !== PROFILE_INFO[sc.profile[sj]].rail) continue; // rails only join rails
+        const outDir = ej === 0 ? 1 : -1; // lanes that leave the node
         const k = laneCount(sc.profile[sj], outDir);
         if (k === 0) continue;
         let turn: number;
@@ -361,17 +361,17 @@ export class SimNet {
         else if (deg === 2) turn = Turn.Straight;
         else {
           const ox = arms[j].dx, oz = arms[j].dz;
-          const left = ox * hz - oz * hx; // >0: à esquerda (esquerda de h = (hz, -hx))
+          const left = ox * hz - oz * hx; // >0: to the left (left of h = (hz, -hx))
           const fwd = ox * hx + oz * hz;
           turn = fwd > 0.7 ? Turn.Straight : left > 0 ? Turn.Left : Turn.Right;
         }
-        // que faixas fazem o movimento: setas da faixa (ou pela posição)
+        // which lanes make the movement: the lanes' arrows (or by position)
         const pairs: Array<[number, number]> = [];
         const lanesIn = inDir > 0 ? PROFILE_INFO[sc.profile[si]].fwd : PROFILE_INFO[sc.profile[si]].back;
         const bit = turn === Turn.Straight ? TurnBit.Straight : turn === Turn.Right ? TurnBit.Right : TurnBit.Left;
         const ok: number[] = [];
         for (let a = 0; a < m; a++) {
-          // faixa ajustada à mão no cruzamento: só as saídas escolhidas (a seta pintada sai da mesma lista)
+          // a lane adjusted by hand at the junction: only the exits chosen (the painted arrow comes from the same list)
           if (turn === Turn.UTurn && ctl.ctl === Ctl.UTurn && a !== m - 1) continue;
           const custom = customExits(spec, si, a);
           if (custom ? custom.includes(sj) && turn !== Turn.UTurn : deg <= 2 || turn === Turn.UTurn || (laneTurns(lanesIn[a]?.turns ?? 0, a, m) & bit)) ok.push(a);
@@ -399,7 +399,7 @@ export class SimNet {
             const t0 = (wx * d1z - wz * d1x) / den, t1 = (wx * d0z - wz * d0x) / den;
             if (t0 > 0 && t1 > 0 && t0 < 80 && t1 < 80) { cx = pa[0] + d0x * t0; cz = pa[2] + d0z * t0; }
           } else if (turn === Turn.UTurn) {
-            // rua sem saída com balão: a volta vai até perto do nó (a faixa termina no recuo do balão)
+            // dead end with a turning bulb: the turn goes up to near the node (the lane ends at the bulb's setback)
             const nc = this.net.nodes.cols;
             const ext = deg === 1 ? 2 * (Math.hypot(nc.x[n] - pa[0], nc.z[n] - pa[2]) + 3) : 8;
             cx = (pa[0] + pb[0]) / 2 + d0x * ext; cz = (pa[2] + pb[2]) / 2 + d0z * ext;
@@ -415,7 +415,7 @@ export class SimNet {
     if (deg >= 3) this.buildConflicts(n);
   }
 
-  /** Pares de conexões do nó que se cruzam ou chegam na mesma faixa. */
+  /** Pairs of the node's connections that cross or arrive in the same lane. */
   private buildConflicts(n: number): void {
     const k = this.conns.cols;
     const list: number[] = [];
@@ -432,7 +432,7 @@ export class SimNet {
     const out: number[][] = list.map(() => []);
     for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
       const ca = list[a], cb = list[b];
-      if (k.arm[ca] === k.arm[cb]) continue; // mesmo braço: fila, não conflito
+      if (k.arm[ca] === k.arm[cb]) continue; // same arm: a queue, not a conflict
       let hit = k.to[ca] === k.to[cb];
       for (let i = 0; i < P && !hit; i++) for (let j = 0; j < P && !hit; j++) {
         const o1 = (a * (P + 1) + i) * 2, o2 = (b * (P + 1) + j) * 2;
@@ -443,10 +443,10 @@ export class SimNet {
     list.forEach((c, i) => { if (out[i].length) this.conflicts.set(c, Int32Array.from(out[i])); });
   }
 
-  /** Faixa só de ônibus? */
+  /** Bus-only lane? */
   isBusLane(lane: number): boolean { return laneBus(this.net.segs.cols.profile[laneSeg(lane)], laneDir(lane), laneIdx(lane)); }
 
-  /** Conexão que leva da faixa ao trecho `toSeg`; sem `bus`, prefere chegar fora da faixa de ônibus. */
+  /** Connection from the lane to segment `toSeg`; without `bus`, prefers to arrive outside the bus lane. */
   connToward(lane: number, toSeg: number, bus = true): number {
     const k = this.conns.cols;
     let any = -1;
@@ -458,7 +458,7 @@ export class SimNet {
     return any;
   }
 
-  /** Alguma faixa do trecho/sentido que tem conexão para `toSeg`; prefere a mais perto de `idx` (e fora da de ônibus, sem `bus`). */
+  /** A lane of the segment/direction with a connection to `toSeg`; prefers the one nearest `idx` (and not the bus lane, without `bus`). */
   laneToward(seg: number, dir: number, toSeg: number, idx: number, bus = true): number {
     const p = this.net.segs.cols.profile[seg];
     const n = laneCount(p, dir);
@@ -473,7 +473,7 @@ export class SimNet {
   }
 }
 
-/** Setas efetivas: as da faixa, ou pela posição (direita vira à direita, esquerda à esquerda). */
+/** Effective arrows: the lane's, or by position (the right lane turns right, the left lane left). */
 export function laneTurns(turns: number, idx: number, count: number): number {
   if (turns) return turns;
   if (count === 1) return TurnBit.Left | TurnBit.Straight | TurnBit.Right;
@@ -506,7 +506,7 @@ function grow<T extends Int32Array | Float32Array | Uint8Array>(a: T, cap: numbe
   return b;
 }
 
-/** Codifica mudanças da rede para mandar ao worker (8 números por operação). */
+/** Encodes network changes to send to the worker (8 numbers per op). */
 export function encodeOps(ops: NetOp[], extra: string[] = []): Float64Array {
   const out = new Float64Array(ops.length * 8);
   ops.forEach((op, i) => {
