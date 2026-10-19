@@ -163,8 +163,18 @@ export class Inspector {
     const height = el('div');
     height.append(row(label(t('inspector.heightNode')), value(`${fmtDec(net.nodes.cols.y[n])} m`)),
       actions(btn(t('junction.lower'), () => this.raise(-0.5)), btn(t('junction.raise'), () => this.raise(0.5))));
+    // roads meeting too sharply (roads/impossible.ts; Roadcraft 4.0 ui/inspector.ts:421-424): the junction cannot close
+    const gap = this.world.impossible.angleAt(n);
+    const impossible = (): void => {
+      if (gap < 0) return;
+      const warn = el('div', 'inspect-warning');
+      warn.setAttribute('role', 'alert');
+      warn.append(el('strong', '', t('inspector.impossible')), ` · ${t('inspector.impossibleGap', { angle: Math.round(gap) })}`, el('br'), t('inspector.impossibleBody'));
+      box.append(warn);
+    };
     if (segs.length === 2) {
       this.head(t('inspector.node'), t('inspector.heightPoint'));
+      impossible();
       box.append(height);
       const sp0 = net.junctions.get(n);
       if (sp0 && sp0.ctl === Ctl.UTurn) box.append(note(t('hint.uturn.placed')), actions(btn(t('ui.insp.closeUturn'), () => this.apply(null, 'fechar retorno'))));
@@ -197,6 +207,7 @@ export class Inspector {
       return;
     }
     this.head(t('inspector.junction'), plural('ui.insp.roads', segs.length));
+    impossible();
     const spec = net.junctions.get(n);
     const eff = effectiveControl(net, n, net.junctions.get(n), net.flow.get(n));
     if (eff.ctl === Ctl.Ring) { box.append(note(t('ui.insp.ring'))); return; }

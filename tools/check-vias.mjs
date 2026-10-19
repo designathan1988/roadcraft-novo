@@ -79,6 +79,23 @@ const SCENARIOS = {
     g.commands.undo();
     check('one undo brings the three back', ids.every((i) => w.buildings.alive[i]), 'alive: ' + ids.map((i) => w.buildings.alive[i]));
   `,
+  // Roadcraft 4.0 ui/inspector.ts:421-426: a node whose roads meet too sharply says it cannot be built, with the angle
+  'inspector-impossible': `
+    const net = w.roads, n = (x, z) => net.addNode({ x, z, y: a.ground(x, z) });
+    const A = n(1500, 1500), B = n(1700, 1500), C = n(1700, 1553);
+    net.addSeg({ a: A, b: B, cx: 1600, cz: 1500, profile: 0, flags: 0, zl: 0, zr: 0 });
+    net.addSeg({ a: A, b: C, cx: 1600, cz: 1526.5, profile: 0, flags: 0, zl: 0, zr: 0 });
+    check('the node is impossible (15° between its roads)', w.impossible.angleAt(A) >= 0, 'angle ' + w.impossible.angleAt(A));
+    g.setTool('inspect');
+    g.inspector.pick(1500, 1500);
+    await wait(300);
+    const warn = document.querySelector('.inspector .inspect-warning');
+    check('the node inspector says it cannot be built, with the angle', !!warn && /15/.test(warn.textContent), 'warning: ' + (warn && warn.textContent));
+    road(1400, 1800, 1600, 1800); road(1500, 1700, 1500, 1900);
+    g.inspector.pick(1500, 1800);
+    await wait(300);
+    check('a right-angle junction has no such warning', !document.querySelector('.inspector .inspect-warning'), 'warning shown');
+  `,
 };
 
 const pick = process.argv.slice(2);
