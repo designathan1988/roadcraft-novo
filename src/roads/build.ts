@@ -16,7 +16,7 @@ import { SegFlag } from './flags.ts';
 import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
 import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPrice, withKind } from './economy.ts';
-import type { JunctionSpec } from './control.ts';
+import { remapSpec, type JunctionSpec } from './control.ts';
 import { ROAD_TUNING } from './tuning.ts';
 import { ARCHES, archFor, eraAt } from '../world/arch.ts';
 
@@ -30,6 +30,7 @@ type Op =
   | { t: 'profile'; id: number; from: number; to: number }
   | { t: 'zone'; id: number; side: number; from: number; to: number }
   | { t: 'junction'; id: number; from: JunctionSpec | null; to: JunctionSpec | null }
+  | { t: 'name'; id: number; from: string | undefined; to: string | undefined }
   | { t: 'addBld'; rec: number[] }
   | { t: 'remBld'; rec: number[] }
   | { t: 'terrain'; idx: Int32Array; before: Float32Array; after: Float32Array; x0: number; z0: number; x1: number; z1: number };
@@ -85,6 +86,7 @@ export class RoadJournal implements Command {
    * Without enough money it undoes itself and returns false. Called once, right after the live operations.
    */
   settle(): boolean {
+    this.tidy();
     const charge = this.world.unlimited ? 0 : this.price;
     if (charge > 0 && charge > this.world.money) { this.invert(); this.ops.length = 0; this.value = 0; this.freeValue = 0; return false; }
     this.charge = charge;
@@ -137,7 +139,71 @@ export class RoadJournal implements Command {
     this.addValue(id, -this.segValue(id));
     const rec = this.net.removeSeg(id);
     this.ops.push({ t: 'remSeg', rec });
+    this.gone.push(rec);
     return rec;
+  }
+
+  /** Segments this journal removed, and the pieces that took over from a removed one (split, join, roundabout cut). */
+  private gone: SegRec[] = [];
+  private heirs = new Map<number, number[]>();
+  /** `pieces` took over from the removed segment `from` (its name and its place in the junctions' settings). */
+  inherit(from: number, pieces: number[]): void { this.heirs.set(from, [...(this.heirs.get(from) ?? []), ...pieces]); }
+
+  /**
+   * Junction settings and street names are kept by segment id, and ids are reused. After the live operations, every
+   * removed segment hands them to its heirs (the pieces it was split into, or a segment between the same two nodes:
+   * raised, moved, reversed) and they are taken off the ones that are gone, so nothing names a removed segment or
+   * passes to a road that reuses the id. Recorded like any change: undo puts them back.
+   */
+  private tidy(): void {
+    const net = this.net, sc = net.segs.cols, names = this.world.streetNames;
+    const gone = this.gone;
+    this.gone = [];
+    const name = new Map<number, string>();
+    // the names as they were before this journal, by the first removal of each id
+    for (const op of this.ops) if (op.t === 'remSeg' && !name.has(op.rec.id)) { const v = this.nameBefore(op.rec.id); if (v !== undefined) name.set(op.rec.id, v); }
+    const done = new Set<number>();
+    for (const rec of gone) {
+      if (done.has(rec.id)) continue;
+      done.add(rec.id);
+      const heirs = (this.heirs.get(rec.id) ?? []).filter((h) => net.segs.alive[h]);
+      for (const n of [rec.a, rec.b]) {
+        if (!net.nodes.alive[n]) continue;
+        const between = net.segsOf(n, []).filter((s) => (sc.a[s] === rec.a && sc.b[s] === rec.b) || (sc.a[s] === rec.b && sc.b[s] === rec.a));
+        for (const s of between) if (!heirs.includes(s)) heirs.push(s);
+      }
+      // street name: on every heir that has none, and off the id if it is no longer one of them
+      const nm = name.get(rec.id);
+      if (nm !== undefined) {
+        for (const h of heirs) if (names.get(h) === undefined) this.setName(h, nm);
+        if (!heirs.includes(rec.id) && names.get(rec.id) === nm) this.setName(rec.id, undefined);
+      }
+      // junction settings at both ends: the heir at that node, or nothing
+      for (const n of [rec.a, rec.b]) {
+        if (!net.nodes.alive[n]) continue;
+        const spec = net.junctions.get(n);
+        if (!spec) continue;
+        const at = net.segsOf(n, []);
+        if (at.includes(rec.id)) continue; // the id is at this node again (re-added, or the heir took it)
+        const heir = heirs.find((h) => at.includes(h)) ?? -1;
+        const next = remapSpec(spec, rec.id, heir, at);
+        if (next !== spec) this.setJunction(n, next);
+      }
+    }
+  }
+
+  /** The street name of segment `id` before this journal's own name changes. */
+  private nameBefore(id: number): string | undefined {
+    let v = this.world.streetNames.get(id);
+    for (let i = this.ops.length - 1; i >= 0; i--) { const op = this.ops[i]; if (op.t === 'name' && op.id === id) v = op.from; }
+    return v;
+  }
+
+  private setName(id: number, to: string | undefined): void {
+    const names = this.world.streetNames, from = names.get(id);
+    if (from === to) return;
+    if (to === undefined) names.delete(id); else names.set(id, to);
+    this.ops.push({ t: 'name', id, from, to });
   }
   setProfile(id: number, to: number): void {
     const from = this.net.segs.cols.profile[id];
@@ -199,6 +265,7 @@ export class RoadJournal implements Command {
       case 'profile': net.setProfile(op.id, doAdd ? op.to : op.from); break;
       case 'zone': net.setZone(op.id, op.side, doAdd ? op.to : op.from); break;
       case 'junction': net.setJunction(op.id, doAdd ? op.to : op.from); break;
+      case 'name': { const v = doAdd ? op.to : op.from; if (v === undefined) this.world.streetNames.delete(op.id); else this.world.streetNames.set(op.id, v); break; }
       case 'addBld': if (doAdd) this.world.restoreBuilding(op.rec); else this.world.removeBuilding(op.rec[0]); break;
       case 'remBld': if (doAdd) this.world.removeBuilding(op.rec[0]); else this.world.restoreBuilding(op.rec); break;
       case 'terrain': this.writeTerrain(op, doAdd ? op.after : op.before); break;
@@ -447,8 +514,9 @@ function splitSeg(j: RoadJournal, net: RoadNetwork, s: number, t: number, y: num
   const yy = y ?? segHeightAt(net, s, t);
   j.removeSeg(s);
   const n = j.addNode(a.x1, a.z1, yy);
-  j.addSeg({ a: rec.a, b: n, cx: a.cx, cz: a.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
-  j.addSeg({ a: n, b: rec.b, cx: b.cx, cz: b.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
+  const pa = j.addSeg({ a: rec.a, b: n, cx: a.cx, cz: a.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
+  const pb = j.addSeg({ a: n, b: rec.b, cx: b.cx, cz: b.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
+  j.inherit(s, [pa, pb]);
   return n;
 }
 
@@ -799,6 +867,7 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
       }
       const ns = j.addSeg({ a: na, b: nb, cx: sub.cx, cz: sub.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
       created.add(ns);
+      j.inherit(s, [ns]);
       approaches.push(ns);
     }
   }
@@ -967,7 +1036,8 @@ export function joinAt(world: World, n: number): RoadJournal {
   const r1 = j.removeSeg(s1); j.removeSeg(s2);
   j.removeNode(n);
   const [a, b] = forward ? [p, q] : [q, p];
-  j.addSeg({ a, b, cx, cz, profile: r1.profile, flags: r1.flags, zl: forward ? r1.zl : r1.zr, zr: forward ? r1.zr : r1.zl });
+  const joined = j.addSeg({ a, b, cx, cz, profile: r1.profile, flags: r1.flags, zl: forward ? r1.zl : r1.zr, zr: forward ? r1.zr : r1.zl });
+  j.inherit(s1, [joined]); j.inherit(s2, [joined]);
   return j;
 }
 

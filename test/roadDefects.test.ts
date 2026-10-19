@@ -14,6 +14,8 @@ import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { Dirty } from '../src/core/grid.ts';
 import { decayTenths } from '../src/world/decay.ts';
+import { Ctl, Rule, type JunctionSpec } from '../src/roads/control.ts';
+import { laneExits } from '../src/roads/laneLinks.ts';
 
 function flatWorld(money: number, y = 10): World {
   const w = new World();
@@ -301,4 +303,83 @@ test('A40: setting the clock keeps the minute set and files every building again
   w.setClock(20 * 1440);
   assert.equal(w.clock, 20 * 1440, 'the clock went back to 0');
   assert.equal(w.buildings.cols.decay[id], decayTenths(0, 20 * 1440));
+});
+
+/** The segment at node n heading (dx, dz) out of it. */
+function legToward(w: World, n: number, dx: number, dz: number): number {
+  const net = w.roads, nc = net.nodes.cols;
+  let best = -1, bd = -2;
+  for (const s of net.segsOf(n, [])) {
+    const o = net.segs.cols.a[s] === n ? net.segs.cols.b[s] : net.segs.cols.a[s];
+    const ex = nc.x[o] - nc.x[n], ez = nc.z[o] - nc.z[n], l = Math.hypot(ex, ez) || 1;
+    const d = (ex * dx + ez * dz) / l;
+    if (d > bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
+/** Every segment id a junction's hand-made settings name. */
+function specSegs(spec: JunctionSpec | undefined): number[] {
+  if (!spec) return [];
+  return [...(spec.legs ?? []).map(([s]) => s), ...(spec.bans ?? []), ...(spec.lanes ?? []).flatMap(([s, , to]) => [s, ...to])];
+}
+
+test('D8: junction rules and lane links follow a split leg and forget a removed one; undo brings them back', () => {
+  const w = flatWorld(1e9);
+  road(w, -200, 0, 200, 0);
+  road(w, 0, -200, 0, 200);
+  const c = w.roads.nearestNode(0, 0, 1);
+  const east = legToward(w, c, 1, 0), west = legToward(w, c, -1, 0), north = legToward(w, c, 0, -1);
+  const set = new RoadJournal(w, 'junction');
+  set.setJunction(c, { ctl: Ctl.Priority, legs: [[east, Rule.Stop]], bans: [north, east], lanes: [[west, 0, [east]]] });
+  assert.ok(set.settle());
+  // a new road crosses the east leg 40 m out: the leg at the node is a new piece
+  road(w, 40, -60, 40, 60);
+  const east2 = legToward(w, c, 1, 0);
+  let spec = w.roads.junctions.get(c);
+  for (const s of specSegs(spec)) {
+    assert.ok(w.roads.segs.alive[s], `the junction names segment ${s}, which is gone`);
+    assert.ok(w.roads.segsOf(c, []).includes(s), `the junction names segment ${s}, which is not at the node`);
+  }
+  assert.deepEqual(spec?.legs, [[east2, Rule.Stop]], 'the stop sign stayed with the east leg');
+  assert.equal(laneExits(w.roads, c, west)[0].exits.length, 1, 'the west lane still has its one exit');
+  assert.equal(laneExits(w.roads, c, west)[0].exits[0][0], east2);
+  // the east leg is demolished: nothing names it any more, and the west lane has exits again (automatic)
+  const commands = new CommandStack();
+  const d = demolishSeg(w, east2);
+  assert.ok(d.settle());
+  commands.push(d);
+  spec = w.roads.junctions.get(c);
+  for (const s of specSegs(spec)) assert.ok(w.roads.segsOf(c, []).includes(s), `after the demolition the junction still names segment ${s}`);
+  assert.ok(laneExits(w.roads, c, west)[0].exits.length > 0, 'the west lane was left with no exit: cars stuck');
+  // a new road elsewhere takes the freed id: it must not inherit anything
+  road(w, 500, 500, 600, 500);
+  for (const s of specSegs(w.roads.junctions.get(c))) assert.ok(w.roads.segsOf(c, []).includes(s));
+  commands.push(road(w, 700, 500, 800, 500));
+  commands.undo(); commands.undo();
+});
+
+test('A23: a street name stays with its street and never passes to a road that reuses the id', () => {
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  commands.push(road(w, -100, 0, 0, 0));
+  const s = w.roads.nearestSeg(-50, 0, 3)![0];
+  w.streetNames.set(s, 'Rua Teste');
+  // splitting the street keeps the name on both pieces
+  commands.push(road(w, -50, -60, -50, 60));
+  const west = w.roads.nearestSeg(-80, 0, 3)![0], east = w.roads.nearestSeg(-20, 0, 3)![0];
+  assert.equal(w.streetNames.get(west), 'Rua Teste', 'the west piece lost the name');
+  assert.equal(w.streetNames.get(east), 'Rua Teste', 'the east piece lost the name');
+  // demolished: the ids are free and the name goes with the road
+  const d = new RoadJournal(w, 'demolish');
+  for (const x of [west, east]) d.removeSeg(x);
+  assert.ok(d.settle());
+  commands.push(d);
+  for (const x of [west, east]) assert.equal(w.streetNames.has(x), false, `the name of the demolished segment ${x} stayed`);
+  commands.push(road(w, 300, 300, 400, 300));
+  const fresh = w.roads.nearestSeg(350, 300, 3)![0];
+  assert.equal(w.streetNames.get(fresh), undefined, 'the new road got the demolished street\'s name');
+  // undo the new road and the demolition: the name is back on the pieces
+  commands.undo(); commands.undo();
+  assert.equal(w.streetNames.get(w.roads.nearestSeg(-80, 0, 3)![0]), 'Rua Teste');
 });

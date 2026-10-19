@@ -193,3 +193,31 @@ export function signalStages(dirs: Array<[number, number]>, out: number[]): numb
   }
   return stages;
 }
+
+/**
+ * The settings with segment `from` replaced by `to` (−1: taken out), keeping only segments still in `at` (the
+ * node's segments now). Returns the same object when nothing names `from`.
+ */
+export function remapSpec(spec: JunctionSpec, from: number, to: number, at: readonly number[]): JunctionSpec {
+  const names = (s: number) => s === from;
+  const hit = spec.legs?.some(([s]) => names(s)) || spec.bans?.some(names) || spec.lanes?.some(([s, , exits]) => names(s) || exits.some(names));
+  if (!hit) return spec;
+  const map = (s: number) => (s === from ? to : s);
+  const keep = (s: number) => s >= 0 && at.includes(s);
+  const next: JunctionSpec = { ...spec };
+  if (spec.legs) next.legs = spec.legs.map(([s, r]) => [map(s), r] as [number, number]).filter(([s]) => keep(s));
+  if (spec.bans) {
+    const bans: number[] = [];
+    for (let i = 0; i + 1 < spec.bans.length; i += 2) {
+      const a = map(spec.bans[i]), b = map(spec.bans[i + 1]);
+      if (keep(a) && keep(b)) bans.push(a, b);
+    }
+    next.bans = bans;
+  }
+  if (spec.lanes) {
+    // a lane whose chosen exits are all gone goes back to automatic (never a lane with no exit)
+    next.lanes = spec.lanes.map(([s, i, exits]) => [map(s), i, exits.map(map).filter(keep)] as [number, number, number[]])
+      .filter(([s, , exits]) => keep(s) && exits.length > 0);
+  }
+  return next;
+}
