@@ -89,7 +89,7 @@ export interface JobPayloads {
 }
 
 export interface JobResults {
-  terrainGen: { tile: number; min: number; max: number };
+  terrainGen: { tile: number; min: number; max: number; hasWater: boolean };
   debugTile: { tile: number; roadNodes: Float32Array; roadSegs: Int32Array; min: number; max: number };
   buildingMesh: { mesh: PackedMesh | null };
   roadMesh: { mesh: PackedMesh | null };

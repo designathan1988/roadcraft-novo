@@ -52,3 +52,24 @@ test('the tile generator writes the water and says which tiles have it', () => {
   assert.ok(n * WATER_SPACING * WATER_SPACING > 1e6, `${n} water samples`);
 });
 
+
+test('the generated city keeps out of the river: no street node in its water, streets only cross it', async () => {
+  const { generateCity } = await import('../src/jobs/cityGen.ts');
+  const c = generateCity(SEED);
+  const wetAt = (x: number, z: number) => level(x, z) > gen.baseHeight(x, z, SEED) - 0.5;
+  const n = c.nodes.length / 3;
+  let wetNodes = 0;
+  for (let i = 0; i < n; i++) if (wetAt(c.nodes[i * 3], c.nodes[i * 3 + 1])) wetNodes++;
+  assert.equal(wetNodes, 0, `${wetNodes} street nodes in the water`);
+  // a street over water is a bridge: from dry ground to dry ground, never more than 320 m of it
+  let along = 0;
+  for (let s = 0; s < c.segs.length; s += 5) {
+    const a = c.segs[s], b = c.segs[s + 1];
+    const ax = c.nodes[a * 3], az = c.nodes[a * 3 + 1], bx = c.nodes[b * 3], bz = c.nodes[b * 3 + 1];
+    const L = Math.hypot(bx - ax, bz - az), k = Math.ceil(L / 4);
+    let wet = 0;
+    for (let i = 1; i < k; i++) if (wetAt(ax + (bx - ax) * i / k, az + (bz - az) * i / k)) wet += L / k;
+    if (wet > 320) along++;
+  }
+  assert.equal(along, 0, `${along} streets run in the river`);
+});

@@ -588,6 +588,7 @@ export class Game {
       const r = await this.pool.run('terrainGen', { seed: this.world.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
       this.world.tileMin[r.tile] = r.min;
       this.world.tileMax[r.tile] = r.max;
+      this.world.tileWater[r.tile] = r.hasWater ? 1 : 0; this.world.waterDirty.add(r.tile);
       this.world.layerDirty.add(r.tile);
       // the tile's props (trees) depend on the terrain
       const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
@@ -2237,7 +2238,7 @@ export class Game {
             // unreadable tile: its terrain comes back from the seed; the save goes to quarantine below
             corrupt++;
             const g = await this.pool.run('terrainGen', { seed: w.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
-            w.tileMin[t] = g.min; w.tileMax[t] = g.max;
+            w.tileMin[t] = g.min; w.tileMax[t] = g.max; w.tileWater[t] = g.hasWater ? 1 : 0; w.waterDirty.add(t);
           } else if (r.found) {
             w.tileMin[t] = r.min; w.tileMax[t] = r.max;
             if (r.boxes) this.insertBoxes(r.boxes);
@@ -2248,7 +2249,7 @@ export class Game {
           }
         } else {
           const r = await this.pool.run('terrainGen', { seed: w.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
-          w.tileMin[t] = r.min; w.tileMax[t] = r.max;
+          w.tileMin[t] = r.min; w.tileMax[t] = r.max; w.tileWater[t] = r.hasWater ? 1 : 0; w.waterDirty.add(t);
         }
         w.layerDirty.add(t);
         for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);

@@ -7,7 +7,7 @@
 
 import { MAP_HALF, SEA_LEVEL } from '../config.ts';
 import { Rng, fbm } from '../core/rng.ts';
-import { baseHeight } from './terrainGen.ts';
+import { baseHeight, waterLevelAt } from './terrainGen.ts';
 import { Zone } from '../roads/zones.ts';
 import { PROFILES } from '../roads/profiles.ts';
 
@@ -32,7 +32,7 @@ const MAX_ART_GRADE = 0.08;
 export function generateCity(seed: number): CityRoads {
   const rng = new Rng(seed * 7919 + 13);
   const H = (x: number, z: number) => baseHeight(x, z, seed);
-  const land = (x: number, z: number) => H(x, z) > SEA_LEVEL + 1.2;
+  const land = (x: number, z: number) => { const h = H(x, z); return h > SEA_LEVEL + 1.2 && waterLevelAt(x, z, seed) < h - 1.2; };
   const slope = (x: number, z: number) => {
     const d = 12;
     return Math.hypot(H(x + d, z) - H(x - d, z), H(x, z + d) - H(x, z - d)) / (2 * d);
