@@ -604,3 +604,23 @@ test('D17: moving a node clears and settles under the roads that move, and refus
   const r3 = moveNode(w, w.roads.nearestNode(0, 0, 1), -MAP_HALF - 50, 0);
   assert.equal(typeof r3, 'string', 'the node was moved off the map');
 });
+
+test('D18: widening a road clears the buildings the wider road covers and settles the terrain under it', async () => {
+  const { changeProfile, changeProfiles } = await import('../src/roads/build.ts');
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  const wide = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+  const half = PROFILE_INFO[wide].right;
+  // a house just off the local street, inside the avenue's width, and a bump in the ground there
+  const house = w.addBuilding({ x: 30, z: half - 4, w: 8, d: 8, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  w.heights[heightIndex(Math.round(sampleCoord(-30)), Math.round(sampleCoord(half - 3)))] = 13;
+  const s = w.roads.nearestSeg(30, 0, 3)![0];
+  const j = changeProfile(w, s, wide);
+  assert.ok(j.settle());
+  assert.equal(w.buildings.alive[house], 0, 'the house now under the avenue still stands');
+  j.invert();
+  assert.equal(w.buildings.alive[house], 1, 'undo brings the house back');
+  const k = changeProfiles(w, [w.roads.nearestSeg(-30, 0, 3)![0]], wide);
+  assert.ok(k.settle());
+  assert.ok(ground(w, -30, half - 3) < 11, `the bump under the widened road is still ${ground(w, -30, half - 3).toFixed(2)} m`);
+});

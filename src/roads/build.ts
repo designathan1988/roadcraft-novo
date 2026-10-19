@@ -748,8 +748,16 @@ export function demolishSeg(world: World, s: number): RoadJournal {
 export function changeProfile(world: World, s: number, profile: number): RoadJournal {
   const j = new RoadJournal(world, 'trocar perfil');
   if (world.roads.segs.cols.flags[s] & SegFlag.Ring) return j;
-  j.setProfile(s, profile);
+  j.guard(() => { j.setProfile(s, profile); settleUnder(j, world, s); });
   return j;
+}
+
+/** After a profile change: like a new road, what the (wider) road now covers goes and the terrain settles under it. */
+function settleUnder(j: RoadJournal, world: World, s: number): void {
+  const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
+  const sq = net.quad(s), t = arcTable(sq, 32), L = t[t.length - 1];
+  const ya = nc.y[sc.a[s]], yb = nc.y[sc.b[s]];
+  clearAndConform(j, world, sq, sc.profile[s], (d) => ya + (yb - ya) * d / L, t, (sc.flags[s] & SegFlag.Wall) !== 0);
 }
 
 /**
@@ -791,7 +799,7 @@ export function streetChain(world: World, s0: number): number[] {
 /** Changes the profile of several segments in a single command. */
 export function changeProfiles(world: World, segs: number[], profile: number): RoadJournal {
   const j = new RoadJournal(world, 'trocar perfil da rua');
-  for (const s of segs) if (!(world.roads.segs.cols.flags[s] & SegFlag.Ring)) j.setProfile(s, profile);
+  j.guard(() => { for (const s of segs) if (!(world.roads.segs.cols.flags[s] & SegFlag.Ring)) { j.setProfile(s, profile); settleUnder(j, world, s); } });
   return j;
 }
 
