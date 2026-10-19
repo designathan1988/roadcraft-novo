@@ -2337,7 +2337,9 @@ export class Game {
     try {
       for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
     } catch { /* save without chosen junctions */ }
-    // what was read is what the save holds; only the repair below and the tiles that lost a segment need writing
+    // what was read is what the save holds (opening itself marked it unsaved: clearing the history, water, weather);
+    // only the repair below and the tiles that lost a segment or could not be read need writing
+    this.unsaved = false;
     w.saveDirty.fill(0);
     // a tile that could not be read now holds the seed's terrain: the next save writes it, so the damaged file stops
     // coming back at every opening (it was kept in quarantine)

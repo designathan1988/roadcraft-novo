@@ -417,6 +417,13 @@ const SCENARIOS = {
     const r = await within(g.load(), 30000);
     check('the road built before the key is there', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500) + ', toasts: ' + toasts.join(' | '));
   `]])),
+  // A city just opened has nothing unsaved (opening another one does not ask to discard anything)
+  'opened-is-saved': `
+    road(1500, 1500, 1700, 1500);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    await g.load();
+    check('right after opening nothing is unsaved', g.unsaved === false && dirtyTiles().length === 0, 'unsaved=' + g.unsaved + ' tiles=' + dirtyTiles());
+  `,
   // Alt+F4 (what Windows sends for it, from outside the game) closes through the close that saves
   'alt-f4': [`
     road(1500, 1500, 1700, 1500);
