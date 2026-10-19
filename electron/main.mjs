@@ -152,7 +152,8 @@ app.whenReady().then(() => {
     const url = new URL(request.url);
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
     const file = path.resolve(rootDir, rel);
-    if (!file.startsWith(rootDir)) return new Response('not found', { status: 404 });
+    // inside dist/ only: a folder next to it whose name starts with "dist" is outside
+    if (file !== rootDir && !file.startsWith(rootDir + path.sep)) return new Response('not found', { status: 404 });
     const res = await net.fetch(pathToFileURL(file).toString());
     const headers = new Headers(res.headers);
     for (const [k, v] of Object.entries(isolation)) headers.set(k, v);

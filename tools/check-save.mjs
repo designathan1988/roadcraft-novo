@@ -350,6 +350,14 @@ const SCENARIOS = {
     for (let i = 0; i < per; i++) { const h = w.heights[i]; if (h < lo) lo = h; if (h > hi) hi = h; }
     check('tile 0 has its own height range', Math.abs(w.tileMin[0] - lo) < 1 && Math.abs(w.tileMax[0] - hi) < 1, 'range ' + w.tileMin[0] + '..' + w.tileMax[0] + ', terrain ' + lo + '..' + hi);
   `,
+  // A39: the game's own protocol (app://) serves only files inside dist/, never from a folder next to it whose name
+  // starts with "dist" (SETUP makes one)
+  'app-path': `
+    const inside = await fetch('app://cidade/index.html').then((r) => r.status, () => 'error');
+    check('a file inside dist/ is served', inside === 200, 'status ' + inside);
+    const next = await fetch('app://cidade/..%2Fdist-probe%2Fprobe.txt').then(async (r) => r.status + ' ' + (await r.text()).slice(0, 20), () => 'refused');
+    check('a file in a folder next to dist/ is not', !next.includes('outside dist'), 'served: ' + next);
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);
@@ -364,6 +372,16 @@ const SCENARIOS = {
   `],
 };
 
+// Node-side preparation of a scenario; returns what undoes it
+const SETUP = {
+  'app-path': () => {
+    const dir = path.join(root, 'dist-probe');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'probe.txt'), 'outside dist');
+    return () => fs.rmSync(dir, { recursive: true, force: true });
+  },
+};
+
 const pick = process.argv.slice(2);
 const names = pick.length ? pick : Object.keys(SCENARIOS);
 let failed = 0;
@@ -372,6 +390,7 @@ for (const name of names) {
   if (!bodies) { console.log(`unknown scenario ${name}`); failed++; continue; }
   // a scenario is one session, or several sessions one after the other over the same folder (closing and reopening)
   const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-save-'));
+  const undo = SETUP[name]?.();
   const checks = [];
   for (const body of Array.isArray(bodies) ? bodies : [bodies]) {
     const script = `(async()=>{${PRELUDE}\ntry {${body}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
@@ -391,6 +410,7 @@ for (const name of names) {
   console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
   for (const c of bad) console.log('  ' + c);
   fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 });
+  undo?.();
 }
 console.log(failed ? `save check: ${failed} FAILED` : 'save check: ok');
 process.exit(failed ? 1 : 0);
