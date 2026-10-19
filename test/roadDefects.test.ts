@@ -897,3 +897,20 @@ test('D39: the preview\'s price of a planned road matches what building it costs
     assert.ok(Math.abs(shown - real) <= real * 0.08, `the preview shows R$ ${shown}, building costs R$ ${real}`);
   }
 });
+
+test('D33: a landmark that grows over time keeps to 3 floors above its tallest neighbour', async () => {
+  const { Growth } = await import('../src/world/growth.ts');
+  const w = flatWorld(0);
+  const g = new Growth(w, null as unknown as JobPool);
+  let worst = 0, landmarks = 0;
+  for (let i = 0; i < 400; i++) {
+    const x = (i % 20) * 120 - 1200, z = Math.floor(i / 20) * 120 - 1200;
+    w.addBuilding({ x: x + 30, z, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Commercial, floors: 6, style: 1 });
+    const l: LotColumns = { count: 1, x: new Float32Array([x]), z: new Float32Array([z]), w: new Float32Array([30]), d: new Float32Array([30]), rot: new Float32Array([0]),
+      zone: new Uint8Array([Zone.ComHigh]), seed: new Uint32Array([i * 7919 + 3]), profile: new Uint8Array([PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]) };
+    const rec = g.recordFor(l, 0, true);
+    if (rec.color) landmarks++;
+    worst = Math.max(worst, rec.floors);
+  }
+  assert.ok(worst <= 9, `a building grew to ${worst} floors next to a 6-floor one (${landmarks} landmarks)`);
+});
