@@ -7,7 +7,7 @@
 
 import * as THREE from 'three/webgpu';
 import { CELL_COUNT, Dirty, cellOriginX, tileId, tileX, type DirtyCells } from '../core/grid.ts';
-import { MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
+import { CELL_SIZE, MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
@@ -51,6 +51,13 @@ export class PropRenderer {
   private blocks = new PropBlocks(CAP / BLOCK, CELL_COUNT);
   private cellVer = new Uint32Array(CELL_COUNT);
   private cellReq = new Uint32Array(CELL_COUNT);
+  /** Version of the props a cell shows (-1: dropped, asked again when it comes back in range). */
+  private cellHave = new Int32Array(CELL_COUNT);
+  /** Cells whose props did not fit in the pool: asked again when blocks are freed. */
+  private pending = new Set<number>();
+  private residentAt = new THREE.Vector3(Infinity, 0, Infinity);
+  private residencyDue = true;
+  private retryDue = false;
   private usedU = uniform(0, 'uint');
   private camU = uniform(new THREE.Vector3());
   private planes: THREE.Vector4[] = Array.from({ length: 6 }, () => new THREE.Vector4());
@@ -377,39 +384,119 @@ export class PropRenderer {
     this.impNormal.value = baked.normal;
   }
 
-  /** Células sujas: pede as peças de novo. */
+  /** Dirty cells: their props are out of date; the ones in range are asked again (`updateResidency`). */
   processDirty(): void {
     const cells = this.dirty.drain(Dirty.Props);
+    for (const c of cells) { this.cellVer[c]++; this.pending.delete(c); }
+    if (cells.length) this.residencyDue = true;
+  }
+
+  /** Horizontal distance from the camera to a cell. */
+  private cellDistance(c: number, cam: THREE.Vector3): number {
+    const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
+    const dx = Math.max(x0 - cam.x, 0, cam.x - (x0 + CELL_SIZE)), dz = Math.max(z0 - cam.z, 0, cam.z - (z0 + CELL_SIZE));
+    return Math.hypot(dx, dz);
+  }
+
+  /** Asks the workers for a cell's props, nearest first. */
+  private requestCell(c: number, distance: number): void {
+    const v = this.cellVer[c];
+    this.cellReq[c] = v;
     const w = this.world, net = w.roads;
-    for (const c of cells) {
-      const v = ++this.cellVer[c];
-      this.cellReq[c] = v;
-      const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
-      const segs: number[] = [];
-      net.forSegsNear(x0 - 40, z0 - 40, x0 + 296, z0 + 296, (s) => segs.push(s));
-      const boxes = w.gatherBoxes([c]);
-      const graph = net.gather(segs, []);
-      const items = w.items.gather(c, MAP_CELLS);
-      this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props); }, {
-        key: `props:${c}`, priority: 2600, transfer: [...roadGraphTransfer(graph), ...boxTransfer(boxes), items.buffer as ArrayBuffer],
-      });
+    const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
+    const segs: number[] = [];
+    net.forSegsNear(x0 - 40, z0 - 40, x0 + 296, z0 + 296, (s) => segs.push(s));
+    const boxes = w.gatherBoxes([c]);
+    const graph = net.gather(segs, []);
+    const items = w.items.gather(c, MAP_CELLS);
+    this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {
+      key: `props:${c}`, priority: distance + 100, transfer: [...roadGraphTransfer(graph), ...boxTransfer(boxes), items.buffer as ArrayBuffer],
+    });
+  }
+
+  /** How far props can be drawn now (the farthest level band), and the range kept beyond it. */
+  private ranges(): { keep: number; drop: number } {
+    const far = this.enabled ? Math.max(0, ...this.distArr) : 420 * this.pixelScale;
+    const keep = far + CELL_SIZE;
+    return { keep, drop: keep * 1.15 + CELL_SIZE };
+  }
+
+  /**
+   * Which cells hold props: the ones within the farthest drawn band (asked nearest first), never the whole map. Cells
+   * that leave the range give their blocks back. Runs when the camera moved, cells got dirty or blocks were freed.
+   */
+  private updateResidency(cam: THREE.Vector3): void {
+    const { keep, drop } = this.ranges();
+    if (keep <= CELL_SIZE) return;
+    const moved = Math.hypot(cam.x - this.residentAt.x, cam.z - this.residentAt.z) > 32;
+    if (!moved && !this.residencyDue && !this.retryDue) return;
+    this.residentAt.copy(cam);
+    this.residencyDue = false;
+    for (const c of [...this.blocks.resident]) {
+      const d = this.cellDistance(c, cam);
+      if (d > drop) this.dropCell(c); else this.blocks.setDistance(c, d);
+    }
+    for (const c of [...this.pending]) if (this.cellDistance(c, cam) > drop) { this.pending.delete(c); this.cellHave[c] = -1; this.cellReq[c] = 0; }
+    if (this.retryDue) {
+      this.retryDue = false;
+      const wait = [...this.pending].map((c) => [c, this.cellDistance(c, cam)] as const).sort((a, b) => a[1] - b[1]);
+      for (const [c, d] of wait) { this.pending.delete(c); this.requestCell(c, d); }
+    }
+    const span = Math.ceil(keep / CELL_SIZE);
+    const ccx = Math.floor((cam.x + MAP_CELLS * CELL_SIZE / 2) / CELL_SIZE), ccz = Math.floor((cam.z + MAP_CELLS * CELL_SIZE / 2) / CELL_SIZE);
+    for (let cz = Math.max(0, ccz - span); cz <= Math.min(MAP_CELLS - 1, ccz + span); cz++) {
+      for (let cx = Math.max(0, ccx - span); cx <= Math.min(MAP_CELLS - 1, ccx + span); cx++) {
+        const c = cz * MAP_CELLS + cx;
+        if (this.cellHave[c] === this.cellVer[c] || this.cellReq[c] === this.cellVer[c] || this.pending.has(c)) continue;
+        const d = this.cellDistance(c, cam);
+        if (d <= keep) this.requestCell(c, d);
+      }
     }
   }
 
-  private setCell(c: number, p: PropColumns | null): void {
-    if (!this.enabled) { this.setCellFallback(c, p); return; }
-    const old = this.blocks.release(c);
-    if (old.length) {
-      for (const b of old) {
-        this.extra.fill(PROP_FREE, b * BLOCK, (b + 1) * BLOCK);
-        this.extraAttr.addUpdateRange(b * BLOCK, BLOCK);
-      }
-      this.extraAttr.needsUpdate = true;
-    }
-    if (!p || p.count === 0) return;
-    const blocks = this.blocks.place(c, p.count, BLOCK);
-    let i = 0;
+  /** A cell out of range gives its blocks back; it is asked again if it comes back. */
+  private dropCell(c: number): void {
+    this.clearBlocks(this.blocks.release(c));
+    if (!this.enabled) this.setCellFallback(c, null);
+    this.cellHave[c] = -1;
+    this.cellReq[c] = 0;
+    this.retryDue ||= this.pending.size > 0;
+  }
+
+  /** Marks blocks free on the GPU side (the cull pass skips them). */
+  private clearBlocks(blocks: readonly number[]): void {
+    if (!blocks.length) return;
     for (const b of blocks) {
+      this.extra.fill(PROP_FREE, b * BLOCK, (b + 1) * BLOCK);
+      this.extraAttr.addUpdateRange(b * BLOCK, BLOCK);
+    }
+    this.extraAttr.needsUpdate = true;
+  }
+
+  private setCell(c: number, p: PropColumns | null, v: number): void {
+    const d = this.cellDistance(c, this.residentAt);
+    // the camera left while the job ran: not kept (asked again if it comes back)
+    if (d > this.ranges().drop) { this.cellHave[c] = -1; this.cellReq[c] = 0; return; }
+    if (!this.enabled) { this.setCellFallback(c, p); this.cellHave[c] = v; return; }
+    const freed = this.blocks.release(c);
+    this.clearBlocks(freed);
+    if (freed.length) this.retryDue ||= this.pending.size > 0;
+    this.pending.delete(c);
+    if (!p || p.count === 0) { this.cellHave[c] = v; return; }
+    const placed = this.blocks.place(c, p.count, BLOCK, d);
+    if (!placed) {
+      // no room even after farther cells gave way: it waits, counted, and is asked again when blocks are freed
+      this.pending.add(c);
+      this.cellHave[c] = -1;
+      return;
+    }
+    for (const e of placed.evicted) {
+      this.clearBlocks(e.blocks);
+      this.cellHave[e.cell] = -1;
+      this.pending.add(e.cell);
+    }
+    let i = 0;
+    for (const b of placed.blocks) {
       const s0 = b * BLOCK;
       const n = Math.min(BLOCK, p.count - i);
       this.data.set(p.data.subarray(i * 4, (i + n) * 4), s0 * 4);
@@ -421,7 +508,12 @@ export class PropRenderer {
     }
     this.poolAttr.needsUpdate = true;
     this.extraAttr.needsUpdate = true;
+    this.cellHave[c] = v;
   }
+
+  /** Cells waiting for room in the pool, and cells holding props. */
+  get pendingCells(): number { return this.pending.size; }
+  get residentCells(): number { return this.blocks.resident.size; }
 
   /** WebGL 2: uma malha instanciada por tipo na célula (nível do meio, ou o único que houver). */
   private setCellFallback(c: number, p: PropColumns | null): void {
@@ -483,12 +575,13 @@ export class PropRenderer {
   /** Antes de desenhar: recorte na GPU (ou escolha das células, no WebGL 2). */
   update(renderer: THREE.WebGPURenderer, camera: THREE.Camera, camPos: THREE.Vector3, now: number): void {
     if (now - this.signalSent > 250) { this.signalSent = now; this.signalTex.needsUpdate = true; }
-    if (!this.enabled) { this.updateFallback(camera, camPos); return; }
+    if (!this.enabled) { this.updateResidency(camPos); this.updateFallback(camera, camPos); return; }
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
     this.defs.forEach((d, t) => d.dist.forEach((x, l) => { this.distArr[t * LODS + l] = d.lods[l] ? x * this.pixelScale : 0; }));
+    this.updateResidency(camPos);
     // An indirect draw costs a call (and one per shadow cascade) even when the cull leaves it empty: a level whose
     // band ends nearer than any prop can be is not drawn. Nearest possible prop: the eye's height over the highest
     // ground of the 3 × 3 tiles round it (+60 m for bridges and rooftops); props beyond those tiles are ≥ 1 km away.
@@ -504,8 +597,14 @@ export class PropRenderer {
     renderer.compute(this.clamp);
   }
 
-  /** Esquece tudo (outra cidade). */
+  /** Forgets everything (another city): results still on their way are ignored by version. */
   clear(): void {
-    for (let c = 0; c < CELL_COUNT; c++) { this.cellReq[c] = ++this.cellVer[c]; this.setCell(c, null); }
+    for (const c of [...this.blocks.resident]) this.clearBlocks(this.blocks.release(c));
+    for (let c = 0; c < CELL_COUNT; c++) {
+      if (!this.enabled) this.setCellFallback(c, null);
+      this.cellVer[c]++; this.cellReq[c] = 0; this.cellHave[c] = -1;
+    }
+    this.pending.clear();
+    this.residencyDue = true;
   }
 }

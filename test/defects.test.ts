@@ -126,3 +126,28 @@ test('E6: a cell mesh that is replaced or reset is disposed (three releases its 
   layer.reset();
   assert.equal(reset, 1, 'reset disposed the mesh it held');
 });
+
+test('E1: a cell that does not fit in the props pool is never cut silently; near cells come before far ones', async () => {
+  const { PropBlocks } = await import('../src/render/propBlocks.ts');
+  const BLOCK = 64;
+  const pool = new PropBlocks(100, 20); // room for 100 blocks
+  // 3 cells of 40 blocks each, placed far to near: the third does not fit beside the other two
+  const placed = [pool.place(0, 40 * BLOCK, BLOCK, 3000), pool.place(1, 40 * BLOCK, BLOCK, 2000), pool.place(2, 40 * BLOCK, BLOCK, 100)];
+  for (let c = 0; c < 3; c++) {
+    const got = pool.blocksOf(c)?.length ?? 0;
+    assert.ok(got === 0 || got === 40, `cell ${c} holds ${got} of its 40 blocks: cut silently`);
+  }
+  assert.equal(pool.blocksOf(2)?.length, 40, 'the nearest cell has all its props');
+  assert.equal(pool.blocksOf(0), null, 'the farthest cell gave way');
+  assert.ok(placed[2] !== null, 'the near cell was placed');
+});
+
+test('E2: the pool\'s high-water mark goes back down when the top blocks are freed', async () => {
+  const { PropBlocks } = await import('../src/render/propBlocks.ts');
+  const pool = new PropBlocks(100, 4);
+  pool.place(0, 10 * 64, 64, 10);
+  pool.place(1, 30 * 64, 64, 10);
+  assert.equal(pool.highBlock, 40);
+  pool.release(1);
+  assert.equal(pool.highBlock, 10, 'only cell 0 is left: the cull pass reads 10 blocks, not 40');
+});
