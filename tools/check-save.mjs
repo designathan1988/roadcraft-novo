@@ -358,6 +358,35 @@ const SCENARIOS = {
     const next = await fetch('app://cidade/..%2Fdist-probe%2Fprobe.txt').then(async (r) => r.status + ' ' + (await r.text()).slice(0, 20), () => 'refused');
     check('a file in a folder next to dist/ is not', !next.includes('outside dist'), 'served: ' + next);
   `,
+  // The desktop game keeps its saves as real files in <user data>/saves (POST checks the disk), not in the browser storage
+  'desktop-files': `
+    road(1500, 1500, 1700, 1500);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    let inBrowser = [];
+    try { for await (const [n] of await opfs(SLOT)) inBrowser.push(n); } catch { /* no such folder: right */ }
+    check('nothing of it is in the browser storage', inBrowser.length === 0, 'browser storage holds ' + inBrowser);
+  `,
+  // Saves an earlier desktop version kept in the browser storage are copied to files once, open, and stay where they were
+  'migrate-opfs': [`
+    road(1500, 1500, 1700, 1500);
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    // the same city as an earlier version left it: meta.bin and tile_NNNN.bin in the browser storage, no files
+    const cur = JSON.parse(new TextDecoder().decode(await files.read('current.json')));
+    const man = JSON.parse(new TextDecoder().decode(await files.read(cur.manifest.file)));
+    const raw = async (name, data) => { const wr = await (await (await opfs(SLOT, true)).getFileHandle(name, { create: true })).createWritable(); await wr.write(data); await wr.close(); };
+    await raw('meta.bin', await files.read(man.meta.file));
+    for (const [t, file] of man.tiles) await raw('tile_' + String(t).padStart(4, '0') + '.bin', await files.read(file));
+    const st = await saveStore();
+    await st.removeFolder(SLOT);
+    await st.remove('', 'migrated-from-browser-storage.json');
+    console.log('CHECK END');
+  `, `
+    const r = await within(g.load(), 30000);
+    check('the save of the earlier version opens', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500));
+    check('it was copied to files', (await files.list()).includes('meta.bin'), 'files: ' + (await files.list()));
+    const left = []; try { for await (const [n] of await opfs(SLOT)) left.push(n); } catch { /* gone */ }
+    check('the browser storage still has it', left.includes('meta.bin') && left.some((n) => n.startsWith('tile_')), 'browser storage: ' + left);
+  `],
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);
@@ -379,6 +408,14 @@ const SETUP = {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'probe.txt'), 'outside dist');
     return () => fs.rmSync(dir, { recursive: true, force: true });
+  },
+};
+
+// Node-side checks after a scenario's sessions, on the run's user data folder: ["OK name" | "FAILED name: why"]
+const POST = {
+  'desktop-files': (own) => {
+    const file = path.join(own, 'saves', 'cidade-1', 'current.json');
+    return [fs.existsSync(file) ? 'OK the save is a real file in the user data folder' : `FAILED the save is a real file in the user data folder: no ${file}`];
   },
 };
 
@@ -405,6 +442,7 @@ for (const name of names) {
     if (!got.includes('END')) got.push('FAILED the session did not finish (hung or crashed) after: ' + (got[got.length - 1] ?? 'nothing'));
     checks.push(...got.filter((c) => c !== 'END'));
   }
+  checks.push(...(POST[name]?.(own) ?? []));
   const bad = checks.filter((c) => c.startsWith('FAILED'));
   failed += bad.length;
   console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);

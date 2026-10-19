@@ -10,7 +10,7 @@
 // and tile_NNNN.bin) opens as generation 0.
 //
 // Where the folders are is a FileStore: in the browser, the origin private file system (OPFS); in the desktop game, real
-// files written by the Electron main process (see electron/files.mjs).
+// files written by the Electron main process (electron/files.mjs) in the app data folder, which Steam Cloud can sync.
 
 import { metaHeader } from './save.ts';
 import { sha256 } from './jobs/storage.ts';
@@ -118,9 +118,82 @@ export class OpfsStore implements FileStore {
   }
 }
 
-/** The save storage of this game: the origin private file system. */
+// ------------------------------------------------------------------ desktop: real files
+
+/** What the desktop game's preload offers (roadcraftApp.files): the main process's file store, over IPC. */
+export interface FilesBridge {
+  read(folder: string, name: string): Promise<Uint8Array | null>;
+  write(folder: string, name: string, data: Uint8Array): Promise<void>;
+  list(folder: string): Promise<FileEntry[]>;
+  remove(folder: string, name: string): Promise<void>;
+  folders(): Promise<string[]>;
+  removeFolder(folder: string): Promise<void>;
+}
+
+/** Saves as real files kept by the Electron main process (electron/files.mjs): <app data>/saves/<folder>/<file>. */
+export class AppStore implements FileStore {
+  bridge: FilesBridge;
+  constructor(bridge: FilesBridge) { this.bridge = bridge; }
+
+  private async call<T>(what: string, fn: () => Promise<T>): Promise<T> {
+    try { return await fn(); } catch (err) { throw storeError(what, err); }
+  }
+
+  read(folder: string, name: string): Promise<Uint8Array | null> {
+    checkName(folder, true); checkName(name);
+    return this.call(`reading ${folder}/${name}`, async () => { const b = await this.bridge.read(folder, name); return b ? new Uint8Array(b) : null; });
+  }
+  write(folder: string, name: string, data: Uint8Array): Promise<void> {
+    checkName(folder, true); checkName(name);
+    return this.call(`writing ${folder}/${name}`, () => this.bridge.write(folder, name, data));
+  }
+  list(folder: string): Promise<FileEntry[]> { checkName(folder, true); return this.call(`listing ${folder}`, () => this.bridge.list(folder)); }
+  remove(folder: string, name: string): Promise<void> { checkName(folder, true); checkName(name); return this.call(`removing ${folder}/${name}`, () => this.bridge.remove(folder, name)); }
+  folders(): Promise<string[]> { return this.call('listing saves', () => this.bridge.folders()); }
+  removeFolder(folder: string): Promise<void> { checkName(folder); return this.call(`removing ${folder}`, () => this.bridge.removeFolder(folder)); }
+}
+
+/** Written in saves/ once the saves the desktop game kept in the browser storage were copied to real files. */
+export const MIGRATED = 'migrated-from-browser-storage.json';
+/** In a folder being copied, until every file of it is there. */
+const MIGRATING = 'migrating-from-browser-storage.json';
+
+/**
+ * Copies, once, every save folder of `from` (the browser storage earlier versions of the desktop game used) into `to`
+ * (real files). The browser storage is never changed. A folder `to` already has is left alone, unless it is one a
+ * copy that stopped half way was making. Throws when a copy fails (the next start tries again).
+ */
+export async function migrateOnce(from: FileStore, to: FileStore): Promise<string[]> {
+  if (await to.read('', MIGRATED)) return [];
+  const have = new Set(await to.folders());
+  const copied: string[] = [];
+  for (const folder of await from.folders()) {
+    if (have.has(folder) && !(await to.read(folder, MIGRATING))) continue;
+    await to.write(folder, MIGRATING, bytesOf({ at: new Date().toISOString() }));
+    for (const e of await from.list(folder)) {
+      const b = await from.read(folder, e.name);
+      if (b) await to.write(folder, e.name, b);
+    }
+    await to.remove(folder, MIGRATING);
+    copied.push(folder);
+  }
+  await to.write('', MIGRATED, bytesOf({ at: new Date().toISOString(), folders: copied }));
+  return copied;
+}
+
+/**
+ * The save storage of this game: real files in the desktop game (after copying, once, the saves it kept in the browser
+ * storage before), the origin private file system in the browser. Never rejects.
+ */
 export async function openSaveStore(): Promise<FileStore> {
-  return new OpfsStore();
+  const bridge = (globalThis as { roadcraftApp?: { files?: FilesBridge } }).roadcraftApp?.files;
+  if (!bridge) return new OpfsStore();
+  const files = new AppStore(bridge);
+  try {
+    const copied = await migrateOnce(new OpfsStore(), files);
+    if (copied.length) console.log('save: copied from the browser storage:', copied.join(', '));
+  } catch (err) { console.error('save: the saves in the browser storage were not copied yet (they stay there; the next start tries again)', err); }
+  return files;
 }
 
 // ------------------------------------------------------------------ generations

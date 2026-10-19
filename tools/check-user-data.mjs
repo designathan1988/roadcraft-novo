@@ -24,8 +24,10 @@ function listing(dir) {
   return out;
 }
 
-const saves = path.join(gameFolder, 'File System');
-const before = listing(saves);
+// the player's saves: real files in saves/ (and, from earlier versions, the browser storage in File System/)
+const places = [path.join(gameFolder, 'saves'), path.join(gameFolder, 'File System')];
+const listAll = () => new Map(places.flatMap((p) => [...listing(p)]));
+const before = listAll();
 const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-check-'));
 const shot = path.join(own, 'shot.png');
 const script = '(async()=>{const g=window.__cidade.game;await g.save(false);console.log("script SAVED");})()';
@@ -40,11 +42,11 @@ const lines = await new Promise((resolve) => {
 const fails = [];
 if (!lines.some((l) => l.includes(`userData: ${own}`))) fails.push(`the run did not use its own folder (${own})`);
 if (!lines.some((l) => l.includes('script SAVED'))) fails.push('the run did not finish saving');
-if (listing(path.join(own, 'File System')).size === 0) fails.push('nothing was saved in the run\'s own folder');
-const after = listing(saves);
+if (listing(path.join(own, 'saves', 'cidade-1')).size === 0) fails.push('nothing was saved in the run\'s own folder');
+const after = listAll();
 const changed = [...after].filter(([f, v]) => before.get(f) !== v).map(([f]) => f);
 const removed = [...before.keys()].filter((f) => !after.has(f));
-if (changed.length || removed.length) fails.push(`the game's folder changed: ${changed.length} files written, ${removed.length} removed (${saves})`);
+if (changed.length || removed.length) fails.push(`the game's folder changed: ${changed.length} files written, ${removed.length} removed (${places.join(', ')})`);
 fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 });
 
 for (const f of fails) console.log(`FAILED ${f}`);

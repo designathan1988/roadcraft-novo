@@ -3,6 +3,7 @@
 // CIDADE_SHOT=file.png takes a screenshot when the game is ready and exits.
 import { app, BrowserWindow, protocol, net, ipcMain } from 'electron';
 import { initSteam, enableOverlay, steamInfo, unlock } from './steam.mjs';
+import { fileStore } from './files.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -39,8 +40,7 @@ if (process.env.CIDADE_SOFTWARE) {
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
 }
 
-// One game at a time: a second copy would share the save storage (OPFS in the user data folder) and both would
-// fail to write. The second one hands over to the first and quits.
+// One game at a time: a second copy would share the save files (in the user data folder) and both would write them. The second one hands over to the first and quits.
 app.setName('Roadcraft');
 // Screenshot and test runs get a user data folder of their own (CIDADE_USER_DATA, or a fresh one in the temp folder,
 // removed on exit): they edit, save and autosave, and must never touch the player's saves in the game's folder.
@@ -144,6 +144,10 @@ function createWindow() {
 const steamOn = initSteam(path.resolve(here, '..'));
 ipcMain.handle('steam:info', () => steamInfo());
 ipcMain.handle('steam:unlock', (_e, id) => unlock(id));
+// The save files: real files in <userData>/saves (electron/files.mjs), where Steam Cloud can sync them; screenshot and
+// test runs have a user data folder of their own. The page reaches them through the preload (roadcraftApp.files).
+const saves = fileStore(path.join(app.getPath('userData'), 'saves'));
+for (const op of ['read', 'write', 'list', 'remove', 'folders', 'removeFolder']) ipcMain.handle(`files:${op}`, (_e, ...args) => saves[op](...args));
 // the game's own Quit: closes the window the normal way, so it saves first
 ipcMain.on('app:quit', (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 

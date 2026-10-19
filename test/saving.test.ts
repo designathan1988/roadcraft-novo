@@ -209,3 +209,55 @@ test('A17: cancelling a key prefix drops the queued jobs and the result of the o
   assert.equal(await other, 'done', 'other jobs go on');
   assert.equal(await outcome(pool, {}, 300, 'lots:1'), 'done', 'a new job of a cancelled key runs');
 });
+
+// ------------------------------------------------------------------ desktop save files (electron/files.mjs)
+
+test('desktop saves: real files, written whole (temporary file, flush, rename), names that are never paths', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const where = '../electron/files.mjs';
+  const { fileStore } = await import(where) as { fileStore(root: string): FileStore };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-files-'));
+  try {
+    const st = fileStore(path.join(root, 'saves'));
+    assert.equal(await st.read('cidade-1', 'meta.bin'), null, 'nothing yet');
+    assert.deepEqual(await st.list('cidade-1'), []);
+    await st.write('cidade-1', 'meta.bin', bytes(1, 2, 3));
+    await st.write('cidade-1', 'meta.bin', bytes(4, 5));
+    assert.deepEqual(new Uint8Array(await st.read('cidade-1', 'meta.bin') as Uint8Array), bytes(4, 5));
+    assert.deepEqual(await st.list('cidade-1'), [{ name: 'meta.bin', size: 2 }], 'no temporary file left behind');
+    assert.ok(fs.existsSync(path.join(root, 'saves', 'cidade-1', 'meta.bin')), 'a real file in the folder');
+    await st.write('', 'mark.json', bytes(7));
+    assert.deepEqual(await st.folders(), ['cidade-1']);
+    for (const bad of ['../x', 'a/b', 'a\b', '..', '.', '']) await assert.rejects(st.write('cidade-1', bad, bytes(1)), /invalid save file name/, bad);
+    await assert.rejects(st.read('..', 'x'), /invalid save file name/);
+    await st.remove('cidade-1', 'meta.bin');
+    await st.remove('cidade-1', 'meta.bin');
+    assert.deepEqual(await st.list('cidade-1'), []);
+    await st.removeFolder('cidade-1');
+    assert.deepEqual(await st.folders(), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('desktop saves: the saves kept in the browser storage are copied to files once, and never removed from it', async () => {
+  const { migrateOnce } = await import('../src/saveFiles.ts');
+  const opfs = new MemoryStore(), files = new MemoryStore();
+  await opfs.write('cidade-1', 'meta.bin', bytes(1));
+  await opfs.write('cidade-1', 'tile_0003.bin', bytes(2, 2));
+  await opfs.write('anterior-2026-10-18T10-00-00-cidade-1', 'meta.bin', bytes(3));
+  // a copy that stopped half way: the folder is there with its "being copied" mark
+  await files.write('anterior-2026-10-18T10-00-00-cidade-1', 'migrating-from-browser-storage.json', bytes(0));
+  // the copy fails once (disk full): nothing is marked as done, and the next start tries again
+  files.failWrite = (n) => n === 'tile_0003.bin';
+  await assert.rejects(migrateOnce(opfs, files));
+  files.failWrite = () => false;
+  assert.deepEqual((await migrateOnce(opfs, files)).sort(), ['anterior-2026-10-18T10-00-00-cidade-1', 'cidade-1']);
+  assert.deepEqual(await files.read('cidade-1', 'tile_0003.bin'), bytes(2, 2));
+  assert.deepEqual((await files.list('anterior-2026-10-18T10-00-00-cidade-1')).map((e) => e.name), ['meta.bin'], 'the half-way mark is gone');
+  assert.deepEqual((await opfs.list('cidade-1')).map((e) => e.name).sort(), ['meta.bin', 'tile_0003.bin'], 'the browser storage is untouched');
+  // once: a save made since is never overwritten by the old one
+  await files.write('cidade-1', 'meta.bin', bytes(9, 9));
+  assert.deepEqual(await migrateOnce(opfs, files), []);
+  assert.deepEqual(await files.read('cidade-1', 'meta.bin'), bytes(9, 9));
+});
