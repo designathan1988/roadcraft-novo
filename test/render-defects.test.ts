@@ -656,3 +656,18 @@ test('E22: switching between the day and the night image starts the new one\'s h
   assert.equal(inner.traas[1].restartHistory, true, 'the night image\'s anti-aliasing restarts from the current frame');
   nightU.value = 0;
 });
+
+test('sky (4.0 port): at street level by day the horizon is a saturated pale blue, not white haze', async () => {
+  const sc = await import('../src/render/scene.ts') as Record<string, unknown> & typeof import('../src/render/scene.ts');
+  const Sky = sc.GradientSky as (new (r: number) => THREE.Mesh & { horizon: { value: THREE.Color }; low: { value: number } }) | undefined;
+  assert.ok(Sky, 'a gradient sky');
+  const sky = new Sky!(1);
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0xffffff, 0.0001);
+  scene.background = new THREE.Color();
+  const parts = { sun: new THREE.DirectionalLight(), hemi: new THREE.HemisphereLight(), sky, scene, env: { update() {} } } as unknown as Parameters<typeof sc.setTimeOfDay>[0];
+  sc.setTimeOfDay(parts, 11, 0.15, 0, 20);
+  const fog = (scene.fog as THREE.FogExp2).color;
+  assert.ok(sky.low.value > 0.9, 'the street-level horizon is on');
+  assert.ok(fog.b - fog.r > 0.25 && fog.r < 0.65, `the horizon/fog at street level is r ${fog.r.toFixed(2)} g ${fog.g.toFixed(2)} b ${fog.b.toFixed(2)} (white haze before: a8c3e2)`);
+});
