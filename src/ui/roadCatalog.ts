@@ -9,7 +9,7 @@ import {
 } from '../roads/profiles.ts';
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
-import { fmtDec, loose, money, plural, t } from './i18n.ts';
+import { fmtDec, lang, loose, money, plural, t } from './i18n.ts';
 
 const CATS: Array<[Category, string]> = [['ruas', 'catalog.cat.streets'], ['avenidas', 'catalog.cat.avenues'], ['rodovias', 'catalog.cat.highways'],
   ['especiais', 'catalog.cat.special'], ['trilhos', 'catalog.cat.rails'], ['meus', 'catalog.cat.mine']];
@@ -178,7 +178,8 @@ export function drawSection(cv: HTMLCanvasElement, p: Omit<Profile, 'id'>, selec
 
 export class RoadCatalog {
   readonly el: HTMLElement;
-  readonly editor: SectionEditor;
+  /** The section editor (made again when the language changes, `languageChanged`). */
+  editor: SectionEditor;
   private tabs: HTMLElement;
   private grid: HTMLElement;
   private cat: Category = 'ruas';
@@ -232,6 +233,19 @@ export class RoadCatalog {
     this.a.use(id);
   }
 
+  /**
+   * The language changed while the game runs: the cards and the section editor are made again in it. An edit in
+   * progress stays open with its profile, selected strip and name.
+   */
+  languageChanged(): void {
+    const old = this.editor, kept = old.state();
+    this.editor = new SectionEditor((def, save) => this.fromEditor(def, save), (text) => this.a.toast(text));
+    old.el.replaceWith(this.editor.el);
+    if (kept) this.editor.restore(kept);
+    this.built = '';
+    if (this.el.isConnected) this.build();
+  }
+
   /** Builds the tabs and cards when the category or the list changed; otherwise only moves the ring. */
   private build(): void {
     const items: Array<{ def: Omit<Profile, 'id'>; id: number; del?: () => void }> = [];
@@ -241,7 +255,8 @@ export class RoadCatalog {
       for (const tp of readTemplates()) items.push({ def: tp, id: -1, del: () => { writeTemplates(readTemplates().filter((x) => x.name !== tp.name)); this.deleted.add(tp.name); this.built = ''; this.build(); } });
       for (const p of PROFILES) if (p.custom && !this.deleted.has(p.name) && !items.some((i) => i.def.name === p.name)) items.push({ def: p, id: p.id });
     } else for (const p of PROFILES) if (!p.custom && !p.ring && p.category === this.cat) items.push({ def: p, id: p.id });
-    const key = `${this.cat}|${PROFILES.length}|${items.map((i) => i.def.name).join(',')}`;
+    // the language is part of what the cards were built for (Roadcraft 4.0 ui/roads/catalogPanel.ts:73)
+    const key = `${lang()}|${this.cat}|${PROFILES.length}|${items.map((i) => i.def.name).join(',')}`;
     if (key !== this.built) {
       this.built = key;
       this.tabs.replaceChildren();
@@ -392,6 +407,17 @@ class SectionEditor {
   }
 
   close(): void { this.el.classList.add('hidden'); this.def = null; }
+
+  /** What an open edit holds (null when closed), to carry it into an editor built again. */
+  state(): { def: Omit<Profile, 'id'>; sel: number; name: string } | null {
+    return this.isOpen && this.def ? { def: this.def, sel: this.sel, name: this.nameInput.value } : null;
+  }
+
+  restore(st: { def: Omit<Profile, 'id'>; sel: number; name: string }): void {
+    this.def = st.def; this.sel = st.sel; this.nameInput.value = st.name;
+    this.el.classList.remove('hidden');
+    this.refresh();
+  }
 
   private insert(s: Strip): void {
     const d = this.def!;

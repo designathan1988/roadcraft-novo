@@ -116,6 +116,23 @@ const SCENARIOS = {
     g.commands.undo();
     check('undo brings the typed name back', w.streetNames.get(s) === 'Rua Digitada', 'name ' + w.streetNames.get(s));
   `,
+  // the language switched while the game runs (Roadcraft 4.0 ui/roads/catalogPanel.ts:73): cards and editor made again
+  'catalog-language': `
+    g.setTool('road');
+    await wait(300);
+    const cat = g.hud.catalog;
+    const card = cat.grid.querySelector('.rc-card');
+    cat.editor.open(window.__cidade.game.world && cat.editor ? { name: 'Rua local', speed: 40, oneWay: false, priority: 0, category: 'ruas',
+      strips: [{ kind: 'sidewalk', width: 3 }, { kind: 'curb', width: 0.2 }, { kind: 'lane', width: 3.2, dir: 1 }, { kind: 'lane', width: 3.2, dir: -1 }, { kind: 'curb', width: 0.2 }, { kind: 'sidewalk', width: 3 }] } : null);
+    const before = cat.editor.state();
+    before.name = 'Minha Rua'; cat.editor.restore(before);
+    const oldEditor = cat.editor.el;
+    cat.languageChanged();
+    check('the cards are made again', card && !card.isConnected && !!cat.grid.querySelector('.rc-card'), 'old card still in place');
+    check('the section editor is made again in its place', !oldEditor.isConnected && cat.editor.el.isConnected, 'editor not replaced');
+    const after = cat.editor.state();
+    check('an open edit stays open with its profile and name', after && after.name === 'Minha Rua' && after.def.strips.length === 6, JSON.stringify(after && { name: after.name, strips: after.def.strips.length }));
+  `,
   // B49: deleting a road model the player used in this session takes its card out of "Mine"
   'catalog-delete-template': `
     localStorage.removeItem('cidade.modelosDeVia');
