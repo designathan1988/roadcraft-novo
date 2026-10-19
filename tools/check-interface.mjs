@@ -573,6 +573,14 @@ export const SCENARIOS = {
     click(byText('.v2-pop .v2-row', 'Gerar cidade|Generate')); await wait(500); await idle();
     check('the generate of the menu takes a new seed', w.seed !== 4321, 'seed ' + w.seed);
   `,
+  // As the 4.0 (main.ts sky: 'day'): a game opens with the sky "always day", that button lit, the clock running
+  'sky-starts-day': { query: '?vazio&workers=3', script: `
+    check('the game opens in always day', g.skyMode === 'dia', 'sky ' + g.skyMode);
+    const lit = QA('[data-sky].on').map((b) => b.dataset.sky).join(',');
+    check('the day button is the lit one', lit === 'dia', 'lit: ' + lit);
+    const h0 = g.hour; await wait(3000);
+    check('the clock runs', g.hour !== h0, 'hour ' + h0 + ' → ' + g.hour);
+  ` },
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

@@ -208,7 +208,7 @@ export class Game {
   private hour = 10;
   private clockSpeed = 1;
   /** Chosen sky and weather set by the player (both go into the save). */
-  private skyMode: SkyMode = 'ciclo';
+  private skyMode: SkyMode = 'dia'; // as Roadcraft 4.0: a game opens in "always day"
   private weatherCtl: WeatherCtl | null = null;
   private waterCtl = { waves: 0.3, foam: 0.4, current: 0.5 };
   /** Clouds placed by the player and the state of the Sky tool. */
@@ -456,7 +456,9 @@ export class Game {
     const params = new URLSearchParams(location.search);
     this.world.seed = Number(params.get('seed') ?? 1) >>> 0;
     this.world.gameId = (Math.random() * 2 ** 32) >>> 0;
-    if (params.has('hora')) { this.hour = Number(params.get('hora')) % 24; this.clockSpeed = 0; }
+    // a photo at a set hour (?hora) shows that hour's light: the sky follows the clock
+    if (params.has('hora')) { this.hour = Number(params.get('hora')) % 24; this.clockSpeed = 0; this.skyMode = 'ciclo'; }
+    this.hud.setSky(this.skyMode);
     this.weather.onStrike = (d) => this.ambient.thunder(d);
     if (params.has('tempestade')) this.weather.fixed = { clouds: 1, rain: 1, storm: 1 };
     else if (params.has('chuva')) this.weather.fixed = { clouds: 0.95, rain: 0.9 };
