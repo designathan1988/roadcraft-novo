@@ -257,6 +257,17 @@ export const SCENARIOS = {
     click(byText('.v2-tab', '^Editar|^Edit')); await frames(2);
     check('Edit goes back to the building panel', !Q('.probe-facade'), 'content still shown');
   `,
+  // B57: in English, the game's own hints and toasts are in English
+  'B57-english': { query: '?vazio&hora=11&workers=3&lang=en', script: `
+    click('[data-cat=zones]'); await frames(2);
+    const hint = Q('.v2-hintbar').textContent;
+    check('the zone hint is in English', /Drag/.test(hint) && !/[ãõçéêáíóúâô]|Arraste/.test(hint), 'hint: ' + hint);
+    click('[data-cat=build]'); await frames(2);
+    g.select(a.lot(100, 100, 130, 100, 115, 130, 1, 3)); await frames(2);
+    click(byText('.v2-toolopts button', '^Renovate')); await frames(2);
+    const toasts = QA('.v2-toast').map((e) => e.textContent).join(' / ');
+    check('the toast is in English', toasts.length > 0 && !/[ãõçéêáíóúâô]|Nenhuma/.test(toasts), 'toasts: ' + toasts);
+  ` },
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

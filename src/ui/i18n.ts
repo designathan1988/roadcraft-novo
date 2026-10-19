@@ -10,7 +10,7 @@ import { ENGINE_EN } from './lang/engine.en.ts';
 import { translate as legacyTranslate } from './lang/legacy.ts';
 
 export type Lang = 'pt-BR' | 'en';
-export const LANGUAGES: ReadonlyArray<readonly [Lang, string]> = [['pt-BR', 'Português'], ['en', 'English']];
+export const LANGUAGES: ReadonlyArray<readonly [Lang, string]> = [['pt-BR', 'Português'], ['en', 'English']]; // not for the player: each language in its own words
 
 const KEY = 'roadcraft.language';
 const OLD_KEY = 'cidade.idioma';

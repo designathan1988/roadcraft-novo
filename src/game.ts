@@ -36,7 +36,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './audio.ts';
 import { Particles } from './render/particles.ts';
-import { followLanguage, onLanguageReload, setLang, t } from './ui/i18n.ts';
+import { fmtDec, fmtInt, followLanguage, loose, money, onLanguageReload, plural, setLang, t } from './ui/i18n.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
@@ -289,16 +289,16 @@ export class Game {
       groundKind: (k) => { this.groundKind = k; },
       forestMode: (cut) => { this.forestCut = cut; },
       forestSpecies: (s) => { this.forestSpecies = s; },
-      forestOne: (one) => { this.forestOne = one; this.hud.setHint(one ? 'Clique para plantar uma árvore da espécie escolhida.' : 'Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.'); },
+      forestOne: (one) => { this.forestOne = one; this.hud.setHint(one ? t('game.hint.forest.one') : t('game.hint.forest')); },
       poleLights: (m) => { this.itemTool.poleLights = m; },
       biome: (b) => this.setBiome(b),
       riverWidth: (w) => { this.riverWidth = w; },
       elements: (e) => { this.elem = e; },
       landform: (m) => { this.landformMode = m as BrushMode; if (this.tool === 'landform') this.brush.mode = this.landformMode; },
       flattenMap: () => {
-        if (!window.confirm('Aplainar todo o terreno? Dá para desfazer com Ctrl+Z.')) return;
+        if (!window.confirm(t('game.confirm.flattenMap'))) return;
         this.commands.run(new FlattenMap(this.world, heightAt(this.world.heights, this.rig.target.x, this.rig.target.z)));
-        this.hud.toast('Mapa aplainado.');
+        this.hud.toast(t('game.toast.flattened'));
       },
       weather: (w) => this.setWeather(w),
       sky: (m) => { this.skyMode = m; this.unsaved = true; },
@@ -348,7 +348,7 @@ export class Game {
       buildingFn: (f) => { if (this.selected >= 0) this.editSelected(0, undefined, f); else this.newFn = f; },
       lotMode: (m) => this.setLotMode(m),
       lotSplit: (k, n) => { this.splitKind = k; this.splitParts = n; },
-      zoneFill: (b) => { this.zoneBlock = b; this.hud.setHint(b ? 'Clique dentro de uma quadra: todas as vias em volta dela recebem a zona.' : 'Arraste para pintar a zona dos lados das vias.'); },
+      zoneFill: (b) => { this.zoneBlock = b; this.hud.setHint(b ? t('game.hint.zone.block') : t('game.hint.zone')); },
       lotUse: (z) => { this.lotUse = z; },
       demolishBuilding: () => this.demolishSelected(),
       inside: (c) => this.insideCmd(c),
@@ -413,7 +413,7 @@ export class Game {
     this.commands.onPush = (c) => {
       const l = c.label;
       this.ambient.sfx(l.startsWith('demolir') || l.startsWith('remover') || l.startsWith('tirar') || l.startsWith('apagar') ? 'demolish'
-        : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place');
+        : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place'); // not for the player: undo labels pick the sound (B60)
     };
     this.commands.onChange = () => {
       this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh();
@@ -444,7 +444,7 @@ export class Game {
     else if (params.has('chuva')) this.weather.fixed = { clouds: 0.95, rain: 0.9 };
     else if (params.has('limpo')) this.weather.fixed = { clouds: 0.15, rain: 0 };
 
-    this.hud.showLoading('Iniciando o vídeo…');
+    this.hud.showLoading(t('game.loading.video'));
     this.parts = await createScene(this.canvas);
     console.log(`camadas de textura: ${this.parts.maxLayers}, mapa ${MAP_TILES} (${location.search})`);
     if (MAP_TILES * MAP_TILES > this.parts.maxLayers) {
@@ -477,14 +477,14 @@ export class Game {
       const apply = () => { w.signTexts.set(key, text); for (const s of chain) w.streetNames.set(s, text); this.textSigns.version++; this.unsaved = true; };
       const invert = () => { w.signTexts.delete(key); chain.forEach((s, i) => { const b = before[i]; if (b === undefined) w.streetNames.delete(s); else w.streetNames.set(s, b); }); this.textSigns.version++; };
       this.commands.run({ label: 'texto da placa', apply, invert });
-      if (street && chain.length) this.hud.toast(`Rua ${text}.`);
+      if (street && chain.length) this.hud.toast(t('game.toast.streetNamed', { name: text }));
     };
 
-    this.hud.showLoading('Gerando o relevo…');
+    this.hud.showLoading(t('game.loading.terrain'));
     await this.generateTerrain();
 
     // all shaders compiled here, never during play
-    this.hud.showLoading('Preparando os shaders…');
+    this.hud.showLoading(t('game.loading.shaders'));
     const warm = new THREE.Group();
     for (const l of this.layers) warm.add(l.warmupMesh());
     warm.add(this.textSigns.warmup());
@@ -520,8 +520,8 @@ export class Game {
     followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
     this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
-      [['Carregar o pior caso', 'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)', () => { if (this.discardOk()) void this.testCity(); }],
-        ['Dinheiro ilimitado (liga/desliga)', 'Modo livre: nada é cobrado neste mapa', () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? 'Modo livre: dinheiro ilimitado.' : 'Dinheiro de volta ao caixa.'); }]]);
+      [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.testCity(); }],
+        [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]]);
     await this.applySettings(this.settings, false);
     await renderer.compileAsync(scene, this.rig.persp);
     await renderer.compileAsync(scene, this.rig.ortho);
@@ -535,8 +535,8 @@ export class Game {
     this.bindInput();
     this.bindResize();
     this.hud.hideLoading();
-    if (params.has('grande')) this.hud.toast('Sua placa de vídeo não comporta aquele tamanho de mapa: abri no maior que cabe.');
-    if (!this.parts.isWebGPU) this.hud.toast('WebGPU indisponível: rodando no modo de compatibilidade (WebGL 2).');
+    if (params.has('grande')) this.hud.toast(t('game.toast.mapTooBig'));
+    if (!this.parts.isWebGPU) this.hud.toast(t('game.toast.webgl'));
     const cam = params.get('cam');
     if (cam) {
       const [x, z, yaw, pitch, dist] = cam.split(',').map(Number);
@@ -690,7 +690,7 @@ export class Game {
     this.updateInfo(now);
     this.vehicles.update(cam, this.rig.eye, now);
     if (this.vehicles.follow) { const p = this.vehicles.followPose; this.rig.followPose(p[0], p[1], p[2], p[3], dt); }
-    else if (this.rig.followY !== null) { this.rig.followY = null; this.hud.toast('A câmera soltou o veículo.'); }
+    else if (this.rig.followY !== null) { this.rig.followY = null; this.hud.toast(t('game.toast.followLost')); }
     const T4 = pf ? performance.now() : 0;
     this.props.processDirty();
     this.props.update(renderer, cam, this.rig.eye, now);
@@ -699,7 +699,7 @@ export class Game {
     if (this.post) { this.post.setCamera(cam); this.post.render(); }
     else renderer.render(scene, cam);
     // measurement (?perf): frames over 30 ms say where the time went
-    if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); }
+    if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); } // not for the player: ?perf measurement log
   }
 
   private toggleTrafficView(): void {
@@ -739,7 +739,7 @@ export class Game {
   togglePause(): void {
     this.paused = !this.paused;
     this.sim.postMessage({ type: 'speed', value: this.paused ? 0 : this.simSpeed } satisfies ToSim);
-    this.hud.toast(this.paused ? 'Pausado. Espaço continua.' : 'Continuando.');
+    this.hud.toast(this.paused ? t('game.toast.paused') : t('game.toast.resumed'));
   }
 
   /** Simulation speed from the top bar: 0 pauses, 1, 2 or 4 (the clock keeps pace, unless frozen for a photo). */
@@ -939,7 +939,7 @@ export class Game {
         const b = this.rig.pick(this.ndcX(), this.ndcY());
         const r = b ? demolishBox(this.world, this.boxStart.x, this.boxStart.z, b.x, b.z) : null;
         this.preview.hideAll();
-        if (r) { this.commands.push(r.cmd); this.hud.toast(`Demolido: ${r.count} ${r.count === 1 ? 'coisa' : 'coisas'}${r.charge < 0 ? ` · devolvido R$ ${(-r.charge).toLocaleString('pt-BR')}` : ''}.`); }
+        if (r) { this.commands.push(r.cmd); this.hud.toast((plural('game.toast.demolished', r.count) + (r.charge < 0 ? t('game.toast.refunded', { money: money(-r.charge) }) : '') + '.')); }
         this.boxStart = null;
       }
       if (this.drag === 'node' && this.cloudGrab >= 0) { this.dropCloud(this.rig.pick(this.ndcX(), this.ndcY())); }
@@ -962,7 +962,7 @@ export class Game {
         else if (this.tool === 'zone' && this.zoneBlock) { if (hit) { const r = this.zoneTool.fillBlock(hit.x, hit.z); if (r !== 'ok') this.hud.toast(r); } }
         else if (e.altKey && ROAD_TOOLS.includes(this.tool)) {
           const p = this.roadTool.pick(hit);
-          if (p >= 0) { this.hud.setProfile(p); this.hud.toast(`Via copiada: ${PROFILE_INFO[p].name}`); }
+          if (p >= 0) { this.hud.setProfile(p); this.hud.toast(t('game.toast.profileCopied', { name: loose(PROFILE_INFO[p].name) })); }
         } else this.roadTool.click(hit, e.shiftKey);
       }
       if (this.drag === 'rotate' && still && ROAD_TOOLS.includes(this.tool)) this.roadTool.cancel();
@@ -1084,7 +1084,7 @@ export class Game {
     renderer.shadowMap.enabled = false;
     if (want) this.post = new Post(renderer, scene, this.rig.persp, this.parts.sun, { shadows: s.shadows, ao: s.ao, bloom: s.bloom });
     if (compile) {
-      this.hud.showLoading('Aplicando as opções…');
+      this.hud.showLoading(t('game.loading.options'));
       await renderer.compileAsync(scene, this.rig.persp);
       this.warmPost();
       this.hud.hideLoading();
@@ -1116,35 +1116,35 @@ export class Game {
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
 
-  private setTool(t: Tool): void {
-    if (t !== this.tool) this.ambient.sfx('click');
-    this.tool = t;
-    zoneOverlayU.value = t === 'zone' || this.zoneLayer ? 1 : 0;
-    if (TERRAIN_TOOLS.includes(t)) this.brush.mode = t === 'landform' ? this.landformMode : t as BrushParams['mode'];
-    if (ROAD_TOOLS.includes(t)) this.roadTool.setMode(t);
+  private setTool(tool: Tool): void {
+    if (tool !== this.tool) this.ambient.sfx('click');
+    this.tool = tool;
+    zoneOverlayU.value = tool === 'zone' || this.zoneLayer ? 1 : 0;
+    if (TERRAIN_TOOLS.includes(tool)) this.brush.mode = tool === 'landform' ? this.landformMode : tool as BrushParams['mode'];
+    if (ROAD_TOOLS.includes(tool)) this.roadTool.setMode(tool);
     else { this.roadTool.cancel(); this.hud.setHint(''); }
-    if (t === 'zone') this.hud.setHint('Arraste para pintar a zona dos lados das vias.');
-    if (t === 'building') { this.select(-1); this.setLotMode(this.lotMode); }
-    if (t !== 'inspect') this.inspector?.close();
-    if (t === 'streetscape' || t === 'barrier') this.itemTool.setMode(t); else if (this.itemTool) this.itemTool.cancel(false);
-    if (t === 'inspect') this.hud.setHint('Clique num cruzamento para mudar o controle (semáforo, placas, movimentos) ou numa via para ver o perfil.');
-    if (t === 'paint') this.hud.setHint('Arraste para pintar o chão (Grama apaga a pintura).');
-    if (t === 'forest') this.hud.setHint('Arraste para plantar um bosque, ou escolha Cortar para abrir clareira.');
-    if (t === 'elements') this.hud.setHint('Arraste para espalhar o elemento escolhido (ou apagar); Raio e [ ] mudam o tamanho do pincel.');
-    if (t === 'landform') this.hud.setHint('Escolha o relevo e arraste (chapada, cânion, escarpa, ravina) ou clique (pão de açúcar); Força muda a altura, [ e ] o tamanho.');
-    if (t === 'sky') this.skyHint();
-    if (t === 'person') this.hud.setHint('Escolha a roupa e a altura e clique: a pessoa fica ali parada ou sai andando pela calçada.');
-    if (t === 'pistol') this.hud.setHint('Clique numa pessoa: ela cai e some.');
-    if (t === 'bomb') this.hud.setHint('Clique onde a bomba cai: no chão ou num prédio. A força muda o tamanho da explosão.');
-    if (t === 'weather') this.hud.setHint('Ajuste chuva, vento e raios nas barras; clique no mapa para cair um raio ali.');
-    if (t === 'river') this.hud.setHint('Clique os pontos do rio, de cima para baixo; Enter ou duplo clique termina, Backspace volta, Esc descarta.');
-    if (t !== 'river') this.riverPts.length = 0;
-    if (t === 'transit') this.hud.setHint('Clique na calçada para pôr paradas na linha; clique numa parada para tirar; Shift+clique torna a parada terminal.');
-    this.transitView.showPaths = t === 'transit';
-    if (t !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); } }
-    this.hud.setTool(t);
-    if (this.health) this.health.context = `ferramenta ${t}`;
-    this.canvas.style.cursor = t === 'camera' ? 'grab' : 'crosshair';
+    if (tool === 'zone') this.hud.setHint(t('game.hint.zone'));
+    if (tool === 'building') { this.select(-1); this.setLotMode(this.lotMode); }
+    if (tool !== 'inspect') this.inspector?.close();
+    if (tool === 'streetscape' || tool === 'barrier') this.itemTool.setMode(tool); else if (this.itemTool) this.itemTool.cancel(false);
+    if (tool === 'inspect') this.hud.setHint(t('game.hint.inspect'));
+    if (tool === 'paint') this.hud.setHint(t('game.hint.paint'));
+    if (tool === 'forest') this.hud.setHint(t('game.hint.forest'));
+    if (tool === 'elements') this.hud.setHint(t('game.hint.elements'));
+    if (tool === 'landform') this.hud.setHint(t('game.hint.landform'));
+    if (tool === 'sky') this.skyHint();
+    if (tool === 'person') this.hud.setHint(t('game.hint.person'));
+    if (tool === 'pistol') this.hud.setHint(t('game.hint.pistol'));
+    if (tool === 'bomb') this.hud.setHint(t('game.hint.bomb'));
+    if (tool === 'weather') this.hud.setHint(t('game.hint.weather'));
+    if (tool === 'river') this.hud.setHint(t('game.hint.river'));
+    if (tool !== 'river') this.riverPts.length = 0;
+    if (tool === 'transit') this.hud.setHint(t('game.hint.transit'));
+    this.transitView.showPaths = tool === 'transit';
+    if (tool !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); } }
+    this.hud.setTool(tool);
+    if (this.health) this.health.context = `ferramenta ${tool}`;
+    this.canvas.style.cursor = tool === 'camera' ? 'grab' : 'crosshair';
   }
 
   /** For photo scripts and tests: the same actions as the tools. */
@@ -1295,7 +1295,7 @@ export class Game {
   private finishRiver(): void {
     if (this.riverPts.length >= 2) {
       const c = new RiverCommand(this.world, this.riverPts, this.riverWidth, Math.min(4, 1.2 + this.riverWidth / 12));
-      if (!c.empty) { this.commands.run(c); this.hud.toast('Rio feito: a água desce sempre pelo caminho desenhado.'); }
+      if (!c.empty) { this.commands.run(c); this.hud.toast(t('game.toast.river')); }
     }
     this.riverPts.length = 0;
     this.preview.hideAll();
@@ -1303,10 +1303,10 @@ export class Game {
 
   private skyHint(): void {
     const s = this.skyTool;
-    this.hud.setHint(s.fog === 'lay' ? 'Arraste para pôr neblina baixa (Raio muda o tamanho do pincel).' : s.fog === 'erase' ? 'Arraste para apagar a neblina.'
-      : s.cloud === 'add' ? 'Clique no mapa: uma nuvem nasce em cima do ponto, com o tamanho, a base e a densidade escolhidos.'
-        : s.cloud === 'move' ? 'Arraste uma nuvem (pela sombra no chão) para outro lugar.' : s.cloud === 'edit' ? 'Clique numa nuvem para aplicar os valores das barras.'
-          : s.cloud === 'remove' ? 'Clique numa nuvem para apagá-la.' : 'Espalhe nuvens ou ponha neblina.');
+    this.hud.setHint(s.fog === 'lay' ? t('game.hint.fog.lay') : s.fog === 'erase' ? t('game.hint.fog.erase')
+      : s.cloud === 'add' ? t('game.hint.cloud.add')
+        : s.cloud === 'move' ? t('game.hint.cloud.move') : s.cloud === 'edit' ? t('game.hint.cloud.edit')
+          : s.cloud === 'remove' ? t('game.hint.cloud.remove') : t('game.hint.sky'));
   }
 
   /** Replaces the cloud list as a command (undo brings back the previous one). */
@@ -1328,14 +1328,14 @@ export class Game {
     if (s.fog !== 'none') return;
     const i = this.cloudAt(x, z);
     if (s.cloud === 'add') {
-      if (this.clouds.length >= MAX_CLOUDS) { this.hud.toast(`O céu já tem o máximo de nuvens (${MAX_CLOUDS}).`); return; }
+      if (this.clouds.length >= MAX_CLOUDS) { this.hud.toast(t('game.toast.maxClouds', { n: MAX_CLOUDS })); return; }
       const y = heightAt(this.world.heights, x, z) + s.base;
       this.setClouds([...this.clouds, { x, z, y, size: s.size, density: s.density }], 'criar nuvem');
     } else if (s.cloud === 'remove' && i >= 0) this.setClouds(this.clouds.filter((_, k) => k !== i), 'apagar nuvem');
     else if (s.cloud === 'edit' && i >= 0) {
       const c = this.clouds[i];
       this.setClouds(this.clouds.map((d, k) => k === i ? { ...c, size: s.size, density: s.density, y: c.y - (c.y - heightAt(this.world.heights, c.x, c.z)) + s.base } : d), 'ajustar nuvem');
-    } else if (i < 0 && s.cloud !== 'none') this.hud.toast('Nenhuma nuvem aqui: clique embaixo de uma.');
+    } else if (i < 0 && s.cloud !== 'none') this.hud.toast(t('game.toast.noCloud'));
   }
 
   private grabCloud(hit: THREE.Vector3 | null): boolean {
@@ -1378,12 +1378,12 @@ export class Game {
     // the cooked people (people front): a group of 1 to 20 with the screen's clothes, height, mode and object
     if (this.vehicles.people.creator) {
       const n = this.personOptions.count ?? 1;
-      if (this.api.people(x, z, this.personOptions)) { this.hud.toast(n === 1 ? 'Pessoa criada.' : `${n} pessoas criadas.`); return; }
+      if (this.api.people(x, z, this.personOptions)) { this.hud.toast(n === 1 ? t('game.toast.personCreated') : t('game.toast.peopleCreated', { n })); return; }
     }
     const p = this.personSpec;
     if (p.walk) {
       this.sim.postMessage({ type: 'people', x, z, count: p.count, color: p.color } satisfies ToSim);
-      this.hud.toast(p.count === 1 ? 'A pessoa saiu andando pela calçada.' : `${p.count} pessoas saíram andando pela calçada.`);
+      this.hud.toast(p.count === 1 ? t('game.toast.personWalks') : t('game.toast.peopleWalk', { n: p.count }));
       return;
     }
     const c = new ItemsCommand(this.world.items, 'pôr pessoa');
@@ -1440,14 +1440,14 @@ export class Game {
     }
     this.hitKind = 'bomb';
     this.sim.postMessage({ type: 'hit', x, z, r, one: false } satisfies ToSim);
-    this.hud.toast(doomed.length ? `Desabou: ${doomed.length} ${doomed.length === 1 ? 'prédio' : 'prédios'}.` : 'Impacto no chão.');
+    this.hud.toast(doomed.length ? plural('game.toast.collapsed', doomed.length) : t('game.toast.bombGround'));
   }
 
   private onHit(people: number, vehicles: number): void {
     const k = this.hitKind;
     this.hitKind = null;
-    if (k === 'pistol') this.hud.toast(people ? 'Atingido.' : 'Ninguém aí: clique numa pessoa.');
-    else if (k === 'bomb' && people + vehicles > 0) this.hud.toast(`Houve vítimas: ${people} ${people === 1 ? 'pessoa' : 'pessoas'} e ${vehicles} ${vehicles === 1 ? 'veículo' : 'veículos'}.`);
+    if (k === 'pistol') this.hud.toast(people ? t('game.toast.hit') : t('game.toast.missed'));
+    else if (k === 'bomb' && people + vehicles > 0) this.hud.toast(t('game.toast.victims', { people: plural('status.people', people), vehicles: plural('status.vehicles', vehicles) }));
   }
 
   /** Weather from the panel: rain, wind, direction, lightning and thunder; null goes back to weather that changes by itself (or to the option). */
@@ -1524,10 +1524,10 @@ export class Game {
   /** Follows the vehicle nearest the centre of the screen, or lets go. */
   private toggleFollow(): void {
     if (this.vehicles.follow) { this.vehicles.follow = null; return; }
-    const t = this.rig.target;
-    if (!this.vehicles.pick(t.x, t.z, Math.max(30, this.rig.dist * 0.4))) { this.hud.toast('Nenhum veículo perto do centro da tela: aproxime a câmera de uma via com trânsito.'); return; }
+    const c = this.rig.target;
+    if (!this.vehicles.pick(c.x, c.z, Math.max(30, this.rig.dist * 0.4))) { this.hud.toast(t('game.toast.followNone')); return; }
     this.rig.dist = 16; this.rig.pitch = THREE.MathUtils.degToRad(14);
-    this.hud.toast('Seguindo o veículo. Esc ou C solta; a roda aproxima.');
+    this.hud.toast(t('game.toast.following'));
   }
 
   private lineMode = 0;
@@ -1547,12 +1547,12 @@ export class Game {
     // Shift+click on a stop: turns the terminal on or off
     if (shift) {
       const s = this.transit.stopNear(hit.x, hit.z, 9);
-      if (!s) { this.hud.toast('Shift+clique numa parada para torná-la terminal.'); return; }
+      if (!s) { this.hud.toast(t('game.toast.terminalHow')); return; }
       const l = this.transit.line(s[0])!;
       const x = l.stops[s[1] * 2], z = l.stops[s[1] * 2 + 1];
       const was = this.transit.terminalNear(x, z, 9) >= 0;
       this.commands.run(this.transit.toggleTerminal(x, z));
-      this.hud.toast(was ? 'Não é mais terminal.' : 'Terminal: os ônibus esperam mais e dão a volta aqui.');
+      this.hud.toast(was ? t('game.toast.terminalOff') : t('game.toast.terminalOn'));
       return;
     }
     const near = this.transit.stopNear(hit.x, hit.z, 9);
@@ -1567,7 +1567,7 @@ export class Game {
     const line = this.transit.line(this.lineSel)!;
     const rail = (line.mode ?? 0) > 0;
     const seg = net.nearestSeg(hit.x, hit.z, 30, (s) => PROFILE_INFO[sc.profile[s]].rail === rail);
-    if (!seg) { this.hud.toast(rail ? 'Ponha a estação sobre um trilho (Via → Trilhos).' : 'Ponha a parada perto de uma via.'); return; }
+    if (!seg) { this.hud.toast(rail ? t('game.toast.stationOnTrack') : t('game.toast.stopNearRoad')); return; }
     const q = net.quad(seg[0]);
     const p2 = new Float64Array(2), d2 = new Float64Array(2);
     bez(q, seg[1], p2); bezD(q, seg[1], d2);
@@ -1578,7 +1578,7 @@ export class Game {
       return;
     }
     const info = PROFILE_INFO[sc.profile[seg[0]]];
-    if (!info.strips.some((s) => s.kind === 'sidewalk')) { this.hud.toast('Essa via não tem calçada.'); return; }
+    if (!info.strips.some((s) => s.kind === 'sidewalk')) { this.hud.toast(t('game.toast.noSidewalk')); return; }
     const l = Math.hypot(d2[0], d2[1]) || 1;
     const lx = d2[1] / l, lz = -d2[0] / l;
     const side = (hit.x - p2[0]) * lx + (hit.z - p2[1]) * lz > 0 ? 1 : -1;
@@ -1646,7 +1646,7 @@ export class Game {
     const pts = this.lotPts;
     if (pts.length < 2) { pts.push([hit.x, hit.z]); return; }
     const r = this.lotRect([hit.x, hit.z]);
-    if (!r) { this.hud.toast('Lote estreito demais.'); pts.length = 0; return; }
+    if (!r) { this.hud.toast(t('game.toast.lotNarrow')); pts.length = 0; return; }
     const seed = (Math.random() * 2 ** 31) >>> 0;
     const zone = this.lotUse;
     const rec = {
@@ -1671,14 +1671,14 @@ export class Game {
     if (m !== 'edit') this.select(-1);
     this.hud.setLotMode(m);
     const hints: Record<LotMode, string> = {
-      edit: 'Clique num prédio para editar, ou num lote vazio para construir.',
-      rect: 'Clique no começo e no fim da frente do lote; depois no fundo.',
-      poly: 'Clique os cantos do lote; Enter ou duplo clique fecha, Backspace volta um ponto.',
-      split: 'Clique num lote para dividi-lo (escolha lado a lado ou frente e fundos e em quantos).',
-      join: 'Clique num lote e depois no lote ao lado para juntá-los.',
-      delete: 'Clique num prédio: vira lote vazio. Clique num lote vazio: ele some.',
-      front: 'Clique perto de um lado do lote: a construção vira de frente para ele.',
-      corner: 'Arraste um canto do lote para mudar o tamanho.',
+      edit: t('game.hint.lot.edit'),
+      rect: t('game.hint.lot.rect'),
+      poly: t('game.hint.lot.poly'),
+      split: t('game.hint.lot.split'),
+      join: t('game.hint.lot.join'),
+      delete: t('game.hint.lot.delete'),
+      front: t('game.hint.lot.front'),
+      corner: t('game.hint.lot.corner'),
     };
     this.hud.setHint(hints[m]);
   }
@@ -1722,22 +1722,22 @@ export class Game {
   private clickLotTool(hit: THREE.Vector3): void {
     if (this.lotMode === 'poly') { this.polyPts.push([hit.x, hit.z]); return; }
     const id = lotAt(this.world, hit.x, hit.z);
-    if (id < 0) { this.hud.toast('Nenhum lote aqui: desenhe um ou zoneie a rua.'); return; }
+    if (id < 0) { this.hud.toast(t('game.toast.noLot')); return; }
     let r: RoadJournal | string | null = null;
     if (this.lotMode === 'split') r = splitLot(this.world, id, this.splitKind, this.splitParts);
     else if (this.lotMode === 'delete') r = deleteLot(this.world, id);
-    else if (this.lotMode === 'front') { r = setLotFront(this.world, id, hit.x, hit.z); if (!r) { this.hud.toast('Esse já é o lado da frente.'); return; } }
+    else if (this.lotMode === 'front') { r = setLotFront(this.world, id, hit.x, hit.z); if (!r) { this.hud.toast(t('game.toast.alreadyFront')); return; } }
     else if (this.lotMode === 'join') {
-      if (this.joinFirst < 0 || !this.world.buildings.alive[this.joinFirst]) { this.joinFirst = id; this.hud.setHint('Agora clique no lote ao lado.'); return; }
+      if (this.joinFirst < 0 || !this.world.buildings.alive[this.joinFirst]) { this.joinFirst = id; this.hud.setHint(t('game.hint.lot.joinSecond')); return; }
       r = joinLots(this.world, this.joinFirst, id);
       this.joinFirst = -1;
-      this.hud.setHint('Clique num lote e depois no lote ao lado para juntá-los.');
+      this.hud.setHint(t('game.hint.lot.join'));
     }
     if (!r) return;
     if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
     this.commands.push(r);
     this.preview.hide();
-    this.hud.toast(this.lotMode === 'split' ? 'Lote dividido.' : this.lotMode === 'join' ? 'Lotes juntados.' : this.lotMode === 'front' ? 'Frente definida: a construção olha para esse lado.' : 'Apagado.');
+    this.hud.toast(this.lotMode === 'split' ? t('game.toast.lotSplit') : this.lotMode === 'join' ? t('game.toast.lotsJoined') : this.lotMode === 'front' ? t('game.toast.frontSet') : t('game.toast.deleted'));
   }
 
   private finishPoly(): void {
@@ -1749,7 +1749,7 @@ export class Game {
     const j = new RoadJournal(this.world, 'lote desenhado');
     j.addBuilding({ ...r, h: 0, color: 0, seed, zone, fn: this.newFn, floors: floorsFor(zone, 0, new Rng(seed)), style: this.newArch >= 0 ? 128 + this.newArch : seed & 127 });
     this.commands.push(j);
-    this.hud.toast('Lote novo criado.');
+    this.hud.toast(t('game.toast.lotCreated'));
   }
 
   private grabCorner(hit: THREE.Vector3 | null): boolean {
@@ -1768,7 +1768,7 @@ export class Game {
     this.preview.hideAll();
     if (!c || !hit || !this.world.buildings.alive[c.id]) return;
     const r = moveLotCorner(this.world, c.id, c.k, hit.x, hit.z);
-    if (typeof r === 'string') { this.hud.toast(`Não mudou: ${r}.`); return; }
+    if (typeof r === 'string') { this.hud.toast(t('game.toast.notChanged', { why: loose(r) })); return; }
     this.commands.push(r);
   }
 
@@ -1778,7 +1778,7 @@ export class Game {
   private lotExtraPts: Array<[number, number]> = [];
 
   private featureActions(): FeatureActions {
-    const hints = { line: 'Clique dois pontos de uma linha que atravesse o lote: ele vira dois.', curve: 'Clique perto de um lado do lote e depois onde esse lado deve passar: ele vira curva.' };
+    const hints = { line: t('game.hint.lot.line'), curve: t('game.hint.lot.curve') };
     const enter = (m: 'line' | 'curve') => { this.setTool('building'); this.lotExtra = m; this.lotExtraPts = []; this.hud.setHint(hints[m]); };
     return {
       lotLine: () => enter('line'),
@@ -1815,28 +1815,28 @@ export class Game {
     if (this.lotExtra === 'line') {
       // the lot the line crosses: under its middle, or under either end
       const id = [lotAt(this.world, (ax + bx) / 2, (az + bz) / 2), lotAt(this.world, ax, az), lotAt(this.world, bx, bz)].find((i) => i >= 0) ?? -1;
-      r = id < 0 ? 'a linha não passa por nenhum lote' : splitLotByLine(this.world, id, ax, az, bx, bz);
+      r = id < 0 ? t('game.refuse.lineNoLot') : splitLotByLine(this.world, id, ax, az, bx, bz);
     } else {
       const id = lotAt(this.world, ax, az);
-      r = id < 0 ? 'clique primeiro perto de um lado, dentro do lote' : curveLotSide(this.world, id, ax, az, bx, bz);
+      r = id < 0 ? t('game.refuse.curveFirst') : curveLotSide(this.world, id, ax, az, bx, bz);
     }
     if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
     this.commands.push(r);
-    this.hud.toast(this.lotExtra === 'line' ? 'Lote dividido pela linha.' : 'Lado curvado.');
+    this.hud.toast(this.lotExtra === 'line' ? t('game.toast.lotSplitLine') : t('game.toast.sideCurved'));
   }
 
   /** Renovation (Roadcraft Shift+click): the building is new again; undo brings the old age back. */
   private renovate(id: number): void {
     const w = this.world;
-    if (id < 0 || !w.buildings.alive[id] || w.buildings.cols.floors[id] === 0) { this.hud.toast('Escolha um prédio para reformar.'); return; }
+    if (id < 0 || !w.buildings.alive[id] || w.buildings.cols.floors[id] === 0) { this.hud.toast(t('game.toast.renovatePick')); return; }
     const before = w.buildings.cols.built[id], now = w.clock;
-    if (w.buildings.cols.decay[id] === 0 && now - before < 1) { this.hud.toast('Esse prédio já está novo.'); return; }
+    if (w.buildings.cols.decay[id] === 0 && now - before < 1) { this.hud.toast(t('game.toast.alreadyNew')); return; }
     this.commands.run({
       label: 'reformar prédio',
       apply: () => { if (w.buildings.alive[id]) w.setBuilt(id, now); },
       invert: () => { if (w.buildings.alive[id]) w.setBuilt(id, before); },
     });
-    this.hud.toast('Prédio reformado: novo de novo.');
+    this.hud.toast(t('game.toast.renovated'));
   }
 
   private clickBuilding(hit: THREE.Vector3 | null, shift = false): void {
@@ -1859,7 +1859,7 @@ export class Game {
     if (best >= 0) { if (shift) this.renovate(best); this.select(best); return; }
     // free lot: build
     const lot = this.growth.lotAt(hit.x, hit.z);
-    if (!lot) { this.hud.toast('Clique num prédio ou num lote vazio (zoneie as vias primeiro).'); return; }
+    if (!lot) { this.hud.toast(t('game.toast.buildWhere')); return; }
     const j = new RoadJournal(this.world, 'construir prédio');
     const id = j.addBuilding(this.growth.recordFor(lot.lots, lot.i));
     this.commands.push(j);
@@ -1890,7 +1890,7 @@ export class Game {
     if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); return; }
     if (c === 'toggle') {
       const id = this.selected >= 0 ? this.selected : lotAt(w, this.rig.target.x, this.rig.target.z);
-      if (id < 0 || col.floors[id] === 0) { this.hud.toast('Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.'); return; }
+      if (id < 0 || col.floors[id] === 0) { this.hud.toast(t('game.toast.insideNone')); return; }
       this.insideId = id;
       this.insideFloor = 0;
     } else if (!this.inside.on) return;
@@ -1906,7 +1906,7 @@ export class Game {
   /** Creator: puts (or removes) the design on the selected building; optional floors (ready-made model). */
   private applyDesign(d: Design | null, floors?: number): void {
     const id = this.selected;
-    if (id < 0 || !this.world.buildings.alive[id]) { this.hud.toast('Selecione um prédio primeiro.'); return; }
+    if (id < 0 || !this.world.buildings.alive[id]) { this.hud.toast(t('game.toast.selectFirst')); return; }
     const col = this.world.buildings.cols, w = this.world;
     const before = [col.color[id], col.h[id], col.floors[id]];
     const enc = d ? encodeDesign(d) : { color: 0, h: 0 };
@@ -1980,7 +1980,7 @@ export class Game {
     if (err === null) { this.saveBlocked = false; return; }
     console.error(`${what} failed:`, err);
     this.saveBlocked = true;
-    this.hud.toast(`${what} não terminou: ${(err as Error)?.message ?? String(err)}. A cidade na tela está incompleta e não será salva; o salvamento anterior não foi tocado.`);
+    this.hud.toast(t('game.toast.flowFailed', { what, message: (err as Error)?.message ?? String(err) }));
   }
 
   /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
@@ -1989,7 +1989,7 @@ export class Game {
     this.busy = true;
     const t0 = performance.now();
     const phase = (name: string) => console.log(`fase: ${name} ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-    this.hud.showLoading('Gerando a cidade…');
+    this.hud.showLoading(t('game.loading.city'));
     const w = this.world;
     try {
       this.resetCity();
@@ -1998,7 +1998,7 @@ export class Game {
       phase('relevo');
       const city = await this.pool.run('cityGen', { seed: w.seed }, { priority: 0 });
       phase('malha viária');
-      this.hud.showLoading('Assentando as vias…');
+      this.hud.showLoading(t('game.loading.roads'));
       const ids: number[] = [];
       for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
       const nc = w.roads.nodes.cols;
@@ -2036,7 +2036,7 @@ export class Game {
       }));
       this.generating = false;
       phase('relevo assentado');
-      this.hud.showLoading('Lotes e prédios…');
+      this.hud.showLoading(t('game.loading.lots'));
       this.growth.processDirty();
       await this.pool.whenIdle();
       phase('lotes');
@@ -2045,9 +2045,9 @@ export class Game {
       this.endRebuild(null, '');
       achieve('CIDADE_GERADA');
       const secs = ((performance.now() - t0) / 1000).toFixed(0);
-      this.hud.toast(`Cidade gerada em ${secs} s: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de via.`);
+      this.hud.toast(t('game.toast.generated', { secs, buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
     } catch (err) {
-      this.endRebuild(err, 'A geração da cidade');
+      this.endRebuild(err, t('game.flow.generate'));
     }
   }
 
@@ -2057,7 +2057,7 @@ export class Game {
   private async testCity(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
-    this.hud.toast('Gerando a cidade de teste…');
+    this.hud.toast(t('game.toast.testCity'));
     const w = this.world;
     try {
       this.resetCity();
@@ -2090,9 +2090,9 @@ export class Game {
       await this.pool.whenIdle();
       const n = this.growth.fillAll();
       this.endRebuild(null, '');
-      this.hud.toast(`Cidade de teste: ${n.toLocaleString('pt-BR')} prédios e ${w.roads.segs.size.toLocaleString('pt-BR')} trechos de rua.`);
+      this.hud.toast(t('game.toast.testCityDone', { buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
     } catch (err) {
-      this.endRebuild(err, 'A cidade de teste');
+      this.endRebuild(err, t('game.flow.testCity'));
     }
   }
 
@@ -2113,13 +2113,13 @@ export class Game {
   private async save(auto = false): Promise<boolean> {
     if (this.busy) return false;
     if (this.saveBlocked) {
-      if (!auto) this.hud.toast('A cidade na tela está incompleta (a abertura ou a geração não terminou) e não é salva. Abra ou crie uma cidade.');
+      if (!auto) this.hud.toast(t('game.toast.saveBlocked'));
       return false;
     }
     this.busy = true;
     try { await this.keepSlotForThisCity(); } catch (err) {
       this.busy = false;
-      this.hud.toast(`Não foi possível salvar: a cidade salva antes não pôde ser guardada (${(err as Error).message}). Nada foi gravado.`);
+      this.hud.toast(t('game.toast.keepFailed', { message: (err as Error).message }));
       return false;
     }
     const w = this.world;
@@ -2149,11 +2149,11 @@ export class Game {
       await this.pool.run('saveMeta', { slot: SLOT, meta }, { priority: -1 });
       tiles.forEach((t, k) => { w.tileInSave[t] = 1; if (w.saveVer[t] === versions[k]) w.saveDirty[t] = 0; });
       if (this.unsavedSerial === serial) this.unsaved = false;
-      if (auto) this.hud.toast('Salvo automaticamente.');
-      else this.hud.toast(tiles.length ? `Salvo (${tiles.length} ladrilhos, ${(bytes / 1024 / 1024).toFixed(1)} MB).` : 'Salvo.');
+      if (auto) this.hud.toast(t('game.toast.autosaved'));
+      else this.hud.toast(tiles.length ? t('game.toast.savedTiles', { tiles: tiles.length, mb: fmtDec(bytes / 1024 / 1024) }) : t('game.toast.saved'));
       return true;
     } catch (err) {
-      this.hud.toast(`Não foi possível salvar: ${(err as Error).message ?? String(err)}. Nada foi perdido; o jogo tenta de novo no próximo salvamento.`);
+      this.hud.toast(t('game.toast.saveFailed', { message: (err as Error).message ?? String(err) }));
       return false;
     } finally {
       this.busy = false;
@@ -2173,19 +2173,19 @@ export class Game {
     let raw: Uint8Array | null;
     try { raw = (await this.pool.run('loadMeta', { slot: SLOT }, { priority: -1 })).meta; } catch (err) {
       this.busy = false;
-      this.hud.toast(`Não foi possível ler o salvamento: ${(err as Error).message}.`);
+      this.hud.toast(t('game.toast.readFailed', { message: (err as Error).message }));
       return false;
     }
-    if (!raw) { this.busy = false; this.hud.toast('Nenhum salvamento encontrado.'); return false; }
+    if (!raw) { this.busy = false; this.hud.toast(t('game.toast.noSave')); return false; }
     let meta;
     try { meta = decodeMeta(raw); } catch (err) {
       this.busy = false;
       if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { reloadWithMap(err.tiles, 'carregar'); return false; }
       const q = await quarantineSlot(SLOT).catch(() => null);
-      this.hud.toast(q ? `Não deu para ler o mapa (${(err as Error).message}). Ele foi guardado intacto em "${q}".` : String(err));
+      this.hud.toast(q ? t('game.toast.quarantined', { message: (err as Error).message, where: q }) : String(err));
       return false;
     }
-    this.hud.showLoading('Carregando a cidade…');
+    this.hud.showLoading(t('game.loading.load'));
     try {
       w.clearBuildings();
       w.items.clear();
@@ -2261,33 +2261,33 @@ export class Game {
       if (repaired) this.unsaved = true;
       if (corrupt) {
         const q = await quarantineSlot(SLOT).catch(() => null);
-        this.hud.toast(`${corrupt} ${corrupt === 1 ? 'pedaço do mapa estava ilegível e voltou' : 'pedaços do mapa estavam ilegíveis e voltaram'} do relevo original${q ? `; o salvamento original foi guardado intacto em "${q}"` : ''}.`);
+        this.hud.toast((plural('game.toast.corrupt', corrupt) + (q ? t('game.toast.corruptKept', { where: q }) : '') + '.'));
       }
-      if (repaired) this.hud.toast(`Mapa reparado: ${repaired} ${repaired === 1 ? 'ponta solta dentro de outra via virou cruzamento' : 'pontas soltas dentro de outras vias viraram cruzamentos'}.`);
+      if (repaired) this.hud.toast(plural('game.toast.repaired', repaired));
       this.rig.restore(meta.camera);
       this.hud.setView(this.rig.mode);
       this.saveBlocked = false;
       this.slotGame = meta.gameId;
       this.endRebuild(null, '');
-      this.hud.toast('Cidade carregada.');
+      this.hud.toast(t('game.toast.loaded'));
       return true;
     } catch (err) {
-      this.endRebuild(err, 'A abertura da cidade');
+      this.endRebuild(err, t('game.flow.load'));
       return false;
     }
   }
 
   /** Saves and downloads the whole map as a .cidade file (only a save that completed is exported). */
   private async exportMap(): Promise<void> {
-    if (!await this.save()) { this.hud.toast('O mapa não foi exportado porque o salvamento não terminou.'); return; }
+    if (!await this.save()) { this.hud.toast(t('game.toast.exportNoSave')); return; }
     const blob = await packSlot(SLOT);
-    if (!blob) { this.hud.toast('Nada salvo para exportar ainda.'); return; }
+    if (!blob) { this.hud.toast(t('game.toast.exportNothing')); return; }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `cidade-${this.world.seed}.cidade`;
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 30000);
-    this.hud.toast(`Mapa exportado (${(blob.size / 1024 / 1024).toFixed(1)} MB).`);
+    this.hud.toast(t('game.toast.exported', { mb: fmtDec(blob.size / 1024 / 1024) }));
   }
 
   /**
@@ -2303,13 +2303,13 @@ export class Game {
         try { decodeMeta(metaBytes); } catch (err) { if (!(err instanceof MapSizeError && MAP_SIZES.includes(err.tiles))) throw err; }
       });
     } catch (err) {
-      this.hud.toast(`Não abriu: ${(err as Error).message}. O salvamento atual não foi tocado.`);
+      this.hud.toast(t('game.toast.importFailed', { message: (err as Error).message }));
       return;
     } finally {
       this.busy = false;
     }
     this.slotGame = null;
-    if (kept) this.hud.toast(`A cidade salva antes foi guardada em "${kept}".`);
+    if (kept) this.hud.toast(t('game.toast.keptAs', { where: kept }));
     await this.load();
   }
 
@@ -2327,7 +2327,7 @@ export class Game {
     if (meta) { try { other = decodeMeta(meta).gameId !== w.gameId; } catch { other = true; } }
     if (other) {
       const kept = await keepPreviousCity(SLOT);
-      if (kept) this.hud.toast(`A cidade salva antes foi guardada em "${kept}".`);
+      if (kept) this.hud.toast(t('game.toast.keptAs', { where: kept }));
     }
     this.slotGame = w.gameId;
   }
@@ -2338,7 +2338,7 @@ export class Game {
   private async newMap(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
-    this.hud.showLoading('Gerando o relevo…');
+    this.hud.showLoading(t('game.loading.terrain'));
     const w = this.world;
     try {
       this.resetCity();
@@ -2350,7 +2350,7 @@ export class Game {
       w.saveDirty.fill(0);
       this.endRebuild(null, '');
     } catch (err) {
-      this.endRebuild(err, 'O mapa novo');
+      this.endRebuild(err, t('game.flow.newMap'));
     }
   }
 }

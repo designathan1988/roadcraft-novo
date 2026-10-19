@@ -510,7 +510,7 @@ function elementRows(h: DrawerHost, p: DrawerParts): void {
 }
 
 // ------------------------------------------------------------------ transit
-const RAIL = { trainTrack: 'Ferrovia dupla', metroTrack: 'Metrô (duplo)' } as const;
+const RAIL = { trainTrack: 'Ferrovia dupla', metroTrack: 'Metrô (duplo)' } as const; // not for the player: profile names are ids
 
 export function transitTabOf(tool: Tool, s: ShellState): TransitTab {
   if (tool === 'road') return s.transitTab === 'metroTrack' ? 'metroTrack' : 'trainTrack';
