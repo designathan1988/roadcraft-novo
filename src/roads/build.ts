@@ -4,7 +4,7 @@
 // buildings in the way. Everything becomes a journal of operations that undoes and
 // redoes exactly, with the same ids.
 
-import { HEIGHT_MAP_RES, HEIGHT_TILE_RES, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
+import { HEIGHT_MAP_RES, HEIGHT_TILE_RES, MAP_HALF, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { Dirty } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
 import { heightAt, heightIndex, sampleCoord, worldOfSample } from '../world/heights.ts';
@@ -1096,7 +1096,11 @@ export function moveNode(world: World, n: number, x: number, z: number): RoadJou
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const j = new RoadJournal(world, 'mover nó');
   const dx = x - nc.x[n], dz = z - nc.z[n];
+  if (Math.abs(x) > MAP_HALF - 20 || Math.abs(z) > MAP_HALF - 20) return text('road.move.outside');
+  const ground = heightAt(world.heights, x, z);
+  const y = ground > nc.y[n] + 4 || ground < nc.y[n] - 4 ? nc.y[n] : Math.max(nc.y[n], ground);
   const segs = net.segsOf(n, []);
+  const eq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
   for (const s of segs) {
     const o = sc.a[s] === n ? sc.b[s] : sc.a[s];
     if (Math.hypot(nc.x[o] - x, nc.z[o] - z) < 8) return 'uma via ali ficaria curta demais';
@@ -1106,13 +1110,33 @@ export function moveNode(world: World, n: number, x: number, z: number): RoadJou
     q.cx += dx / 2; q.cz += dz / 2;
     if (bezLength(q) > MAX_SEG_LEN) return text('road.move.tooLong', { max: MAX_SEG_LEN });
     if (sc.flags[s] & SegFlag.Ring) return 'nó de rotatória não se move';
+    // the moved road may not run into another one at its level (that would need a junction)
+    let crosses = false;
+    const yo = nc.y[o];
+    net.forSegsNear(Math.min(q.x0, q.cx, q.x1), Math.min(q.z0, q.cz, q.z1), Math.max(q.x0, q.cx, q.x1), Math.max(q.z0, q.cz, q.z1), (t) => {
+      if (crosses || t === s || sc.a[t] === n || sc.b[t] === n || sc.a[t] === o || sc.b[t] === o) return;
+      net.quad(t, eq);
+      for (const [tn, to] of intersectQuads(q, eq)) {
+        const yNew = sc.a[s] === n ? y + (yo - y) * tn : yo + (y - yo) * tn;
+        if (Math.abs(yNew - segHeightAt(net, t, to)) < 4.5) crosses = true;
+      }
+    });
+    if (crosses) return text('road.move.crosses');
   }
   const recs = segs.map((s) => j.removeSeg(s));
   const rec = net.nodeRec(n);
   j.removeNode(n);
-  net.addNode({ ...rec, x, z, y: heightAt(world.heights, x, z) > rec.y + 4 || heightAt(world.heights, x, z) < rec.y - 4 ? rec.y : Math.max(rec.y, heightAt(world.heights, x, z)) });
+  net.addNode({ ...rec, x, z, y });
   j.recordAddNode(n);
-  for (const r of recs) j.addSeg({ ...r, cx: r.cx + dx / 2, cz: r.cz + dz / 2 });
+  j.guard(() => {
+    for (const r of recs) {
+      const s = j.addSeg({ ...r, cx: r.cx + dx / 2, cz: r.cz + dz / 2 });
+      // like a new road: what stands in the way goes, the terrain settles under it
+      const sq = net.quad(s), t = arcTable(sq, 32), L = t[t.length - 1];
+      const ya = nc.y[sc.a[s]], yb = nc.y[sc.b[s]];
+      clearAndConform(j, world, sq, sc.profile[s], (d) => ya + (yb - ya) * d / L, t, (sc.flags[s] & SegFlag.Wall) !== 0);
+    }
+  });
   return j;
 }
 

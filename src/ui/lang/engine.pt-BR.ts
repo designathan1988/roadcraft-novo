@@ -16,6 +16,8 @@ export const ENGINE_PT: Record<string, string> = {
   'road.ring.exists': 'Já existe uma rotatória aqui.',
   'road.ring.water': 'A rotatória não cabe aqui: o anel passaria sobre a água.',
   'road.move.tooLong': 'uma via ali ficaria mais longa que {max} m (divida-a antes)',
+  'road.move.outside': 'fora do mapa',
+  'road.move.crosses': 'a via passaria por cima de outra no mesmo nível, sem cruzamento',
   'ui.stats.tip': '{residents} moradores · {jobs} empregos · {buildings} prédios · {speed} km/h de média perto daqui',
   'ui.cat.roads': 'Vias',
   'ui.cat.zones': 'Zoneamento e lotes',

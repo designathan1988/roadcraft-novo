@@ -581,3 +581,26 @@ test('D16: no edit makes a segment longer than the spatial index holds; clicks n
   if (typeof m !== 'string') assert.ok(m.settle());
   for (let s = 0; s < w2.roads.segs.end; s++) if (w2.roads.segs.alive[s]) assert.ok(w2.roads.segs.cols.len[s] <= MAX_SEG_LEN + 0.01, `moving a node made a ${w2.roads.segs.cols.len[s].toFixed(0)} m segment`);
 });
+
+test('D17: moving a node clears and settles under the roads that move, and refuses crossings and the map edge', async () => {
+  const { moveNode } = await import('../src/roads/build.ts');
+  const { MAP_HALF } = await import('../src/config.ts');
+  const w = flatWorld(1e9);
+  road(w, 0, 0, 80, 0);
+  const end = w.roads.nearestNode(80, 0, 1);
+  // a house and a hill where the road will swing to
+  const house = w.addBuilding({ x: 40, z: 30, w: 12, d: 12, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
+  for (let gz = Math.round(sampleCoord(20)); gz <= Math.round(sampleCoord(40)); gz++) for (let gx = Math.round(sampleCoord(20)); gx <= Math.round(sampleCoord(60)); gx++) w.heights[heightIndex(gx, gz)] = 12.5;
+  const m = moveNode(w, end, 80, 60);
+  assert.ok(typeof m !== 'string', `the move was refused: ${m}`);
+  assert.ok(m.settle());
+  assert.equal(w.buildings.alive[house], 0, 'the house the moved road now runs through still stands');
+  assert.ok(ground(w, 40, 30) < 11, `the ground under the moved road stayed at ${ground(w, 40, 30).toFixed(2)}`);
+  // across another road at grade: refused (it would cross without a junction)
+  road(w, 150, -60, 150, 60);
+  const r2 = moveNode(w, w.roads.nearestNode(80, 60, 1), 200, 0);
+  assert.equal(typeof r2, 'string', 'moving the node made the road cross another one without a junction');
+  // off the map: refused
+  const r3 = moveNode(w, w.roads.nearestNode(0, 0, 1), -MAP_HALF - 50, 0);
+  assert.equal(typeof r3, 'string', 'the node was moved off the map');
+});
