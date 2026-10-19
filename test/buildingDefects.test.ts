@@ -569,3 +569,60 @@ test('F13: neighbouring cells place the same lots at their border (no overlaps b
   assert.ok(lots.length > 100, `${lots.length} lots`);
   assert.deepEqual(failures.slice(0, 10), [], `${failures.length} overlaps between cells`);
 });
+
+test('F8, F31: the catalog keeps every field of the 38 Roadcraft 4.0 projects', async () => {
+  const fs = await import('node:fs');
+  const C = await import('../src/world/catalog.ts');
+  const dir = new URL('../data/lots-roadcraft/', import.meta.url);
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+  const projects = C.catalogProjects();
+  assert.equal(projects.length, files.length);
+  const near = (a: number, b: number) => Math.abs(a - b) <= 1e-5 * Math.max(1, Math.abs(b));
+  const mat = (m: { finish: number; colour: number } | null, j?: { finish: string; colour: number }) => (!m && !j) || (!!m && !!j && C.CAT_FINISHES[m.finish] === j.finish && m.colour === j.colour);
+  let elements = 0, storeys = 0, sides = 0, bays = 0, geometry = 0;
+  files.forEach((file, k) => {
+    const j = JSON.parse(fs.readFileSync(new URL(file, dir), 'utf8')), b = j.body, p = projects[k], tag = p.name;
+    assert.equal(p.name, file.replace('.json', ''));
+    assert.equal(C.CAT_USES[p.use], j.use, tag); assert.equal(C.CAT_USES[p.buildingUse], b.use, tag); assert.equal(C.CAT_FUNCTIONS[p.fn], b.function, tag);
+    assert.equal(C.CAT_DENSITIES[p.density], j.density, tag);
+    assert.deepEqual([p.module, p.groundHeight, p.storeyHeight, p.palette, p.lotPlan], [b.module, b.groundHeight, b.storeyHeight, b.palette, b.lotPlan ?? -1], tag);
+    for (const m of ['wall', 'trim', 'roof'] as const) assert.ok(mat(p[m], b.materials[m]), `${tag} ${m}`);
+    assert.equal(p.volumes.length, b.volumes.length, tag);
+    b.volumes.forEach((v: any, i: number) => {
+      const q = p.volumes[i], t = `${tag} volume ${v.id}`;
+      assert.deepEqual([q.x, q.y, q.w, q.d, q.base, C.CAT_ROOFS[q.roof]], [v.x, v.y, v.w, v.d, v.base, v.roof], t);
+      assert.equal(q.open < 0 ? undefined : C.CAT_SURFACES[q.open], v.open, t);
+      assert.ok(mat(q.material, v.materials?.wall), t);
+      assert.equal(q.pattern < 0 ? undefined : C.CAT_PATTERNS[q.pattern], v.facadePattern, t);
+      assert.equal(!!q.outline, !!v.outline, t);
+      if (v.outline) v.outline.forEach((pt: any, n: number) => assert.ok(near(q.outline![n * 2], pt.x) && near(q.outline![n * 2 + 1], pt.y), t));
+      for (let f = 0; f < 4; f++) {
+        const g = v.facadeGeometry?.[f];
+        assert.deepEqual(q.geometry[f] ?? undefined, g, `${t} face ${f}`);
+        if (g) geometry++;
+      }
+      assert.equal(q.storeys.length, v.storeys.length, t);
+      v.storeys.forEach((s: any, n: number) => {
+        const r = q.storeys[n];
+        storeys++;
+        assert.equal(C.CAT_BAYS[r.fill], s.facade.fill, t);
+        for (let f = 0; f < 4; f++) { const want = s.facade.sides?.[f]; assert.equal(r.sides[f] < 0 ? undefined : C.CAT_BAYS[r.sides[f]], want, `${t} storey ${n} side ${f}`); if (want) sides++; }
+        const got = Object.fromEntries(r.bays.map(([f, i, c]) => [`${f}:${i}`, C.CAT_BAYS[c]]));
+        assert.deepEqual(got, s.facade.bays ?? {}, `${t} storey ${n} bays`);
+        bays += r.bays.length;
+      });
+    });
+    const els = b.elements ?? [];
+    assert.equal(p.elements.length, els.length, tag);
+    els.forEach((e: any, n: number) => {
+      const q = p.elements[n], t = `${tag} element ${e.id}`;
+      assert.equal(C.CAT_ELEMENTS[q.kind], e.kind, t);
+      for (const key of ['x', 'y', 'w', 'd', 'z', 'h'] as const) assert.ok(near(q[key], e[key]), `${t} ${key}: ${q[key]} vs ${e[key]}`);
+      assert.equal(q.facing, e.facing, t);
+      assert.ok(mat(q.material, e.material), t);
+      elements++;
+    });
+  });
+  // the whole: 2,008 elements, 914 storeys, 1,564 side fills, 38 doors, 380 face geometries
+  assert.deepEqual({ elements, storeys, sides, bays, geometry }, { elements: 2008, storeys: 914, sides: 1564, bays: 38, geometry: 380 });
+});
