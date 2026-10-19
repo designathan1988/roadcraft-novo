@@ -149,30 +149,70 @@ const SCENARIOS = {
     await frames(5);
     check('shown again, it draws', drawn > 0, 'nothing drawn');
   `,
+  // E29: with no wind the trees and the grass stand still (two captures 1 s apart, camera and clock still)
+  'still-trees': {
+    body: `
+      g.weather.windFixed = 0;
+      await g.view(2500, -2500, 35, 12, 40, 11);
+      await frames(10);
+      const y = w.tileMax[0] ? 0 : 0;
+      const q = g.rig.target;
+      const trees = [];
+      for (let i = 0; i < 9; i++) trees.push({ x: q.x - 8 + (i % 3) * 8, z: q.z - 8 + Math.floor(i / 3) * 8, y: q.y, type: 0, variant: i % 3, scale: 42 });
+      putProps(trees);
+      await frames(30);
+    `,
+    env: { CIDADE_DIFF: '1000', CIDADE_SETTLE: '3' },
+    diff: (pct) => [pct < 0.5, 'with no wind, under 0.5% of the pixels change in 1 s (' + pct + '%)', pct + '% of the pixels changed'],
+  },
+  // E29: and with wind they do move
+  'windy-trees': {
+    body: `
+      g.weather.windFixed = 0.8;
+      await g.view(2500, -2500, 35, 12, 40, 11);
+      await frames(10);
+      const q = g.rig.target;
+      const trees = [];
+      for (let i = 0; i < 9; i++) trees.push({ x: q.x - 8 + (i % 3) * 8, z: q.z - 8 + Math.floor(i / 3) * 8, y: q.y, type: 0, variant: i % 3, scale: 42 });
+      putProps(trees);
+      await frames(30);
+    `,
+    env: { CIDADE_DIFF: '1000', CIDADE_SETTLE: '3' },
+    diff: (pct) => [pct > 3, 'with a strong wind the trees and the grass move (' + pct + '% of the pixels in 1 s)', 'only ' + pct + '% of the pixels changed'],
+  },
 };
 
 const pick = process.argv.slice(2);
 const names = pick.length ? pick : Object.keys(SCENARIOS);
 let failed = 0;
 for (const name of names) {
-  const body = SCENARIOS[name];
-  if (!body) { console.log(`unknown scenario ${name}`); failed++; continue; }
+  const sc = SCENARIOS[name];
+  if (!sc) { console.log(`unknown scenario ${name}`); failed++; continue; }
+  const body = typeof sc === 'string' ? sc : sc.body;
   const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-render-'));
   const script = `(async()=>{${PRELUDE}\ntry {${body}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
   const lines = await new Promise((resolve) => {
     const out = [];
     const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), '?vazio&mapa=10&hora=11&limpo', script],
-      { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '300' } });
+      { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '300', ...(sc.env ?? {}) } });
     p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
     p.on('exit', () => resolve(out));
   });
   const got = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
+  // scenarios that measure what changes between two captures (shot.mjs with CIDADE_DIFF)
+  if (sc.diff) {
+    const d = lines.map((l) => /diff: ([0-9.]+)% of pixels changed/.exec(l)).find(Boolean);
+    const [ok, okName, why] = d ? sc.diff(Number(d[1])) : [false, 'two captures compared', 'no diff line'];
+    got.splice(got.indexOf('END') < 0 ? got.length : got.indexOf('END'), 0, (ok ? 'OK ' : 'FAILED ') + okName + (ok ? '' : ': ' + why));
+  }
   if (!got.includes('END')) got.push('FAILED the session did not finish (hung or crashed) after: ' + (got[got.length - 1] ?? 'nothing'));
   const checks = got.filter((c) => c !== 'END');
   const bad = checks.filter((c) => c.startsWith('FAILED'));
   failed += bad.length;
   console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
   for (const c of checks) console.log('  ' + c);
+  // CHECK_KEEP=folder: keep each scenario's captures (shot and difference map) there
+  if (process.env.CHECK_KEEP) for (const f of fs.readdirSync(own).filter((f) => f.endsWith('.png'))) { fs.mkdirSync(process.env.CHECK_KEEP, { recursive: true }); fs.copyFileSync(path.join(own, f), path.join(process.env.CHECK_KEEP, `${name}-${f}`)); }
   fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 });
 }
 console.log(failed ? `render check: ${failed} FAILED` : 'render check: ok');

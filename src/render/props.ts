@@ -17,7 +17,7 @@ import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctE
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
 import { PAINTS } from './vehicles.ts';
-import { windU } from './weather.ts';
+import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
 import { SHADOW_LENGTH, sunDirection } from './sun.ts';
@@ -340,9 +340,11 @@ export class PropRenderer {
       const isCard = step(abs(pcol.w.mul(255).sub(PMAT.LeafCard)), float(0.5));
       const leaf = max(step(abs(pcol.w.mul(255).sub(PMAT.Leaf)), float(0.5)), isCard);
       // with strong wind: faster and wider sway, leaning with the wind
-      const sway = sin(time.mul(windU.mul(2.2).add(1.3)).add(inst.x.mul(0.07)).add(inst.z.mul(0.05))).mul(windU.mul(0.09).add(0.03)).add(windU.mul(windU).mul(0.06)).mul(p.y).mul(leaf);
-      const wx = p.x.mul(c).add(p.z.mul(s)).add(sway);
-      const wz = p.x.negate().mul(s).add(p.z.mul(c));
+      // along the wind, as much as the wind: none in still air (it used to sway 3 cm per metre of height with no
+      // wind, always along x)
+      const sway = sin(time.mul(windU.mul(2.2).add(1.3)).add(inst.x.mul(0.07)).add(inst.z.mul(0.05))).mul(windU.mul(0.09)).add(windU.mul(windU).mul(0.06)).mul(p.y).mul(leaf);
+      const wx = p.x.mul(c).add(p.z.mul(s)).add(sway.mul(windDirU.x));
+      const wz = p.x.negate().mul(s).add(p.z.mul(c)).add(sway.mul(windDirU.y));
       const n = normalLocal;
       vN.assign(vec3(n.x.mul(c).add(n.z.mul(s)), n.y, n.x.negate().mul(s).add(n.z.mul(c))));
       // traffic light: which lamp is lit

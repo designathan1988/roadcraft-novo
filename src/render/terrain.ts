@@ -5,7 +5,7 @@
 
 import * as THREE from 'three/webgpu';
 import { currentU, foamU, waveU } from './scene.ts';
-import { windU } from './weather.ts';
+import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
 import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
@@ -463,10 +463,11 @@ export class TerrainRenderer {
       const lp = positionLocal;
       const tip = attribute('tip', 'float');
       // wind: the tips bend with the wind
-      const sway = sin(time.mul(windU.mul(2.5).add(1.6)).add(base.x.mul(0.31)).add(base.y.mul(0.23))).mul(windU.mul(0.08).add(0.025)).mul(tip);
+      // the tips bend along the wind, as much as the wind (still air: still grass)
+      const sway = sin(time.mul(windU.mul(2.5).add(1.6)).add(base.x.mul(0.31)).add(base.y.mul(0.23))).mul(windU.mul(0.1)).mul(tip);
       vTip.assign(tip);
       vShade.assign(jz);
-      return vec3(lp.x.mul(c).add(lp.z.mul(sn)).add(sway), lp.y, lp.x.negate().mul(sn).add(lp.z.mul(c))).mul(k).add(vec3(base.x, h.add(0.01), base.y));
+      return vec3(lp.x.mul(c).add(lp.z.mul(sn)), lp.y, lp.x.negate().mul(sn).add(lp.z.mul(c))).mul(k).add(vec3(windDirU.x, 0, windDirU.y).mul(sway.mul(k))).add(vec3(base.x, h.add(0.01), base.y));
     });
     const m = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide });
     m.positionNode = position();
