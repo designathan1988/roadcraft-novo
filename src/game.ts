@@ -760,7 +760,8 @@ export class Game {
   /** Sends the network changes and the camera position to the simulation. */
   private syncSim(now: number): void {
     if (this.netOps.length) {
-      if (this.transit.lines.length) this.roadsVersion++;
+      // the stops follow the roads: resend the lines only when segments changed (a zone dab or a junction control does not)
+      if (this.transit.lines.length && this.netOps.some((op) => op.t === 'addSeg' || op.t === 'remSeg' || op.t === 'profile' || op.t === 'clear')) this.roadsVersion++;
       const extra: string[] = [];
       const ops = encodeOps(this.netOps, extra);
       this.netOps.length = 0;

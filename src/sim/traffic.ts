@@ -1855,68 +1855,131 @@ export class Traffic {
 
   // ------------------------------------------------------------ buses
 
-  /** Replaces the set of lines. Buses of changed lines leave; new ones spawn at the stops. */
+  /**
+   * Replaces the set of lines (the page sends them again after every road edit, so the stops follow the roads). A line
+   * that is still there keeps its buses, their riders and the people waiting, stop by stop (matched by position): only
+   * a removed stop loses those waiting for it, and riders bound for it get off at the bus's next stop. Buses of removed
+   * lines (or a line that changed mode) leave; missing buses spawn at the stops; extra ones leave.
+   */
   setLines(specs: LineSpec[]): void {
-    const c = this.veh.cols, net = this.sim.net, sc = net.segs.cols;
-    // remove the current buses (only those in the lines' lists)
-    for (const set of this.busSets) {
-      for (const v of [...set]) {
-        if (!this.veh.alive[v]) continue;
-        if (c.micro[v]) { set.delete(v); c.dying[v] = 1; c.line[v] = -1; } else this.despawn(v);
+    const old = this.lines, oldSets = this.busSets;
+    const byId = new Map<number, number>();
+    old.forEach((ln, i) => byId.set(ln.id, i));
+    const keptOld = new Set<number>();
+    const lines: SimLine[] = [], sets: Array<Set<number>> = [];
+    for (const sp of specs) {
+      const ln = this.resolveLine(sp), li = lines.length, set = new Set<number>();
+      const oi = byId.get(sp.id);
+      if (oi !== undefined && !keptOld.has(oi) && old[oi].mode === ln.mode) {
+        keptOld.add(oi);
+        this.carryLine(old[oi], oldSets[oi], ln, li, set);
       }
+      lines.push(ln); sets.push(set);
     }
-    this.lines = specs.map((sp) => {
-      const rail = (sp.mode ?? 0) > 0;
-      const ln: SimLine = { id: sp.id, color: sp.color, buses: sp.buses, mode: sp.mode ?? 0, stopLane: [], stopV: [], waiting: [], lastT: [],
-        stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
-      /** One stop at (x, z); `flip`: the stop of the return trip, across the street. False if no road there. */
-      const addStop = (x: number, z: number, i: number, flip: boolean): boolean => {
-        // bus: nearest ordinary road; train and metro: nearest rail
-        const hit = net.nearestSeg(x, z, 40, (sg) => PROFILE_INFO[sc.profile[sg]].rail === rail);
-        if (!hit) return false;
-        const [seg, t] = hit;
-        const q = net.quad(seg);
-        const pp = new Float64Array(2), dd = new Float64Array(2);
-        bez(q, t, pp); bezD(q, t, dd);
-        // return trip: the same stop mirrored across the street's centre line
-        if (flip) { x = 2 * pp[0] - x; z = 2 * pp[1] - z; }
-        // side: u+ (left of a→b) is the sidewalk of those driving from b to a
-        const u = (x - pp[0]) * dd[1] - (z - pp[1]) * dd[0];
-        let dir = u > 0 ? -1 : 1;
-        if (rail) {
-          // station: the line heads to the next station on the track of its direction
-          const ni = (i + 2) % sp.stops.length, nx = sp.stops[ni] - x, nz = sp.stops[ni + 1] - z;
-          dir = nx * dd[0] + nz * dd[1] >= 0 ? 1 : -1;
-        }
-        if (laneCount(sc.profile[seg], dir) === 0) dir = -dir;
-        if (laneCount(sc.profile[seg], dir) === 0) return false;
-        const lane = laneId(seg, dir, 0);
-        const L = this.sim.laneLen(lane);
-        const along = this.sim.sAlong(seg, t);
-        const v = dir > 0 ? along - this.sim.segS0(seg) : this.sim.segS1(seg) - along;
-        if (sp.term?.includes(i / 2)) ln.term.add(ln.stopLane.length);
-        ln.stopLane.push(lane);
-        ln.stopV.push(Math.max(Math.min(8, L * 0.4), Math.min(L - 14, v)));
-        ln.waiting.push(0); ln.lastT.push(this.time);
-        const lp = new Float64Array(4);
-        this.sim.lanePoint(lane, ln.stopV[ln.stopV.length - 1], lp);
-        ln.stopX.push(x); ln.stopZ.push(z); ln.stopY.push(lp[1] + 0.15);
-        ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // facing the road
-        return true;
-      };
-      const kept: number[] = [];
-      for (let i = 0; i + 1 < sp.stops.length; i += 2) if (addStop(sp.stops[i], sp.stops[i + 1], i, false)) kept.push(i);
-      // Roadcraft bus lines go out and back: the stops of the return trip on the other side, the two ends terminals
-      if (!rail && !sp.loop && kept.length >= 2) {
-        ln.term.add(0); ln.term.add(ln.stopLane.length - 1);
-        for (let k = kept.length - 2; k >= 1; k--) addStop(sp.stops[kept[k]], sp.stops[kept[k] + 1], kept[k], true);
-      }
-      ln.waitTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
-      return ln;
+    // buses of lines that are gone leave (only those in the lines' lists)
+    oldSets.forEach((set, oi) => { if (!keptOld.has(oi)) for (const v of set) this.retireBus(v); });
+    this.lines = lines;
+    this.busSets = sets;
+    // a line with fewer buses now: the extra ones leave
+    sets.forEach((set, li) => {
+      let extra = set.size - lines[li].buses;
+      for (const v of [...set]) { if (extra <= 0) break; set.delete(v); this.retireBus(v); extra--; }
     });
-    this.busSets = this.lines.map(() => new Set<number>());
-    this.riders.clear();
     this.keepBuses();
+  }
+
+  /** A bus leaves its line: fades out where it is (near the camera) or goes at once (far). Not a trip. */
+  private retireBus(v: number): void {
+    const c = this.veh.cols;
+    if (!this.veh.alive[v] || c.line[v] < 0) return;
+    this.riders.delete(v);
+    if (c.micro[v]) { c.dying[v] = 1; c.line[v] = -1; } else { c.line[v] = -1; this.despawn(v); }
+  }
+
+  /** The new version `ln` (index `li`) of line `prev`: its buses, riders and those waiting, stop by stop. */
+  private carryLine(prev: SimLine, prevSet: Set<number>, ln: SimLine, li: number, set: Set<number>): void {
+    const c = this.veh.cols, n = ln.stopLane.length, m = prev.stopLane.length;
+    // the same stop: the same place on the sidewalk (the return trip's stops are mirrored, so they differ)
+    const toNew = new Int32Array(m).fill(-1);
+    for (let j = 0; j < m; j++) {
+      for (let i = 0; i < n; i++) if (Math.abs(ln.stopX[i] - prev.stopX[j]) < 1 && Math.abs(ln.stopZ[i] - prev.stopZ[j]) < 1) { toNew[j] = i; break; }
+    }
+    for (let j = 0; j < m; j++) {
+      const i = toNew[j];
+      if (i < 0) continue;
+      ln.lastT[i] = prev.lastT[j];
+      let w = 0;
+      for (let k = 0; k < m; k++) if (toNew[k] >= 0) { ln.waitTo[i][toNew[k]] += prev.waitTo[j][k]; w += prev.waitTo[j][k]; }
+      ln.waiting[i] = w;
+    }
+    ln.boardings = prev.boardings; ln.perHour = prev.perHour;
+    /** The first stop from old index `j` on (in the line's order) that is still there. */
+    const nextKept = (j: number): number => { for (let k = 0; k < m; k++) { const i = toNew[(j + k) % m]; if (i >= 0) return i; } return 0; };
+    for (const v of prevSet) {
+      if (!this.veh.alive[v] || c.dying[v] || c.line[v] < 0) continue;
+      set.add(v);
+      c.line[v] = li;
+      const next = nextKept(c.stopI[v]);
+      const r = this.riders.get(v);
+      if (r) {
+        const nr = new Float64Array(n);
+        for (let k = 0; k < r.length && k < m; k++) nr[toNew[k] >= 0 ? toNew[k] : next] += r[k];
+        this.riders.set(v, nr);
+      }
+      c.stopI[v] = next;
+    }
+  }
+
+  /** A line from the page with its stops resolved to lanes. */
+  private resolveLine(sp: LineSpec): SimLine {
+    const net = this.sim.net, sc = net.segs.cols;
+    const rail = (sp.mode ?? 0) > 0;
+    const ln: SimLine = { id: sp.id, color: sp.color, buses: sp.buses, mode: sp.mode ?? 0, stopLane: [], stopV: [], waiting: [], lastT: [],
+      stopX: [], stopZ: [], stopY: [], stopYaw: [], waitTo: [], boardings: 0, perHour: 0, term: new Set<number>() };
+    /** One stop at (x, z); `flip`: the stop of the return trip, across the street. False if no road there. */
+    const addStop = (x: number, z: number, i: number, flip: boolean): boolean => {
+      // bus: nearest ordinary road; train and metro: nearest rail
+      const hit = net.nearestSeg(x, z, 40, (sg) => PROFILE_INFO[sc.profile[sg]].rail === rail);
+      if (!hit) return false;
+      const [seg, t] = hit;
+      const q = net.quad(seg);
+      const pp = new Float64Array(2), dd = new Float64Array(2);
+      bez(q, t, pp); bezD(q, t, dd);
+      // return trip: the same stop mirrored across the street's centre line
+      if (flip) { x = 2 * pp[0] - x; z = 2 * pp[1] - z; }
+      // side: u+ (left of a→b) is the sidewalk of those driving from b to a
+      const u = (x - pp[0]) * dd[1] - (z - pp[1]) * dd[0];
+      let dir = u > 0 ? -1 : 1;
+      if (rail) {
+        // station: the line heads to the next station on the track of its direction
+        const ni = (i + 2) % sp.stops.length, nx = sp.stops[ni] - x, nz = sp.stops[ni + 1] - z;
+        dir = nx * dd[0] + nz * dd[1] >= 0 ? 1 : -1;
+      }
+      if (laneCount(sc.profile[seg], dir) === 0) dir = -dir;
+      if (laneCount(sc.profile[seg], dir) === 0) return false;
+      const lane = laneId(seg, dir, 0);
+      const L = this.sim.laneLen(lane);
+      const along = this.sim.sAlong(seg, t);
+      const v = dir > 0 ? along - this.sim.segS0(seg) : this.sim.segS1(seg) - along;
+      if (sp.term?.includes(i / 2)) ln.term.add(ln.stopLane.length);
+      ln.stopLane.push(lane);
+      ln.stopV.push(Math.max(Math.min(8, L * 0.4), Math.min(L - 14, v)));
+      ln.waiting.push(0); ln.lastT.push(this.time);
+      const lp = new Float64Array(4);
+      this.sim.lanePoint(lane, ln.stopV[ln.stopV.length - 1], lp);
+      ln.stopX.push(x); ln.stopZ.push(z); ln.stopY.push(lp[1] + 0.15);
+      ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // facing the road
+      return true;
+    };
+    const kept: number[] = [];
+    for (let i = 0; i + 1 < sp.stops.length; i += 2) if (addStop(sp.stops[i], sp.stops[i + 1], i, false)) kept.push(i);
+    // Roadcraft bus lines go out and back: the stops of the return trip on the other side, the two ends terminals
+    if (!rail && !sp.loop && kept.length >= 2) {
+      ln.term.add(0); ln.term.add(ln.stopLane.length - 1);
+      for (let k = kept.length - 2; k >= 1; k--) addStop(sp.stops[kept[k]], sp.stops[kept[k] + 1], kept[k], true);
+    }
+    ln.waitTo = ln.stopLane.map(() => new Float64Array(ln.stopLane.length));
+    return ln;
   }
 
   /** Keeps the number of buses on each line (those that vanished respawn at a stop). */
