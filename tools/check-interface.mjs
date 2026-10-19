@@ -767,6 +767,14 @@ export const SCENARIOS = {
     click(byText('.v2-pop .v2-choice', '^Português')); await frames(4);
     check('and back to Portuguese', Q('[data-cat=roads] .v2-cat-name').textContent === 'Vias' && document.documentElement.lang === 'pt-BR' && !!byText('.v2-pop .v2-row', '^Novo mapa'), 'dock ' + Q('[data-cat=roads] .v2-cat-name').textContent + ', lang ' + document.documentElement.lang);
   `,
+  // The 4.0 tool hint (v2/shell.css:158, v2/shell.ts:844-846): never on screen; it describes the map for screen readers
+  'hint-hidden-4.0': `
+    click('[data-cat=roads]'); await frames(3);
+    const h = Q('.v2-hintbar');
+    check('the tool hint is not on screen', h && getComputedStyle(h).display === 'none', 'display ' + (h && getComputedStyle(h).display) + ': ' + (h && h.textContent));
+    const by = g.canvas.getAttribute('aria-describedby');
+    check('it describes the map', !!by && document.getElementById(by) === h && h.textContent.length > 5, 'describedby ' + by);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

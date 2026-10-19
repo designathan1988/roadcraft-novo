@@ -402,6 +402,8 @@ export class Hud {
 
     this.side = el('aside', 'v2-side');
     this.hint = el('div', 'v2-hintbar');
+    // the map's description (index.html, aria-describedby), as Roadcraft 4.0 (v2/shell.ts:844-846)
+    this.hint.id = 'v2Hint';
     this.hint.hidden = true;
     this.toasts = el('div', 'v2-toasts');
     this.toasts.setAttribute('role', 'status');

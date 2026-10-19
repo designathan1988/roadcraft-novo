@@ -11,15 +11,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #10191b; col
 .v2-act.on { color: var(--v-accent); border-color: var(--v-accent); background: var(--v-accent-soft); }
 .v2-act > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* The tool's hint: one line over the dock; with the drawer open it goes under the top bar. */
-.v2-hintbar {
-  position: absolute; left: 50%; bottom: calc(12px + var(--v-dock-h) + 8px); transform: translateX(-50%); z-index: 4;
-  max-width: min(720px, calc(100vw - 24px)); padding: 5px 12px; border-radius: 999px; pointer-events: none;
-  background: rgba(14, 22, 24, 0.78); border: 1px solid var(--v-line); color: var(--v-text); font-size: 12.5px; text-align: center;
-}
-.v2-hintbar[hidden] { display: none; }
-.v2:has(> .v2-drawer:not([hidden])) > .v2-hintbar { bottom: auto; top: calc(12px + var(--v-hud-h) + 10px); }
-.v2:has(> .v2-toasts > .v2-toast:not([hidden])) > .v2-hintbar { opacity: 0; }
+/* The tool's hint is never on screen (Roadcraft 4.0, v2/shell.css:158): it describes the map for screen readers
+   (index.html, aria-describedby); what a tool does is the drawer's tooltip, and the game's answers are toasts. */
+.v2-hintbar { display: none !important; }
 
 /* The selection column holds the inspector and hides with it. */
 .v2-side:not(:has(> .inspector:not(.hidden))) { display: none; }
