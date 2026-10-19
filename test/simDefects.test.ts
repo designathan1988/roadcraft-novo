@@ -168,3 +168,34 @@ test('C11: at a quiet traffic light (no cars, at night) pedestrians still get to
   assert.ok(waits > 5, `pedestrians waited at the light ${waits} times`);
   assert.ok(worst < 90, `a pedestrian waited ${worst.toFixed(0)} s at a light with no cars`);
 });
+
+test('C6: a traffic light far from the camera is not frozen and open: far vehicles stop at its red, far pedestrians wait for it', async () => {
+  const { laneId } = await import('../src/sim/lanes.ts');
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim, 6000, 6000); // the camera far away: every vehicle here runs in the far model
+  tr.density = 0;
+  let n = -1;
+  for (let i = 0; i < sim.net.nodes.end && n < 0; i++) if (sim.net.nodes.alive[i] && sim.nodePhases[i] > 0) n = i;
+  assert.ok(n >= 0, 'a traffic light');
+  const sc = sim.net.segs.cols, k = sim.conns.cols, deg = sim.net.nodes.cols.deg[n];
+  // run a while: a light that runs changes state
+  const states = new Set<number>();
+  for (let i = 0; i < 20 * 120; i++) { tr.step(0.05); states.add(tr.sig.state(n)); }
+  assert.ok(states.size >= 4, `the far light went through ${states.size} states in 2 min`);
+  // an arm that is red right now, and a car arriving by it at the end of its lane
+  const st = tr.sig.state(n), green = (st & 3) === 0 ? tr.sig.arms[n * 8 + (st >> 2)] : 0;
+  let arm = -1;
+  for (let a = 0; a < deg && arm < 0; a++) if (!(green & (1 << a))) arm = a;
+  const seg = sim.armSeg[n * 8 + arm], lane = laneId(seg, sc.b[seg] === n ? 1 : -1, 0);
+  let conn = sim.laneConn[lane];
+  while (conn >= 0 && k.turn[conn] === 3) conn = k.nextFromLane[conn];
+  assert.ok(conn >= 0, 'a way through the node');
+  const v = place(tr, lane, sim.laneLen(lane), k.to[conn], false);
+  inner(tr).mesoAdvance(v);
+  assert.equal(tr.veh.cols.lane[v], lane, 'a far car went through a red light');
+  // a pedestrian at the crossing of an arm whose cars have green waits
+  if (green) {
+    let ga = 0; while (!(green & (1 << ga))) ga++;
+    assert.equal(tr.walkOk(n, ga), false, 'a far pedestrian may cross in front of a green');
+  }
+});

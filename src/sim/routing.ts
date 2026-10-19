@@ -37,8 +37,8 @@ export class Router {
 
   constructor(sim: SimNet) { this.sim = sim; }
 
-  /** Segundos de espera esperados no nó `n` chegando por `sIn` e saindo por `sOut`. */
-  nodeCost(n: number, sIn: number, sOut: number): number {
+  /** Seconds expected at node `n` arriving by `sIn` and leaving by `sOut`; without `signalWait`, a light costs only the turn. */
+  nodeCost(n: number, sIn: number, sOut: number, signalWait = true): number {
     const sim = this.sim, sc = sim.net.segs.cols;
     if (sim.net.nodes.cols.deg[n] < 3) return 0;
     const ai = n * 8 + sim.segArm[sIn * 2 + (sc.a[sIn] === n ? 0 : 1)];
@@ -48,7 +48,7 @@ export class Router {
     const cross = hx * oz - hz * ox, dot = hx * ox + hz * oz;
     const turn = dot > 0.7 ? 0 : cross > 0 ? 2 : dot < -0.7 ? 15 : 6;
     const signal = sim.nodePhases[n] > 0;
-    if (signal) return 10 + turn * 1.3;
+    if (signal) return (signalWait ? 10 : 0) + turn * 1.3;
     if (sim.nodeRing[n]) return 3;
     const rule = sim.armRule[ai];
     const wait = rule === Rule.Stop ? (sim.nodeCtl[n] === Ctl.AllStop ? 6 : 8) : rule === Rule.Yield ? 4 : rule === Rule.Main ? 0 : 2;

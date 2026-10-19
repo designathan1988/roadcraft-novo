@@ -167,6 +167,27 @@ export class Signals {
     return 0;
   }
 
+  /**
+   * Earliest time from `t` on when vehicles on arm `arm` have green: exact for a timed light; an actuated one is asked
+   * again a second later. `t` itself when green now (or no light).
+   */
+  nextGreen(n: number, arm: number, t: number): number {
+    if (this.sim.nodePhases[n] === 0 || this.go(n, arm)) return t;
+    if (this.on[n]) return t + 1;
+    const ns = this.sim.nodePhases[n], cyc = this.cycle[n];
+    if (!(cyc > 0)) return t + 1;
+    // walk the cycle from where it stands until a green of a stage that releases the arm
+    const st = this.timed(n, t);
+    let s = st >> 2, sub = st & 3, wait = -this.timedIn;
+    for (let guard = 0; guard < ns * 3 + 3; guard++) {
+      const o = n * 8 + s;
+      if (sub === Sub.Green) { if (this.arms[o] & (1 << arm)) return t + Math.max(0, wait); wait += this.green[o]; sub = Sub.Amber; }
+      else if (sub === Sub.Amber) { wait += this.amber[o]; sub = Sub.AllRed; }
+      else { wait += SIGNAL.allRed; sub = Sub.Green; s = (s + 1) % ns; }
+    }
+    return t + 1;
+  }
+
   /** Current stage (× 4) + sub-phase: the actuated state near the camera, the timed cycle elsewhere. */
   state(n: number): number {
     return this.on[n] ? this.phase[n] * 4 + this.sub[n] : this.timed(n, this.time);
@@ -183,6 +204,7 @@ export class Signals {
 
   /** Pedestrians may start crossing arm `arm` now. */
   walkOk(n: number, arm: number): boolean {
+    if (this.sim.nodePhases[n] === 0) return true;
     const st = this.state(n);
     return (st & 3) === Sub.Green && (this.walk[n * 8 + (st >> 2)] & (1 << arm)) !== 0;
   }

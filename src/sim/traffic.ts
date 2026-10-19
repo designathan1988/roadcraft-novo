@@ -992,10 +992,12 @@ export class Traffic {
     }
     // the junction at the end of the lane: the same wait the router estimates (signal, stop, turn) and the
     // arm's throughput, as in micro
+    // (at a light the red itself is simulated when the vehicle reaches the line: only the turn's slowdown here, and the
+    // queue leaves at the saturation headway of a green)
     const ns = this.nextSeg(v);
-    const wait = ns >= 0 ? this.router.nodeCost(this.sim.laneTo(lane), laneSeg(lane), ns) : 0;
-    const node = this.sim.laneTo(lane);
-    const headway = this.sim.nodePhases[node] > 0 ? 3.4 : wait >= 6 ? 3.6 : wait >= 4 ? 2.6 : 1.8;
+    const node = this.sim.laneTo(lane), lit = this.sim.nodePhases[node] > 0;
+    const wait = ns >= 0 ? this.router.nodeCost(node, laneSeg(lane), ns, !lit) : 0;
+    const headway = lit ? 2 : wait >= 6 ? 3.6 : wait >= 4 ? 2.6 : 1.8;
     // time: free driving, slowed by occupancy (BPR curve), plus the junction wait; all times MESO_ALPHA
     const occ = Math.min(1, this.laneCount[lane] * 7.5 / (L * lanes));
     const run = rest / (laneSpeed(p) * c.vf[v]) * (1 + 3 * occ * occ) + wait;
@@ -1034,6 +1036,11 @@ export class Traffic {
     }
     const conn = sim.connToward(lane, ns, c.line[v] >= 0);
     const node = sim.laneTo(lane);
+    // the light: red for this arm, wait for its next green (the far model obeys the lights too)
+    if (sim.nodePhases[node] > 0) {
+      const arm = sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)];
+      if (!this.sig.go(node, arm)) { this.schedule(v, Math.max(this.time + 0.2, this.sig.nextGreen(node, arm, this.time))); return; }
+    }
     const dir = sim.net.segs.cols.a[ns] === node ? 1 : -1;
     // meso: enters the least full lane among those valid for the next turn (all lanes carry cars,
     // as in micro; otherwise everyone reaches the window in a single lane)
@@ -1083,7 +1090,7 @@ export class Traffic {
   gateOpen(conn: number): boolean {
     const sim = this.sim, k = sim.conns.cols;
     const n = k.node[conn];
-    if (sim.nodePhases[n] > 0) return this.windowSignals.has(n) ? this.stageGreen(conn) : true;
+    if (sim.nodePhases[n] > 0) return this.stageGreen(conn);
     if (sim.nodeRing[n]) {
       const from = k.from[conn];
       const fromRing = (sim.net.segs.cols.flags[laneSeg(from)] & SegFlag.Ring) !== 0;
@@ -1243,7 +1250,6 @@ export class Traffic {
     // level crossing with the barrier down: road traffic waits (the train goes through)
     if (sim.nodeCtl[n] === Ctl.Crossing && this.crossingDown(n) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(k.from[conn])]].rail) return false;
     if (sim.nodePhases[n] > 0) {
-      if (!this.windowSignals.has(n)) return true;
       if (!this.stageGreen(conn)) {
         if (this.sig.amberNow(n) && this.stageGreen(conn, true)) { const sv = c.v[v]; if (toEnd < (sv * sv) / (2 * 3.5)) return true; }
         return false;
@@ -1305,10 +1311,8 @@ export class Traffic {
     return false;
   }
 
-  /** May pedestrians start crossing arm `arm` of node `n`? (lights near the camera; elsewhere they do not wait) */
-  walkOk(n: number, arm: number): boolean {
-    return !this.windowSignals.has(n) || this.sig.walkOk(n, arm);
-  }
+  /** May pedestrians start crossing arm `arm` of node `n`? (every light, near the camera or not) */
+  walkOk(n: number, arm: number): boolean { return this.sig.walkOk(n, arm); }
 
   /** A pedestrian waits at the kerb of the crossing over arm `arm` of node `n`: calls the light. */
   pedCall(n: number, arm: number): void { this.sig.pedCall(n, arm); }
@@ -1554,7 +1558,7 @@ export class Traffic {
     if (this.time - this.lastAdmit[n] < JAM_SECONDS || this.time < this.releaseAt[n]) return false;
     if (this.veh.cols.wait[v] < JAM_SECONDS) return false;
     if (this.jamAt[n] < this.lastAdmit[n]) { this.jamAt[n] = this.time; this.jams++; } // new jam
-    if (sim.nodePhases[n] > 0 && (!this.windowSignals.has(n) || !this.stageGreen(conn, true))) return false;
+    if (sim.nodePhases[n] > 0 && !this.stageGreen(conn, true)) return false;
     if (this.connHead[conn] >= 0 && this.veh.cols.s[this.connTail[conn]] < this.veh.cols.len[this.connTail[conn]] + 2) return false;
     if (this.pedCrossing(n)) return false;
     const list = sim.conflicts.get(conn);
