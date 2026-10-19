@@ -139,3 +139,35 @@ test('lorry yards: a truck bound for a yard turns in at the dock\'s gate as it d
   assert.ok(docked >= 0, `the truck never backed into the dock (planned ${tr.mvs.planned}, refused ${tr.mvs.refused})`);
   assert.ok(docked < 45, `it turned in ${docked.toFixed(0)} m along the lane, past the gate at 14 m`);
 });
+
+test('bends: turns are driven within the lateral acceleration a driver accepts (4 m/s² falling with speed, less for heavy vehicles)', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 1 / 25;
+  const c = tr.veh.cols, k = sim.conns.cols;
+  // each connection's sharpest curvature, from its curve (|B' × B''| / |B'|³ at 9 points)
+  const curv = (x: number) => {
+    const ax = 2 * (k.x0[x] - 2 * k.cx[x] + k.x1[x]), az = 2 * (k.z0[x] - 2 * k.cz[x] + k.z1[x]);
+    let m = 0;
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8, dx = 2 * (1 - t) * (k.cx[x] - k.x0[x]) + 2 * t * (k.x1[x] - k.cx[x]), dz = 2 * (1 - t) * (k.cz[x] - k.z0[x]) + 2 * t * (k.z1[x] - k.cz[x]);
+      const d = Math.hypot(dx, dz);
+      if (d > 1e-3) m = Math.max(m, Math.abs(dx * az - dz * ax) / (d * d * d));
+    }
+    return m;
+  };
+  let worst = 0, turning = 0;
+  for (let i = 0; i < 20 * 240; i++) {
+    tr.step(0.05);
+    if (i % 10 === 0) tr.checkWindow();
+    for (let j = 0; j < tr.microN; j++) {
+      const v = tr.micro[j], x = c.conn[v];
+      if (x < 0 || k.turn[x] === 1 || c.s[v] < 2 || c.s[v] > k.len[x] - 2) continue;
+      turning++;
+      const share = (1 + 0.2 * c.aggr[v]) * (c.kind[v] ? 0.7 : 1);
+      worst = Math.max(worst, (c.v[v] * c.v[v] * curv(x)) / share);
+    }
+  }
+  assert.ok(turning > 200, `vehicle-steps in turns ${turning}`);
+  assert.ok(worst <= 4.3, `lateral acceleration up to ${worst.toFixed(1)} m/s² (per unit of the driver's share) in a turn`);
+});

@@ -17,7 +17,7 @@ import { FlowAdvisor } from './advisor.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
-import { archOf, desiredSpeed, driveAccel, drawDriver, driverSchema } from './drivers.ts';
+import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver, driverSchema } from './drivers.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
@@ -566,9 +566,13 @@ export class Traffic {
       if (c.kind[v] === 0 && this.tryKerbStop(v, lane)) return 1;
       if (c.kind[v] === 0 && this.tryParkManoeuvre(v, lane)) return 1;
     }
+    // the same share of drop-offs away from the kerb animation: the trip ends and the car drives on to another; decided
+    // with room to brake for wherever the new route turns (it stops at the kerb instead where it can)
+    if (this.dropsOff(v)) {
+      if (c.micro[v] && c.kind[v] === 0 && toEnd < 12 && this.tryKerbStop(v, lane)) return 1;
+      if ((toEnd >= 12 || !c.micro[v] || c.kind[v] !== 0 || laneIdx(lane) !== 0) && this.dropOffTrip(v, this.sim.laneTo(lane))) return 0;
+    }
     if (toEnd >= 12) return 0;
-    // the same share of drop-offs away from the kerb animation: the trip ends and the car drives on to another
-    if (this.dropsOff(v) && this.dropOffTrip(v, this.sim.laneTo(lane))) return 0;
     return this.startParking(v, lane) ? 1 : 2;
   }
 
@@ -1749,6 +1753,46 @@ export class Traffic {
   }
   private microStep = 0;
 
+  /**
+   * Braking for the bends ahead (roadcraft 4.0 `curveSpeedCap`): connection `conn` starts `d` m ahead, and after it
+   * and its lane the route's next turn. For each bend slower than the vehicle, the steady deceleration that reaches
+   * its speed at its start, applied once it reaches 80 % of the driver's comfortable braking (up to the emergency one).
+   * Returns the acceleration limit (Infinity: none).
+   */
+  private bendBrake(v: number, conn: number, d: number): number {
+    const c = this.veh.cols, sim = this.sim, k = sim.conns.cols, heavy = c.kind[v] !== 0, speed = c.v[v];
+    let limit = Infinity, at = d, x = conn;
+    const horizon = (speed * speed) / (2 * c.db[v]) + 20;
+    for (let i = 0; i < 2 && x >= 0 && at < horizon; i++) {
+      const vb = bendSpeed(c, v, this.bendK(v, x), heavy);
+      if (speed > vb) {
+        const need = (speed * speed - vb * vb) / (2 * Math.max(0.5, at - 0.5));
+        if (need >= c.db[v] * 0.8) limit = Math.min(limit, -Math.min(c.dbe[v], Math.max(need, c.db[v] * 0.8)));
+      }
+      // and the turn after: past this connection and the lane it leads to (its exit along the route)
+      if (i > 0) break;
+      const after = this.segAfter(v, 1), to = k.to[x];
+      if (after < 0) break;
+      at += k.len[x] + sim.laneLen(to);
+      x = this.connAfter(to, after, c.line[v] >= 0);
+    }
+    return limit;
+  }
+
+  /** Curvature of a connection for vehicle `v`: a train reverses at the end of its line (drawn as a loop), so none there. */
+  private bendK(v: number, conn: number): number {
+    const k = this.sim.conns.cols;
+    return this.veh.cols.kind[v] === 4 && k.turn[conn] === Turn.UTurn ? 0 : k.k[conn];
+  }
+
+  /** The connection from `lane` (or the lane of its segment it will change to) toward segment `seg`; −1 if none. */
+  private connAfter(lane: number, seg: number, bus: boolean): number {
+    const sim = this.sim;
+    let x = sim.connToward(lane, seg, bus);
+    if (x < 0) { const l2 = sim.laneToward(laneSeg(lane), laneDir(lane), seg, laneIdx(lane), bus); if (l2 >= 0) x = sim.connToward(l2, seg, bus); }
+    return x;
+  }
+
   /** Distance to the rearmost vehicle on the connection/lane ahead (to follow through the node). */
   private aheadThrough(conn: number): [number, number] {
     const c = this.veh.cols, k = this.sim.conns.cols;
@@ -1766,7 +1810,8 @@ export class Traffic {
     if (c.dying[v] === 4) { this.kerbStep(v, lane, dt); return; }
     const L = sim.laneLen(lane);
     const p = sim.net.segs.cols.profile[laneSeg(lane)];
-    const v0 = desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time);
+    // the limit, and the lane's own bend (a sharply curved road is driven slower)
+    let v0 = Math.min(desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time), bendSpeed(c, v, sim.segK[laneSeg(lane)], c.kind[v] !== 0));
     let gap = 1e9, vl = 99;
     /** Where it must have stopped by, whatever its comfort (a bus or train stop: no further than just past it). */
     let stopRoom = 1e9;
@@ -1796,7 +1841,9 @@ export class Traffic {
     else if (this.atDestination(v) && c.line[v] < 0 && c.kind[v] === 2 && this.docks.length && (this.microStep + v) % 20 === 0 && this.nearCam(lane) && this.tryDock(v, lane)) return;
     else if (this.atDestination(v) && c.line[v] < 0) {
       // near the camera cars and trucks decide 30 m before the end (room for the manoeuvre); the rest at 12 m
-      const room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.nearCam(lane) ? 30 : 12;
+      // (a drop-off that drives straight on decides with room to brake for the next turn)
+      let room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.nearCam(lane) ? 30 : 12;
+      if (this.dropsOff(v)) room = Math.max(room, (c.v[v] * c.v[v]) / (2 * c.db[v]) + 25);
       if (L - c.s[v] < room) { const r = this.arrive(v, lane, L - c.s[v]); if (r === 1) return; if (r === 2) c.dying[v] = 1; }
     } else {
       let ns = this.nextSeg(v);
@@ -1846,9 +1893,13 @@ export class Traffic {
         if (sg >= 0) stopRoom = Math.min(stopRoom, toEnd + sg + 0.5);
       }
     }
+    // the turn ahead: slow enough by the line to take its bend within the driver's lateral comfort (braking on time)
+
     // what the car ahead is doing, when it is the obstacle (the stop line, a stop or a red stand still)
     const al = lead >= 0 && gap === c.s[lead] - c.len[lead] - c.s[v] ? c.acc[lead] : 0;
     let a = driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, stopRoom);
+    // the bends ahead (this junction's turn, and the next one's after a short lane): braked for in time
+    if (conn >= 0) a = Math.min(a, this.bendBrake(v, conn, L - c.s[v]));
     if (c.dying[v]) a = Math.min(a, 0); // an arrived vehicle disappears without braking in front of others
     if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // in the bay, waiting to pull out
     if (c.mv[v] >= 0) a = -9; // pulling out of the bay: held until the manoeuvre is back in the lane
@@ -2006,7 +2057,8 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim, k = sim.conns.cols;
     const L = k.len[conn];
     const to = k.to[conn];
-    const v0 = desiredSpeed(c, v, Math.min(laneSpeed(sim.net.segs.cols.profile[laneSeg(to)]), k.turn[conn] === Turn.Straight ? 99 : 8) * c.vf[v], this.time);
+    // through the junction at the limit, or at the speed its bend allows within the driver's lateral comfort
+    const v0 = Math.min(desiredSpeed(c, v, laneSpeed(sim.net.segs.cols.profile[laneSeg(to)]) * c.vf[v], this.time), bendSpeed(c, v, this.bendK(v, conn), c.kind[v] !== 0));
     let gap = 1e9, vl = 99;
     const lead = c.prev[v];
     if (lead >= 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
@@ -2028,7 +2080,11 @@ export class Traffic {
     if (sg >= 0 && sg - c.s[v] < gap) { gap = Math.max(0, sg - c.s[v]); vl = 0; }
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2); // a lane change finishing on the way through
     const al = lead >= 0 && gap === c.s[lead] - c.len[lead] - c.s[v] ? c.acc[lead] : 0;
-    const a = Math.max(-9, driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, sg >= 0 ? Math.max(0, sg - c.s[v]) + 0.5 : 1e9));
+    let a = Math.max(-9, driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, sg >= 0 ? Math.max(0, sg - c.s[v]) + 0.5 : 1e9));
+    if (c.v[v] > v0 + 0.3) a = Math.min(a, -c.db[v]); // in the bend too fast (it came in late): brakes, not coasts
+    // the next junction's turn, after the lane this connection leads to
+    const next = this.segAfter(v, 1);
+    if (next >= 0) { const c2 = this.connAfter(to, next, c.line[v] >= 0); if (c2 >= 0) a = Math.min(a, this.bendBrake(v, c2, L - c.s[v] + sim.laneLen(to))); }
     const nv = Math.max(0, c.v[v] + a * dt);
     c.acc[v] = (nv - c.v[v]) / dt;
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
@@ -2563,6 +2619,9 @@ export class Traffic {
       c.s[v] = s; c.conn[v] = -1; c.held[v] = 0; c.wait[v] = 0;
       // in a queue it stands; otherwise it drives at what the lane has been driving at
       c.v[v] = s < est - 1 ? 0 : Math.min(free * c.vf[v], this.laneVel[lane] > 0 ? this.laneVel[lane] : free * 0.7);
+      // never faster than what still stops comfortably at the line (whatever the junction asks of it there)
+      c.v[v] = Math.min(c.v[v], Math.sqrt(2 * c.db[v] * Math.max(0, L - s - 1)));
+      c.acc[v] = 0;
       c.fade[v] = 0;
       this.addMicro(v);
       this.insert(v, false, lane);

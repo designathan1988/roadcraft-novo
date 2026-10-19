@@ -129,6 +129,24 @@ export function driveAccel(c: Cols, u: number, v: number, v0: number, gap: numbe
   return acc;
 }
 
+/**
+ * Lateral acceleration a driver accepts in a bend (roadcraft 4.0 `params.ts`): 4 m/s², falling by 0.09 per m/s of
+ * speed, never below 1.8; heavy vehicles take 70 % of it; ±20 % with aggression.
+ */
+const MAX_LATERAL = 4.0, LATERAL_FALL = 0.09, MIN_LATERAL = 1.8, HEAVY_SHARE = 0.7, AGGRESSION_SHARE = 0.2;
+
+/**
+ * Fastest speed (m/s) driver `u` takes a bend of curvature `k` (1/m) at (roadcraft 4.0 `vehicles/curvature.ts`):
+ * the lateral acceleration v²k within the comfort that falls with speed (a0 − c·v), or the floor's.
+ */
+export function bendSpeed(c: Cols, u: number, k: number, heavy: boolean): number {
+  if (k < 1e-4) return Infinity;
+  const share = (1 + AGGRESSION_SHARE * c.aggr[u]) * (heavy ? HEAVY_SHARE : 1);
+  const a0 = share * MAX_LATERAL, fall = share * LATERAL_FALL;
+  const v = (-fall + Math.sqrt(fall * fall + 4 * k * a0)) / (2 * k);
+  return Math.max(v, Math.sqrt((share * MIN_LATERAL) / k));
+}
+
 /** The speed driver `v` aims for now, around `v0`. */
 export function desiredSpeed(c: Cols, v: number, v0: number, time: number): number {
   return v0 * (1 + c.driftA[v] * Math.sin(c.driftP[v] + time * c.driftR[v]));

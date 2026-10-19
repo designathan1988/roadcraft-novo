@@ -31,6 +31,8 @@ const connSchema = {
   cx: Float32Array, cz: Float32Array,
   x1: Float32Array, y1: Float32Array, z1: Float32Array,
   len: Float32Array, turn: Uint8Array, arm: Uint8Array,
+  /** Sharpest curvature along the connection (1/m). */
+  k: Float32Array,
   nextAtNode: Int32Array, nextFromLane: Int32Array,
 };
 
@@ -65,6 +67,8 @@ export class SimNet {
   turnCar = new Uint8Array((1 << 14) * 8);
   /** Segment of each arm (n * 8 + arm). */
   armSeg = new Int32Array((1 << 14) * 8);
+  /** Sharpest curvature of each segment's centre line (1/m). */
+  segK = new Float32Array(1 << 14);
   /** Connections that cross or merge with each connection (rebuilt with the node). */
   readonly conflicts = new Map<number, Int32Array>();
   /** Roundabout node (entries give way to the ring). */
@@ -105,6 +109,7 @@ export class SimNet {
       this.retreat = grow(this.retreat, cap * 2, 0);
       this.segArm = grow(this.segArm, cap * 2, 0);
       this.laneConn = grow(this.laneConn, cap * 16, -1);
+      this.segK = grow(this.segK, cap, 0);
     });
   }
 
@@ -118,6 +123,7 @@ export class SimNet {
         const q = net.quad(op.rec.id);
         const t = arcTable(q, ARC_STEPS);
         this.arc.set(t, op.rec.id * (ARC_STEPS + 1));
+        this.segK[op.rec.id] = quadCurvature(q.x0, q.z0, q.cx, q.cz, q.x1, q.z1);
         this.laneMeters += net.segs.cols.len[op.rec.id] * (laneCount(op.rec.profile, 1) + laneCount(op.rec.profile, -1));
         this.dirtyNodes.add(op.rec.a); this.dirtyNodes.add(op.rec.b);
         this.dirtyDeadEndsNear(op.rec.id);
@@ -406,6 +412,7 @@ export class SimNet {
           }
           kc.cx[c] = cx; kc.cz[c] = cz;
           kc.len[c] = quadLen(pa[0], pa[2], cx, cz, pb[0], pb[2]);
+          kc.k[c] = quadCurvature(pa[0], pa[2], cx, cz, pb[0], pb[2]);
           kc.turn[c] = turn; kc.arm[c] = armIndex.get(i) ?? 0;
           kc.nextAtNode[c] = this.nodeConn[n]; this.nodeConn[n] = c;
           kc.nextFromLane[c] = this.laneConn[from]; this.laneConn[from] = c;
@@ -486,6 +493,19 @@ function segCross(ax: number, az: number, bx: number, bz: number, cx: number, cz
   const d1 = (bx - ax) * (cz - az) - (bz - az) * (cx - ax), d2 = (bx - ax) * (dz - az) - (bz - az) * (dx - ax);
   const d3 = (dx - cx) * (az - cz) - (dz - cz) * (ax - cx), d4 = (dx - cx) * (bz - cz) - (dz - cz) * (bx - cx);
   return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
+/** Sharpest curvature (1/m) of a quadratic Bézier, sampled at 9 points: |B' × B''| / |B'|³. */
+export function quadCurvature(x0: number, z0: number, cx: number, cz: number, x1: number, z1: number): number {
+  const ax = 2 * (x0 - 2 * cx + x1), az = 2 * (z0 - 2 * cz + z1);
+  let k = 0;
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    const dx = 2 * (1 - t) * (cx - x0) + 2 * t * (x1 - cx), dz = 2 * (1 - t) * (cz - z0) + 2 * t * (z1 - cz);
+    const d = Math.hypot(dx, dz);
+    if (d > 1e-3) k = Math.max(k, Math.abs(dx * az - dz * ax) / (d * d * d));
+  }
+  return k;
 }
 
 function quadLen(x0: number, z0: number, cx: number, cz: number, x1: number, z1: number): number {

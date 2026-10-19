@@ -51,7 +51,18 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
   tr.onDropOff = () => { drops++; };
   // docas de galpão junto às ruas (como a página manda: ponto, rumo de frente para a rua)
   const docks: number[] = [];
-  for (const [x, z, yaw] of DOCKS) docks.push(x, z, yaw);
+  // a warehouse on each side of every industrial street (around the DOCKS points), its dock 16 m back from the kerb
+  // at the street's middle, facing it: trucks carry goods to industry, so they drive past them
+  const sc = sim.net.segs.cols;
+  for (let sg = 0; sg < sim.net.segs.end; sg++) {
+    if (!sim.net.segs.alive[sg] || !DOCKS.some(([x, z]) => Math.hypot(sc.mx[sg] - x, sc.mz[sg] - z) < 120)) continue;
+    const q = sim.net.quad(sg), px = (q.x0 + 2 * q.cx + q.x1) / 4, pz = (q.z0 + 2 * q.cz + q.z1) / 4;
+    const tx = q.x1 - q.x0, tz = q.z1 - q.z0, tl = Math.hypot(tx, tz);
+    for (const side of [1, -1]) {
+      const nx = side * tz / tl, nz = -side * tx / tl;
+      docks.push(px + nx * 16, pz + nz * 16, Math.atan2(-nx, -nz));
+    }
+  }
   tr.setDocks(new Float32Array(docks));
   const data = new Float32Array(11 * 20000);
   const c = tr.veh.cols, mc = tr.mvs.t.cols;
