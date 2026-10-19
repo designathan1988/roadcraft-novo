@@ -966,3 +966,21 @@ test('D36: changing only the density keeps the buildings that fit it; towers go 
   assert.equal(w.buildings.alive[house], 1, 'turning it low demolished the house too');
   assert.equal(w.buildings.alive[tower], 0, 'a 12-floor tower stays in a low-density zone');
 });
+
+test('D43: undo while a stroke is still open does nothing; after it closes it undoes the stroke', async () => {
+  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  commands.push(road(w, -150, 0, 150, 0));
+  const roads = w.roads.segs.size;
+  const tool = new ZoneTool(w, commands);
+  tool.begin();
+  tool.dab(0, 20);
+  assert.equal(commands.undo(), false, 'undo ran in the middle of the zoning stroke');
+  assert.equal(w.roads.segs.size, roads, 'undo in the middle of the stroke took the road away');
+  tool.end();
+  assert.equal(commands.undo(), true);
+  const sc = w.roads.segs.cols;
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) assert.ok(!sc.zl[s] && !sc.zr[s], 'the undo after the stroke did not take the zoning back');
+  assert.equal(w.roads.segs.size, roads);
+});

@@ -960,7 +960,7 @@ export class Game {
       try { finishDrag(e); } catch (err) {
         console.error(err);
         this.hud.toast(t('tool.failed', { message: (err as Error)?.message ?? String(err) }));
-      } finally { this.drag = 'none'; }
+      } finally { this.drag = 'none'; if (this.commands.holding) this.zoneTool.end(); }
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('dblclick', () => { if (this.tool === 'river') this.finishRiver(); if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly(); });
@@ -1094,6 +1094,8 @@ export class Game {
 
   /** Undo (false) or redo (true), with sound. */
   private history(redo: boolean): void {
+    // a brush, zoning or free road still being dragged is recorded on release: undo waits for it
+    if (this.drag === 'brush' || this.drag === 'zone' || this.drag === 'free' || this.drag === 'node') return;
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
 

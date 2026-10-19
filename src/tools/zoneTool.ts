@@ -31,10 +31,15 @@ export class ZoneTool {
     this.commands = commands;
   }
 
-  begin(): void { this.stroke = new RoadJournal(this.world, 'zonear'); }
+  begin(): void {
+    if (!this.stroke) this.commands.hold();
+    this.stroke = new RoadJournal(this.world, 'zonear');
+  }
 
   end(): void {
-    if (this.stroke && !this.stroke.empty) this.commands.push(this.stroke);
+    if (!this.stroke) return;
+    this.commands.release();
+    if (!this.stroke.empty) this.commands.push(this.stroke);
     this.stroke = null;
   }
 

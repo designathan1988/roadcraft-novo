@@ -61,8 +61,15 @@ export class CommandStack {
 
   endGroup(): void { this.open = null; }
 
+  /** Strokes still being drawn (zoning, brushes): undo and redo wait until they are recorded. */
+  private held = 0;
+  hold(): void { this.held++; }
+  release(): void { if (this.held > 0) this.held--; }
+  get holding(): boolean { return this.held > 0; }
+
   /** Undoes the last step. False when there is none or it failed (then it stays the last step, see onError). */
   undo(): boolean {
+    if (this.held) return false;
     this.open = null;
     const c = this.done[this.done.length - 1];
     if (!c) return false;
@@ -75,6 +82,7 @@ export class CommandStack {
 
   /** Redoes the last undone step. False when there is none or it failed (then it stays to redo, see onError). */
   redo(): boolean {
+    if (this.held) return false;
     this.open = null;
     const c = this.undone[this.undone.length - 1];
     if (!c) return false;
@@ -91,5 +99,5 @@ export class CommandStack {
   get canUndo(): boolean { return this.done.length > 0; }
   get canRedo(): boolean { return this.undone.length > 0; }
 
-  clear(): void { this.done.length = 0; this.undone.length = 0; this.open = null; this.onChange(); }
+  clear(): void { this.done.length = 0; this.undone.length = 0; this.open = null; this.held = 0; this.onChange(); }
 }
