@@ -136,7 +136,10 @@ export class World {
     return [-w, -d, w, -d, w, d, -w, d];
   }
 
-  /** Advances the city clock; buildings that reach a new decay tenth get their cell redrawn (only those). */
+  /**
+   * Advances the city clock; buildings that reach a new decay tenth get it in `decay` (only those). Nothing drawn reads
+   * decay yet, so no mesh is marked for it; the saved decay is derived again from `built` on load.
+   */
   advanceClock(minutes: number): void {
     if (!(minutes > 0)) return;
     this.clock += minutes;
@@ -160,7 +163,7 @@ export class World {
   private refreshDecay(id: number): void {
     const c = this.buildings.cols;
     const d = decayTenths(c.built[id], this.clock);
-    if (d !== c.decay[id]) { c.decay[id] = d; this.decayChanges++; this.touchCell(c.cell[id], Dirty.Buildings); }
+    if (d !== c.decay[id]) { c.decay[id] = d; this.decayChanges++; }
     const next = nextTenthAt(c.built[id], d);
     c.due[id] = next;
     if (next !== Infinity) this.decayHeap.push(next, id);

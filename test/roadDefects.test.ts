@@ -12,6 +12,7 @@ import { demolishBox } from '../src/tools/demolish.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
+import { Dirty } from '../src/core/grid.ts';
 
 function flatWorld(money: number, y = 10): World {
   const w = new World();
@@ -275,4 +276,20 @@ test('D6: a roundabout never fills the sea', () => {
   for (const [x, z] of at) assert.ok(ground(w, x, z) < 0, `the sea bed at ${x}, ${z} rose to ${ground(w, x, z).toFixed(2)}`);
   assert.notEqual(roundaboutRefusal(w, 10, 0, 22), '', 'the tool says why it cannot go there');
   assert.equal(roundaboutRefusal(w, 120, 0, 22), '', 'on dry land it can');
+});
+
+test('D9 and A41: decay tenths rebuild no mesh and mark no tile for saving', () => {
+  const w = flatWorld(0);
+  for (let i = 0; i < 400; i++) w.addBuilding({ x: (i % 20) * 30 - 300, z: Math.floor(i / 20) * 30 - 300, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: i, zone: Zone.Residential, floors: 3, style: 1, built: i * 37 });
+  for (const k of [Dirty.Buildings, Dirty.Props, Dirty.Save, Dirty.Lots]) w.dirty.drain(k);
+  w.saveDirty.fill(0);
+  const versions = w.cellVersion.slice();
+  const before = w.decayChanges;
+  for (let day = 0; day < 40; day++) w.advanceClock(1440);
+  assert.ok(w.decayChanges - before > 400 * 9, `the buildings aged (${w.decayChanges - before} tenths passed)`);
+  for (const [name, k] of [['buildings', Dirty.Buildings], ['props', Dirty.Props], ['save', Dirty.Save]] as const) {
+    assert.equal(w.dirty.pending(k), 0, `decay marked ${w.dirty.pending(k)} cells dirty for ${name}`);
+  }
+  assert.equal(w.saveDirty.reduce((a, b) => a + b, 0), 0, 'decay marked tiles for saving');
+  assert.deepEqual(w.cellVersion, versions, 'decay bumped cell versions');
 });
