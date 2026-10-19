@@ -6,7 +6,7 @@
 
 import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
-import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, type DirtyCells, type DirtyKind } from '../core/grid.ts';
+import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, type DirtyCells, type DirtyKind, type DirtyReader } from '../core/grid.ts';
 import type { PackedMesh } from '../jobs/protocol.ts';
 
 export interface LayerSource {
@@ -76,8 +76,8 @@ export class CellLayer {
   private pv = new THREE.Matrix4();
   private camPos = new THREE.Vector3();
   private src: LayerSource;
-  private dirty: DirtyCells;
-  private kind: DirtyKind;
+  /** This layer's own list of dirty cells (the detail layer reads the same kind). */
+  private dirty: DirtyReader;
   private opt: LayerOptions;
   private extra: boolean;
   private facade: boolean;
@@ -93,8 +93,7 @@ export class CellLayer {
 
   constructor(src: LayerSource, dirty: DirtyCells, kind: DirtyKind, material: THREE.Material, opt: LayerOptions, extra = false, facade = false) {
     this.src = src;
-    this.dirty = dirty;
-    this.kind = kind;
+    this.dirty = dirty.reader(kind);
     this.material = material;
     this.opt = opt;
     this.extra = extra;
@@ -128,7 +127,7 @@ export class CellLayer {
 
   /** Takes this kind's dirty cells and asks for the new meshes. */
   processDirty(): void {
-    const cells = this.dirty.drain(this.kind);
+    const cells = this.dirty.drain();
     for (const c of cells) {
       this.cellVer[c]++;
       const t = tileOfCell(c);
