@@ -89,7 +89,11 @@ export class RoadJournal implements Command {
     this.ops.push({ t: 'addNode', rec: this.net.nodeRec(id) });
     return id;
   }
-  /** Raises or lowers a node (attached segments follow): removes and re-adds with the same ids. */
+  /**
+   * Raises or lowers a node (attached segments follow): removes and re-adds with the same ids. The segments go back
+   * through `addSeg`, so their value is counted again with the build kind of the new height: the edit costs (or gives
+   * back a share of) only the difference, never the whole value of the roads that stay.
+   */
   moveNodeY(id: number, y: number): void {
     const net = this.net;
     const segs = net.segsOf(id, []);
@@ -99,7 +103,7 @@ export class RoadJournal implements Command {
     this.removeNode(id);
     net.addNode({ ...rec, y });
     this.ops.push({ t: 'addNode', rec: net.nodeRec(id) });
-    for (const r of recs) { net.addSeg(r); this.ops.push({ t: 'addSeg', rec: net.segRec(r.id) }); }
+    for (const r of recs) this.addSeg({ ...r, flags: r.flags & ~KIND_MASK });
   }
   removeNode(id: number): void {
     const rec = this.net.nodeRec(id);
