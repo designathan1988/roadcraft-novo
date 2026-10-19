@@ -30,6 +30,27 @@ const SHARPEN = 0.35;
 export interface PostOptions { shadows: boolean; ao: boolean; bloom: boolean }
 
 
+/**
+ * Cascades whose shadow fades out over the last 30 % of their reach. three's CSM fades between cascades but not at the
+ * far end of the last one: there every shadow (a forest's trees) stopped on a straight line across the screen, the
+ * ground darker on the near side of it.
+ */
+class FadingCSM extends CSMShadowNode {
+  private reachU = T.uniform(PERSP_SHADOW_FAR);
+  setup(builder: unknown): Node {
+    const shadowed = (super.setup as (b: unknown) => Node)(builder);
+    this.reachU.value = Math.min(this.maxFar, (this.camera as THREE.PerspectiveCamera | null)?.far ?? this.maxFar);
+    const depth = T.positionView.z.negate();
+    const fade = smoothstep(this.reachU.mul(0.7), this.reachU, depth);
+    return mix(shadowed, vec4(1, 1, 1, 1), fade);
+  }
+  /** Keeps the fade's reach with the cascades' (`fitCascades` changes maxFar). */
+  updateFrustums(): void {
+    super.updateFrustums();
+    if (this.reachU) this.reachU.value = Math.min(this.maxFar, (this.camera as THREE.PerspectiveCamera | null)?.far ?? this.maxFar);
+  }
+}
+
 export class Post {
   readonly pipeline: THREE.RenderPipeline;
   private scenePass: Node;
@@ -56,7 +77,7 @@ export class Post {
       sun.shadow.normalBias = 0.4;
       // the cascades also draw what only casts (the terrain's coarse shadow copy); cloned into each cascade
       sun.shadow.camera.layers.enable(SHADOW_ONLY_LAYER);
-      const csm = new CSMShadowNode(sun, { cascades: 3, maxFar: PERSP_SHADOW_FAR, mode: 'practical', lightMargin: 300 });
+      const csm = new FadingCSM(sun, { cascades: 3, maxFar: PERSP_SHADOW_FAR, mode: 'practical', lightMargin: 300 });
       csm.fade = true;
       sun.shadow.shadowNode = csm;
       this.csm = csm;

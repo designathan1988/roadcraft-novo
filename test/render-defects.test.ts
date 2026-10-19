@@ -744,3 +744,9 @@ test('a near-level mesh is not drawn in place of a far level that is built and e
   layer.update(camera, eye);
   assert.ok(!layer.group.children.includes(L.cells[0][c].mesh!), 'the near level was drawn for the empty far one');
 });
+
+test('the shadows fade out at the far end of their reach (no straight line across the ground)', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync('src/render/post.ts', 'utf8');
+  assert.ok(/class FadingCSM extends CSMShadowNode/.test(src) && src.includes('new FadingCSM('), 'the sun uses cascades that fade at their far end');
+});
