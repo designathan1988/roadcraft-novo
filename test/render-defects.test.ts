@@ -269,3 +269,28 @@ test('E18: the ambient occlusion reads the depth with the matrices of the camera
   assert.ok(aoNode._cameraNear!.object === iso, 'GTAO reads the isometric camera\'s near and far');
   assert.ok(denoiseNode._cameraProjectionMatrixInverse!.value === iso.projectionMatrixInverse, 'the denoise unprojects with the isometric camera');
 });
+
+test('E5, E25: each prop draw carries one variant only (a hydrant does not process the vertices of 13 other pieces)', async () => {
+  const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
+  const { PROP } = await import('../src/jobs/props.ts');
+  const defs = PM.buildPropDefs();
+  // what the renderer draws: one geometry per kind and level (before: per type and level)
+  const build = PM.buildPropKinds as ((d: typeof defs) => { kinds: Array<{ type: number; lods: Array<THREE.BufferGeometry | null> }> }) | undefined;
+  const draws = build ? build(defs).kinds : defs.map((d, type) => ({ type, lods: d.lods }));
+  const mixed: string[] = [];
+  let hydrant = Infinity;
+  for (const k of draws) {
+    for (const [l, g] of k.lods.entries()) {
+      if (!g) continue;
+      const col = g.attributes.pcol as THREE.BufferAttribute, variants = new Set<number>();
+      for (let i = 0; i < col.count; i++) {
+        const mat = Math.round(col.getW(i) * 255);
+        if (mat >= PM.PMAT.Sign0 && mat <= PM.FACE_LAST) variants.add(mat - PM.PMAT.Sign0);
+      }
+      if (variants.size > 1) mixed.push(`type ${k.type} level ${l}: ${variants.size} variants, ${col.count} vertices per instance`);
+      if (k.type === PROP.Furniture && variants.size === 1 && variants.has(0)) hydrant = col.count;
+    }
+  }
+  assert.deepEqual(mixed, [], 'draws that carry several variants');
+  assert.ok(hydrant < 600, `a hydrant draws ${hydrant} vertices`);
+});

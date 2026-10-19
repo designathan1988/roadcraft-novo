@@ -478,3 +478,79 @@ export function buildPropDefs(): PropDef[] {
   if (defs.length !== PROP_TYPES) throw new Error('tipos de peça');
   return defs;
 }
+
+/** One thing the renderer draws: a prop type, or one variant (or group of variants) of a type whose variants are
+ *  different meshes. */
+export interface PropKind {
+  type: number;
+  /** Mesh per level (null = not drawn). */
+  lods: Array<THREE.BufferGeometry | null>;
+  dist: [number, number, number];
+  radius: number;
+}
+
+/** Variants a type's instance can have (4 bits in the pose). */
+export const VARIANTS = 16;
+
+/**
+ * Types whose variants are different meshes, and the kind each variant draws with (index into that type's kinds).
+ * Everything in one mesh, the shader collapsing the wrong ones, made every instance process the vertices of all of
+ * them: ~3,624 per furniture piece, ~5,860 per ground piece.
+ */
+const SPLIT: Record<number, number[]> = {
+  [PROP.Furniture]: Array.from({ length: VARIANTS }, (_, v) => v),
+  [PROP.Ground]: Array.from({ length: VARIANTS }, (_, v) => Math.min(v, 11)),
+  [PROP.Barrier]: Array.from({ length: VARIANTS }, (_, v) => Math.min(v, 4)),
+  // signs share the post and the face quads; only the street-name blades are a mesh of their own
+  [PROP.Sign]: Array.from({ length: VARIANTS }, (_, v) => (v === SIGN.Name ? 1 : 0)),
+};
+
+/** Kind of each (type, variant): index = type × VARIANTS + variant. The same table on the CPU and in the cull pass. */
+export function propKindTable(): { kindOf: Uint32Array; count: number } {
+  const kindOf = new Uint32Array(PROP_TYPES * VARIANTS);
+  let k = 0;
+  for (let t = 0; t < PROP_TYPES; t++) {
+    const split = SPLIT[t];
+    const subs = split ? Math.max(...split) + 1 : 1;
+    for (let v = 0; v < VARIANTS; v++) kindOf[t * VARIANTS + v] = k + (split ? split[v] : 0);
+    k += subs;
+  }
+  return { kindOf, count: k };
+}
+
+/** The part of a mesh a group of variants draws: its own variant parts plus the shared parts (other materials). */
+function variantPart(g: THREE.BufferGeometry | null, keep: (variant: number) => boolean): THREE.BufferGeometry | null {
+  if (!g) return null;
+  const col = g.attributes.pcol as THREE.BufferAttribute;
+  const tris: number[] = [];
+  for (let t = 0; t < col.count / 3; t++) {
+    const mat = Math.round(col.getW(t * 3) * 255);
+    const variant = mat >= PMAT.Sign0 && mat <= FACE_LAST ? mat - PMAT.Sign0 : -1;
+    if (variant < 0 || keep(variant)) tris.push(t);
+  }
+  if (tris.length === 0) return null;
+  const out = new THREE.BufferGeometry();
+  for (const name of Object.keys(g.attributes)) {
+    const a = g.attributes[name] as THREE.BufferAttribute, n = a.itemSize;
+    const arr = new Float32Array(tris.length * 3 * n);
+    tris.forEach((t, i) => arr.set((a.array as Float32Array).subarray(t * 3 * n, (t + 1) * 3 * n), i * 3 * n));
+    out.setAttribute(name, new THREE.BufferAttribute(arr, n));
+  }
+  return out;
+}
+
+/** The kinds the renderer draws, in kind order (`propKindTable`). */
+export function buildPropKinds(defs: PropDef[]): { kinds: PropKind[]; kindOf: Uint32Array } {
+  const { kindOf } = propKindTable();
+  const kinds: PropKind[] = [];
+  defs.forEach((d, type) => {
+    const split = SPLIT[type];
+    if (!split) { kinds.push({ type, lods: d.lods, dist: d.dist, radius: d.radius }); return; }
+    const subs = Math.max(...split) + 1;
+    for (let s = 0; s < subs; s++) {
+      const lods = d.lods.map((g) => variantPart(g, (v) => split[v] === s));
+      kinds.push({ type, lods, dist: d.dist, radius: d.radius });
+    }
+  });
+  return { kinds, kindOf };
+}

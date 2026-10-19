@@ -12,7 +12,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, buildSignAtlas, impostorSources, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, type PropDef } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -33,7 +33,9 @@ const BLOCK = 64;
 /** Entries of the visible list: an instance is in at most two levels at once (the fading band). */
 const VISIBLE = CAP * 2;
 const LODS = 3;
-const DRAWS = PROP_TYPES * LODS;
+/** Kinds drawn: the types, with the ones whose variants are different meshes split per variant. */
+const KINDS = propKindTable().count;
+const DRAWS = KINDS * LODS;
 const FADE_BAND = 0.12;
 
 export class PropRenderer {
@@ -43,6 +45,15 @@ export class PropRenderer {
   private pool: JobPool;
   private dirty: DirtyCells;
   private defs: PropDef[];
+  /** What is drawn: one kind per type, or per variant for the types whose variants are different meshes. */
+  private kinds: PropKind[];
+  private kindOfAttr: THREE.StorageBufferAttribute;
+  /** Instances of each kind in held cells within that kind's reach (a kind with none nearby is not drawn). */
+  private kindNear = new Uint32Array(KINDS);
+  private kindNearDue = true;
+  /** Instances per kind of each cell that holds props. */
+  private cellKinds = new Map<number, Uint32Array>();
+  private kindOf: Uint32Array;
   private data = new Float32Array(CAP * 4);
   private extra = new Uint32Array(CAP).fill(PROP_FREE);
   private poolAttr: THREE.StorageBufferAttribute;
@@ -103,6 +114,10 @@ export class PropRenderer {
     this.dirty = world.dirty;
     this.enabled = isWebGPU; // compute culling: WebGPU only (on WebGL 2 the props are left out for now)
     this.defs = buildPropDefs();
+    const built = buildPropKinds(this.defs);
+    this.kinds = built.kinds;
+    this.kindOf = built.kindOf;
+    this.kindOfAttr = new THREE.StorageBufferAttribute(built.kindOf, 1);
     // the impostor frames are measured from the tree meshes before the material reads them
     impostorFrames(impostorSources(this.defs));
     this.poolAttr = new THREE.StorageBufferAttribute(this.data, 4);
@@ -111,7 +126,7 @@ export class PropRenderer {
     this.offsetAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
     this.cursorAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
     const draw = new Uint32Array(DRAWS * 5);
-    this.defs.forEach((d, t) => d.lods.forEach((g, l) => { if (g) draw[(t * LODS + l) * 5] = g.attributes.position.count; }));
+    this.kinds.forEach((d, k) => d.lods.forEach((g, l) => { if (g) draw[(k * LODS + l) * 5] = g.attributes.position.count; }));
     this.drawAttr = new THREE.IndirectStorageBufferAttribute(draw, 1);
     const sig = new Uint8Array(signalsSab);
     this.signalTex = new THREE.DataTexture(sig, 512, sig.length / 512, THREE.RedFormat, THREE.UnsignedByteType);
@@ -121,7 +136,7 @@ export class PropRenderer {
 
     this.planesU = uniformArray(this.planes, 'vec4');
     this.distU = uniformArray(this.distArr, 'float');
-    this.radiusU = uniformArray(this.defs.map((d) => d.radius), 'float');
+    this.radiusU = uniformArray(this.kinds.map((d) => d.radius), 'float');
 
     // ---- compute. The visible list is compact: each draw's instances in one run, the runs back to back. Count (how
     // many each draw gets), prefix (where each run starts), fill. No draw has a cap of its own: a forest of 250,000
@@ -135,6 +150,7 @@ export class PropRenderer {
     })().compute(DRAWS);
     const poolC = storage(this.poolAttr, 'vec4', CAP).toReadOnly();
     const extraC = storage(this.extraAttr, 'uint', CAP).toReadOnly();
+    const kindOfC = storage(this.kindOfAttr, 'uint', PROP_TYPES * VARIANTS).toReadOnly();
     const visW = storage(this.visAttr, 'uint', VISIBLE);
     /** Culls instance i and calls `emit(slot, code)` for each level it is drawn in (one, or two while fading). */
     const classify = (emit: (slot: Node, code: Node) => void) => {
@@ -142,8 +158,12 @@ export class PropRenderer {
       If(i.lessThan(this.usedU), () => {
         const type = extraC.element(i).bitAnd(uint(31)).toVar();
         If(type.lessThan(uint(PROP_FREE)), () => {
-          const p = poolC.element(i).xyz.toVar();
-          const r = this.radiusU.element(type);
+          const pose = poolC.element(i).toVar();
+          const p = pose.xyz;
+          // the kind: the type, or the type's variant when its variants are different meshes
+          const variant = uint(pose.w).shiftRight(uint(12)).bitAnd(uint(15));
+          const kind = kindOfC.element(type.mul(VARIANTS).add(variant)).toVar();
+          const r = this.radiusU.element(kind);
           let inside: Node = float(1);
           for (let k = 0; k < 6; k++) {
             const pl = this.planesU.element(k);
@@ -152,7 +172,7 @@ export class PropRenderer {
           If(inside.greaterThan(0.5), () => {
             const d = length(p.sub(this.camU)).toVar();
             for (let l = 0; l < LODS; l++) {
-              const slot = type.mul(LODS).add(l);
+              const slot = kind.mul(LODS).add(l);
               const end = this.distU.element(slot);
               const start = l === 0 ? float(-1) : this.distU.element(slot.sub(1));
               // enters level l at the end of the previous one (fading), leaves at the end of its own
@@ -200,14 +220,14 @@ export class PropRenderer {
       return;
     }
     const material = this.createMaterial('gpu');
-    this.defs.forEach((d, t) => d.lods.forEach((g, l) => {
+    this.kinds.forEach((d, t) => d.lods.forEach((g, l) => {
       if (!g) return;
       g.setIndirect(this.drawAttr, (t * LODS + l) * 5 * 4);
       const mesh = new THREE.Mesh(g, material);
       mesh.frustumCulled = false;
       mesh.userData.slot = t * LODS + l;
       // only the near level casts shadows (and not the wires)
-      mesh.castShadow = l === 0 && t !== PROP.Wire;
+      mesh.castShadow = l === 0 && d.type !== PROP.Wire;
       mesh.receiveShadow = true;
       this.group.add(mesh);
       this.slotMesh[t * LODS + l] = mesh;
@@ -441,7 +461,7 @@ export class PropRenderer {
 
   /** How far props can be drawn now (the farthest level band), and the range kept beyond it. */
   private ranges(): { keep: number; drop: number } {
-    const far = this.enabled ? Math.max(0, ...this.distArr) : 420 * this.pixelScale;
+    const far = this.enabled ? this.reach * this.pixelScale : 420 * this.pixelScale;
     const keep = far + CELL_SIZE;
     return { keep, drop: keep * 1.15 + CELL_SIZE };
   }
@@ -457,6 +477,7 @@ export class PropRenderer {
     if (!moved && !this.residencyDue && !this.retryDue) return;
     this.residentAt.copy(cam);
     this.residencyDue = false;
+    this.kindNearDue = true;
     for (const c of [...this.blocks.resident]) {
       const d = this.cellDistance(c, cam);
       if (d > drop) this.dropCell(c); else this.blocks.setDistance(c, d);
@@ -482,10 +503,52 @@ export class PropRenderer {
   /** A cell out of range gives its blocks back; it is asked again if it comes back. */
   private dropCell(c: number): void {
     this.clearBlocks(this.blocks.release(c));
+    this.forgetKinds(c);
     if (!this.enabled) this.setCellFallback(c, null);
     this.cellHave[c] = -1;
     this.cellReq[c] = 0;
     this.retryDue ||= this.pending.size > 0;
+  }
+
+  /** Farthest level band of any kind (m, at 1080p). */
+  private get reach(): number {
+    let r = 0;
+    for (const k of this.kinds) k.dist.forEach((x, l) => { if (k.lods[l]) r = Math.max(r, x); });
+    return r;
+  }
+
+  /** Counts a placed cell's instances per kind (kinds with none in the held cells are not drawn). */
+  private countKinds(c: number, p: PropColumns): void {
+    this.forgetKinds(c);
+    const n = new Uint32Array(KINDS);
+    for (let i = 0; i < p.count; i++) {
+      const type = p.extra[i] & 31;
+      if (type >= PROP_TYPES) continue;
+      n[this.kindOf[type * VARIANTS + ((p.data[i * 4 + 3] >>> 12) & 15)]]++;
+    }
+    this.cellKinds.set(c, n);
+    this.kindNearDue = true;
+  }
+
+  /**
+   * Which kinds have instances within their own reach of the camera: the held cells (a bounded ring round the
+   * camera) and each kind's farthest band. Runs when cells come or go or the camera moved (residency), not per frame.
+   */
+  private countKindsNear(cam: THREE.Vector3): void {
+    this.kindNearDue = false;
+    this.kindNear.fill(0);
+    const reach = this.kinds.map((k) => Math.max(...k.dist.map((x, l) => (k.lods[l] ? x : 0))) * this.pixelScale);
+    for (const [c, n] of this.cellKinds) {
+      const d = this.cellDistance(c, cam);
+      for (let k = 0; k < KINDS; k++) if (n[k] && d < reach[k]) this.kindNear[k] += n[k];
+    }
+  }
+
+  private forgetKinds(c: number): void {
+    const n = this.cellKinds.get(c);
+    if (!n) return;
+    this.cellKinds.delete(c);
+    this.kindNearDue = true;
   }
 
   /** Marks blocks free on the GPU side (the cull pass skips them). */
@@ -505,6 +568,7 @@ export class PropRenderer {
     if (!this.enabled) { this.setCellFallback(c, p); this.cellHave[c] = v; return; }
     const freed = this.blocks.release(c);
     this.clearBlocks(freed);
+    this.forgetKinds(c);
     if (freed.length) this.retryDue ||= this.pending.size > 0;
     this.pending.delete(c);
     if (!p || p.count === 0) { this.cellHave[c] = v; return; }
@@ -517,6 +581,7 @@ export class PropRenderer {
     }
     for (const e of placed.evicted) {
       this.clearBlocks(e.blocks);
+      this.forgetKinds(e.cell);
       this.cellHave[e.cell] = -1;
       this.pending.add(e.cell);
     }
@@ -533,6 +598,7 @@ export class PropRenderer {
     }
     this.poolAttr.needsUpdate = true;
     this.extraAttr.needsUpdate = true;
+    this.countKinds(c, p);
     this.cellHave[c] = v;
   }
 
@@ -605,8 +671,9 @@ export class PropRenderer {
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
-    this.defs.forEach((d, t) => d.dist.forEach((x, l) => { this.distArr[t * LODS + l] = d.lods[l] ? x * this.pixelScale : 0; }));
+    this.kinds.forEach((d, k) => d.dist.forEach((x, l) => { this.distArr[k * LODS + l] = d.lods[l] && this.kindNear[k] > 0 ? x * this.pixelScale : 0; }));
     this.updateResidency(camPos);
+    if (this.kindNearDue) this.countKindsNear(camPos);
     // An indirect draw costs a call (and one per shadow cascade) even when the cull leaves it empty: a level whose
     // band ends nearer than any prop can be is not drawn. Nearest possible prop: the eye's height over the highest
     // ground of the 3 × 3 tiles round it (+60 m for bridges and rooftops); props beyond those tiles are ≥ 1 km away.
@@ -625,7 +692,7 @@ export class PropRenderer {
 
   /** Forgets everything (another city): results still on their way are ignored by version. */
   clear(): void {
-    for (const c of [...this.blocks.resident]) this.clearBlocks(this.blocks.release(c));
+    for (const c of [...this.blocks.resident]) { this.clearBlocks(this.blocks.release(c)); this.forgetKinds(c); }
     for (let c = 0; c < CELL_COUNT; c++) {
       if (!this.enabled) this.setCellFallback(c, null);
       this.cellVer[c]++; this.cellReq[c] = 0; this.cellHave[c] = -1;
