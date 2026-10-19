@@ -15,9 +15,12 @@ import { cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { CELL_SIZE } from '../config.ts';
 import { SHAPE_SCALE, SHAPE_STRIDE, type BoxColumns, type PackedMesh } from './protocol.ts';
 import { CIVIC_CATALOG, CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign, type Design } from '../world/design.ts';
-import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
+import { CAT_ELEMENTS, CAT_FINISHES, CAT_FUNCTIONS, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
 import { BAY, catalogFacade } from '../world/catalogFacade.ts';
 import { FIN } from './buildingFinishes.ts';
+import { BMAT, Facade } from './buildingCodes.ts';
+
+export { BMAT, Facade };
 
 export const GEN_VERSION = 15;
 /** Camada de detalhe: para onde vão as peças 3D das janelas enquanto o gerador roda num descarte. */
@@ -96,7 +99,7 @@ CIVIC_TOP[Fn.SportsCourt] = 4; CIVIC_TOP[Fn.Cemetery] = 5; CIVIC_TOP[Fn.Playgrou
  * rules (style, shop ground storey, design, catalog project, civic shape). Cheap: for the camera and the collapse,
  * which ask every frame or for many buildings; the inside view takes the exact layout (buildingVolumes).
  */
-export function wallsHeight(zone: number, floors: number, x: number, z: number, style: number, fn: number, color: number, h: number): number {
+export function wallsHeight(zone: number, floors: number, x: number, z: number, style: number, fn: number, color: number, h: number, seed = 0, w = 0, d = 0): number {
   const fl = Math.max(1, floors);
   if (hasDesign(color)) {
     const ds = decodeDesign(color, h), e = ds.catalog ? catalogProjects()[ds.catalog - 1] : undefined;
@@ -104,6 +107,8 @@ export function wallsHeight(zone: number, floors: number, x: number, z: number, 
     return fl * (ds.finish === 2 ? 3.6 : 3.2);
   }
   if (CIVIC_DESIGNS[fn]) { const [ds, minF] = CIVIC_DESIGNS[fn]; return Math.max(minF, Math.min(fl, minF * 2)) * (ds.finish === 2 ? 3.6 : 3.2); }
+  const civic = fn ? civicProject(fn, seed, w, d) : 0;
+  if (civic) { const e = catalogProjects()[civic - 1]; return (e.groundHeight + (catalogLevels(e, fl)[1] - 1) * e.storeyHeight) * CAT_UNIT; }
   if (fn) return CIVIC_TOP[fn] ?? 3.6 * fl;
   if (zone === Zone.Industrial) return 6 + fl * 2.5 + 2;
   const arch = pickArch(zone, fl, x, z, style), a = ARCHES[arch];
@@ -131,10 +136,6 @@ function untagged(mb: MeshBuilder, draw: () => void): void {
 /** Lajes: manta clara, cimento, piche, cinza escuro, telhado verde. */
 const ROOF_FLATS = [0x8f8b84, 0xa8a49b, 0x5d5f61, 0x77736c, 0x6f8a55, 0xb9b2a6];
 
-/** Materiais dos prédios (canal alfa da cor). */
-export const BMAT = { Wall: 0, RoofFlat: 1, RoofTile: 2, Curtain: 3, Plain: 4, Metal: 5, Paving: 6, Grass: 7, Fence: 8, Shop: 9 } as const;
-/** Tipo de fachada (bits 0-1 do byte de tipo); bit 2 = térreo de loja. */
-export const Facade = { Punched: 0, Curtain: 1, House: 2, Industrial: 3, ShopBit: 4 } as const;
 
 const PLASTER = [0xece6da, 0xe3d6bd, 0xd9c7a6, 0xc9b79c, 0xb7b1a7, 0xdcd2c2, 0xe7d8c9, 0xc2c6c8, 0xd6c3a5, 0xefe9df, 0xc9a98a, 0xa9b4b8, 0xe2cfb4, 0xd0b48f];
 const TILE = [0x9b4a32, 0x8a3f2b, 0x6e3b2c, 0x5a5d61, 0x7a4a36, 0xa65a3c];
@@ -644,7 +645,7 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
   genLod = g.lod;
   const v0 = mb.v;
   const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
-  const cat = ds?.catalog ? ds.catalog : plan.landmark[i];
+  const cat = ds?.catalog ? ds.catalog : plan.landmark[i] || (b.fn[i] ? civicProject(b.fn[i], b.seed[i], W, D) : 0);
   const proj = cat ? catalogProjects()[cat - 1] : undefined;
   if (proj) catalogBuilding(g, proj, ds ? ds.wall : -1);
   else if (ds) design(g, ds);
@@ -1963,6 +1964,33 @@ function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y
 }
 
 // ------------------------------------------------------------ cell plan: facade patterns and landmarks
+
+/** Share of the civic records drawn from a civic catalog project of their function, when the lot fits it (%). */
+const CIVIC_PROJECT_SHARE = 60;
+let civicByFn: Map<number, number[]> | null = null;
+
+/**
+ * The civic catalog project (1-based index, 0 = none) a civic record is drawn from: one of the projects of its
+ * function (school, church, hospital, city hall, police, fire station, courthouse, cemetery, bank), by its seed, on
+ * 60 % of them, when the lot takes the project at 60 % of its size or more. From the record alone: the same on every
+ * level and in the camera's and the collapse's height (wallsHeight).
+ */
+export function civicProject(fn: number, seed: number, w: number, d: number): number {
+  if (!civicByFn) {
+    civicByFn = new Map();
+    catalogProjects().forEach((p, k) => {
+      if (!CIVIC_CATALOG.has(p.name)) return;
+      const name = CAT_FUNCTIONS[p.fn], id = (Fn as Record<string, number>)[name[0].toUpperCase() + name.slice(1)];
+      if (id === undefined) return;
+      if (!civicByFn!.has(id)) civicByFn!.set(id, []);
+      civicByFn!.get(id)!.push(k);
+    });
+  }
+  const list = civicByFn.get(fn);
+  if (!list || hash2(seed, fn, 0xc1c) % 100 >= CIVIC_PROJECT_SHARE) return 0;
+  const k = list[hash2(seed, 0xc1d) % list.length], ext = catalogExtent(catalogProjects()[k]);
+  return Math.min(w / ((ext.x1 - ext.x0) * CAT_UNIT), d / (ext.y1 * CAT_UNIT)) >= 0.6 ? k + 1 : 0;
+}
 
 /** Landmark towers: the catalog projects that are not civic (index into catalogProjects()). */
 let towerCatalog: number[] | null = null;
