@@ -317,42 +317,88 @@ function roofPlant(g: Gen, items: readonly RoofPlantItem[], x0: number, x1: numb
   }
 }
 
-/** Telhado de duas águas com cumeeira ao longo de x (ou z), beiral e oitões. */
-function gable(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number,
-  roofCol: number, wallCol: number, alongX: boolean): void {
-  const o = 0.45; // beiral
+/** 4.0 EAVES and ROOF_THICK (buildingMesh.ts:191-193): the overhang, and the roof's body read at the fascia. */
+const EAVES = 0.45, ROOF_THICK = 0.18;
+
+/**
+ * A pitched roof as the 4.0 draws it (buildingMesh.ts:3473-3541): the slopes over a 45 cm overhang, the roof's body
+ * 18 cm thick (a fascia in the trim x 0.92 round the edge, the soffit under the overhang in the trim x 0.7), the ridge
+ * capped by a rounded row of tiles; a hip roof's ends are slopes too (hips at 45°), a gable's ends are barge boards up
+ * each rake over a wall-coloured gable triangle. The ridge runs along the longer side; `rise` is the ridge's height.
+ */
+function pitchedRoof(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, rise: number,
+  roofCol: number, trim: number, wallCol: number, hipped: boolean, alongX = x1 - x0 >= z1 - z0): void {
   if (!alongX) {
-    // gira o problema: cumeeira ao longo de z
-    const g: Frame = { ...f, c: f.c * 0 + Math.cos(Math.atan2(f.s, f.c) + Math.PI / 2), s: Math.sin(Math.atan2(f.s, f.c) + Math.PI / 2) };
-    // em g, x local vira z: troca os limites
-    gable(mb, g, -z1, -z0, x0, x1, y, h, roofCol, wallCol, true);
+    // the ridge along z: the same roof in a frame turned a quarter (local x becomes z)
+    const ang = Math.atan2(f.s, f.c) + Math.PI / 2;
+    pitchedRoof(mb, { ...f, c: Math.cos(ang), s: Math.sin(ang) }, -z1, -z0, x0, x1, y, rise, roofCol, trim, wallCol, hipped, true);
     return;
   }
-  const zm = (z0 + z1) / 2, half = (z1 - z0) / 2 + o;
-  const slope = h / half;
-  const yE = y - o * slope; // beiral um pouco abaixo
-  const P = (lx: number, ly: number, lz: number, n: [number, number, number], col: number, mat: number) =>
-    mb.vert(wx(f, lx, lz), ly, wz(f, lx, lz), nx(f, n[0], n[2]), n[1], nz(f, n[0], n[2]), col, mat);
-  const nl = Math.hypot(1, slope);
-  const nFront: [number, number, number] = [0, 1 / nl, slope / nl], nBack: [number, number, number] = [0, 1 / nl, -slope / nl];
-  // água da frente e do fundo
-  let a = P(x0 - o, yE, z1 + o, nFront, roofCol, BMAT.RoofTile), b = P(x1 + o, yE, z1 + o, nFront, roofCol, BMAT.RoofTile);
-  let c = P(x1 + o, y + h, zm, nFront, roofCol, BMAT.RoofTile), d = P(x0 - o, y + h, zm, nFront, roofCol, BMAT.RoofTile);
-  mb.quad(a, b, c, d, nx(f, 0, nFront[2]), nFront[1], nz(f, 0, nFront[2]));
-  a = P(x1 + o, yE, z0 - o, nBack, roofCol, BMAT.RoofTile); b = P(x0 - o, yE, z0 - o, nBack, roofCol, BMAT.RoofTile);
-  c = P(x0 - o, y + h, zm, nBack, roofCol, BMAT.RoofTile); d = P(x1 + o, y + h, zm, nBack, roofCol, BMAT.RoofTile);
-  mb.quad(a, b, c, d, nx(f, 0, nBack[2]), nBack[1], nz(f, 0, nBack[2]));
-  // oitões (triângulos de parede)
-  for (const [xx, sx] of [[x0, -1], [x1, 1]] as Array<[number, number]>) {
-    const n: [number, number, number] = [sx, 0, 0];
-    const t0 = P(xx, y, z0, n, wallCol, BMAT.Plain), t1 = P(xx, y, z1, n, wallCol, BMAT.Plain), t2 = P(xx, y + h - o * 0, zm, n, wallCol, BMAT.Plain);
-    mb.tri(t0, t1, t2, nx(f, sx, 0), 0, nz(f, sx, 0));
+  const o = EAVES, T = ROOF_THICK;
+  const span = z1 - z0, slope = rise / (span / 2);
+  const eave = y - o * slope, ridge = y + rise, cm = (z0 + z1) / 2;
+  const hipIn = hipped ? Math.min(span / 2, (x1 - x0) / 2) : 0;
+  const r0 = x0 + hipIn, r1 = x1 - hipIn;
+  const fascia = shadeHex(trim, 0.92), soffit = shadeHex(trim, 0.7), cap = shadeHex(roofCol, 0.85);
+  type P3 = [number, number, number];
+  /** A face (3 or 4 local points), its normal from its corners turned to the side of `hint`. */
+  const face = (pts: P3[], col: number, mat: number, hint: P3): void => {
+    const [a, b, c] = pts;
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let n0 = uy * vz - uz * vy, n1 = uz * vx - ux * vz, n2 = ux * vy - uy * vx;
+    const l = Math.hypot(n0, n1, n2);
+    if (l < 1e-9) return;
+    n0 /= l; n1 /= l; n2 /= l;
+    if (n0 * hint[0] + n1 * hint[1] + n2 * hint[2] < 0) { n0 = -n0; n1 = -n1; n2 = -n2; }
+    const N0 = nx(f, n0, n2), N2 = nz(f, n0, n2);
+    const ids = pts.map((q) => mb.vert(wx(f, q[0], q[2]), q[1], wz(f, q[0], q[2]), N0, n1, N2, col, mat));
+    if (ids.length === 3) mb.tri(ids[0], ids[1], ids[2], N0, n1, N2);
+    else mb.quad(ids[0], ids[1], ids[2], ids[3], N0, n1, N2);
+  };
+  blank(mb);
+  const RT = BMAT.RoofTile, PL = BMAT.Plain;
+  // the two long slopes
+  face([[x0 - o, eave, z1 + o], [x1 + o, eave, z1 + o], [r1, ridge, cm], [r0, ridge, cm]], roofCol, RT, [0, 1, 1]);
+  face([[x1 + o, eave, z0 - o], [x0 - o, eave, z0 - o], [r0, ridge, cm], [r1, ridge, cm]], roofCol, RT, [0, 1, -1]);
+  // far (level 1 and up) the slopes and the gables only: the body and the cap are under a pixel there (4.0 far level)
+  const body = genLod === 0;
+  // the body along the eaves: fascia and soffit
+  if (body) for (const [ze, zw, sz] of [[z1 + o, z1, 1], [z0 - o, z0, -1]] as const) {
+    face([[x0 - o, eave - T, ze], [x1 + o, eave - T, ze], [x1 + o, eave, ze], [x0 - o, eave, ze]], fascia, PL, [0, 0, sz]);
+    face([[x0 - o, eave - T, ze], [x1 + o, eave - T, ze], [x1, y - T, zw], [x0, y - T, zw]], soffit, PL, [0, -1, 0]);
   }
-  // forro do beiral (por baixo), para não ver através
-  const u = [P(x0 - o, yE, z1 + o, [0, -1, 0], wallCol, BMAT.Plain), P(x1 + o, yE, z1 + o, [0, -1, 0], wallCol, BMAT.Plain),
-    P(x1 + o, yE, z0 - o, [0, -1, 0], wallCol, BMAT.Plain), P(x0 - o, yE, z0 - o, [0, -1, 0], wallCol, BMAT.Plain)];
-  mb.quad(u[0], u[1], u[2], u[3], 0, -1, 0);
+  // the ridge cap: two narrow slopes over the ridge, 7 cm proud
+  if (body && r1 > r0 + 1e-3) {
+    const w = 0.14, lift = 0.07, lo = ridge - w * slope + 0.01;
+    face([[r0, lo, cm + w], [r1, lo, cm + w], [r1, ridge + lift, cm], [r0, ridge + lift, cm]], cap, RT, [0, 1, 1]);
+    face([[r1, lo, cm - w], [r0, lo, cm - w], [r0, ridge + lift, cm], [r1, ridge + lift, cm]], cap, RT, [0, 1, -1]);
+  }
+  if (hipped) {
+    for (const [xe, xw, sx, rr] of [[x0 - o, x0, -1, r0], [x1 + o, x1, 1, r1]] as const) {
+      face([[xe, eave, z0 - o], [xe, eave, z1 + o], [rr, ridge, cm]], roofCol, RT, [sx, 1, 0]);
+      if (!body) continue;
+      face([[xe, eave - T, z0 - o], [xe, eave - T, z1 + o], [xe, eave, z1 + o], [xe, eave, z0 - o]], fascia, PL, [sx, 0, 0]);
+      face([[xe, eave - T, z0 - o], [xe, eave - T, z1 + o], [xw, y - T, z1], [xw, y - T, z0]], soffit, PL, [0, -1, 0]);
+    }
+  } else {
+    for (const [xe, xw, sx] of [[x0 - o, x0, -1], [x1 + o, x1, 1]] as const) {
+      // barge boards up each rake, their underside over the gable, the gable triangle in the wall's colour
+      face([[xw, y, z0], [xw, y, z1], [xw, ridge, cm]], wallCol, PL, [sx, 0, 0]);
+      if (!body) continue;
+      face([[xe, eave - T, z0 - o], [xe, ridge - T, cm], [xe, ridge, cm], [xe, eave, z0 - o]], fascia, PL, [sx, 0, 0]);
+      face([[xe, ridge - T, cm], [xe, eave - T, z1 + o], [xe, eave, z1 + o], [xe, ridge, cm]], fascia, PL, [sx, 0, 0]);
+      face([[xe, eave - T, z0 - o], [xw, eave - T, z0 - o], [xw, ridge - T, cm], [xe, ridge - T, cm]], soffit, PL, [0, -1, 0]);
+      face([[xe, ridge - T, cm], [xw, ridge - T, cm], [xw, eave - T, z1 + o], [xe, eave - T, z1 + o]], soffit, PL, [0, -1, 0]);
+    }
+  }
 }
+
+/** A gable roof with its ridge along x (or z when !alongX): the 4.0's (pitchedRoof). */
+function gable(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number,
+  roofCol: number, wallCol: number, alongX: boolean, trim = 0xf4efe4): void {
+  pitchedRoof(mb, f, x0, x1, z0, z1, y, h, roofCol, trim, wallCol, false, alongX);
+}
+
 
 /** Cores de toldo (roadcraft `procedural.ts`). */
 const AWNINGS = [0xb8382e, 0x2f6b4f, 0x2f4f7a, 0xd9a43a, 0x6b3f6b, 0x3d3d3d, 0xc7652f, 0x1f5f6b, 0x8a2f3c, 0x3f7f8f, 0x5c6b2f, 0xd06d8a];
@@ -907,39 +953,9 @@ function piers(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
   }
 }
 
-/** Telhado de quatro águas com beiral (casas). */
-export function hip(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, roofCol: number, soffit: number): void {
-  const o = 0.6;
-  const X0 = x0 - o, X1 = x1 + o, Z0 = z0 - o, Z1 = z1 + o;
-  const w = X1 - X0, d = Z1 - Z0;
-  const ridge = Math.max(0, (w - d) / 2), ridgeZ = Math.max(0, (d - w) / 2);
-  const cx = (X0 + X1) / 2, cz = (Z0 + Z1) / 2;
-  const yE = y - 0.25;
-  const top = y + h;
-  // cumeeira (ponto ou segmento ao longo do lado maior)
-  const rA: [number, number] = [cx - ridge, cz - ridgeZ], rB: [number, number] = [cx + ridge, cz + ridgeZ];
-  const P = (lx: number, ly: number, lz: number) => [wx(f, lx, lz), ly, wz(f, lx, lz)] as const;
-  const face = (pts: Array<readonly [number, number, number]>) => {
-    // normal pela regra da mão (para fora e para cima)
-    const [a, b, c] = pts;
-    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    let nx2 = uy * vz - uz * vy, ny2 = uz * vx - ux * vz, nz2 = ux * vy - uy * vx;
-    if (ny2 < 0) { nx2 = -nx2; ny2 = -ny2; nz2 = -nz2; }
-    const ids = pts.map((p) => mb.vert(p[0], p[1], p[2], nx2, ny2, nz2, roofCol, BMAT.RoofTile));
-    if (ids.length === 3) mb.tri(ids[0], ids[1], ids[2], nx2, ny2, nz2);
-    else mb.quad(ids[0], ids[1], ids[2], ids[3], nx2, ny2, nz2);
-  };
-  const A = P(X0, yE, Z1), B = P(X1, yE, Z1), C = P(X1, yE, Z0), D = P(X0, yE, Z0);
-  const RA = P(rA[0], top, rA[1]), RB = P(rB[0], top, rB[1]);
-  if (w >= d) {
-    face([A, B, RB, RA]); face([C, D, RA, RB]); face([B, C, RB]); face([D, A, RA]);
-  } else {
-    // ridge along z: RA at the back (Z0, side C-D), RB at the front (Z1, side A-B)
-    face([B, C, RA, RB]); face([D, A, RB, RA]); face([A, B, RB]); face([C, D, RA]);
-  }
-  // forro do beiral
-  const u = [A, B, C, D].map((p) => mb.vert(p[0], p[1], p[2], 0, -1, 0, soffit, BMAT.Plain));
-  mb.quad(u[0], u[1], u[2], u[3], 0, -1, 0);
+/** A hip roof (houses): the 4.0's (pitchedRoof); `trim` gives the fascia and the soffit. */
+export function hip(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, roofCol: number, trim: number): void {
+  pitchedRoof(mb, f, x0, x1, z0, z1, y, h, roofCol, trim, trim, true);
 }
 
 /** Facha da (estilo, semente, tipo) para o volume principal. */
@@ -976,7 +992,7 @@ function house(g: Gen): void {
       prism(mb, f, sx, sx + bw * 0.45, z0 - 3, z0 + 2, f.base, hi + 0.4 + fh, shadeHex(wallCol, 0.85), BMAT.Wall, a.module, 0x8f8b84, BMAT.RoofFlat);
     }
   } else if (a.roof === 'hip') hip(mb, f, x0, x1, z0, z1, top, r.range(1.6, 2.6), roofCol, a.trim);
-  else gable(mb, f, x0, x1, z0, z1, top, r.range(1.8, 3.0), roofCol, wallCol, bw >= bd);
+  else gable(mb, f, x0, x1, z0, z1, top, r.range(1.8, 3.0), roofCol, wallCol, bw >= bd, a.trim);
   if (lod > 0) return;
   door(mb, f, Math.max(x0 + 1.2, Math.min(x1 - 1.2, off + (hash2(g.seed, 0xd0) & 1 ? -1 : 1) * bw * 0.22)), z1, hi + 0.4, a.trim, false);
   // varanda na frente (bangalô e casa colonial): laje, pilares e telhadinho

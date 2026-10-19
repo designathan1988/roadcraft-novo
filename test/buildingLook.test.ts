@@ -180,3 +180,21 @@ test('telhado 3: flat roofs carry the 4.0 parapet (0.85 m, membrane inside) and 
   for (let i = 0; i < m.vertexCount; i++) if ((m.color[i * 4 + 3] & 15) === 1 && FLAT_ROOFS.includes(rgb(i))) membrane++;
   assert.ok(membrane > 40, `${membrane} membrane vertices`);
 });
+
+test('telhado 4: pitched roofs have the 4.0 body (18 cm fascia, soffit, ridge cap) and gable triangles in the wall', async () => {
+  const { hip } = await import('../src/jobs/buildingGen.ts');
+  const { MeshBuilder } = await import('../src/jobs/meshBuilder.ts');
+  const mb = new MeshBuilder(false, true);
+  hip(mb, { cx: 0, cz: 0, c: 1, s: 0, base: 0 }, -5, 5, -8, 8, 6, 2.5, 0x993322, 0xf0f0f0);
+  const cols = new Set<number>();
+  let lowest = Infinity, highest = -Infinity;
+  for (let i = 0; i < mb.v; i++) { cols.add(mb.col[i]); lowest = Math.min(lowest, mb.pos[i * 3 + 1]); highest = Math.max(highest, mb.pos[i * 3 + 1]); }
+  const shade = (c: number, k: number) => (Math.round(((c >> 16) & 255) * k) << 16) | (Math.round(((c >> 8) & 255) * k) << 8) | Math.round((c & 255) * k);
+  assert.ok(cols.has(shade(0xf0f0f0, 0.92)), 'fascia in the trim x 0.92');
+  assert.ok(cols.has(shade(0xf0f0f0, 0.7)), 'soffit in the trim x 0.7');
+  assert.ok(cols.has(shade(0x993322, 0.85)), 'ridge cap');
+  // the eave 45 cm out falls by the slope, the body 18 cm under it; the cap 7 cm over the ridge
+  const slope = 2.5 / 5;
+  assert.ok(Math.abs(lowest - (6 - 0.45 * slope - 0.18)) < 1e-3, `fascia bottom ${lowest}`);
+  assert.ok(Math.abs(highest - (6 + 2.5 + 0.07)) < 1e-3, `ridge cap ${highest}`);
+});

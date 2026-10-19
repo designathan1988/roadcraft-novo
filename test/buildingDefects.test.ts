@@ -100,10 +100,11 @@ test('F3: a hip roof deeper than wide covers its plan once, without holes or fol
     let area = 0;
     for (let i = 0; i < mb.t; i += 3) {
       const a = mb.idx[i] * 3, b = mb.idx[i + 1] * 3, c = mb.idx[i + 2] * 3, P = mb.pos;
-      if (P[a + 1] < 5.9 && P[b + 1] < 5.9 && P[c + 1] < 5.9) continue; // the soffit under the eaves
+      // the roof's own slopes (the tiles in the roof colour; not the soffit, the fascia or the ridge cap)
+      if (mb.mat[mb.idx[i]] !== 2 || mb.col[mb.idx[i]] !== 0x993322) continue;
       area += Math.abs((P[b] - P[a]) * (P[c + 2] - P[a + 2]) - (P[c] - P[a]) * (P[b + 2] - P[a + 2])) / 2;
     }
-    const plan = (w + 1.2) * (d + 1.2);
+    const plan = (w + 0.9) * (d + 0.9); // the 4.0 eaves, 45 cm
     assert.ok(Math.abs(area - plan) < 0.01, `${w}×${d}: the roof covers ${area.toFixed(2)} m² of a ${plan.toFixed(2)} m² plan`);
   }
 });
