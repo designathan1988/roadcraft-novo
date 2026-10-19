@@ -466,11 +466,19 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     } else if (cur === 'weather') {
       const w = s.weather;
       const send = (): void => a.weather(w.manual ? { rain: w.rain, wind: w.wind, dir: w.dir, lightning: w.lightning, thunder: w.thunder } : null);
-      const manual = (): void => { if (!w.manual) { w.manual = true; h.render(); } send(); };
-      p.options.append(orow(t('ui.weather.mode'), choices([
+      const mode = choices([
         { label: t('ui.weather.auto'), on: !w.manual, run: () => { w.manual = false; send(); h.render(); } },
         { label: t('ui.weather.manual'), on: w.manual, run: () => { w.manual = true; send(); h.render(); } },
-      ])),
+      ]);
+      // a slider moved in automatic mode turns to "set here" without rebuilding the panel (the drag goes on)
+      const manual = (): void => {
+        if (!w.manual) {
+          w.manual = true;
+          mode.querySelectorAll('button').forEach((b, i) => { b.classList.toggle('on', i === 1); b.setAttribute('aria-pressed', String(i === 1)); });
+        }
+        send();
+      };
+      p.options.append(orow(t('ui.weather.mode'), mode),
       range(t('weather.rain'), 0, 100, 1, Math.round(w.rain * 100), (v) => `${v}%`, (v) => { w.rain = v / 100; manual(); }),
       range(t('weather.wind'), 0, 25, 1, w.wind, (v) => `${v} m/s`, (v) => { w.wind = v; manual(); }),
       range(t('weather.windDirection'), 0, 359, 1, w.dir, (v) => `${v}°`, (v) => { w.dir = v; manual(); }, t('v2.s.direction')),
