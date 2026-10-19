@@ -19,7 +19,15 @@ export interface LayerSource {
   buildPlate?(p: number, priority: number, done: (m: PackedMesh | null) => void): void;
   /** Does the cell have anything to draw? */
   hasContent(c: number): boolean;
+  /**
+   * For a layer without shadows (`shadows: false`): does this cell, tile or plate still cast one (a road layer's
+   * bridges and viaducts)? Asked when its mesh arrives.
+   */
+  castsShadow?(scope: SlotScope, id: number): boolean;
 }
+
+/** What a slot holds: a cell (L0/L1), a tile (L2) or a plate (L3). */
+export type SlotScope = 'cell' | 'tile' | 'plate';
 
 export interface LayerOptions {
   /** Distance at which a tile starts drawing by cells. */
@@ -42,8 +50,8 @@ export interface LayerOptions {
 }
 
 /** One mesh of the layer: a cell, a tile or a plate (`size` metres from its origin corner). */
-interface Slot { mesh: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number; size: number }
-const slot = (size: number) => (): Slot => ({ mesh: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size });
+interface Slot { mesh: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number; size: number; scope: SlotScope; id: number }
+const slot = (size: number, scope: SlotScope) => (_: unknown, id: number): Slot => ({ mesh: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size, scope, id });
 
 const FADE = 0.35;
 const PLATE_COUNT = MAP_PLATES * MAP_PLATES;
@@ -65,8 +73,8 @@ export class CellLayer {
   readonly group = new THREE.Group();
   readonly material: THREE.Material;
   private cells: Slot[][];
-  private tiles: Slot[] = Array.from({ length: TILE_COUNT }, slot(TILE_SIZE));
-  private plates: Slot[] = Array.from({ length: PLATE_COUNT }, slot(PLATE_SIZE));
+  private tiles: Slot[] = Array.from({ length: TILE_COUNT }, slot(TILE_SIZE, 'tile'));
+  private plates: Slot[] = Array.from({ length: PLATE_COUNT }, slot(PLATE_SIZE, 'plate'));
   private cellVer = new Uint32Array(CELL_COUNT).fill(1);
   private tileVer = new Uint32Array(TILE_COUNT).fill(1);
   private plateVer = new Uint32Array(PLATE_COUNT).fill(1);
@@ -102,8 +110,8 @@ export class CellLayer {
     this.opt = opt;
     this.extra = extra;
     this.facade = facade;
-    this.cells = [Array.from({ length: CELL_COUNT }, slot(CELL_SIZE))];
-    if (opt.detail) this.cells.push(Array.from({ length: CELL_COUNT }, slot(CELL_SIZE)));
+    this.cells = [Array.from({ length: CELL_COUNT }, slot(CELL_SIZE, 'cell'))];
+    if (opt.detail) this.cells.push(Array.from({ length: CELL_COUNT }, slot(CELL_SIZE, 'cell')));
     this.group.matrixAutoUpdate = false;
   }
 
@@ -225,7 +233,7 @@ export class CellLayer {
     // three culls it per camera with the bounds above: each shadow cascade draws only the meshes inside it (without
     // this every mesh the layer chose went into all 3 cascades, plates 4-10 km away included)
     mesh.frustumCulled = true;
-    mesh.castShadow = this.opt.shadows ?? true;
+    mesh.castShadow = (this.opt.shadows ?? true) || (this.src.castsShadow?.(s.scope, s.id) ?? false);
     mesh.receiveShadow = true;
     // a rebuild after an edit swaps at once (no fade hole)
     (mesh.userData as FadeData).instant = replacing;
@@ -308,7 +316,7 @@ export class CellLayer {
     // the shadow (away from the sun, as long as its height casts it); three culls the mesh out of the main pass and
     // draws it only into the cascades it reaches
     const sun = sunDirection;
-    if ((this.opt.shadows ?? true) && sun.y > 0.02 && this.distTo(x, z, size) < SHADOW_REACH * this.pixelScale) {
+    if (mesh.castShadow && sun.y > 0.02 && this.distTo(x, z, size) < SHADOW_REACH * this.pixelScale) {
       const len = Math.min(SHADOW_LENGTH, (s.maxY - s.minY) / sun.y);
       const dx = -sun.x * len, dz = -sun.z * len;
       this.box.min.set(Math.min(this.box.min.x, this.box.min.x + dx), s.minY - (s.maxY - s.minY), Math.min(this.box.min.z, this.box.min.z + dz));

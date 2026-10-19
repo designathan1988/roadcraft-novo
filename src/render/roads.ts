@@ -10,6 +10,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { roadGraphTransfer } from '../jobs/protocol.ts';
 import { RMAT, RoadCode } from '../jobs/roadMesh.ts';
 import type { RoadNetwork } from '../roads/network.ts';
+import { heightAt } from '../world/heights.ts';
 import { MAX_LINES, MAX_PROFILES, TABLE_W, onProfileAdded, profileCount, writeProfileRow } from '../roads/profiles.ts';
 import { LAMP_FIRST, LAMP_STEP } from '../jobs/props.ts';
 import { nightU } from './scene.ts';
@@ -48,8 +49,38 @@ export function createTrafficLook(sab: SharedArrayBuffer): TrafficLook {
   return { occupancy: tex, center: uniform(new THREE.Vector2()), arrows };
 }
 
-export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, look: TrafficLook): CellLayer {
+/** Height over the ground from which a road is a bridge (as `roads/economy.ts` charges it). */
+const BRIDGE_GAP = 4.5;
+
+/** Does any segment of these cells run over a bridge (its height over the ground past BRIDGE_GAP)? */
+function hasBridge(net: RoadNetwork, heights: Float32Array, cells: number[]): boolean {
+  const sc = net.segs.cols, nc = net.nodes.cols, segs: number[] = [], nodes: number[] = [];
+  for (const c of cells) net.cellContents(c, segs, nodes);
+  for (const s of segs) {
+    const a = sc.a[s], b = sc.b[s];
+    // the road's height is linear from node to node along the curve: 9 samples
+    for (let k = 0; k <= 8; k++) {
+      const t = k / 8, u = 1 - t;
+      const x = u * u * nc.x[a] + 2 * u * t * sc.cx[s] + t * t * nc.x[b];
+      const z = u * u * nc.z[a] + 2 * u * t * sc.cz[s] + t * t * nc.z[b];
+      if (nc.y[a] * u + nc.y[b] * t - heightAt(heights, x, z) > BRIDGE_GAP) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Roads by cells. The layer casts no shadow (a road on the ground would shadow only itself), except the cells and
+ * tiles with a bridge or a viaduct when the heights are given.
+ */
+export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, look: TrafficLook, heights?: Float32Array): CellLayer {
+  const tileCells = (t: number) => {
+    const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0, out: number[] = [];
+    for (let j = 0; j < CELLS_PER_TILE; j++) for (let i = 0; i < CELLS_PER_TILE; i++) out.push(cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j));
+    return out;
+  };
   const src: LayerSource = {
+    castsShadow: (scope, id) => !!heights && scope !== 'plate' && hasBridge(net, heights, scope === 'cell' ? [id] : tileCells(id)),
     hasContent: (c) => net.cellCount[c] > 0,
     buildCell: (c, level, priority, done) => {
       const segs: number[] = [], nodes: number[] = [];

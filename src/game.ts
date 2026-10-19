@@ -245,7 +245,7 @@ export class Game {
     // per segment: occupancy a→b, b→a, asphalt wear (simulation), free
     this.occupancySab = new SharedArrayBuffer(OCCUPANCY_SEGS * 4);
     this.trafficLook = createTrafficLook(this.occupancySab);
-    this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook);
+    this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook, this.world.heights);
     this.layers = [this.roads, this.city, this.cityDetail];
 
     const posesSab = createPoseBuffers();

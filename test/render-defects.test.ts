@@ -361,3 +361,35 @@ test('E14: a building outside the view whose shadow falls into it is drawn into 
   assert.equal(frustum.intersectsBox(new THREE.Box3(new THREE.Vector3(-1064, 0, -552), new THREE.Vector3(-728, 300, -216))), false, 'the tower is outside the view');
   assert.ok(layer.group.children.includes(L.cells[0][c].mesh!), 'the tower west of the view, whose shadow falls into it, is a shadow caster');
 });
+
+test('E15: road cells with a bridge cast a sun shadow; flat road cells do not', async () => {
+  const { createRoads, createTrafficLook } = await import('../src/render/roads.ts');
+  const { buildRoad, planRoad, snap } = await import('../src/roads/build.ts');
+  const { cellId, cellX } = await import('../src/core/grid.ts');
+  const { HEIGHT_TILE_RES, MAP_TILES, TILE_SIZE, HEIGHT_SPACING } = await import('../src/config.ts');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(-20); w.tileMax.fill(10);
+  w.money = 1e9;
+  // a valley 20 m deep and 80 m wide across x = −40..40 (rows of the height grid, tile by tile)
+  const res = HEIGHT_TILE_RES * MAP_TILES, half = MAP_TILES * TILE_SIZE / 2;
+  for (let gz = 0; gz < res; gz++) for (let gx = 0; gx < res; gx++) {
+    const x = gx * HEIGHT_SPACING - half;
+    if (Math.abs(x) > 40) continue;
+    const t = Math.floor(gz / HEIGHT_TILE_RES) * MAP_TILES + Math.floor(gx / HEIGHT_TILE_RES);
+    w.heights[t * HEIGHT_TILE_RES * HEIGHT_TILE_RES + (gz % HEIGHT_TILE_RES) * HEIGHT_TILE_RES + (gx % HEIGHT_TILE_RES)] = -10;
+  }
+  const a = snap(w.roads, -200, 0, 8), b = snap(w.roads, 200, 0, 8);
+  const plan = planRoad(w, a, null, b, 0, 0);
+  assert.ok(plan.ok, plan.reason);
+  assert.ok(buildRoad(w, plan, a, b, 0).settle());
+  const flat = snap(w.roads, 100, 2000, 8), flat2 = snap(w.roads, 400, 2000, 8); // east of the valley
+  const plan2 = planRoad(w, flat, null, flat2, 0, 0);
+  assert.ok(buildRoad(w, plan2, flat, flat2, 0).settle());
+  const layer = (createRoads as (...a: unknown[]) => CellLayer)(w.roads, null, w.dirty, createTrafficLook(new SharedArrayBuffer(512 * 512 * 4)), w.heights);
+  const L = inside(layer);
+  const bridgeCell = cellId(cellX(0), cellX(0)), flatCell = cellId(cellX(250), cellX(2000));
+  L.setMesh(L.cells[0][bridgeCell], triangle(), 1);
+  L.setMesh(L.cells[0][flatCell], triangle(), 1);
+  assert.equal(L.cells[0][bridgeCell].mesh!.castShadow, true, 'the bridge over the valley casts a shadow');
+  assert.equal(L.cells[0][flatCell].mesh!.castShadow, false, 'a road on flat ground casts none (its shadow would be under it)');
+});
