@@ -172,3 +172,41 @@ test('E21: a new cell mesh comes with its bounds (three never walks its vertices
     assert.ok(g.boundingSphere!.containsPoint(v), `vertex ${i} inside the sphere`);
   }
 });
+
+/** A renderer stand-in: enough for the post-processing to build its node graph (nothing is drawn). */
+const fakeRenderer = () => ({ shadowMap: {}, coordinateSystem: THREE.WebGPUCoordinateSystem, reversedDepthBuffer: false }) as unknown as THREE.WebGPURenderer;
+
+test('E7: rebuilding the final image frees every render target the old one held', async () => {
+  const { Post } = await import('../src/render/post.ts');
+  const GTAONode = (await import('three/addons/tsl/display/GTAONode.js')).default;
+  const BloomNode = (await import('three/addons/tsl/display/BloomNode.js')).default;
+  const { CSMShadowNode } = await import('three/addons/csm/CSMShadowNode.js');
+  const TRAANode = (await import('../src/render/traa.ts')).default;
+  // every class that owns GPU targets: count the instances disposed
+  const classes = { PassNode: THREE.PassNode, RTTNode: THREE.RTTNode, ShadowNode: THREE.ShadowNode, GTAONode, BloomNode, TRAANode, CSMShadowNode } as Record<string, { prototype: { dispose(): void } }>;
+  const disposed = new Map<string, Set<unknown>>();
+  const restore: Array<() => void> = [];
+  for (const [name, C] of Object.entries(classes)) {
+    const own = Object.prototype.hasOwnProperty.call(C.prototype, 'dispose') ? C.prototype.dispose : undefined;
+    const orig = C.prototype.dispose;
+    C.prototype.dispose = function (this: unknown) { if (!disposed.has(name)) disposed.set(name, new Set()); disposed.get(name)!.add(this); return orig.call(this); };
+    restore.push(() => { if (own) C.prototype.dispose = own; else delete (C.prototype as { dispose?: unknown }).dispose; });
+  }
+  try {
+    const renderer = fakeRenderer();
+    const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), sun = new THREE.DirectionalLight();
+    const scene = new THREE.Scene(); scene.add(sun);
+    const post = new Post(renderer, scene, camera, sun, { shadows: true, ao: true, bloom: true });
+    // the first frame builds the cascades (3 shadow maps)
+    (post.csm as unknown as { _init(b: unknown): void })._init({ camera, renderer });
+    post.dispose();
+    const count = (k: string) => disposed.get(k)?.size ?? 0;
+    assert.ok(count('PassNode') >= 1, `scene pass freed (${count('PassNode')})`);
+    assert.equal(count('GTAONode'), 1, 'ambient occlusion freed');
+    assert.equal(count('BloomNode'), 1, 'bloom freed');
+    assert.equal(count('TRAANode'), 2, 'both anti-aliasing histories freed');
+    assert.equal(count('RTTNode'), 2, 'the two copies of the image fed to the anti-aliasing freed');
+    assert.equal(count('CSMShadowNode'), 1, 'cascades freed');
+    assert.equal(count('ShadowNode'), 3, 'the three cascade shadow maps freed');
+  } finally { for (const r of restore) r(); }
+});

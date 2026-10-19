@@ -41,6 +41,7 @@ export class Post {
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, sun: THREE.DirectionalLight, opts: PostOptions) {
     this.renderer = renderer;
     this.opts = opts;
+    this.sun = sun;
     // cascaded shadows: only as far as a shadow still covers a useful pixel
     if (opts.shadows) {
       renderer.shadowMap.enabled = true;
@@ -61,6 +62,7 @@ export class Post {
     // no MSAA: anti-aliasing is temporal (TRAA), which also cleans the occlusion's noise
     const scenePass = pass(scene, camera, { samples: 0 });
     this.scenePass = scenePass;
+    this.owned.push(scenePass);
     // normal and velocity blend by material: opaque overwrites, colorOnly's transparent leaves them
     const outs = mrt({ output, normal: packNormalToRGB(normalView), velocity: stableVelocity });
     outs.setBlendMode('normal', new THREE.BlendMode(THREE.MaterialBlending));
@@ -74,17 +76,20 @@ export class Post {
       const normal = sample((uv: Node) => unpackRGBToNormal(scenePass.getTextureNode('normal').sample(uv)));
       const depth = depthTex;
       const aoPass = ao(depth, normal, camera);
+      this.owned.push(aoPass);
       aoPass.resolutionScale = 0.5;
       aoPass.radius.value = 3.5;
       aoPass.distanceExponent.value = 1.5;
       aoPass.thickness.value = 2;
       const clean: Node = denoise(aoPass.getTextureNode(), depth, normal, camera);
+      this.owned.push(clean);
       const occ = clean.r;
       color = vec4(color.rgb.mul(mix(float(1), occ, 0.85)), color.a);
     }
     // one TRAA per output: one TRAA shared by two final images loses its history and the whole image shook at the
     // edges (10% of the pixels changing with everything still)
     const aa = traa(color, depthTex, scenePass.getTextureNode('velocity'), camera);
+    this.ownTraa(aa);
     this.camera = camera;
     this.traas = [aa];
 
@@ -134,8 +139,10 @@ export class Post {
       // image (before it, the glow of the jittered frame went into the history and the image drizzled).
       // By day the glow hardly shows and the pass costs: the day output has no bloom.
       const aaN = traa(color, depthTex, scenePass.getTextureNode('velocity'), camera);
+      this.ownTraa(aaN);
       this.traas.push(aaN);
       const b = bloom(aaN, 0.6, 0.35, 0.9);
+      this.owned.push(b);
       b.strength = nightU.mul(0.55).add(0.08);
       this.nightOut = grade(aaN.add(b), aaN);
     }
@@ -157,6 +164,16 @@ export class Post {
   }
 
   private traas: Node[] = [];
+  /** Nodes holding GPU targets (the scene pass, AO, bloom, anti-aliasing and the image copied into it). */
+  private owned: Array<{ dispose(): void }> = [];
+  private sun: THREE.DirectionalLight;
+
+  /** The anti-aliasing node and, when the image fed to it had to be copied into a texture, that copy. */
+  private ownTraa(n: Node): void {
+    this.owned.push(n);
+    const beauty = (n as unknown as { beautyNode?: { isRTTNode?: boolean; dispose(): void } }).beautyNode;
+    if (beauty?.isRTTNode) this.owned.push(beauty);
+  }
   private camera: THREE.Camera;
   private dayOut: Node;
   private nightOut: Node;
@@ -182,5 +199,20 @@ export class Post {
     this.pipeline.render();
   }
 
-  dispose(): void { this.pipeline.dispose(); void this.renderer; }
+  /**
+   * Frees everything this final image holds on the GPU. Rebuilding it (shadows, occlusion or bloom switched in the
+   * options) used to free only the pipeline's quad: the scene targets, the AO, bloom and anti-aliasing targets and the
+   * three cascade shadow maps stayed, 100-200 MB per change.
+   */
+  dispose(): void {
+    for (const n of this.owned) n.dispose();
+    this.owned.length = 0;
+    if (this.csm) {
+      for (const s of (this.csm as unknown as { _shadowNodes: Array<{ dispose(): void }> })._shadowNodes) s.dispose();
+      this.csm.dispose();
+      if ((this.sun.shadow as { shadowNode?: unknown }).shadowNode === this.csm) (this.sun.shadow as { shadowNode?: unknown }).shadowNode = null;
+    }
+    this.pipeline.dispose();
+    void this.renderer;
+  }
 }
