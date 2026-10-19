@@ -542,6 +542,11 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   return m;
 }
 
+/** The pose at `o` is the followed vehicle: its own id (pose index 10) and kind and colour (light bits left out). */
+export function followMatch(d: Float32Array, o: number, f: { info: number; id: number }): boolean {
+  return d[o + 10] === f.id && d[o + 8] % 65536 === f.info;
+}
+
 export class VehicleRenderer {
   readonly group = new THREE.Group();
   private near: Batch[];
@@ -577,7 +582,7 @@ export class VehicleRenderer {
   hidePeople = false;
 
   /** Veículo seguido pela câmera: rastreado pela pose mais perto da última, com o mesmo tipo e cor. */
-  follow: { x: number; z: number; info: number; lost: number } | null = null;
+  follow: { x: number; z: number; info: number; id: number; lost: number } | null = null;
   /** Pose do seguido neste quadro: x, y, z, rumo. */
   readonly followPose = new Float64Array(4);
 
@@ -592,7 +597,7 @@ export class VehicleRenderer {
       if (dd < bd) { bd = dd; best = o; }
     }
     if (best < 0) return false;
-    this.follow = { x: d[best + 4], z: d[best + 6], info: d[best + 8] % 65536, lost: 0 };
+    this.follow = { x: d[best + 4], z: d[best + 6], info: d[best + 8] % 65536, id: d[best + 10], lost: 0 };
     return true;
   }
 
@@ -632,7 +637,7 @@ export class VehicleRenderer {
         const yaw = d[o + 3] + dy * t;
         const px = d[o] + (d[o + 4] - d[o]) * tp, py = d[o + 1] + (d[o + 5] - d[o + 1]) * tp, pz = d[o + 2] + (d[o + 6] - d[o + 2]) * tp;
         const pyaw = d[o + 3] + dy * tp;
-        if (fol && d[o + 8] % 65536 === fol.info) {
+        if (fol && followMatch(d, o, fol)) {
           const dd = (x - fol.x) ** 2 + (z - fol.z) ** 2;
           if (dd < fbest) { fbest = dd; fp[0] = x; fp[1] = y; fp[2] = z; fp[3] = yaw; }
         }

@@ -780,3 +780,14 @@ test('C25: bus riders walk to the stop itself to board and step off the bus at t
   assert.equal(boardFar, 0, `${boardFar} of ${boarded} boarded away from the stop`);
   assert.equal(alightFar, 0, `${alightFar} of ${alighted} stepped off away from the stop`);
 });
+
+test('C28: following a vehicle keeps to that vehicle when a look-alike passes closer', async () => {
+  const mod = await import('../src/render/vehicles.ts') as unknown as { followMatch?: (d: Float32Array, o: number, f: { info: number; id: number }) => boolean };
+  assert.ok(typeof mod.followMatch === 'function', 'the followed vehicle is matched by something of its own');
+  const d = new Float32Array(22);
+  // two silver sedans, same kind and colour: ids 41 and 42
+  d[8] = 0 * 256 + 3; d[10] = 41; d[11 + 8] = 0 * 256 + 3 + 65536 /* braking */; d[11 + 10] = 42;
+  const fol = { info: 3, id: 42 };
+  assert.equal(mod.followMatch(d, 0, fol), false, 'the look-alike matched');
+  assert.equal(mod.followMatch(d, 11, fol), true, 'the followed car (braking) did not match');
+});
