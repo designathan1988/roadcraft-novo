@@ -355,9 +355,12 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
   const s = h.s, a = h.a, cur = h.tool();
   const now = landTabOf(cur, s.item);
   s.landTab = now;
+  // an item or a barrier picked places it: Remove poles is left
+  const placing = (): void => { s.itemRemove = false; a.itemRemove(false); };
+  const putItem = (k: number): void => { placing(); s.item = k; a.item(k); h.pick('streetscape'); h.render(); };
   const first: Record<LandTab, () => void> = {
     relief: () => h.pick('raise'), ground: () => h.pick('paint'), nature: () => h.pick('forest'),
-    sky: () => h.pick('sky'), street: () => { s.item = Item.Tree; a.item(s.item); h.pick('streetscape'); }, people: () => h.pick('person'),
+    sky: () => h.pick('sky'), street: () => putItem(Item.Tree), people: () => h.pick('person'),
   };
   for (const [id, key, icon] of [['relief', 'v2.land.relief', 'terrain'], ['ground', 'v2.land.ground', 'paint'], ['nature', 'v2.land.nature', 'ls_tree'],
     ['sky', 'v2.land.sky', 'cloud'], ['street', 'v2.land.street', 'ls_bench'], ['people', 'tool.person', 'people']] as const) {
@@ -416,7 +419,7 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
       card(t('terrain.fog'), fogOn, () => { st.fog = 'lay'; st.cloud = 'none'; sendSky(); h.pick('sky'); }, svg('fog', 30)),
       card(t('terrain.weather'), cur === 'weather', () => h.pick('weather'), svg('storm', 30)));
     const effects = section(p.strip, t('el.effects'));
-    for (const [k, name] of EFFECTS) effects.append(card(t(`el.kind.${name}`), cur === 'streetscape' && s.item === k, () => { s.item = k; a.item(k); h.pick('streetscape'); }, svg(`el_${name}`, 30)));
+    for (const [k, name] of EFFECTS) effects.append(card(t(`el.kind.${name}`), cur === 'streetscape' && s.item === k, () => putItem(k), svg(`el_${name}`, 30)));
     if (cloudOn) {
       const icons = { add: 'plus', move: 'move', edit: 'draw', remove: 'eraser' } as const;
       p.options.append(orow(t('v2.row.brush'), choices((['add', 'move', 'edit', 'remove'] as const).map((m) => ({
@@ -452,7 +455,7 @@ export function renderLandscape(h: DrawerHost, p: DrawerParts): void {
     }
   } else if (now === 'street') {
     const furniture = section(p.strip, t('tool.streetscape'));
-    for (const [k, key, icon] of STREET) furniture.append(card(t(key), cur === 'streetscape' && s.item === k, () => { s.itemRemove = false; a.itemRemove(false); s.item = k; a.item(k); h.pick('streetscape'); h.render(); }, svg(icon, 30)));
+    for (const [k, key, icon] of STREET) furniture.append(card(t(key), cur === 'streetscape' && s.item === k, () => putItem(k), svg(icon, 30)));
     const walls = section(p.strip, t('v2.land.walls'));
     for (const [k, key, icon] of WALLS) walls.append(card(t(key), cur === 'barrier' && s.barrier === k, () => { s.itemRemove = false; a.itemRemove(false); s.barrier = k; a.barrierKind(k); h.pick('barrier'); h.render(); }, svg(icon, 30)));
     const poles = section(p.strip, t('tool.pole'));
