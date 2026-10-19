@@ -173,6 +173,25 @@ test('E21: a new cell mesh comes with its bounds (three never walks its vertices
   }
 });
 
+test('E4: a cell mesh outside a shadow cascade is not drawn into it', () => {
+  const w = new World();
+  const layer = new CellLayer(recordingSource(), w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40 });
+  const L = inside(layer);
+  const s = L.cells[0][0]; // the map's south-west corner cell
+  L.setMesh(s, { ...triangle(), originX: -5120, originZ: -5120 }, 1);
+  const mesh = s.mesh!;
+  // a cascade's camera: 300 m square round a point 3 km away, looking down
+  const cascade = new THREE.OrthographicCamera(-150, 150, 150, -150, 1, 2000);
+  cascade.position.set(-2000, 1000, -2000); cascade.lookAt(-2000, 0, -2000); cascade.updateMatrixWorld();
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(cascade.projectionMatrix, cascade.matrixWorldInverse));
+  // three's renderer draws an object when `!object.frustumCulled || object.intersectsFrustum(frustum)`
+  const drawn = !mesh.frustumCulled || mesh.intersectsFrustum(frustum);
+  assert.equal(drawn, false, 'the corner cell was drawn into a cascade 4 km away');
+  cascade.position.set(-5000, 1000, -5000); cascade.lookAt(-5000, 0, -5000); cascade.updateMatrixWorld();
+  frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(cascade.projectionMatrix, cascade.matrixWorldInverse));
+  assert.equal(mesh.intersectsFrustum(frustum), true, 'a cascade over the cell draws it');
+});
+
 /** A renderer stand-in: enough for the post-processing to build its node graph (nothing is drawn). */
 const fakeRenderer = () => ({ shadowMap: {}, coordinateSystem: THREE.WebGPUCoordinateSystem, reversedDepthBuffer: false }) as unknown as THREE.WebGPURenderer;
 

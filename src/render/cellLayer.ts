@@ -221,7 +221,9 @@ export class CellLayer {
     mesh.matrixWorld.copy(mesh.matrix);
     mesh.matrixAutoUpdate = false;
     mesh.matrixWorldAutoUpdate = false;
-    mesh.frustumCulled = false;
+    // three culls it per camera with the bounds above: each shadow cascade draws only the meshes inside it (without
+    // this every mesh the layer chose went into all 3 cascades, plates 4-10 km away included)
+    mesh.frustumCulled = true;
     mesh.castShadow = this.opt.shadows ?? true;
     mesh.receiveShadow = true;
     // a rebuild after an edit swaps at once (no fade hole)
