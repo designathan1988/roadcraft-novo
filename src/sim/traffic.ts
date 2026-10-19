@@ -134,6 +134,9 @@ export interface LineSpec {
 /** Where trucks start and end (none, residential, commercial, industrial, mixed): goods between industry and commerce. */
 const TRUCK_ZONES = [0.05, 0.1, 0.6, 1, 0.4];
 
+/** Cell of the stop index (m) and cells per side of the map. */
+const STOP_CELL = 600, STOP_CELLS = Math.ceil(MAP_SIZE / STOP_CELL);
+
 const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
 const TERMINAL_DWELL = 75;
@@ -1960,6 +1963,29 @@ export class Traffic {
       for (const v of [...set]) { if (extra <= 0) break; set.delete(v); this.retireBus(v); extra--; }
     });
     this.keepBuses();
+    this.indexStops();
+  }
+
+  /** Stops by STOP_CELL cell of the map (first entry of each cell, then line and stop of each entry). */
+  private stopStart = new Int32Array(STOP_CELLS * STOP_CELLS + 1);
+  private stopLine = new Int32Array(0);
+  private stopIdx = new Int32Array(0);
+
+  /** Sorts every stop into its cell (when the lines change), so the drawing reads only the cells near the camera. */
+  private indexStops(): void {
+    const cellOf = (x: number, z: number) => {
+      const i = Math.min(STOP_CELLS - 1, Math.max(0, Math.floor((x + MAP_HALF) / STOP_CELL)));
+      const j = Math.min(STOP_CELLS - 1, Math.max(0, Math.floor((z + MAP_HALF) / STOP_CELL)));
+      return j * STOP_CELLS + i;
+    };
+    let n = 0;
+    for (const ln of this.lines) n += ln.stopX.length;
+    const start = this.stopStart.fill(0), line = new Int32Array(n), idx = new Int32Array(n);
+    this.lines.forEach((ln) => { for (let i = 0; i < ln.stopX.length; i++) start[cellOf(ln.stopX[i], ln.stopZ[i]) + 1]++; });
+    for (let c = 0; c < STOP_CELLS * STOP_CELLS; c++) start[c + 1] += start[c];
+    const fill = start.slice(0, STOP_CELLS * STOP_CELLS);
+    this.lines.forEach((ln, li) => { for (let i = 0; i < ln.stopX.length; i++) { const k = fill[cellOf(ln.stopX[i], ln.stopZ[i])]++; line[k] = li; idx[k] = i; } });
+    this.stopLine = line; this.stopIdx = idx;
   }
 
   /** A bus leaves its line: fades out where it is (near the camera) or goes at once (far). Not a trip. */
@@ -2177,8 +2203,13 @@ export class Traffic {
   /** Those waiting at stops near the camera (standing people, up to 14 per stop). */
   writeStopPeople(data: Float32Array, stride: number, start: number, max: number): number {
     let n = 0;
-    for (const ln of this.lines) {
-      for (let i = 0; i < ln.stopX.length; i++) {
+    // only the cells within 600 m of the camera (the stop index), never every stop of every line
+    const i0 = Math.max(0, Math.floor((this.camX - 600 + MAP_HALF) / STOP_CELL)), i1 = Math.min(STOP_CELLS - 1, Math.floor((this.camX + 600 + MAP_HALF) / STOP_CELL));
+    const j0 = Math.max(0, Math.floor((this.camZ - 600 + MAP_HALF) / STOP_CELL)), j1 = Math.min(STOP_CELLS - 1, Math.floor((this.camZ + 600 + MAP_HALF) / STOP_CELL));
+    for (let cj = j0; cj <= j1; cj++) for (let ci = i0; ci <= i1; ci++) {
+      const cell = cj * STOP_CELLS + ci;
+      for (let e = this.stopStart[cell]; e < this.stopStart[cell + 1]; e++) {
+        const ln = this.lines[this.stopLine[e]], i = this.stopIdx[e];
         const x = ln.stopX[i], z = ln.stopZ[i];
         if (Math.abs(x - this.camX) > 600 || Math.abs(z - this.camZ) > 600) continue;
         const w = Math.min(14, Math.floor(Math.min(120, ln.waiting[i] + (this.time - ln.lastT[i]) * WAIT_RATE)));

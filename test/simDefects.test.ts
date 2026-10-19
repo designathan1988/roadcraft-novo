@@ -451,3 +451,25 @@ test('C48: the number of pedestrians follows the demand, not a fixed ceiling of 
   for (let i = 0; i < 20 * 300 && peds.count <= 110000; i++) peds.step(0.05);
   assert.ok(peds.count > 110000, `${peds.count} pedestrians for a demand of ${want}`);
 });
+
+test('C50: drawing the people waiting at stops looks only at the stops near the camera', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim, 8000, 8000);
+  tr.density = 0;
+  const lines = [];
+  for (let i = 0; i < 40; i++) lines.push({ id: i + 1, color: i % 16, buses: 0, stops: [-120, -189, 189, 0, 0, 189] });
+  tr.setLines(lines);
+  let reads = 0;
+  for (const ln of tr.lines) {
+    for (const key of ['stopX', 'stopZ'] as const) {
+      ln[key] = new Proxy(ln[key], { get(t, p, r) { if (typeof p === 'string' && /^\d+$/.test(p)) reads++; return Reflect.get(t, p, r); } });
+    }
+  }
+  const out = new Float32Array(11 * 1000);
+  for (let i = 0; i < 20; i++) tr.writeStopPeople(out, 11, 0, 1000);
+  assert.equal(reads, 0, `${reads} stop reads in 20 steps with every stop 8 km from the camera`);
+  // near the camera they are drawn
+  tr.camX = 0; tr.camZ = 0;
+  for (const ln of tr.lines) ln.lastT.fill(-1000); // people have been arriving for a while
+  assert.ok(tr.writeStopPeople(out, 11, 0, 1000) > 0, 'nobody drawn at the stops near the camera');
+});
