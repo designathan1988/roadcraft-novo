@@ -71,11 +71,12 @@ export const SCENARIOS = {
     click('[data-pop=camera]');
     await frames(2);
     const y1 = g.rig.yaw;
-    click(byText('.v2-pop .v2-icon', '\\\\(Q\\\\)'));
+    // the turn-left button: its name without the key, as Roadcraft 4.0 (v2/shell.ts:759)
+    click(byText('.v2-pop .v2-icon', '^Girar à esquerda|^Turn left'));
     await wait(1500);
     const left = g.rig.yaw - y1;
     check('Q turns the camera', Math.abs(q) > 0.1, 'Q turned ' + q.toFixed(3));
-    check('the "(Q)" button turns the same way as Q', Math.sign(left) === Math.sign(q) && Math.abs(left) > 0.1, 'Q ' + q.toFixed(3) + ', button ' + left.toFixed(3));
+    check('the turn-left button turns the same way as Q', Math.sign(left) === Math.sign(q) && Math.abs(left) > 0.1, 'Q ' + q.toFixed(3) + ', button ' + left.toFixed(3));
   `,
   // B31: [ and ] with the zone tool change the zone brush (the radius the panel shows), not the hidden terrain brush
   'B31-zone-radius-keys': `
@@ -575,7 +576,10 @@ export const SCENARIOS = {
     check('generating from the title screen uses its seed', w.seed === 4321 && w.roads.segs.size > 0, 'seed ' + w.seed + ', segments ' + w.roads.segs.size);
     w.money = w.money; g.unsaved = false; for (let t = 0; t < w.saveDirty.length; t++) w.saveDirty[t] = 0;
     click('[data-pop=menu]'); await frames(2);
-    click(byText('.v2-pop .v2-row', 'Gerar cidade|Generate')); await wait(500); await idle();
+    // the menu's new city over the whole map (Roadcraft 4.0 New world) asks first
+    const confirm0 = window.confirm; window.confirm = () => true;
+    click(byText('.v2-pop .v2-row', '^Nova cidade|^New city')); await wait(500); await idle();
+    window.confirm = confirm0;
     check('the generate of the menu takes a new seed', w.seed !== 4321, 'seed ' + w.seed);
   `,
   // As the 4.0 (main.ts sky: 'day'): a game opens with the sky "always day", that button lit, the clock running
@@ -668,9 +672,10 @@ export const SCENARIOS = {
     click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
     const strip = Q('.v2-strip');
     strip.scrollLeft = 120; strip.dispatchEvent(new Event('scroll')); await frames(2);
-    check('a long strip fades at the side with more', !!strip.dataset.more, 'no fade; scroll ' + strip.scrollWidth + ' / ' + strip.clientWidth);
+    const s0 = strip.scrollLeft;
+    check('a long strip fades at the side with more', !!strip.dataset.more && s0 > 0, 'no fade; scroll ' + strip.scrollWidth + ' / ' + strip.clientWidth);
     click(QA('.v2-strip .v2-card')[16]); await frames(2);
-    check('the strip keeps its scroll after a pick', Q('.v2-strip').scrollLeft > 60, 'scroll ' + Q('.v2-strip').scrollLeft);
+    check('the strip keeps its scroll after a pick', s0 > 0 && Math.abs(Q('.v2-strip').scrollLeft - s0) <= 1, 'scroll ' + Q('.v2-strip').scrollLeft + ', was ' + s0);
   ` },
   // The 4.0 graphics dialog (ui/graphicsPanel.ts): a full screen row and the graphics card's name
   'options-4.0': `
