@@ -5,8 +5,9 @@
 import * as THREE from 'three/webgpu';
 import { T } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { colorOnly } from './post.ts';
+import { colorOnly } from './tsl.ts';
 import { flashU, windU } from './weather.ts';
+import { CLOUD_DATA, CLOUD_TEX, MAX_CLOUDS, cloudCountU } from './cloudShadow.ts';
 
 const {
   vec3, vec4, float, int, ivec2, smoothstep, textureLoad, time, instanceIndex, hash, cameraPosition, normalize, cross,
@@ -15,20 +16,17 @@ const {
 
 export interface Cloud { x: number; z: number; y: number; size: number; density: number }
 
-export const MAX_CLOUDS = 24;
+export { MAX_CLOUDS } from './cloudShadow.ts';
 const PUFFS = 64;
 
 export class CloudPuffs {
   readonly mesh: THREE.Mesh;
-  private tex: THREE.DataTexture;
-  private data = new Float32Array(MAX_CLOUDS * 2 * 4);
+  // the cloud list lives in cloudShadow.ts: the final image reads it for the clouds' shadows
+  private tex = CLOUD_TEX;
+  private data = CLOUD_DATA;
   private geo: THREE.InstancedBufferGeometry;
 
   constructor() {
-    // duas linhas por nuvem: (x, y, z, tamanho) e (densidade, -, -, -)
-    this.tex = new THREE.DataTexture(this.data, MAX_CLOUDS, 2, THREE.RGBAFormat, THREE.FloatType);
-    this.tex.minFilter = this.tex.magFilter = THREE.NearestFilter;
-    this.tex.needsUpdate = true;
     const g = new THREE.InstancedBufferGeometry();
     const q = new THREE.PlaneGeometry(1, 1);
     g.index = q.index;
@@ -84,6 +82,7 @@ export class CloudPuffs {
       d[(MAX_CLOUDS + i) * 4] = c.density;
     }
     this.geo.instanceCount = n * PUFFS;
+    cloudCountU.value = n;
     this.mesh.visible = n > 0;
     this.tex.needsUpdate = true;
   }

@@ -5,10 +5,10 @@
 import * as THREE from 'three/webgpu';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { colorOnly } from './post.ts';
+import { colorOnly } from './tsl.ts';
 
 const {
-  uniform, vec2, vec3, vec4, float, mix, smoothstep, clamp, positionWorld, positionLocal, time, mx_fractal_noise_float,
+  uniform, vec3, vec4, float, mix, smoothstep, clamp, positionWorld, positionLocal, time, mx_fractal_noise_float,
   instanceIndex, hash, fract, cameraPosition, normalize, cross, sRGBTransferEOTF, attribute, sin, step, cameraProjectionMatrix,
 } = T;
 
@@ -24,14 +24,24 @@ export const windU = uniform(0.2);
 export const windDirU = uniform(new THREE.Vector2(0.91, 0.41));
 /** Clarão do relâmpago (0..1, cai em décimos de segundo). */
 export const flashU = uniform(0);
+/** How far the cloud layer has drifted with the wind (m, x and z): the clouds and their shadows move together. */
+export const cloudDriftU = uniform(new THREE.Vector2(0, 0));
+
+/** Cover of the weather's cloud layer over a point of its plane (0..1): the noise its material draws. */
+export function layerCover(xz: Node): Node {
+  const p = xz.add(cloudDriftU).div(2600);
+  const n = mx_fractal_noise_float(vec3(p.x, p.y, time.mul(0.002)), 4, 2, 0.5).mul(0.5).add(0.5);
+  const cover = cloudsU.mul(0.9);
+  return smoothstep(float(1).sub(cover), float(1.15).sub(cover.mul(0.6)), n);
+}
 
 const RAIN_DROPS = 14000;
 /** Raio: 40 trechos, cada um com 4 triângulos (borda, miolo, borda: o miolo brilha, as bordas são o halo). */
 const BOLT_SEGS = 40;
 const BOLT_VERTS = BOLT_SEGS * 12;
 const RAIN_BOX = 70;
-/** Altura da camada de nuvens. */
-const CLOUD_Y = 2200;
+/** Height of the weather's cloud layer (m). */
+export const CLOUD_Y = 2200;
 
 export class Weather {
   readonly group = new THREE.Group();
@@ -65,10 +75,8 @@ export class Weather {
   constructor() {
     // nuvens: plano alto, ruído que anda com o vento
     const cm = colorOnly(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide }));
-    const p = positionWorld.xz.div(2600).add(vec2(time.mul(0.004), time.mul(0.0015)));
-    const n = mx_fractal_noise_float(vec3(p.x, p.y, time.mul(0.002)), 4, 2, 0.5).mul(0.5).add(0.5);
-    const cover = cloudsU.mul(0.9);
-    const a = smoothstep(float(1).sub(cover), float(1.15).sub(cover.mul(0.6)), n);
+    // the layer drifts with the wind (`cloudDriftU`, Roadcraft 4.0: drift += wind × dt), its shadows with it
+    const a = layerCover(positionWorld.xz);
     const day = float(1).sub(nightU);
     const light = mix(vec3(0.12, 0.13, 0.16), vec3(0.96, 0.96, 0.97), day).mul(mix(float(1), float(0.62), rainU));
     // câmera subindo para perto da camada (vista geral de mapas grandes): as nuvens somem
@@ -222,6 +230,9 @@ export class Weather {
    */
   update(dt: number, gameDt: number, eye: THREE.Vector3, ground = 0, fog?: THREE.Color): void {
     this.eyeU.value.copy(eye);
+    // the cloud layer drifts along the wind: 3 m/s in calm air, 15 m/s in a gale
+    const drift = cloudDriftU.value as THREE.Vector2, wd = windDirU.value as THREE.Vector2, speed = 3 + 12 * windU.value;
+    drift.set(drift.x + wd.x * speed * dt, drift.y + wd.y * speed * dt);
     // sem chuva, os riscos nem são desenhados; acima da camada, as nuvens também não
     this.rain.visible = rainU.value > 0.003;
     this.clouds.visible = eye.y < CLOUD_Y - 250;

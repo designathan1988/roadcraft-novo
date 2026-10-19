@@ -11,13 +11,14 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
+import { SHADOW_ONLY_LAYER, SHADOW_REACH, sunDirection } from './sun.ts';
+import { cloudShadowAt, cloudShadowStrength } from './cloudShadow.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
 const {
   pass, mrt, output, normalView, packNormalToRGB, unpackRGBToNormal, sample, vec2, vec4, vec3, mix, float, dot, renderOutput,
-  smoothstep, max, min, clamp, screenUV, select, pow, sqrt, screenSize, cameraProjectionMatrix,
+  smoothstep, max, min, clamp, screenUV, select, pow, sqrt, screenSize, cameraProjectionMatrix, getViewPosition,
 } = T;
 
 /** How far the sun's shadows reach from the perspective camera (m). */
@@ -28,12 +29,6 @@ const SHARPEN = 0.35;
 
 export interface PostOptions { shadows: boolean; ao: boolean; bloom: boolean }
 
-/** A transparent material paints colour only: it leaves the normal and velocity of what is behind it (the occlusion
- *  and the TRAA read those layers; otherwise rain and clouds turn into streaks and smudges). */
-export function colorOnly<M extends THREE.NodeMaterial>(m: M): M {
-  m.mrtNode = mrt({ output, normal: vec4(0, 0, 0, 0), velocity: vec4(0, 0, 0, 0) });
-  return m;
-}
 
 export class Post {
   readonly pipeline: THREE.RenderPipeline;
@@ -43,6 +38,8 @@ export class Post {
   opts: PostOptions;
 
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, sun: THREE.DirectionalLight, opts: PostOptions) {
+    this.camWorldU.value = camera.matrixWorld;
+    this.projInvU.value = camera.projectionMatrixInverse;
     this.renderer = renderer;
     this.opts = opts;
     this.sun = sun;
@@ -91,6 +88,15 @@ export class Post {
       this.owned.push(clean);
       const occ = clean.r;
       color = vec4(color.rgb.mul(mix(float(1), occ, 0.85)), color.a);
+    }
+    // the clouds' shadows on the ground (Roadcraft 4.0): each pixel's world position from the depth, carried up
+    // along the sun to the clouds (not on the sky)
+    {
+      const rawDepth = depthTex.sample(screenUV).r;
+      const view = getViewPosition(screenUV, rawDepth, this.projInvU);
+      const world = this.camWorldU.mul(vec4(view, 1)).xyz;
+      const shade = cloudShadowAt(world, this.sunU).mul(cloudShadowStrength(nightU)).mul(rawDepth.greaterThan(0).toFloat());
+      color = vec4(color.rgb.mul(float(1).sub(shade)), color.a);
     }
     // one TRAA per output: one TRAA shared by two final images loses its history and the whole image shook at the
     // edges (10% of the pixels changing with everything still)
@@ -170,6 +176,10 @@ export class Post {
   }
 
   private traas: Node[] = [];
+  /** The active camera's world matrix and inverse projection (the clouds' shadows rebuild world positions). */
+  private camWorldU = T.uniform(new THREE.Matrix4());
+  private projInvU = T.uniform(new THREE.Matrix4());
+  private sunU = T.uniform(new THREE.Vector3(0, 1, 0));
   /** Nodes holding GPU targets (the scene pass, AO, bloom, anti-aliasing and the image copied into it). */
   private owned: Array<{ dispose(): void }> = [];
   private sun: THREE.DirectionalLight;
@@ -190,6 +200,9 @@ export class Post {
   /** The active camera changed (perspective/isometric). */
   setCamera(camera: THREE.Camera): void {
     this.camera = camera;
+    this.camWorldU.value = camera.matrixWorld;
+    this.projInvU.value = camera.projectionMatrixInverse;
+    (this.sunU.value as THREE.Vector3).copy(sunDirection);
     if (this.scenePass.camera !== camera) {
       this.scenePass.camera = camera;
       for (const t of this.traas) t.camera = camera;

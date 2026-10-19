@@ -8,7 +8,7 @@ import * as THREE from 'three/webgpu';
 import { T } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { windU } from './weather.ts';
-import { colorOnly } from './post.ts';
+import { colorOnly } from './tsl.ts';
 import type { World } from '../world/world.ts';
 import { Dirty, cellOriginX, type DirtyReader } from '../core/grid.ts';
 import { CELL_SIZE, MAP_CELLS } from '../config.ts';

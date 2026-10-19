@@ -10,7 +10,7 @@ import { heightAt } from '../world/heights.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import type { Transit } from '../world/transit.ts';
 import { PAINTS } from './vehicles.ts';
-import { colorOnly } from './post.ts';
+import { colorOnly } from './tsl.ts';
 import { Dirty, cellId, cellX, type DirtyCells, type DirtyReader } from '../core/grid.ts';
 
 const CAP = 2048;

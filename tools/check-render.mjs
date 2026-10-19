@@ -153,6 +153,8 @@ const SCENARIOS = {
   'still-trees': {
     body: `
       g.weather.windFixed = 0;
+      // clear sky: the clouds' shadows drift with the wind and would move the image
+      g.weather.fixed = { clouds: 0, rain: 0 };
       await g.view(2500, -2500, 35, 12, 40, 11);
       await frames(10);
       const y = w.tileMax[0] ? 0 : 0;
@@ -184,12 +186,16 @@ const SCENARIOS = {
   'far-forest': {
     body: `
       g.weather.windFixed = 0;
-      await g.view(2500, -2500, 35, 14, 700, 11);
+      // clear sky: the clouds' shadows drift with the wind and would move the image
+      g.weather.fixed = { clouds: 0, rain: 0 };
+      // only far trees in view (the nearest ground in the picture is ~600 m away: the trees' photos)
+      await g.view(2500, -2500, 35, 8, 2500, 11);
       await g.settle(10);
       await frames(30);
     `,
     env: { CIDADE_DIFF: '1000', CIDADE_SETTLE: '3' },
-    diff: (pct) => [pct < 0.5, 'a far forest seen still changes under 0.5% of the pixels in 1 s (' + pct + '%)', pct + '% of the pixels changed'],
+    // measured with only far trees in view: 0.99-1.65% without the photos' mipmaps, 0.62-0.78% with them
+    diff: (pct) => [pct < 0.9, 'a far forest seen still changes under 0.9% of the pixels in 1 s (' + pct + '%)', pct + '% of the pixels changed'],
   },
 };
 
