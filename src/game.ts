@@ -52,7 +52,7 @@ import { Inspector } from './ui/inspector.ts';
 import { installKeys } from './ui/keys.ts';
 import { attachPinch } from './ui/touch.ts';
 import { BOMB_START, bombRadius } from './ui/strike.ts';
-import { zoomPercent } from './ui/readouts.ts';
+import { demandFactor, zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
@@ -816,7 +816,7 @@ export class Game {
     if (now - this.demandSent > 2000) {
       this.demandSent = now;
       const st = this.settings;
-      const demand = st?.demand === 'baixa' ? 0.6 : st?.demand === 'pico' ? 1.5 : 1;
+      const demand = demandFactor(st?.demand);
       this.sim.postMessage({ type: 'demand', hour: this.hour, demand, traffic: st?.traffic ?? 1, people: st?.people ?? 1 } satisfies ToSim);
     }
     if (now - this.camSent > 250) {

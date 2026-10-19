@@ -10,3 +10,8 @@ export function zoomPercent(viewHeightPx: number, dist: number, fovDeg: number):
 export function centreText(x: number, z: number, fmt: (v: number) => string): string {
   return `X ${fmt(Math.round(x) + 0)} · Y ${fmt(Math.round(-z) + 0)}`;
 }
+
+/** The simulation's demand as a factor, as Roadcraft 4.0 (v2/shell.ts:741): low 0.55, normal 1, peak 1.55. */
+export function demandFactor(demand: string | undefined): number {
+  return demand === 'baixa' ? 0.55 : demand === 'pico' ? 1.55 : 1;
+}
