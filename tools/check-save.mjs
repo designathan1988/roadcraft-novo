@@ -328,6 +328,18 @@ const SCENARIOS = {
     check('an opening while saving is refused', s4 === true && l4 === false, 'save() ' + s4 + ', load() ' + l4);
     check('nothing is doubled', w.roads.segs.size === segs && w.buildings.size === builds && errors.length === e0, 'segments ' + w.roads.segs.size + ' of ' + segs + ', errors: ' + errors.slice(e0).join(' | '));
   `,
+  // A31: with unlimited money on, the balance is saved too: turning it off after opening gives the balance back
+  'unlimited-money': `
+    road(1500, 1500, 1700, 1500);
+    w.money = 12345;
+    w.unlimited = true;
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    w.money = 1; w.unlimited = false;
+    await g.load();
+    check('unlimited money is still on after opening', w.unlimited === true, 'unlimited=' + w.unlimited);
+    w.unlimited = false;
+    check('turning it off gives the saved balance', w.money === 12345, 'money ' + w.money);
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);

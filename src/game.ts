@@ -2131,9 +2131,9 @@ export class Game {
         transfer: [heights.buffer as ArrayBuffer, ...boxTransfer(boxes), roads.nodes.buffer as ArrayBuffer, roads.segs.buffer as ArrayBuffer, roads.items.buffer as ArrayBuffer, ground.buffer, water.buffer] });
     });
     for (const p of packs) p.catch(() => { /* reported below */ });
-    const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: listed, camera: this.rig.state(), hour: this.hour, transit: this.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.unlimited ? NaN : w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
+    const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: listed, camera: this.rig.state(), hour: this.hour, transit: this.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
       extra: JSON.stringify({ sky: this.skyMode, weather: this.weatherCtl, water: this.waterCtl, clouds: this.clouds, fog: fogLevel.value, terminals: this.transit.terminals,
-        signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: this.settings.paint ?? 'br' }) });
+        signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: this.settings.paint ?? 'br', unlimited: w.unlimited }) });
     try {
       const writer = await slot.begin();
       let bytes = 0;
@@ -2234,6 +2234,7 @@ export class Game {
     try { setCustomProfiles(meta.profiles ? JSON.parse(meta.profiles) as Profile[] : []); } catch { setCustomProfiles([]); }
     w.clearGround();
     this.setBiome(meta.biome ?? 0);
+    // the balance is saved even with unlimited money on (older saves wrote NaN then: the starting cash comes back)
     w.unlimited = meta.money !== undefined && Number.isNaN(meta.money);
     w.money = meta.money !== undefined && !Number.isNaN(meta.money) ? meta.money : START_MONEY;
     const roads: RoadSave[] = [];
@@ -2244,8 +2245,9 @@ export class Game {
     try {
       const extra = meta.extra ? JSON.parse(meta.extra) as { sky?: SkyMode; weather?: WeatherCtl | null; water?: { waves: number; foam: number; current: number } } : {};
       this.setWater(extra.water ?? { waves: 0.3, foam: 0.4, current: 0.5 });
-      const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]>; clock?: number; paint?: string };
+      const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]>; clock?: number; paint?: string; unlimited?: boolean };
       w.clock = ex.clock ?? 0;
+      if (ex.unlimited !== undefined) w.unlimited = ex.unlimited;
       // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
       if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
       w.signTexts.clear(); for (const [k, v] of ex.signs ?? []) w.signTexts.set(k, v);

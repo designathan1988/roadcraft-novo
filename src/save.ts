@@ -17,7 +17,7 @@ export interface SaveMeta {
   transit?: Float64Array;
   /** Road profiles made by the player (JSON). */
   profiles?: string;
-  /** Cash on hand (NaN = sandbox mode). */
+  /** Cash on hand (NaN in older saves: sandbox mode on; now the flag is in `extra`). */
   money?: number;
   /** Junctions with a chosen control (JSON of [node, spec]). */
   junctions?: string;
