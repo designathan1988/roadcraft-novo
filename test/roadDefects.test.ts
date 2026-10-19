@@ -914,3 +914,27 @@ test('D33: a landmark that grows over time keeps to 3 floors above its tallest n
   }
   assert.ok(worst <= 9, `a building grew to ${worst} floors next to a 6-floor one (${landmarks} landmarks)`);
 });
+
+test('D32: one square per neighbourhood, even after the lots are cut again', async () => {
+  const { Growth } = await import('../src/world/growth.ts');
+  const { Fn } = await import('../src/world/arch.ts');
+  const w = flatWorld(0);
+  const g = new Growth(w, null as unknown as JobPool);
+  const set = g as unknown as { setLots(c: number, l: LotColumns): void };
+  const lotsAt = (xs: number[], big: number): LotColumns => ({ count: xs.length, x: Float32Array.from(xs), z: new Float32Array(xs.length).fill(100),
+    w: Float32Array.from(xs.map((_, i) => (i === big ? 40 : 14))), d: Float32Array.from(xs.map((_, i) => (i === big ? 40 : 26))), rot: new Float32Array(xs.length),
+    zone: new Uint8Array(xs.length).fill(Zone.Residential), seed: Uint32Array.from(xs.map((_, i) => i + 11)), profile: new Uint8Array(xs.length) });
+  // every cell of one neighbourhood (2 × 2 cells) gets lots with a big one; grow the big lot of each, twice over
+  // (the second time the lots were cut again and another lot is the biggest)
+  let squares = 0;
+  for (const round of [0, 1]) for (const [cx, cz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const x0 = cx * 256 - 5120 + 5120 % 512, z0 = cz * 256 - 5120 + 5120 % 512;
+    const l = lotsAt([x0 + 30, x0 + 90, x0 + 150, x0 + 210], round === 0 ? 1 : 2);
+    for (let i = 0; i < l.count; i++) l.z[i] = z0 + 100;
+    set.setLots(cellId(cellX(x0 + 1), cellX(z0 + 1)), l);
+    const big = round === 0 ? 1 : 2;
+    const rec = g.recordFor(l, big);
+    if (rec.fn === Fn.Square) { squares++; w.growBuilding(rec); }
+  }
+  assert.equal(squares, 1, `${squares} squares in one neighbourhood`);
+});

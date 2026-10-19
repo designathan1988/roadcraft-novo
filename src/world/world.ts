@@ -11,6 +11,8 @@ import { MinuteHeap, decayTenths, nextTenthAt } from './decay.ts';
 import { RoadNetwork } from '../roads/network.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
 import { ImpossibleNodes } from '../roads/impossible.ts';
+import { MAP_CELLS } from '../config.ts';
+import { Fn } from './arch.ts';
 
 /** Buildings. Milestone 1 has only generic boxes; the procedural generator arrives in milestone 4. */
 export const buildingSchema = {
@@ -90,6 +92,11 @@ export class World {
   readonly cellVersion = new Uint32Array(CELL_COUNT);
   /** Buildings per cell. */
   readonly cellBuildings = new Uint32Array(CELL_COUNT);
+  /** Squares per neighbourhood (2 × 2 cells): growth puts one at most in each (Roadcraft). */
+  readonly squares = new Uint16Array(Math.ceil(MAP_CELLS / 2) ** 2);
+
+  /** The neighbourhood (2 × 2 cells, 512 m) of a point. */
+  static neighbourhood(x: number, z: number): number { return (cellX(z) >> 1) * Math.ceil(MAP_CELLS / 2) + (cellX(x) >> 1); }
 
   readonly roads: RoadNetwork;
   /** Nodes where two neighbouring roads meet under 25° (the top bar's warning), kept from the network's changes. */
@@ -254,6 +261,7 @@ export class World {
     c.cell[id] = cid;
     this.buildingIndex.insert(id, x, z);
     this.cellBuildings[cid]++;
+    if (c.fn[id] === Fn.Square) this.squares[World.neighbourhood(x, z)]++;
     this.count(id, 1);
     this.refreshDecay(id);
     this.touchCell(cid, Dirty.Buildings);
@@ -302,7 +310,10 @@ export class World {
   editBuilding(id: number, floors: number, style: number, fn = this.buildings.cols.fn[id]): void {
     const c = this.buildings.cols;
     this.count(id, -1);
+    const nb = World.neighbourhood(c.x[id], c.z[id]);
+    if (c.fn[id] === Fn.Square) this.squares[nb]--;
     c.floors[id] = floors; c.style[id] = style; c.fn[id] = fn;
+    if (fn === Fn.Square) this.squares[nb]++;
     this.count(id, 1);
     this.touchCell(c.cell[id], Dirty.Buildings);
   }
@@ -322,6 +333,7 @@ export class World {
     this.count(id, -1);
     const cid = this.buildings.cols.cell[id];
     this.cellBuildings[cid]--;
+    if (this.buildings.cols.fn[id] === Fn.Square) this.squares[World.neighbourhood(this.buildings.cols.x[id], this.buildings.cols.z[id])]--;
     this.touchCell(cid, Dirty.Buildings);
     this.buildings.release(id);
   }
@@ -360,6 +372,7 @@ export class World {
     this.buildingIndex.clear();
     this.buildings.clear();
     this.cellBuildings.fill(0);
+    this.squares.fill(0);
     this.residents = 0; this.jobs = 0;
     this.decayHeap.clear();
     this.clock = 0;

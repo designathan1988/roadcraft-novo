@@ -12,7 +12,7 @@ import { Fn, archFor, civicFor, eraAt } from './arch.ts';
 import { generatedBuilt } from './decay.ts';
 import { LANDMARKS, encodeDesign } from './design.ts';
 import { hash2 } from '../core/rng.ts';
-import type { BuildingRec, World } from './world.ts';
+import { World, type BuildingRec } from './world.ts';
 
 /** Floors by zone and frontage road (avenues give taller buildings). */
 export function floorsFor(zoneId: number, profile: number, r: Rng): number {
@@ -196,6 +196,8 @@ export class Growth {
     const biggest = Growth.biggest(l) === i;
     let fn = biggest && this.squareCell(cell) === cell ? Fn.Square : civicFor(cell, baseZone(l.zone[i]), biggest, l.w[i] * l.d[i]);
     if (fn === Fn.Square && !(biggest && this.squareCell(cell) === cell)) fn = Fn.None;
+    // one square per neighbourhood: the lots may be cut again later and another lot become the biggest
+    if (fn === Fn.Square && this.world.squares[World.neighbourhood(l.x[i], l.z[i])] > 0) fn = Fn.None;
     const zone = baseZone(l.zone[i]);
     let floors = floorsFor(l.zone[i], l.profile[i], r);
     let most = Infinity;
