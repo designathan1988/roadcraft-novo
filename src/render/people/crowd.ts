@@ -229,6 +229,12 @@ export class PeopleRenderer {
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.eye.setFromMatrixPosition(camera.matrixWorld);
+    // the people the player placed go first: a dense crowd filling the batches must not cut them
+    if (this.creator?.size) {
+      const t = performance.now() / 1000;
+      this.creator.forEach(this.eye.x, this.eye.z, 700, t, this.lastT > 0 ? Math.min(0.2, t - this.lastT) : 0, this.visible, this.drawPlaced);
+      this.lastT = t;
+    }
   }
 
   /**
@@ -327,11 +333,6 @@ export class PeopleRenderer {
   }
 
   end(): void {
-    if (this.creator?.size) {
-      const t = performance.now() / 1000;
-      this.creator.forEach(this.eye.x, this.eye.z, 700, t, this.lastT > 0 ? Math.min(0.2, t - this.lastT) : 0, this.visible, this.drawPlaced);
-      this.lastT = t;
-    }
     for (let lod = 0; lod < this.geos.length; lod++) {
       const n = this.counts[lod];
       this.geos[lod].instanceCount = n;

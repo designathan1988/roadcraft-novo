@@ -879,3 +879,28 @@ test('C52: the bicycle wheels roll (marked as wheels for the shader, with spokes
   assert.ok(parts.size >= 2, `wheel parts in the bicycle: ${[...parts]}`);
   assert.ok([...parts].some((p) => Math.floor((p - 100) / 2) === 2), 'no spokes: a rolling ring looks still');
 });
+
+test('C43: when the crowd fills the people batches, the groups the player placed are still drawn', async () => {
+  const THREE = await import('three/webgpu');
+  const { PeopleRenderer } = await import('../src/render/people/crowd.ts');
+  const pr = new PeopleRenderer(), P = inner(pr);
+  const attr = (cap: number) => ({ array: new Float32Array(cap * 4), needsUpdate: false, clearUpdateRanges() {}, addUpdateRange() {} });
+  P.attrs = [2048, 8192, 16384].map((cap) => ({ pos: attr(cap), prev: attr(cap), info: attr(cap), anim: attr(cap) }));
+  P.geos = [{ instanceCount: 0 }, { instanceCount: 0 }, { instanceCount: 0 }];
+  P.meta = { variations: [{ band: 'adult', height: 1.75, sitPelvis: [0.5, 0.1] }] };
+  // five people the player placed, 10 m in front of the camera
+  P.creator = { size: 5, forEach(_x: number, _z: number, _r: number, _t: number, _dt: number, _vis: unknown, draw: (p: unknown) => void) {
+    for (let i = 0; i < 5; i++) draw({ x: i, y: 0, z: 10, yaw: 0, px: i, pz: 10, pyaw: 0, variation: 0, clip: 1, hash: 0xabc000 + i, scale: 1 });
+  } };
+  const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
+  cam.position.set(0, 2, 0); cam.lookAt(0, 0, 10); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+  pr.begin(cam);
+  // a dense crowd close by: more full-detail people than the batch holds
+  const d = new Float32Array(11); d[8] = 3 * 256;
+  for (let i = 0; i < 3000; i++) pr.push(d, 0, (i % 50) * 0.5, 0, 4, 0, (i % 50) * 0.5, 0, 4, 0, 4, 50, false);
+  pr.end();
+  const info = P.attrs[0].info.array as Float32Array;
+  let placed = 0;
+  for (let i = 0; i < pr.drawn[0]; i++) if ((info[i * 4] & 0xfff000) === 0xabc000) placed++;
+  assert.equal(placed, 5, `${placed} of the 5 placed people drawn with a full crowd`);
+});
