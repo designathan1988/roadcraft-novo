@@ -5,7 +5,7 @@
 import * as THREE from 'three/webgpu';
 import { T } from './tsl.ts';
 
-/** Corte: centro e meia largura/fundo (x, z, w/2, d/2), giro (cos, sen) e altura (sem corte: muito alta). */
+/** Cut: centre and half width/depth (x, z, w/2, d/2), turn (cos, sin) and height (no cut: very high). */
 export const cutBoxU = T.uniform(new THREE.Vector4(0, 0, 0, 0));
 export const cutRotU = T.uniform(new THREE.Vector2(1, 0));
 export const cutYU = T.uniform(1e9);
@@ -66,7 +66,7 @@ export class InsideView {
     // circulation: lift and stairs in the core
     this.add(this.mats.core, 1.4, y, zc, 2.2, H, 2.4);
     for (let s = 0; s < 10; s++) this.add(this.mats.stair, -1.2, y + s * (H / 10), zc - 1.4 + s * 0.28, 1.6, H / 10, 0.3);
-    // algumas mesas nas salas
+    // a few desks in the rooms
     for (let i = 0; i < nx; i++) {
       const cx = -W / 2 + ((i + 0.5) * W) / nx;
       if (Math.abs(cx) < 3) continue;
