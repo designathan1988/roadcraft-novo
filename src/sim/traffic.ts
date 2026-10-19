@@ -104,6 +104,8 @@ const vehSchema = {
   ml: Int32Array, mnext: Int32Array, mprev: Int32Array,
   // when it entered its current lane and where (for the speed actually driven on each lane, near and far)
   tIn: Float64Array, s0: Float32Array,
+  // the micro step it last moved in (one move per step, even after passing from a connection to a lane)
+  moved: Uint32Array,
 };
 
 /** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
@@ -1602,12 +1604,12 @@ export class Traffic {
   }
 
   private stepMicro(dt: number): void {
-    const c = this.veh.cols, sim = this.sim;
+    const c = this.veh.cols, sim = this.sim, step = ++this.microStep;
     // connections first (they are ahead of the lanes that feed them)
     for (const conn of [...this.activeConns]) {
       for (let v = this.connHead[conn]; v >= 0;) {
         const next = c.next[v];
-        this.moveOnConn(v, conn, dt);
+        if (c.moved[v] !== step) { c.moved[v] = step; this.moveOnConn(v, conn, dt); }
         v = next;
       }
     }
@@ -1615,11 +1617,12 @@ export class Traffic {
       if (!sim.net.segs.alive[laneSeg(lane)]) continue;
       for (let v = this.laneHead[lane]; v >= 0;) {
         const next = c.next[v];
-        this.moveOnLane(v, lane, dt);
+        if (c.moved[v] !== step) { c.moved[v] = step; this.moveOnLane(v, lane, dt); }
         v = next;
       }
     }
   }
+  private microStep = 0;
 
   /** Distance to the rearmost vehicle on the connection/lane ahead (to follow through the node). */
   private aheadThrough(conn: number): [number, number] {

@@ -636,3 +636,17 @@ test('C42: a car stopped at the kerb when the camera leaves finishes its drop-of
   assert.equal(tr.arrived, arrived + 1, `the drop-off trip was not counted (arrived ${arrived} → ${tr.arrived})`);
   assert.ok(tr.veh.alive[v] && !c.dying[v], 'the car did not drive on to its next trip');
 });
+
+test('C34: a car leaving a junction moves once per step, not twice', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 0;
+  const k = sim.conns.cols, conn = someConn(sim);
+  // on the connection, 0.1 m from its end, at 10 m/s
+  const v = place(tr, k.from[conn], 0, k.to[conn], true);
+  const T = inner(tr), c = tr.veh.cols;
+  T.unlink(v); c.conn[v] = conn; c.s[v] = k.len[conn] - 0.1; c.v[v] = 10; T.insert(v, true, conn);
+  tr.step(0.05);
+  assert.equal(c.lane[v], k.to[conn], 'onto the next lane');
+  assert.ok(c.s[v] < 0.6, `${(c.s[v] + 0.1).toFixed(2)} m driven in a 0.05 s step at 10 m/s`);
+});
