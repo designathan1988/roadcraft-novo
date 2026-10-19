@@ -78,6 +78,8 @@ import { keepPreviousCity, packSlot, quarantineSlot, unpackToSlot } from './mapF
 import { repairDanglingEnds } from './roads/repair.ts';
 
 const SLOT = 'cidade-1';
+/** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
+const STILL_FRAMES = 40;
 /** Segments that fit in the occupancy map (2 directions per segment). */
 export const OCCUPANCY_SEGS = 1 << 17;
 
@@ -526,6 +528,7 @@ export class Game {
       this.rig.restore(new Float64Array([x, z, yaw * Math.PI / 180, pitch * Math.PI / 180, dist, params.has('iso') ? 1 : 0]));
     }
     this.last = performance.now();
+    this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
     else if (params.has('cidade')) await this.generatedCity();
@@ -590,7 +593,22 @@ export class Game {
 
   // ----------------------------------------------------------------- frame
 
+  /** Frames in a row with nothing to draw (paused, camera still, no input, no work arriving). */
+  private stillFrames = 0;
+  private lastInput = 0;
+  private drawnView = new THREE.Matrix4();
+  private drawnProj = new THREE.Matrix4();
+
+  /** Input marks the frames as live (hover previews, brush ring, menus over the 3D view). */
+  private watchInput(): void {
+    const mark = () => { this.lastInput = performance.now(); this.stillFrames = 0; };
+    for (const e of ['pointermove', 'pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'resize']) window.addEventListener(e, mark, { capture: true, passive: true });
+    document.addEventListener('visibilitychange', mark);
+  }
+
   private frame(now: number): void {
+    // minimized or hidden: nothing is drawn; the simulation goes on in its worker (the clock does not jump on return)
+    if (document.hidden) { this.last = now; return; }
     this.health?.frame(now - this.last);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
@@ -654,6 +672,16 @@ export class Game {
       this.preview.show({ x0: (a.x + hit.x) / 2, z0: a.z, cx: (a.x + hit.x) / 2, cz, x1: (a.x + hit.x) / 2, z1: hit.z }, Math.abs(hit.x - a.x) / 2, [0, 1], [H(a.x, a.z), H(hit.x, hit.z)], true, 0xe2564b);
     } else if (ROAD_TOOLS.includes(this.tool) && this.tool !== 'free' && this.drag !== 'pan' && this.drag !== 'rotate') this.roadTool.hover(hit);
     if ((this.tool === 'streetscape' || this.tool === 'barrier') && this.drag !== 'pan' && this.drag !== 'rotate' && this.drag !== 'row') this.itemTool.hover(hit);
+
+    // Drawn only when something visible can change: the camera, the simulation or the clock running, input, meshes
+    // arriving, weather. Paused and idle, after STILL_FRAMES (the anti-aliasing settles) nothing is drawn; water and
+    // leaves stand still until something moves.
+    const live = !this.paused || now - this.lastInput < 800 || !this.pool.isIdle() || this.generating || rainU.value > 0.01 || flashU.value > 0
+      || !this.drawnView.equals(cam.matrixWorld) || !this.drawnProj.equals(cam.projectionMatrix);
+    this.stillFrames = live ? 0 : this.stillFrames + 1;
+    this.drawnView.copy(cam.matrixWorld);
+    this.drawnProj.copy(cam.projectionMatrix);
+    if (this.stillFrames > STILL_FRAMES) return;
 
     const pf = this.perfLog, T0 = pf ? performance.now() : 0;
     for (const l of this.layers) l.processDirty();

@@ -118,6 +118,37 @@ const SCENARIOS = {
     await frames(2);
     check('turning the camera redraws the cascades', g.stats().draws > Math.max(...still), 'after turning: ' + g.stats().draws);
   `,
+  // E20: paused with nothing moving, and minimized, the game stops drawing; input or showing it again draws at once
+  'idle-frames': `
+    await g.view(0, 0, 35, 40, 300, 11);
+    await g.settle(10);
+    g.weather.windFixed = 0;
+    if (!g.paused) g.togglePause();
+    let drawn = 0;
+    const draw = g.post.render.bind(g.post);
+    g.post.render = (...a) => { drawn++; return draw(...a); };
+    await frames(120);
+    drawn = 0;
+    await frames(60);
+    check('paused and idle, nothing is drawn (' + drawn + ' of 60 frames)', drawn === 0, drawn + ' of 60 frames drawn');
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300 }));
+    drawn = 0;
+    await frames(5);
+    check('moving the mouse draws again', drawn > 0, 'nothing drawn after the input');
+    if (!g.paused) g.togglePause();
+    g.togglePause();
+    await frames(10);
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    drawn = 0;
+    await frames(30);
+    check('minimized while running, nothing is drawn (' + drawn + ' of 30 frames)', drawn === 0, drawn + ' of 30 frames drawn');
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+    drawn = 0;
+    await frames(5);
+    check('shown again, it draws', drawn > 0, 'nothing drawn');
+  `,
 };
 
 const pick = process.argv.slice(2);
