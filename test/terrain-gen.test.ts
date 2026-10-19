@@ -13,7 +13,8 @@ const level = (x: number, z: number) => (gen as Record<string, unknown>).waterLe
 /** The river's middle at x: the lowest ground across a band, where there is water over it. */
 function middle(x: number): { z: number; ground: number; level: number } | null {
   let best: { z: number; ground: number; level: number } | null = null;
-  for (let z = -2000; z <= 2000; z += 4) {
+  const zc = gen.courseZ(x, SEED);
+  for (let z = zc - 200; z <= zc + 200; z += 4) {
     const w = level(x, z);
     if (w === NO_WATER) continue;
     const g = gen.baseHeight(x, z, SEED);
@@ -72,4 +73,26 @@ test('the generated city keeps out of the river: no street node in its water, st
     if (wet > 320) along++;
   }
   assert.equal(along, 0, `${along} streets run in the river`);
+});
+
+test('lakes as in 4.0: hollows away from the river, each one body at one flat level', () => {
+  // water more than 700 m from the river's middle is a lake: grouped by its level, each group is one compact body
+  const lakes = new Map<number, number[]>();
+  for (let x = -MAP_HALF * 0.74; x < MAP_HALF * 0.74; x += 24) {
+    const zc = gen.courseZ(x, SEED);
+    for (let z = -MAP_HALF * 0.74; z < MAP_HALF * 0.74; z += 24) {
+      if (Math.abs(z - zc) < 700) continue;
+      const w = level(x, z);
+      if (w === NO_WATER) continue;
+      const k = Math.round(w * 1000);
+      if (!lakes.has(k)) lakes.set(k, []);
+      lakes.get(k)!.push(x, z);
+    }
+  }
+  assert.ok(lakes.size >= 1, 'no lake');
+  for (const [k, p] of lakes) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i < p.length; i += 2) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); z0 = Math.min(z0, p[i + 1]); z1 = Math.max(z1, p[i + 1]); }
+    assert.ok(x1 - x0 < 600 && z1 - z0 < 600, `lake at level ${k / 1000} spans ${x1 - x0} × ${z1 - z0} m`);
+  }
 });

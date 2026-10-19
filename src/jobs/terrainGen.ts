@@ -52,15 +52,15 @@ function valueNoise(x: number, y: number): number {
 /** `world/terrain.ts:45`. */
 const influence = (u: number) => u * u * (3 - 2 * u);
 /** A rough river dab's reach at a point (`world/terrain.ts:251-252`). */
-const roughReach = (x: number, z: number) => {
-  const lobe = RIVER_RADIUS * 0.6;
-  return RIVER_RADIUS * (ROUGH_REACH_MIN + (1 - ROUGH_REACH_MIN) * (0.5 + 0.5 * valueNoise(x / lobe + 23.9, z / lobe + 31.4)));
+const roughReach = (x: number, z: number, radius = RIVER_RADIUS) => {
+  const lobe = radius * 0.6;
+  return radius * (ROUGH_REACH_MIN + (1 - ROUGH_REACH_MIN) * (0.5 + 0.5 * valueNoise(x / lobe + 23.9, z / lobe + 31.4)));
 };
 /** The bed's section, 1 on the floor to 0 at the reach (`world/terrain.ts:272`). */
 const bedProfile = (d: number, reach: number) => influence(Math.min(1, (1 - d / reach) / RIVER_BED_FLOOR));
 
 /** The river's course: z of its middle at x. */
-const courseZ = (x: number, seed: number) => 900 * fbm(x / 4000, 0.5, seed + 31, 2) + 600 * Math.sin(x / 2300);
+export const courseZ = (x: number, seed: number) => 900 * fbm(x / 4000, 0.5, seed + 31, 2) + 600 * Math.sin(x / 2300);
 
 /** The land before the river and lakes cut it: broad hills, the river's valley, ranges at the map's edge. */
 function land(x: number, z: number, seed: number): number {
@@ -81,7 +81,8 @@ function land(x: number, z: number, seed: number): number {
   return h;
 }
 
-interface Lake { x: number; z: number; level: number; bed: number; flooded: Map<number, number> | null }
+/** A lake: a few overlapping river dabs (x, z, radius each), as a player paints one, at one level. */
+interface Lake { dabs: Array<[number, number, number]>; level: number; flooded: Map<number, number> | null }
 interface Plan {
   /** Per 8 m of x from the map's west edge: the river's middle, its water level and its depth over the floor. */
   z: Float32Array; level: Float32Array; depth: Float32Array;
@@ -142,21 +143,39 @@ function lakeOf(i: number, j: number, seed: number): Lake | null {
   const P = plan(seed), key = (i + 512) * 1024 + (j + 512);
   if (P.lakes.has(key)) return P.lakes.get(key)!;
   let lake: Lake | null = null;
-  const r = (k: number) => 0.5 + 0.5 * hash2(i * 7 + k + seed * 13, j * 11 - k);
-  const x = (i + 0.2 + 0.6 * r(1)) * LAKE_GRID, z = (j + 0.2 + 0.6 * r(2)) * LAKE_GRID;
-  const edge = Math.max(Math.abs(x), Math.abs(z)) / MAP_HALF;
-  if (r(3) < 0.55 && edge < 0.74 && riverAt(x, z, seed).d > 600) {
-    // a hollow: lower than the ring round it
-    const c = land(x, z, seed);
+  // the most hollow of 5 × 5 spots in the square's middle (lower than the ring 250 m round it), if it is one
+  const ringOf = (x: number, z: number) => {
     let ring = 0;
-    for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; ring += land(x + Math.cos(a) * 300, z + Math.sin(a) * 300, seed) / 8; }
-    if (c < ring - 1.5) {
-      // 4.0 render/terrain.ts:1790-1798: the level down from the lowest bank, the bed cut at the middle
-      let bank = c;
-      for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; bank = Math.min(bank, land(x + Math.cos(a) * RIVER_RADIUS, z + Math.sin(a) * RIVER_RADIUS, seed)); }
-      const bed = c - BED_CARVE, level = bank - Math.max(WATER_MARGIN, WATER_FILL * (bank - bed));
-      if (bed + TERRAIN_WATER_HEIGHT < level && level > SEA_LEVEL + 1) lake = { x, z, level, bed, flooded: null };
+    for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; ring += land(x + Math.cos(a) * 250, z + Math.sin(a) * 250, seed) / 8; }
+    return ring;
+  };
+  let x = 0, z = 0, best = Infinity;
+  for (let v = 0; v < 5; v++) for (let u = 0; u < 5; u++) {
+    const px = (i + 0.2 + 0.15 * u) * LAKE_GRID, pz = (j + 0.2 + 0.15 * v) * LAKE_GRID;
+    if (Math.max(Math.abs(px), Math.abs(pz)) / MAP_HALF > 0.74 || riverAt(px, pz, seed).d < 600) continue;
+    const h = land(px, pz, seed), k = h - ringOf(px, pz);
+    if (k < best) { best = k; x = px; z = pz; }
+  }
+  if (best < -1) {
+    // the dabs: one on the hollow, 2-3 more overlapping it (35-60 m off, 65-80 m wide), one body with a lobed shore
+    const r = (k: number) => 0.5 + 0.5 * hash2(i * 7 + k + seed * 13, j * 11 - k);
+    const dabs: Array<[number, number, number]> = [[x, z, RIVER_RADIUS]];
+    const more = 2 + (r(1) < 0.5 ? 1 : 0), a0 = r(2) * Math.PI * 2;
+    for (let k = 0; k < more; k++) {
+      const a = a0 + k * (Math.PI * 2 / more) + (r(3 + k) - 0.5), d = 35 + 25 * r(6 + k);
+      dabs.push([x + Math.cos(a) * d, z + Math.sin(a) * d, 65 + 15 * r(9 + k)]);
     }
+    // 4.0 render/terrain.ts:1790-1798, per dab: the level down from its lowest bank, its bed cut at its middle; the
+    // lake stands at the lowest of them
+    let level = Infinity;
+    for (const [dx, dz, dr] of dabs) {
+      const c = land(dx, dz, seed);
+      let bank = c;
+      for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; bank = Math.min(bank, land(dx + Math.cos(a) * dr, dz + Math.sin(a) * dr, seed)); }
+      const bed = c - BED_CARVE * dr / RIVER_RADIUS;
+      level = Math.min(level, bank - Math.max(WATER_MARGIN, WATER_FILL * (bank - bed)));
+    }
+    if (level > SEA_LEVEL + 1) lake = { dabs, level, flooded: null };
   }
   P.lakes.set(key, lake);
   return lake;
@@ -176,8 +195,15 @@ export function baseHeight(x: number, z: number, seed: number): number {
   // the bed: from the land down to the floor by the bed's section (4.0 world/terrain.ts:272-277), never raised
   if (r.section > 0 && h > r.floor) h -= (h - r.floor) * r.section;
   for (const l of lakesNear(x, z, seed)) {
-    const d = Math.hypot(x - l.x, z - l.z), reach = roughReach(x, z);
-    if (d < reach) { const floor = land(l.x, l.z, seed) - BED_CARVE; if (h > floor) h -= (h - floor) * bedProfile(d, reach); }
+    // a stroke's dabs move the ground by the most of them, not the sum (4.0 world/terrain.ts:279-283)
+    let low = h;
+    for (const [dx, dz, dr] of l.dabs) {
+      const d = Math.hypot(x - dx, z - dz), reach = roughReach(x, z, dr);
+      if (d >= reach) continue;
+      const floor = land(dx, dz, seed) - BED_CARVE * dr / RIVER_RADIUS;
+      if (h > floor) low = Math.min(low, h - (h - floor) * bedProfile(d, reach));
+    }
+    h = low;
   }
   return Math.min(TERRAIN_MAX_Y, Math.max(TERRAIN_MIN_Y, h));
 }
@@ -188,14 +214,16 @@ function lakeWater(l: Lake, seed: number): Map<number, number> {
   const W = new Map<number, number>();
   const key = (gx: number, gz: number) => gz * 65_536 + gx;
   const at = (g: number) => g * WATER_SPACING - MAP_HALF;
-  // the disc: every sample within the spread of the dab (4.0 render/terrain.ts:2416-2441)
-  const reach = RIVER_RADIUS * WATER_RADIUS * WATER_SPREAD;
-  const g0x = Math.floor((l.x - reach + MAP_HALF) / WATER_SPACING), g1x = Math.ceil((l.x + reach + MAP_HALF) / WATER_SPACING);
-  const g0z = Math.floor((l.z - reach + MAP_HALF) / WATER_SPACING), g1z = Math.ceil((l.z + reach + MAP_HALF) / WATER_SPACING);
+  // the discs: every sample within the spread of a dab (4.0 render/terrain.ts:2416-2441)
   const queue: number[] = [];
-  for (let gz = g0z; gz <= g1z; gz++) for (let gx = g0x; gx <= g1x; gx++) {
-    if (Math.hypot(at(gx) - l.x, at(gz) - l.z) >= reach) continue;
-    W.set(key(gx, gz), l.level); queue.push(gx, gz);
+  for (const [dx, dz, dr] of l.dabs) {
+    const reach = dr * WATER_RADIUS * WATER_SPREAD;
+    const g0x = Math.floor((dx - reach + MAP_HALF) / WATER_SPACING), g1x = Math.ceil((dx + reach + MAP_HALF) / WATER_SPACING);
+    const g0z = Math.floor((dz - reach + MAP_HALF) / WATER_SPACING), g1z = Math.ceil((dz + reach + MAP_HALF) / WATER_SPACING);
+    for (let gz = g0z; gz <= g1z; gz++) for (let gx = g0x; gx <= g1x; gx++) {
+      if (W.has(key(gx, gz)) || Math.hypot(at(gx) - dx, at(gz) - dz) >= reach) continue;
+      W.set(key(gx, gz), l.level); queue.push(gx, gz);
+    }
   }
   // the flood, breadth first from the disc's whole edge into ground under the level (4.0 :2368-2392)
   const steps = new Map<number, number>(), added: number[] = [];
