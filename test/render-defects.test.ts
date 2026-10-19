@@ -465,3 +465,23 @@ test('E38: light rain draws only the drops that show', async () => {
   assert.ok(drawn <= Math.ceil(all * 0.1) + 1, `rain at 10% draws ${drawn} of ${all} drops`);
   assert.ok(drawn > 0);
 });
+
+test('E39: a factory turned into something else stops smoking', async () => {
+  const { Particles } = await import('../src/render/particles.ts');
+  const { chimneyOf } = await import('../src/world/arch.ts');
+  const { Zone } = await import('../src/roads/zones.ts');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10);
+  let seed = 1;
+  while (!chimneyOf(seed, 30, 40, 2)) seed++;
+  const id = w.growBuilding({ x: 100, z: 100, w: 30, d: 40, h: 0, rot: 0, color: 0, seed, zone: Zone.Industrial, floors: 2, style: 0 });
+  const p = new Particles(w);
+  const eye = new THREE.Vector3(100, 50, 100);
+  p.update(1, eye);
+  assert.equal(p.count, 1, 'the factory\'s chimney smokes');
+  // the player turns it into something else (a function: no chimney); same number of buildings and items
+  w.editBuilding(id, 2, 0, 1);
+  p.update(1, eye);
+  assert.equal(p.count, 0, 'the old chimney still smokes');
+});
+

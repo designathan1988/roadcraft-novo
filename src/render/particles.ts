@@ -10,6 +10,8 @@ import { nightU } from './scene.ts';
 import { windU } from './weather.ts';
 import { colorOnly } from './post.ts';
 import type { World } from '../world/world.ts';
+import { Dirty, cellOriginX, type DirtyReader } from '../core/grid.ts';
+import { CELL_SIZE, MAP_CELLS } from '../config.ts';
 import { Item } from '../world/items.ts';
 import { chimneyOf } from '../world/arch.ts';
 import { baseZone, Zone } from '../roads/zones.ts';
@@ -35,12 +37,18 @@ export class Particles {
   private world: World;
   private lastX = Infinity;
   private lastZ = Infinity;
-  private lastVer = '';
   private timer = 0;
+  /** Buildings and items edited since the last look (own lists: a factory replaced by another building used to keep
+   *  smoking, the building count being the same). */
+  private builtEdits: DirtyReader;
+  private itemEdits: DirtyReader;
+  private due = true;
   count = 0;
 
   constructor(world: World) {
     this.world = world;
+    this.builtEdits = world.dirty.reader(Dirty.Buildings);
+    this.itemEdits = world.dirty.reader(Dirty.Props);
     this.tex = new THREE.DataTexture(this.data, MAX_EMIT, 1, THREE.RGBAFormat, THREE.FloatType);
     this.tex.minFilter = this.tex.magFilter = THREE.NearestFilter;
     this.tex.needsUpdate = true;
@@ -139,7 +147,7 @@ export class Particles {
   /** Fumaça, fogo, poeira e faíscas por alguns segundos num ponto. */
   burst(x: number, y: number, z: number, kind: number, strength: number, seconds: number): void {
     this.bursts.push([x, y, z, kind, strength, this.clock + seconds]);
-    this.lastVer = '';
+    this.due = true;
     this.timer = 0;
   }
 
@@ -148,12 +156,20 @@ export class Particles {
     this.timer -= dt;
     if (this.timer > 0) return;
     this.timer = 0.5;
-    const w = this.world;
     const before = this.bursts.length;
     this.bursts = this.bursts.filter((b) => b[5] > this.clock);
-    const ver = `${w.items.size}/${w.buildings.size}/${this.bursts.length}`;
-    if (before === this.bursts.length && ver === this.lastVer && Math.hypot(eye.x - this.lastX, eye.z - this.lastZ) < 120) return;
-    this.lastVer = ver; this.lastX = eye.x; this.lastZ = eye.z;
+    if (before !== this.bursts.length) this.due = true;
+    // an edit within reach of the emitters gathered last time
+    const reach = RADIUS + CELL_SIZE;
+    for (const r of [this.builtEdits, this.itemEdits]) {
+      for (const c of r.drain()) {
+        const x = cellOriginX(c % MAP_CELLS) + CELL_SIZE / 2, z = cellOriginX((c / MAP_CELLS) | 0) + CELL_SIZE / 2;
+        if (Math.abs(x - this.lastX) < reach && Math.abs(z - this.lastZ) < reach) this.due = true;
+      }
+    }
+    if (!this.due && Math.hypot(eye.x - this.lastX, eye.z - this.lastZ) < 120) return;
+    this.due = false;
+    this.lastX = eye.x; this.lastZ = eye.z;
     this.rebuild(eye.x, eye.z);
   }
 

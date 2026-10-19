@@ -6,7 +6,7 @@
 // blocks go up to the GPU. A level change fades by dithering.
 
 import * as THREE from 'three/webgpu';
-import { CELL_COUNT, Dirty, cellOriginX, tileId, tileX, type DirtyCells } from '../core/grid.ts';
+import { CELL_COUNT, Dirty, cellOriginX, tileId, tileX, type DirtyReader } from '../core/grid.ts';
 import { CELL_SIZE, MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
@@ -44,7 +44,8 @@ export class PropRenderer {
   readonly enabled: boolean;
   private world: World;
   private pool: JobPool;
-  private dirty: DirtyCells;
+  /** This renderer's own list of cells whose props changed (particles read the same kind). */
+  private dirty: DirtyReader;
   private defs: PropDef[];
   /** What is drawn: one kind per type, or per variant for the types whose variants are different meshes. */
   private kinds: PropKind[];
@@ -121,7 +122,7 @@ export class PropRenderer {
   constructor(world: World, pool: JobPool, signalsSab: SharedArrayBuffer, isWebGPU: boolean) {
     this.world = world;
     this.pool = pool;
-    this.dirty = world.dirty;
+    this.dirty = world.dirty.reader(Dirty.Props);
     this.enabled = isWebGPU; // compute culling: WebGPU only (on WebGL 2 the props are left out for now)
     this.defs = buildPropDefs();
     const built = buildPropKinds(this.defs);
@@ -457,7 +458,7 @@ export class PropRenderer {
 
   /** Dirty cells: their props are out of date; the ones in range are asked again (`updateResidency`). */
   processDirty(): void {
-    const cells = this.dirty.drain(Dirty.Props);
+    const cells = this.dirty.drain();
     for (const c of cells) { this.cellVer[c]++; this.pending.delete(c); }
     if (cells.length) this.residencyDue = true;
   }
