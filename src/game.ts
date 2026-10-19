@@ -390,6 +390,7 @@ export class Game {
       },
       streetName: (x, z) => this.hudActions.streetNameAt?.(x, z) ?? '',
       editProfile: (p, apply) => this.hud.catalog.editFor(p, apply),
+      project: (x, z) => { const v = new THREE.Vector3(x, heightAt(this.world.heights, x, z), z).project(this.rig.camera); return { x: v.x * innerWidth / 2, y: -v.y * innerHeight / 2 }; },
       nameStreet: (seg, name) => this.commands.run(nameStreetCommand(this.world, seg, name, () => { this.textSigns.version++; this.unsaved = true; this.inspector.refresh(); })),
     });
     this.commands.onPush = (c) => {

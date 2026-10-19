@@ -96,6 +96,33 @@ const SCENARIOS = {
     await wait(300);
     check('a right-angle junction has no such warning', !document.querySelector('.inspector .inspect-warning'), 'warning shown');
   `,
+  // Roadcraft 4.0 ui/roads/connectorPanel.ts:40-167: the lane connectors as a plan, by mouse and by keyboard
+  'junction-plan': `
+    road(1400, 1500, 1600, 1500); road(1500, 1400, 1500, 1600);
+    const n = w.roads.nearestNode(1500, 1500, 1);
+    g.setTool('inspect');
+    g.inspector.pick(1500, 1500);
+    await wait(300);
+    const ins = () => [...document.querySelectorAll('.inspector .cn-end.in')], outs = () => [...document.querySelectorAll('.inspector .cn-end.out')];
+    check('the plan shows lanes coming in and roads going out', ins().length >= 4 && outs().length === 4, 'in ' + ins().length + ', out ' + outs().length);
+    ins()[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await wait(200);
+    const lit = document.querySelectorAll('.inspector .cn-link.on').length;
+    check('a lane picked lights where it goes', lit >= 1, 'lit links ' + lit);
+    const litOut = document.querySelector('.inspector .cn-end.out.on');
+    litOut.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await wait(200);
+    const spec = w.roads.junctions.get(n);
+    check('clicking a road it goes to unlinks it (a custom connection, undoable)', !!spec && !!spec.lanes && spec.lanes.length === 1, JSON.stringify(spec));
+    const end = document.querySelector('.inspector .cn-end.out:not(.on)');
+    end.focus();
+    end.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await wait(200);
+    const spec2 = w.roads.junctions.get(n);
+    check('Enter on a focused end links it back', spec2 && spec2.lanes && spec2.lanes[0][2].length === lit, JSON.stringify(spec2 && spec2.lanes));
+    const moves = document.querySelectorAll('.inspector .rp-move').length;
+    check('a movement chip per pair of roads, named by the turn', moves === 12 && /esquerda|left|direita|right|frente|through/.test(document.querySelector('.inspector .rp-move').textContent), 'chips ' + moves);
+  `,
   // B50: a street name typed in the inspector can be taken away (an empty name gives the generated one back)
   'street-name-clear': `
     road(1500, 1500, 1700, 1500);
