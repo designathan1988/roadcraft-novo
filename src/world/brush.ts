@@ -1,6 +1,6 @@
-// Pincel de terreno. Um traço é um comando: guarda o valor antigo de cada
-// amostra tocada e, no fim, o novo. Desfazer escreve os antigos de volta.
-// Custo proporcional às amostras tocadas.
+// Terrain brush. A stroke is one command: it keeps the old value of every
+// sample it touched and, at the end, the new one. Undo writes the old ones back.
+// Cost in proportion to the samples touched.
 
 import { HEIGHT_MAP_RES, HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_TILES, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { Dirty } from '../core/grid.ts';
@@ -10,22 +10,22 @@ import type { World } from './world.ts';
 
 export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten' | 'mesa' | 'canyon' | 'escarpment' | 'sugarloaf' | 'gully';
 
-/** Relevos prontos: a rocha pintada no chão onde a forma sobe ou desce (Ground). */
+/** Ready-made landforms: the rock painted on the ground where the shape rises or falls (Ground). */
 export const LANDFORM_ROCK: Partial<Record<BrushMode, number>> = { mesa: 9, canyon: 9, escarpment: 10, sugarloaf: 8, gully: 2 };
 
 export interface BrushParams {
   mode: BrushMode;
   radius: number; // m
-  strength: number; // m/s no centro para subir/descer; fração/s para alisar/nivelar
+  strength: number; // m/s at the centre to raise/lower; fraction/s to smooth/level
 }
 
-/** Marca as camadas, ladrilhos e células afetadas por um retângulo de amostras. */
+/** Marks the layers, tiles and cells a rectangle of samples affects. */
 function touchSamples(world: World, gx0: number, gz0: number, gx1: number, gz1: number): void {
   const shift = Math.log2(HEIGHT_TILE_RES);
   for (let tz = gz0 >> shift; tz <= gz1 >> shift; tz++) {
     for (let tx = gx0 >> shift; tx <= gx1 >> shift; tx++) world.layerDirty.add(tz * MAP_TILES + tx);
   }
-  // prédios em cima do terreno dependem da altura
+  // buildings on the terrain depend on its height
   world.touchRect(worldOfSample(gx0) - HEIGHT_SPACING, worldOfSample(gz0) - HEIGHT_SPACING,
     worldOfSample(gx1) + HEIGHT_SPACING, worldOfSample(gz1) + HEIGHT_SPACING, Dirty.Terrain | Dirty.Buildings | TERRAIN_FOLLOWERS);
 }
@@ -42,8 +42,8 @@ function extendBounds(world: World, idx: number, v: number): void {
 function smoothstep01(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }
 
 /**
- * Aplaina o mapa inteiro numa altura. É a única edição que toca o mapa todo (pedida pelo jogador,
- * uma vez); o desfazer guarda as alturas antigas quantizadas em 16 bits (2 bytes por amostra).
+ * Flattens the whole map to one height. It is the only edit that touches the whole map (asked for by the player,
+ * once); the undo keeps the old heights quantized to 16 bits (2 bytes per sample).
  */
 export class FlattenMap implements Command {
   readonly label = 'aplainar mapa';
@@ -89,11 +89,11 @@ export class BrushStroke implements Command {
 
   constructor(world: World) { this.world = world; }
 
-  /** Aplica um passo do pincel em (x, z) durante dt segundos. */
+  /** Applies one step of the brush at (x, z) for dt seconds. */
   dab(x: number, z: number, p: BrushParams, dt: number): void {
     const h = this.world.heights;
     if ((p.mode === 'flatten' || LANDFORM_ROCK[p.mode] !== undefined) && this.flattenTo === null) this.flattenTo = heightAt(h, x, z);
-    // altura (ou fundura) dos relevos pela força: 0,4 → 45 m
+    // height (or depth) of the landforms by the strength: 0.4 → 45 m
     const H = 5 + p.strength * 100, base = this.flattenTo ?? 0;
     const r = p.radius / HEIGHT_SPACING;
     const cx = sampleCoord(x), cz = sampleCoord(z);
@@ -105,7 +105,7 @@ export class BrushStroke implements Command {
       for (let gx = gx0; gx <= gx1; gx++) {
         const d = Math.hypot(gx - cx, gz - cz) / r;
         if (d >= 1) continue;
-        const f = 0.5 + 0.5 * Math.cos(d * Math.PI); // queda suave
+        const f = 0.5 + 0.5 * Math.cos(d * Math.PI); // soft falloff
         const i = heightIndex(gx, gz);
         const v = h[i];
         if (!this.before.has(i)) this.before.set(i, v);
@@ -114,14 +114,14 @@ export class BrushStroke implements Command {
           case 'raise': nv = v + p.strength * dt * f; break;
           case 'lower': nv = v - p.strength * dt * f; break;
           case 'flatten': nv = v + (this.flattenTo! - v) * k * f; break;
-          // chapada e escarpa: topo plano na altura do começo + H, paredões (escarpa: dois degraus)
+          // mesa and escarpment: flat top at the start height + H, cliffs (escarpment: two steps)
           case 'mesa': nv = Math.max(v, base + H * smoothstep01((1 - d) / 0.18)); break;
           case 'escarpment': nv = Math.max(v, base + H * (0.55 * smoothstep01((1 - d) / 0.08) + 0.45 * smoothstep01((0.6 - d) / 0.08))); break;
-          // cânion: fundo plano, paredes quase verticais
+          // canyon: flat bottom, nearly vertical walls
           case 'canyon': nv = Math.min(v, Math.max(SEA_LEVEL + 2, base - H) + (base - Math.max(SEA_LEVEL + 2, base - H)) * (1 - smoothstep01((1 - d) / 0.2))); break;
-          // pão de açúcar: cúpula de flancos íngremes
+          // sugarloaf: a dome with steep flanks
           case 'sugarloaf': nv = Math.max(v, base + H * 1.6 * Math.pow(Math.max(0, 1 - d * d), 0.7)); break;
-          // ravina: sulco em V que se aprofunda arrastando
+          // gully: a V groove that deepens as it is dragged
           case 'gully': nv = Math.max(Math.min(v, SEA_LEVEL + 1.5), v - Math.min(H * 0.25, 3) * dt * 4 * (1 - d) * (1 - d)); break;
           case 'smooth': {
             const a = gx > 0 ? h[heightIndex(gx - 1, gz)] : v;
@@ -142,7 +142,7 @@ export class BrushStroke implements Command {
     touchSamples(this.world, gx0, gz0, gx1, gz1);
   }
 
-  /** Fecha o traço: congela os valores antes/depois em arrays tipados. */
+  /** Closes the stroke: freezes the before/after values into typed arrays. */
   finish(): boolean {
     this.finished = true;
     const n = this.before.size;

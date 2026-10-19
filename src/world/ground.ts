@@ -1,9 +1,9 @@
-// Chão pintado e água dos rios e lagos. Duas grades compartilhadas com os
-// workers e com a GPU (uma camada por ladrilho, como as alturas):
-// - chão (8 m): R = tipo de chão, G = força da pintura, B = floresta, A = clareira (sem árvore);
-// - água (8 m): altura da superfície (−1000 = sem água).
-// As duas na mesma grade de 8 m (índice waterIndex): leve o bastante para mapas maiores.
-// Pincéis e rios são comandos que guardam antes/depois só do que tocaram.
+// Painted ground and the water of rivers and lakes. Two grids shared with the
+// workers and the GPU (one layer per tile, like the heights):
+// - ground (8 m): R = ground type, G = paint strength, B = forest, A = clearing (no tree);
+// - water (8 m): surface height (−1000 = no water).
+// Both on the same 8 m grid (waterIndex): light enough for bigger maps.
+// Brushes and rivers are commands that keep before/after of what they touched only.
 
 import { HEIGHT_MAP_RES, HEIGHT_TILE_RES, MAP_HALF, MAP_TILES, SEA_LEVEL, TERRAIN_MIN_Y } from '../config.ts';
 import { Dirty } from '../core/grid.ts';
@@ -11,7 +11,7 @@ import type { Command } from '../core/commands.ts';
 import { heightAt, heightIndex, sampleCoord, worldOfSample } from './heights.ts';
 import type { World } from './world.ts';
 
-/** Tipos de chão (canal R). 0 = automático (grama, terra e rocha pela inclinação). */
+/** Ground types (channel R). 0 = automatic (grass, soil and rock by the slope). */
 export const Ground = {
   Auto: 0, Sand: 1, Soil: 2, Meadow: 3, Snow: 4, Gravel: 5, Asphalt: 6, Concrete: 7,
   Granite: 8, Sandstone: 9, Basalt: 10, Cerrado: 11, Flowers: 12, Rocks: 13, Mud: 14,
@@ -22,13 +22,13 @@ export const GROUND_NAMES: Array<[number, string]> = [
   [Ground.Sandstone, 'Rocha: arenito'], [Ground.Basalt, 'Rocha: basalto'], [Ground.Cerrado, 'Cerrado'], [Ground.Flowers, 'Flores'],
   [Ground.Rocks, 'Pedras'], [Ground.Mud, 'Lama'],
 ];
-/** Cor sRGB de cada tipo (o shader lê esta tabela). */
+/** sRGB colour of each type (the shader reads this table). */
 export const GROUND_COLORS = [
   0x6b8545, 0xb8a882, 0x85715a, 0x7a8a4a, 0xeef0f2, 0x9a958c, 0x45484c, 0xa9a59d,
   0x8f8a85, 0xc08458, 0x4a4846, 0x9c8f52, 0x8a9a52, 0x7d7a74, 0x5a4a3a,
 ];
 
-/** Biomas do mapa: cores da grama e mistura de árvores. */
+/** Map biomes: grass colours and tree mix. */
 export const BIOMES = ['Sem ecossistema', 'Cerrado', 'Mata Atlântica', 'Amazônia', 'Caatinga', 'Pampa', 'Pantanal'];
 
 export const WATER_SPACING = 8;
@@ -49,7 +49,7 @@ export function createGroundBuffers(): { ground: SharedArrayBuffer; water: Share
   return { ground, water };
 }
 
-/** Nível da água em (x, z) (o mais alto dos 4 vizinhos; sem água = NO_WATER). */
+/** Water level at (x, z) (the highest of the 4 neighbours; no water = NO_WATER). */
 export function waterAt(w: Float32Array, x: number, z: number): number {
   const gx = Math.floor(waterCoord(x)), gz = Math.floor(waterCoord(z));
   let best = NO_WATER;
@@ -62,10 +62,10 @@ export function waterAt(w: Float32Array, x: number, z: number): number {
 }
 
 export type GroundMode = 'paint' | 'forest' | 'cut';
-/** Espécie do bosque plantado (guardada no canal A enquanto não há clareira): 0 mista, 1 carvalho, 2 cipreste, 3 palmeira. */
+/** Species of a planted wood (kept in channel A while there is no clearing): 0 mixed, 1 oak, 2 cypress, 3 palm. */
 export const TREE_SPECIES: Array<[number, string]> = [[0, 'Mistas'], [1, 'Carvalho'], [2, 'Cipreste'], [3, 'Palmeira']];
 
-/** Traço do pincel de chão: pintura, floresta (planta) ou corte (clareira). */
+/** Stroke of the ground brush: paint, forest (plants) or cut (clearing). */
 export class GroundStroke implements Command {
   readonly label = 'pintar o chão';
   private world: World;
@@ -97,7 +97,7 @@ export class GroundStroke implements Command {
       if (mode === 'paint') {
         if (kind === Ground.Auto) G = Math.max(0, G - Math.round(255 * f));
         else if (R === kind || G < 40) { R = kind; G = Math.min(255, G + Math.round(255 * f)); }
-        else G = Math.max(0, G - Math.round(255 * f)); // primeiro apaga o outro tipo, depois pinta
+        else G = Math.max(0, G - Math.round(255 * f)); // first wipes the other type, then paints
       } else if (mode === 'forest') { B = Math.min(255, B + Math.round(255 * f)); A = species & 3; }
       else { B = Math.max(0, B - Math.round(255 * f)); A = Math.min(255, A + Math.round(255 * f)); }
       g[i] = (R | (G << 8) | (B << 16) | (A << 24)) >>> 0;
@@ -128,7 +128,7 @@ export class GroundStroke implements Command {
   invert(): void { this.write(this.old); }
 }
 
-/** Camadas e células do chão tocadas (a floresta muda as peças; a pintura, o terreno). */
+/** Ground layers and cells touched (forest changes the props; paint only the ground layer). */
 function touchGround(world: World, gx0: number, gz0: number, gx1: number, gz1: number, props: boolean): void {
   for (let tz = gz0 >> WSHIFT; tz <= gz1 >> WSHIFT; tz++) for (let tx = gx0 >> WSHIFT; tx <= gx1 >> WSHIFT; tx++) {
     world.groundDirty.add(tz * MAP_TILES + tx);
@@ -139,8 +139,8 @@ function touchGround(world: World, gx0: number, gz0: number, gx1: number, gz1: n
 }
 
 /**
- * Rio: cava um leito ao longo do traço e põe água nele. A superfície desce
- * sempre (nunca sobe rio acima) e fica um pouco abaixo das margens.
+ * River: digs a bed along the stroke and puts water in it. The surface always goes
+ * down (never up river) and stays a little below the banks.
  */
 export class RiverCommand implements Command {
   readonly label = 'rio';
@@ -152,8 +152,8 @@ export class RiverCommand implements Command {
   constructor(world: World, pts: Array<[number, number]>, width: number, depth: number) {
     this.world = world;
     const h = world.heights, wat = world.water;
-    // pontos a cada 4 m ao longo do traço
-    // pontos repetidos (duplo clique) saem
+    // points every 4 m along the stroke
+    // repeated points (double click) are dropped
     pts = pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 2);
     const path: Array<[number, number]> = [];
     for (let i = 0; i + 1 < pts.length; i++) {
@@ -162,7 +162,7 @@ export class RiverCommand implements Command {
       for (let k = 0; k < n; k++) path.push([ax + (bx - ax) * k / n, az + (bz - az) * k / n]);
     }
     path.push(pts[pts.length - 1]);
-    // nível da água: altura do chão menos 0,8 m, nunca subindo ao longo do caminho, nunca abaixo do mar
+    // water level: ground height minus 0.8 m, never rising along the path, never below the sea
     const level = new Float64Array(path.length);
     let prev = Infinity;
     for (let i = 0; i < path.length; i++) {
@@ -173,7 +173,7 @@ export class RiverCommand implements Command {
     const half = width / 2;
     const hMap = new Map<number, number>(), wMap = new Map<number, number>();
     let gx0 = Infinity, gz0 = Infinity, gx1 = -Infinity, gz1 = -Infinity;
-    // terreno: leito em U (fundo = nível − profundidade), margens suaves até 1,6 × meia largura
+    // terrain: U-shaped bed (bottom = level − depth), soft banks out to 1.6 × half width
     path.forEach(([x, z], i) => {
       const reach = half * 1.6 + 4;
       const ax = Math.max(0, Math.floor(sampleCoord(x - reach))), bx = Math.min(HEIGHT_MAP_RES - 1, Math.ceil(sampleCoord(x + reach)));
@@ -188,7 +188,7 @@ export class RiverCommand implements Command {
         const bed = t < 1 ? level[i] - depth * (1 - t * t) : level[i] + (t - 1) * 2.5;
         if (bed < cur) hMap.set(idx, Math.max(TERRAIN_MIN_Y, bed));
       }
-      // água: células de 8 m dentro da largura (e uma a mais, escondida pela margem)
+      // water: 8 m cells inside the width (and one more, hidden by the bank)
       const wr = half + WATER_SPACING;
       const wx0 = Math.max(0, Math.floor(waterCoord(x - wr))), wx1 = Math.min(WATER_MAP_RES - 1, Math.ceil(waterCoord(x + wr)));
       const wz0 = Math.max(0, Math.floor(waterCoord(z - wr))), wz1 = Math.min(WATER_MAP_RES - 1, Math.ceil(waterCoord(z + wr)));
