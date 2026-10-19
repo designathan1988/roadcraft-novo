@@ -85,6 +85,9 @@ export class CommandStack {
     return true;
   }
 
+  /** The step an undo would take back (null when there is none). */
+  get top(): Command | null { return this.done[this.done.length - 1] ?? null; }
+
   get canUndo(): boolean { return this.done.length > 0; }
   get canRedo(): boolean { return this.undone.length > 0; }
 

@@ -766,3 +766,31 @@ test('D24: demolishing a Stop sign takes its rule away; undo puts both back', as
     assert.ok(w.roads.junctions.get(c)?.legs?.some(([, r]) => r === Rule.Stop), 'undo brought the sign back without its rule');
   }
 });
+
+test('D25: Backspace in the wall tool takes back its own last run, never another command', async () => {
+  const { ItemTool } = await import('../src/tools/itemTool.ts');
+  const { Item } = await import('../src/world/items.ts');
+  const w = flatWorld(1e9);
+  const commands = new CommandStack();
+  const stub = new Proxy({}, { get: () => () => {} });
+  const tool = new ItemTool(w, commands, stub as never, stub as never);
+  tool.setMode('barrier');
+  tool.barrier = Item.Wall;
+  const at = (x: number, z: number) => ({ x, y: 10, z }) as never;
+  tool.click(at(300, 300), false);
+  tool.click(at(320, 300), false);
+  tool.click(at(340, 300), false);
+  assert.equal(w.items.size, 2, 'two runs of wall');
+  // Backspace twice: each takes back the last run, and the trace goes on from where that run began
+  tool.back();
+  assert.equal(w.items.size, 1, 'Backspace did not take back the last run');
+  tool.back();
+  assert.equal(w.items.size, 0, 'a second Backspace did not take back the run before');
+  tool.click(at(320, 320), false);
+  assert.equal(w.items.size, 1, 'after Backspace the trace did not go on from its start');
+  // the player builds a road while the trace is still open, then presses Backspace
+  commands.push(road(w, -100, 0, 100, 0));
+  const roads = w.roads.segs.size;
+  tool.back();
+  assert.equal(w.roads.segs.size, roads, 'Backspace in the wall tool undid the road');
+});

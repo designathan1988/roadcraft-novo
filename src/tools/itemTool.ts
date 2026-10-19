@@ -53,6 +53,8 @@ export class ItemTool {
   /** Lights on the wired poles: 0 none, 1 on alternate poles, 2 on all. */
   poleLights = 0;
   private last: { x: number; z: number } | null = null;
+  /** Runs of the open trace, newest last, each with the point it started from (Backspace takes them back). */
+  private runs: Array<{ cmd: Command; from: { x: number; z: number } }> = [];
   private world: World;
   private commands: CommandStack;
   private preview: RoadPreview;
@@ -67,6 +69,7 @@ export class ItemTool {
   cancel(showHint = true): void {
     if (this.last) this.commands.endGroup();
     this.last = null;
+    this.runs.length = 0;
     this.preview.hideAll();
     if (showHint) this.hint();
   }
@@ -161,6 +164,7 @@ export class ItemTool {
       c.add([a.x + (sp.x - a.x) * t0, a.z + (sp.z - a.z) * t0, a.x + (sp.x - a.x) * t1, a.z + (sp.z - a.z) * t1, this.barrier, this.barrier === Item.PoleLine ? this.poleLights : 0]);
     }
     this.commands.push(c);
+    this.runs.push({ cmd: c, from: a });
     this.last = { x: sp.x, z: sp.z };
   }
 
@@ -194,11 +198,17 @@ export class ItemTool {
     this.preview.show({ x0: a.x, z0: a.z, cx: (a.x + b.x) / 2, cz: (a.z + b.z) / 2, x1: b.x, z1: b.z }, 0.5, [0, 1], [a.y + 0.4, b.y + 0.4], true, 0x4cd28a);
   }
 
-  /** Backspace: undoes the last run and moves the point back. */
+  /**
+   * Backspace: takes back the trace's last run and goes on from where it began. Only the tool's own run: if another
+   * command came after it, the trace just ends and nothing is undone.
+   */
   back(): void {
     if (!this.last) return;
-    this.commands.undo();
-    this.last = null;
+    const r = this.runs[this.runs.length - 1];
+    if (!r || this.commands.top !== r.cmd) { this.runs.length = 0; this.last = null; this.hint(); return; }
+    if (!this.commands.undo()) return;
+    this.runs.pop();
+    this.last = r.from;
     this.hint();
   }
 }
