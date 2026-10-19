@@ -383,7 +383,7 @@ export class TerrainRenderer {
       const spacing = step.mul(morph.add(1));
       // and 0.4 m at the finest level too: the 4 m grid does not follow the junction fans and corners, and it surfaced
       // through the asphalt in the middle of junctions (the road skirts reach 0.7 m)
-      const sink = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3).add(smoothstep(0.35, 0.7, cover).mul(0.4)));
+      const sink = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3).add(smoothstep(0.35, 0.7, cover).mul(0.8)));
       const y = heightAt(mxz).sub(sink);
       // normal by central differences at the level's scale
       const e = max(step, float(HEIGHT_SPACING));

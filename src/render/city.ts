@@ -116,7 +116,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
         (r) => done(r.mesh), { key: `plate:${p}`, priority, transfer: boxTransfer(boxes) });
     },
   };
-  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 200, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
+  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 1400, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
 }
 
 

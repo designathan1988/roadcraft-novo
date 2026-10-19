@@ -13,7 +13,7 @@ import { partGeometries, type PartKind } from '../r40/render/buildings/kit.ts';
 import { COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT } from '../r40/render/buildings/cellArrays.ts';
 import { POSE_FLOATS } from '../r40/render/buildings/partPose.ts';
 import { LOOK_FLOATS } from '../r40/render/buildings/shellParts.ts';
-import { FINISHES } from '../r40/world/buildings/materials.ts';
+import { FINISHES, roofMaterial, wallMaterial } from '../r40/world/buildings/materials.ts';
 import type { Building } from '../r40/world/buildings/types.ts';
 import type { BufferGeometry } from 'three';
 import { FIN } from './buildingFinishes.ts';
@@ -46,6 +46,12 @@ export const COARSE_PARTS = new Set<string>(['glass', 'glassDark', 'water']);
 const SKIPPED = new Set<string>(['wash']);
 
 let models: Record<PartKind, BufferGeometry> | null = null;
+
+/** An IEEE half float's bits -> its number. */
+function half(h: number): number {
+  const e = (h >> 10) & 31, f = h & 1023, sg = h & 0x8000 ? -1 : 1;
+  return sg * (e === 0 ? f * 2 ** -24 : e === 31 ? (f ? NaN : Infinity) : (1 + f / 1024) * 2 ** (e - 15));
+}
 
 /** Linear 0..1 -> an sRGB byte. */
 function srgbByte(x: number): number {
@@ -104,9 +110,10 @@ function building40(lot: Lot40): Building {
   return { ...body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: -fz, rotation: lot.rot } as Building;
 }
 
-export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number): Laid40 {
+export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number, far = false): Laid40 {
   const b = building40(lot);
-  const chunk = emitChunk(b, (x, y) => lot.groundAt(x, -y));
+  // far: 4.0's facade level (L1: the openings drawn by the shader, no small parts), the near level otherwise
+  const chunk = emitChunk(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), undefined, far);
   letGoEmitted(b);
   let laidShell = 0, laidParts = 0;
   const n = [0, 0, 0];
@@ -130,6 +137,33 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
       }
       laidShell += P.length / 3;
     }
+  }
+  // the far level's runs of bays with openings (4.0 chunk.ts RunChunk): walls whose windows the shader draws from their
+  // grid (u in bays, v in storeys, whole at the runs' corners) and their bay width and storey height (half floats)
+  if (shell && chunk.runs) {
+    for (const [finish, part] of Object.entries(chunk.runs)) {
+      if (!part) continue;
+      const fin = FIN_OF[finish] ?? 0;
+      const base = shell.v;
+      const P = part.position, N = part.normal, C = part.paint, I = part.index, F = part.facade, G = part.grid;
+      const k = COLOUR_RANGE / PAINT_UNIT;
+      for (let i = 0; i < P.length / 3; i++) {
+        unfold(N[i * 2], N[i * 2 + 1], n);
+        const bay = half(F[i * 2]), storey = half(F[i * 2 + 1]);
+        shell.curFac[0] = paneRow; shell.curFac[1] = lot.seed & 255;
+        shell.curFac[2] = Math.max(0, Math.min(31, Math.round((storey - 2.5) * 10))) << 3;
+        shell.curFac[3] = Math.min(127, Math.max(1, Math.round(bay * 10))) * 2;
+        shell.curU = G[i * 4];
+        shell.curBase = P[i * 3 + 1] - G[i * 4 + 1] * storey;
+        shell.vert(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], n[0], n[1], n[2], hexOf(C[i * 4] * k, C[i * 4 + 1] * k, C[i * 4 + 2] * k), MAT.Wall | (fin << 4));
+      }
+      for (let t = 0; t < I.length; t += 3) {
+        unfold(N[I[t] * 2], N[I[t] * 2 + 1], n);
+        shell.tri(base + I[t], base + I[t + 1], base + I[t + 2], n[0], n[1], n[2]);
+      }
+      laidShell += P.length / 3;
+    }
+    shell.curFac[3] = 0; shell.curU = 0;
   }
   if (pool) {
     for (const [kind, batch] of Object.entries(chunk.parts) as Array<[PartKind, typeof chunk.parts[PartKind]]>) {
@@ -215,6 +249,10 @@ export function massLot40(lot: Lot40, mb: MeshBuilder, level: number, style: num
   const m = emitMassing(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), false, undefined, detail);
   if (!m) return 0;
   const P = m.position, N = m.normal, C = m.colour, F = m.facade, G = m.glazing, I = m.index;
+  // the walls' and the roofs' finish of the near building (brick, plaster, stone, tile...): the far one keeps its texture
+  const v0 = b.volumes.find((v) => !v.open) ?? b.volumes[0];
+  const wallFin = v0 ? FIN_OF[wallMaterial(b, v0, 0).finish] ?? 0 : 0;
+  const roofFin = v0 ? FIN_OF[roofMaterial(b, v0).finish] ?? 0 : 0;
   const base = mb.v, seed = lot.seed & 255;
   for (let i = 0; i < P.length / 3; i++) {
     const bay = F[i * 4 + 1], storey = F[i * 4 + 2], z0 = F[i * 4 + 3], share = G[i * 2];
@@ -227,7 +265,7 @@ export function massLot40(lot: Lot40, mb: MeshBuilder, level: number, style: num
       mb.curU = F[i * 4] / bay;
       mb.curBase = z0;
     } else { mb.curFac[3] = 0; mb.curU = 0; }
-    const mat = wall ? MAT.Wall : MAT.Plain;
+    const mat = wall ? MAT.Wall | (wallFin << 4) : MAT.Plain | (roofFin << 4);
     mb.vert(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], N[i * 3], N[i * 3 + 1], N[i * 3 + 2], hexOf(C[i * 3], C[i * 3 + 1], C[i * 3 + 2]), mat);
   }
   for (let t = 0; t < I.length; t += 3) {

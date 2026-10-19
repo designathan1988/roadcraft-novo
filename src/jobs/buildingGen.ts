@@ -796,7 +796,11 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     const ch = chimneyOf(b.seed[i], W, D, floors);
     if (ch) chimney(g.mb, f, ch[0], ch[1], f.base, hi + ch[2], g.lod);
   }
-  else if (lod >= 1 && R40_ZONES.has(zone)) {
+  else if (lod === 1 && R40_ZONES.has(zone)) {
+    // the same 4.0 building at 4.0's facade level (L1): its walls, openings and roofs, without the small parts
+    layLot40(lot40Of(b, i, fit, zone, floors, heights), mb, null, PANE_ROW, true);
+  }
+  else if (lod >= 2 && R40_ZONES.has(zone)) {
     // the same 4.0 building from afar (jobs/building40.ts massLot40): never another building than the near one
     massLot40(lot40Of(b, i, fit, zone, floors, heights), mb, lod, arch);
   }

@@ -23,10 +23,10 @@ export const PART_TYPES: readonly number[] = [PROP.BFrame, PROP.BBox, PROP.BRail
 export const VARIANT_TYPES = new Set<number>([PROP.BMisc, PROP.BPropA, PROP.BPropB, PROP.BLot]);
 /** Metres each type is drawn to, at 1080p: the 4.0 draws a part by its size on the screen (partFiling.ts). */
 export const PART_DIST: Readonly<Record<number, number>> = {
-  [PROP.BFrame]: 80, [PROP.BBox]: 130, [PROP.BRail]: 60, [PROP.BMisc]: 110, [PROP.BPropA]: 60, [PROP.BPropB]: 40, [PROP.BLot]: 260,
+  [PROP.BFrame]: 400, [PROP.BBox]: 600, [PROP.BRail]: 300, [PROP.BMisc]: 400, [PROP.BPropA]: 250, [PROP.BPropB]: 150, [PROP.BLot]: 800,
 };
 /** How far from the camera a cell asks for its building parts (the farthest type, and a cell's reach). */
-export const PARTS_RANGE = 260 + 128;
+export const PARTS_RANGE = 800 + 128;
 
 /** Scale range of the log code, metres: SCALE_MIN * 2^(code / max * SCALE_OCTAVES). */
 export const SCALE_MIN = 0.005, SCALE_OCTAVES = 13;
