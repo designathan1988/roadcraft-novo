@@ -74,7 +74,7 @@ import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParam
 import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
-import { MapFileError, keepPreviousCity, packSlot, quarantineSlot, readPackage, savedIn } from './mapFile.ts';
+import { MapFileError, keepPreviousCity, packSlot, previousCities, quarantineSlot, readPackage, restorePrevious, savedIn, type SaveActions } from './mapFile.ts';
 import { KeptFileMissing, SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation, type Opened } from './saveFiles.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
 
@@ -100,7 +100,7 @@ export class Game {
   readonly commands = new CommandStack();
   readonly hud: Hud;
   /** The panel button actions (test scripts call the same thing the button does). */
-  hudActions!: HudActions & FeatureActions;
+  hudActions!: HudActions & FeatureActions & SaveActions;
   /** Measurement (?perf): where the time of slow frames went. */
   perfLog: string[] | null = null;
   private parts!: SceneParts;
@@ -281,7 +281,7 @@ export class Game {
       else if (op.t === 'clear') { arr.fill(0); this.trafficLook.arrows.needsUpdate = true; }
     });
 
-    this.hud = new Hud(this.hudActions = Object.assign(this.featureActions(), {
+    this.hud = new Hud(this.hudActions = Object.assign(this.featureActions(), this.saveActions(), {
       tool: (t) => this.setTool(t),
       item: (k) => { this.itemTool.item = k; },
       signType: (k) => { this.itemTool.sign = k; },
@@ -2420,6 +2420,34 @@ export class Game {
 
   /** The gameId of the city in the save slot (null: not known yet). */
   private slotGame: number | null = null;
+
+  /** The previous cities kept aside (mapFile.ts), for the interface (hudActions). */
+  private saveActions(): SaveActions {
+    return {
+      previousCities: async () => previousCities(await this.saveStore, SLOT),
+      openPreviousCity: (folder) => { if (this.discardOk()) void this.openPreviousCity(folder); },
+    };
+  }
+
+  /**
+   * Puts a previous city back in the save and opens it: the city in the save goes aside first (a previous city in its
+   * turn), then the previous city's save becomes a new generation of the slot.
+   */
+  private async openPreviousCity(folder: string): Promise<void> {
+    if (this.busy || !await this.mayWrite() || this.busy) return;
+    this.busy = true;
+    let kept: string | null;
+    try { kept = await restorePrevious(await this.slot(), folder); } catch (err) {
+      this.hud.toast(t('save.previousFailed', { why: errorText(err) }));
+      return;
+    } finally {
+      this.busy = false;
+    }
+    this.slotGame = null;
+    this.slotBase = null;
+    if (kept) this.hud.toast(t('save.keptPrevious', { folder: kept }));
+    await this.load();
+  }
 
   private async newMap(): Promise<void> {
     if (this.busy) return;

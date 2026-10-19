@@ -179,3 +179,46 @@ export async function quarantineSlot(slot: SaveSlot, why: string): Promise<strin
     return null;
   }
 }
+/** A previous city kept aside: its folder and what its save says. */
+export interface PreviousCity { folder: string; saved: string; seed: number; gameId: number; tiles: number; bytes: number }
+
+/** The previous cities of a slot, newest first (those whose save checks out). */
+export async function previousCities(store: FileStore, slot: string): Promise<PreviousCity[]> {
+  const out: PreviousCity[] = [];
+  for (const folder of (await foldersOf(store, 'anterior', slot)).reverse()) {
+    try {
+      const g = (await new SaveSlot(store, folder).open()).generations[0];
+      if (!g) continue;
+      let bytes = g.meta.size;
+      for (const r of g.tiles.values()) bytes += r.size;
+      // a copy of a save from before generations has no date of its own: the folder's
+      const saved = g.saved || folder.slice('anterior-'.length, 'anterior-'.length + 19).replace(/T(\d\d)-(\d\d)-(\d\d)/, 'T$1:$2:$3');
+      out.push({ folder, saved, seed: g.seed, gameId: g.game, tiles: g.tiles.size, bytes });
+    } catch (err) { console.warn('save: previous city not readable', folder, err); }
+  }
+  return out;
+}
+
+/**
+ * Puts a previous city back in the slot: the city in the slot now is kept aside first (keepPreviousCity), then the
+ * previous city's save is committed as a new generation of the slot. Returns the folder the current city went to.
+ */
+export async function restorePrevious(slot: SaveSlot, folder: string): Promise<string | null> {
+  if (!folder.startsWith('anterior-') || !folder.endsWith(`-${slot.folder}`)) throw new Error(`${folder} is not a previous city of ${slot.folder}`);
+  const from = new SaveSlot(slot.store, folder);
+  const g = (await from.open()).generations[0];
+  if (!g) throw new Error(`the save in ${folder} cannot be read`);
+  const tiles = new Map<number, Uint8Array>();
+  for (const t of g.tiles.keys()) tiles.set(t, await from.readTile(g, t));
+  const kept = await keepPreviousCity(slot);
+  await slot.adopt(g.metaBytes, tiles, g.game, g.seed);
+  return kept;
+}
+
+/** The save actions the interface can call (Game.hudActions): the previous cities of the save, and opening one. */
+export interface SaveActions {
+  /** The previous cities kept aside, newest first. */
+  previousCities(): Promise<PreviousCity[]>;
+  /** Puts a previous city (`folder` from previousCities) back in the save and opens it, asking first when the city on screen has unsaved work. */
+  openPreviousCity(folder: string): void;
+}

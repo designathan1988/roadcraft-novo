@@ -305,4 +305,5 @@ export const ENGINE_PT: Record<string, string> = {
   'save.file.damaged': 'o arquivo de mapa está danificado',
   'save.otherTab': 'Esta cidade está aberta em outra aba, que é quem salva. Feche a outra aba para salvar aqui.',
   'save.nowWriter': 'A outra aba fechou: esta aba agora salva a cidade.',
+  'save.previousFailed': 'A cidade anterior não abriu: {why}. O salvamento atual não foi tocado.',
 };

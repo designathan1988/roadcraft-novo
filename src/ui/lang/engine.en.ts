@@ -305,4 +305,5 @@ export const ENGINE_EN: Record<string, string> = {
   'save.file.damaged': 'the map file is damaged',
   'save.otherTab': 'This city is open in another tab, which is the one that saves. Close the other tab to save here.',
   'save.nowWriter': 'The other tab closed: this tab saves the city now.',
+  'save.previousFailed': 'The previous city did not open: {why}. The current save was not touched.',
 };

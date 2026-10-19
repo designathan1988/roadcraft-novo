@@ -387,6 +387,24 @@ const SCENARIOS = {
     const left = []; try { for await (const [n] of await opfs(SLOT)) left.push(n); } catch { /* gone */ }
     check('the browser storage still has it', left.includes('meta.bin') && left.some((n) => n.startsWith('tile_')), 'browser storage: ' + left);
   `],
+  // Previous cities: a city another one replaced in the save is listed, and opening it puts it back (the city that was
+  // in the save goes aside in its turn)
+  'previous-cities': `
+    road(-4000, -4000, -3800, -4000);
+    check('the first city is saved', await g.save(false) === true, 'save() did not complete');
+    await g.newMap();
+    w.unlimited = true;
+    road(1500, 1500, 1700, 1500);
+    check('the second city is saved', await g.save(false) === true, 'save() did not complete');
+    const list = await g.hudActions.previousCities();
+    check('the first city is listed as a previous city', list.length === 1 && list[0].tiles >= 1 && list[0].bytes > 0 && !!list[0].saved, JSON.stringify(list));
+    g.hudActions.openPreviousCity(list[0].folder);
+    for (let k = 0; k < 120 && (g.busy || !roadAt(-3900, -4000)); k++) await wait(250);
+    check('opening it brings it back', roadAt(-3900, -4000) && !roadAt(1600, 1500) && !g.busy, 'first city road ' + roadAt(-3900, -4000) + ', second ' + roadAt(1600, 1500));
+    const after = await g.hudActions.previousCities();
+    check('the city that was in the save is now a previous city', after.some((c) => c.gameId !== list[0].gameId), JSON.stringify(after));
+    check('and the save works', await g.save(false) === true, 'save() did not complete');
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);
