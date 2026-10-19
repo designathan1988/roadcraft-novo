@@ -26,6 +26,8 @@ const SPAWN_STEADY = 40, SPAWN_FILL = 400;
 /** Chance of spawning at a node by the zone of the roads around it (none, residential, commercial, industrial, mixed). */
 const ZONE_PULL = [0.12, 0.4, 1, 0.15, 0.8];
 const ROUTE = 32;
+/** Someone left with nowhere to walk fades out over this long (s). */
+const FADE_OUT = 1.5;
 /** A node near the camera lets its people out of a door within this distance (m). */
 const DOOR_CELL = 80;
 const WAYS = 12;
@@ -513,10 +515,21 @@ export class Peds {
       if (c.tLine[p] >= 0) { const q = this.posNow(p); this.onStop(c.tLine[p], c.tFrom[p], c.tTo[p], q[0], q[2]); }
       return false;
     }
-    const n = this.routes[p * ROUTE + i], nNext = this.routes[p * ROUTE + i + 1];
-    const sIn = c.seg[p], sOut = this.segBetween(n, nNext);
+    const n = this.routes[p * ROUTE + i];
+    let nNext = this.routes[p * ROUTE + i + 1];
+    const sIn = c.seg[p];
+    let sOut = this.segBetween(n, nNext);
     if (c.bike[p]) return this.bikeThrough(p, n, sIn, sOut);
-    if (sOut < 0 || !net.segs.alive[sIn] || !PROFILE_INFO[sc.profile[sOut]].walk) return false;
+    const usable = (s: number) => s >= 0 && net.segs.alive[s] && PROFILE_INFO[sc.profile[s]].walk;
+    if (!usable(sOut) || !net.segs.alive[sIn]) {
+      // the way ahead (or the sidewalk just walked) was demolished: a new route from this corner to where they were
+      // going; with none, they leave (fading out)
+      if (!this.reroute(p, n)) return this.fadeOut(p);
+      if (!net.segs.alive[sIn]) return this.startSidewalk(p);
+      nNext = this.routes[p * ROUTE + 1];
+      sOut = this.segBetween(n, nNext);
+      if (!usable(sOut)) return this.fadeOut(p);
+    }
     // start point = end of the sidewalk just finished
     const here = this.posNow(p);
     this.lineFrom[p * 3] = here[0]; this.lineFrom[p * 3 + 1] = here[1]; this.lineFrom[p * 3 + 2] = here[2];
@@ -657,7 +670,7 @@ export class Peds {
   private posNow(p: number, time = this.time): number[] {
     const c = this.t.cols, sim = this.sim, out = this.pos3;
     out[3] = c.pyaw[p];
-    if (c.mode[p] === 3) {
+    if (c.mode[p] === 3 || c.mode[p] === 4) {
       out[0] = this.lineFrom[p * 3]; out[1] = this.lineFrom[p * 3 + 1]; out[2] = this.lineFrom[p * 3 + 2];
       return out;
     }
@@ -699,8 +712,29 @@ export class Peds {
 
   /** One event: end of a segment, end of a straight line or end of a wait. */
   private advance(p: number): void {
-    const ok = this.t.cols.mode[p] === 0 ? this.atNode(p) : this.nextWay(p);
+    const mode = this.t.cols.mode[p];
+    const ok = mode === 4 ? false : mode === 0 ? this.atNode(p) : this.nextWay(p);
     if (!ok) this.kill(p);
+  }
+
+  /** A new walking route from node `n` to the end of the current one (on foot, turning back allowed). */
+  private reroute(p: number, n: number): boolean {
+    const c = this.t.cols, r = p * ROUTE, dest = this.routes[r + c.rLen[p] - 1];
+    if (dest === n || !this.sim.net.nodes.alive[dest]) return false;
+    const len = this.router.route(n, dest, this.routes, r, ROUTE, true);
+    if (len < 2 || this.routes[r + len - 1] !== dest) return false;
+    c.rLen[p] = len; c.rIdx[p] = 0;
+    return true;
+  }
+
+  /** Nowhere left to walk: stands where it is and fades out over FADE_OUT s, then leaves. */
+  private fadeOut(p: number): boolean {
+    const c = this.t.cols, q = this.posNow(p);
+    this.lineFrom[p * 3] = q[0]; this.lineFrom[p * 3 + 1] = q[1]; this.lineFrom[p * 3 + 2] = q[2];
+    c.pyaw[p] = q[3];
+    c.mode[p] = 4; c.t0[p] = this.time; c.dur[p] = FADE_OUT;
+    this.schedule(p, this.time + FADE_OUT);
+    return true;
   }
 
   // ------------------------------------------------------------ step
@@ -716,7 +750,7 @@ export class Peds {
       const p = this.heapP[0], at = this.heapT[0];
       this.popEvent();
       if (!this.t.alive[p] || c.at[p] !== at) continue; // stale event
-      if (c.mode[p] === 0 && !this.sim.net.segs.alive[c.seg[p]]) { this.kill(p); continue; }
+      if (c.mode[p] === 0 && !this.sim.net.segs.alive[c.seg[p]]) { this.fadeOut(p); continue; }
       this.advance(p);
     }
   }
@@ -748,7 +782,7 @@ export class Peds {
         data[o] = c.px[p]; data[o + 1] = c.py[p]; data[o + 2] = c.pz[p]; data[o + 3] = c.pyaw[p];
         data[o + 4] = q[0]; data[o + 5] = q[1]; data[o + 6] = q[2]; data[o + 7] = q[3];
         data[o + 8] = (c.bike[p] ? 5 : 3) * 256 + c.color[p];
-        data[o + 9] = 1;
+        data[o + 9] = c.mode[p] === 4 ? Math.max(0, 1 - (this.time - c.t0[p]) / c.dur[p]) : 1;
         data[o + 10] = c.look[p];
         c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.pyaw[p] = q[3];
         n++;

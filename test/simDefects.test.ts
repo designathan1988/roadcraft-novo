@@ -812,3 +812,41 @@ test('C24: the rear wagons of a train stay on the track through a bend', async (
   for (let s = 0; s <= sim.laneLen(behind); s += 0.5) { sim.lanePoint(behind, s, q); best = Math.min(best, Math.hypot(q[0] - out[0], q[2] - out[2])); }
   assert.ok(best < 1, `the wagon is ${best.toFixed(1)} m off the track`);
 });
+
+test('C26: a pedestrian whose way ahead was demolished walks round another way; one left with no way fades out', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { recordOps, mirror } = await import('./simCity.ts');
+  const { w, sim } = gridCity(6, 100, -1);
+  const ops = recordOps(w);
+  const peds = new Peds(sim);
+  peds.density = 1 / 8;
+  for (let i = 0; i < 20 * 20; i++) peds.step(0.05);
+  const P = inner(peds), c = peds.t.cols;
+  // walkers with at least three segments still ahead: the segment two nodes ahead of each is demolished
+  const watch: number[] = [], doomed = new Set<number>();
+  for (let p = 0; p < peds.t.end && watch.length < 25; p++) {
+    if (!peds.t.alive[p] || c.bike[p] || c.tLine[p] >= 0 || c.mode[p] !== 0 || c.rIdx[p] + 3 >= c.rLen[p]) continue;
+    const a = P.routes[p * 32 + c.rIdx[p] + 1], b = P.routes[p * 32 + c.rIdx[p] + 2];
+    const s = P.segBetween(a, b);
+    if (s < 0 || !w.roads.segs.alive[s]) continue;
+    // a few inner streets only (removing many would cut people off from where they go)
+    const sc = w.roads.segs.cols;
+    if (Math.abs(sc.mx[s]) > 180 || Math.abs(sc.mz[s]) > 180 || (!doomed.has(s) && doomed.size >= 6)) continue;
+    doomed.add(s); watch.push(p);
+  }
+  assert.ok(watch.length >= 8, `walkers watched ${watch.length}`);
+  // who disappears before reaching the end of the route
+  const gone = new Set<number>(), kill = P.kill.bind(P), alive = new Set(watch);
+  P.kill = (p: number) => { if (alive.has(p)) { alive.delete(p); if (c.rIdx[p] + 1 < c.rLen[p]) gone.add(p); } kill(p); };
+  for (const s of doomed) w.roads.removeSeg(s);
+  mirror(sim, ops.splice(0)); sim.rebuild();
+  const out = new Float32Array(11 * 40000);
+  let faded = 0;
+  for (let i = 0; i < 20 * 60; i++) {
+    peds.step(0.05);
+    if (i % 5 === 0) { peds.camX = 0; peds.camZ = 0; peds.checkWindow(); const n = peds.writePoses(out, 11, 0, 40000); for (let j = 0; j < n; j++) if (out[j * 11 + 9] < 0.99) faded++; }
+  }
+  const went = watch.length - gone.size;
+  assert.ok(went >= watch.length * 0.6, `${went} of ${watch.length} walkers went round the demolished street (the rest vanished)`);
+  assert.ok(faded > 0, 'nobody left on a demolished sidewalk was seen fading out');
+});
