@@ -53,7 +53,7 @@ import { installKeys } from './ui/keys.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
-import { InsideView } from './render/inside.ts';
+import { InsideView, insideTarget } from './render/inside.ts';
 import { Blast } from './render/blast.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
@@ -1861,7 +1861,8 @@ export class Game {
     const w = this.world, col = w.buildings.cols;
     if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); return; }
     if (c === 'toggle') {
-      const id = this.selected >= 0 ? this.selected : lotAt(w, this.rig.target.x, this.rig.target.z);
+      // the selected building when it is in view; otherwise the one at the centre of the screen
+      const id = insideTarget(w, this.selected, this.rig.target.x, this.rig.target.z, this.rig.dist);
       if (id < 0 || col.floors[id] === 0) { this.hud.toast('Nenhum prédio escolhido nem no centro da tela: clique num prédio ou aponte a vista para um.'); return; }
       this.insideId = id;
       this.insideFloor = 0;

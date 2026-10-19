@@ -291,6 +291,22 @@ test('B9, B14: the inside view stays in its building and cuts only above the flo
   assert.equal(view.plan!.floors, 20);
 });
 
+test('B12: the inside view opens the building in view, not a selection left far away', async () => {
+  const { insideTarget } = await import('../src/render/inside.ts');
+  const { RoadJournal } = await import('../src/roads/build.ts');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.unlimited = true;
+  const j = new RoadJournal(w, 'build');
+  const far = j.addBuilding({ x: -3000, z: -3000, w: 20, d: 30, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Commercial, floors: 6, style: 0 });
+  const here = j.addBuilding({ x: 1000, z: 1000, w: 20, d: 30, h: 0, rot: 0, color: 0, seed: 2, zone: Zone.Commercial, floors: 6, style: 0 });
+  j.settle();
+  // looking at "here" from 200 m, with "far" still selected
+  assert.equal(insideTarget(w, far, 1000, 1000, 200), here);
+  // the selection in view is the one opened, even off the centre
+  assert.equal(insideTarget(w, here, 1040, 980, 200), here);
+  assert.equal(insideTarget(w, -1, 1000, 1000, 200), here);
+});
+
 test('B11: the inside view goes with its building (demolished, a new city) and follows its edits', async () => {
   const { InsideView, cutYU } = await import('../src/render/inside.ts');
   const { RoadJournal } = await import('../src/roads/build.ts');

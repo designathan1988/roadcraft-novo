@@ -9,6 +9,7 @@ import * as THREE from 'three/webgpu';
 import { T } from './tsl.ts';
 import { buildingTag, buildingVolumes, type Volume } from '../jobs/buildingGen.ts';
 import type { World } from '../world/world.ts';
+import { lotAt } from '../world/lotEdit.ts';
 
 /** Cut: centre and half width/depth (x, z, w/2, d/2), turn (cos, sin) and height (no cut: very high). */
 export const cutBoxU = T.uniform(new THREE.Vector4(0, 0, 0, 0));
@@ -93,6 +94,16 @@ export function insidePlanOf(world: World, id: number, k: number): InsidePlan | 
     return insidePlan(buildingVolumes(world.heights, boxes, i), { x: col.x[id], z: col.z[id], w: col.w[id], d: col.d[id], rot: col.rot[id] }, k, buildingTag(col.seed[id], col.x[id], col.z[id]));
   }
   return null;
+}
+
+/**
+ * The building the inside view opens: the selected one when it is in view (within the camera's distance of the point
+ * looked at, plus 60 m), otherwise the one at that point (-1: none). A selection left far away is not opened off screen.
+ */
+export function insideTarget(world: World, selected: number, tx: number, tz: number, dist: number): number {
+  const col = world.buildings.cols;
+  if (selected >= 0 && world.buildings.alive[selected] && Math.hypot(col.x[selected] - tx, col.z[selected] - tz) < dist + 60) return selected;
+  return lotAt(world, tx, tz);
 }
 
 export class InsideView {
