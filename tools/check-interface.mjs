@@ -677,6 +677,19 @@ export const SCENARIOS = {
     const gpu = dlg.querySelector('.opt-gpu');
     check('the options name the graphics card', !!gpu && gpu.textContent.length > 15, 'gpu: ' + (gpu && gpu.textContent));
   `,
+  // The 4.0 road keys (ui/roads/keys.ts): a third key, alignment (V), cycles straight, curve and free; Reset in Options
+  'road-keys-4.0': `
+    click('[data-cat=roads]'); await frames(2);
+    const seq = [g.tool];
+    for (let k = 0; k < 3; k++) { key('KeyV'); keyUp('KeyV'); await frames(2); seq.push(g.tool); }
+    check('V cycles the alignment: straight, curve, free, straight', seq.join(',') === 'road,curve,free,road', 'tools ' + seq.join(','));
+    const pill = Q('.v2-toolopts .rp-open');
+    check('the keys pill shows the three keys, whole', pill && /V/.test(pill.textContent) && pill.scrollWidth <= pill.clientWidth + 1, 'pill: ' + (pill && pill.textContent + ' (' + pill.scrollWidth + ' / ' + pill.clientWidth + ')'));
+    click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
+    const dlg = g.optionsPanel.root;
+    check('Options lists the alignment key', /Trocar o traçado|Change the alignment|alignment/i.test(dlg.textContent), 'no alignment key');
+    check('Options has Reset for the road keys', [...dlg.querySelectorAll('button')].some((b) => /Restaurar padrão|Reset/.test(b.textContent)), 'no reset');
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);

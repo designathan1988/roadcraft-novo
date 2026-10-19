@@ -169,7 +169,7 @@ export interface HudActions extends OptionalActions {
   zoneLayer(on: boolean): void;
   /** Traffic %, people % and demand. */
   simulation(s: Partial<SimSettings>): void;
-  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string; preset: string; webgpu: boolean };
+  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string; roadAlign: string; preset: string; webgpu: boolean };
   /** A quality preset (baixo, medio, alto, ultra), applied and kept. */
   quality(preset: string): void;
   /** The view the city opened with (Home). */
@@ -198,7 +198,7 @@ type PopId = 'menu' | 'layers' | 'sim' | 'camera' | 'help';
 
 /** The keys of each tool, for the help panel: [key, what it does]. */
 const TOOL_KEYS: Partial<Record<Tool | 'roads' | 'terrain', Array<[string, string]>>> = {
-  roads: [['help.key.click', 'ui.do.roadPoint'], ['ui.key.altClick', 'ui.do.copyProfile'], ['help.key.pageUpDown', 'palette.height'], ['help.key.esc', 'ui.do.cancel']],
+  roads: [['help.key.click', 'ui.do.roadPoint'], ['ui.key.altClick', 'ui.do.copyProfile'], ['help.key.pageUpDown', 'palette.height'], ['ui.key.v', 'roadKeys.alignment'], ['help.key.esc', 'ui.do.cancel']],
   roundabout: [['help.key.click', 'ui.do.roundabout'], ['ui.key.brackets', 'v2.roundabout.radius']],
   terrain: [['v2.key.drag', 'ui.do.brush'], ['ui.key.brackets', 'terrain.radius']],
   bulldoze: [['help.key.click', 'help.do.remove'], ['v2.key.drag', 'ui.do.boxRemove'], ['help.key.undo', 'help.do.undo']],
@@ -427,7 +427,8 @@ export class Hud {
       building: () => self.picked,
       insideFloor: () => self.insideFloor,
       builderTabs: this.builderTabs,
-      roadKeys: () => { const k = a.settings(); return `${keyName(k.roadUp)} / ${keyName(k.roadDown)}`; },
+      // short names, so the three fit in the pill (Roadcraft 4.0: PgUp · PgDn · V)
+      roadKeys: () => { const k = a.settings(); const n = (c: string): string => keyName(c).replace('Page Up', 'PgUp').replace('Page Down', 'PgDn'); return `${n(k.roadUp)} · ${n(k.roadDown)} · ${n(k.roadAlign)}`; },
     };
     this.setSky('ciclo');
     this.syncSpeed();

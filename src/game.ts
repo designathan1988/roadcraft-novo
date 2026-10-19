@@ -378,7 +378,7 @@ export class Game {
       simulation: (sim) => { Object.assign(this.settings, sim); saveSettings(this.settings); this.demandSent = 0; },
       settings: () => {
         const st = this.settings;
-        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', preset: st?.preset ?? 'alto', webgpu: !!this.parts?.isWebGPU };
+        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', roadAlign: st?.roadAlign ?? 'KeyV', preset: st?.preset ?? 'alto', webgpu: !!this.parts?.isWebGPU };
       },
       paint: (style) => { this.settings.paint = style; saveSettings(this.settings); setPaintStyle(style); },
       furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
@@ -1117,6 +1117,9 @@ export class Game {
     const road = ROAD_TOOLS.includes(t) && t !== 'bulldoze';
     if (road && c === (this.settings.roadUp ?? 'PageUp')) { this.setElevation(this.roadTool.elevation + 4); return true; }
     if (road && c === (this.settings.roadDown ?? 'PageDown')) { this.setElevation(this.roadTool.elevation - 4); return true; }
+    // the alignment key (V): straight, curve, free, straight again (Roadcraft 4.0)
+    const drawing: Tool[] = ['road', 'curve', 'free', 'blocks'];
+    if (drawing.includes(t) && c === (this.settings.roadAlign ?? 'KeyV') && !e.shiftKey) { this.setTool(t === 'road' ? 'curve' : t === 'curve' ? 'free' : 'road'); return true; }
     if (c === 'BracketLeft' || c === 'BracketRight') {
       const f = c === 'BracketLeft' ? 1 / 1.2 : 1.2;
       if (t === 'roundabout') { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); return true; }

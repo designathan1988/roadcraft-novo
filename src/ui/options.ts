@@ -29,10 +29,14 @@ export interface Settings {
   /** Road tool keys (key codes): raise and lower the road. */
   roadUp?: string;
   roadDown?: string;
+  /** Road tool key that cycles the alignment: straight, curve, free (Roadcraft 4.0; default V). */
+  roadAlign?: string;
 }
 
 /** Keys the game already uses (they cannot be picked for the road): read from the key table (keys.ts). */
 const RESERVED = reservedKeys();
+/** The road keys' defaults: Page Up, Page Down, V. */
+const ROAD_DEFAULTS = ['PageUp', 'PageDown', 'KeyV'];
 
 export const PRESETS: Record<Preset, Omit<Settings, 'preset' | 'weather'>> = {
   baixo: { resolution: 0.75, shadows: false, ao: false, bloom: false, detail: 0.7 },
@@ -165,7 +169,8 @@ export class OptionsPanel {
             ev.preventDefault(); ev.stopPropagation();
             this.stopCapture();
             if (ev.code === 'Escape') { b.textContent = keyName(get()); return; }
-            if (RESERVED.has(ev.code)) { b.textContent = t('roadKeys.reserved', { key: keyName(ev.code) }); setTimeout(() => { b.textContent = keyName(get()); }, 1600); return; }
+            // the game's keys are refused, except the road keys' own defaults (Page Up / Down tilt the camera, V the view)
+            if (RESERVED.has(ev.code) && !ROAD_DEFAULTS.includes(ev.code)) { b.textContent = t('roadKeys.reserved', { key: keyName(ev.code) }); setTimeout(() => { b.textContent = keyName(get()); }, 1600); return; }
             set(ev.code); b.textContent = keyName(ev.code);
           };
           window.addEventListener('keydown', on, true);
@@ -176,7 +181,11 @@ export class OptionsPanel {
       const wrap = document.createElement('span');
       const lu = document.createElement('span'); lu.textContent = t('roadKeys.heightUp');
       const ld = document.createElement('span'); ld.textContent = t('roadKeys.heightDown');
-      wrap.append(lu, keyBtn(() => s.roadUp ?? 'PageUp', (c) => { s.roadUp = c; }), ld, keyBtn(() => s.roadDown ?? 'PageDown', (c) => { s.roadDown = c; }));
+      const la = document.createElement('span'); la.textContent = t('roadKeys.alignment');
+      const reset = document.createElement('button'); reset.className = 'v2-btn'; reset.textContent = t('roadKeys.reset');
+      reset.addEventListener('click', () => { this.stopCapture(); s.roadUp = 'PageUp'; s.roadDown = 'PageDown'; s.roadAlign = 'KeyV'; this.render(s); });
+      wrap.append(lu, keyBtn(() => s.roadUp ?? 'PageUp', (c) => { s.roadUp = c; }), ld, keyBtn(() => s.roadDown ?? 'PageDown', (c) => { s.roadDown = c; }),
+        la, keyBtn(() => s.roadAlign ?? 'KeyV', (c) => { s.roadAlign = c; }), reset);
       row(t('roadKeys.title'), wrap);
     }
     row(t('ui.options.weather'), select(s.weather, [['auto', t('ui.weather.auto')], ['limpo', t('ui.options.clear')], ['chuva', t('weather.rain').replace(/\s*\(.*$/, '')], ['tempestade', t('weather.storm')]], (v) => { s.weather = v; }));
