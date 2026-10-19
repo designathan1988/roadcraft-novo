@@ -8,6 +8,7 @@ import { Rng } from '../r40/core/rng.ts';
 import { madeToMeasure } from '../r40/world/buildings/procedural.ts';
 import { furnishLot, lotKind, planLot } from '../r40/world/growth/lotPlan.ts';
 import { emitChunk, letGoEmitted } from '../r40/render/buildings/buildingMesh.ts';
+import { CELL_DETAIL, PLATE_DETAIL, TILE_DETAIL, emitMassing } from '../r40/render/buildings/massing.ts';
 import { partGeometries, type PartKind } from '../r40/render/buildings/kit.ts';
 import { COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT } from '../r40/render/buildings/cellArrays.ts';
 import { POSE_FLOATS } from '../r40/render/buildings/partPose.ts';
@@ -84,7 +85,8 @@ export type PartSink = (kind: string, x: number, y: number, z: number, yaw: numb
  * either may be null to leave it out. `paneRow`: the facade window row the panes are drawn with (a whole-pane row: the
  * room behind, blinds, night).
  */
-export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number): Laid40 {
+/** The lot's 4.0 building (the Building record of 4.0, its lot furnished), the same for every level drawn of it. */
+function building40(lot: Lot40): Building {
   const rng = new Rng(lot.seed >>> 0);
   const plan = planLot(lotKind(lot.use, lot.density), lot.W, lot.D, rng);
   const env = plan.building;
@@ -99,7 +101,11 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
   // the 4.0 lot frame: origin at the front's middle, +y away from the street, the map's y = -world z
   const c = Math.cos(lot.rot), s = Math.sin(lot.rot);
   const fx = lot.cx + (lot.D / 2) * s, fz = lot.cz + (lot.D / 2) * c;
-  const b = { ...body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: -fz, rotation: lot.rot } as Building;
+  return { ...body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: -fz, rotation: lot.rot } as Building;
+}
+
+export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number): Laid40 {
+  const b = building40(lot);
   const chunk = emitChunk(b, (x, y) => lot.groundAt(x, -y));
   letGoEmitted(b);
   let laidShell = 0, laidParts = 0;
@@ -195,4 +201,40 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
     parts.curFac[3] = 0;
   }
   return { shell: laidShell, parts: laidParts };
+}
+
+/**
+ * The same 4.0 building from afar (4.0 render/buildings/massing.ts emitMassing): its blocks as they stand, coloured as
+ * the near one, the windows drawn by the shader from each wall's bays and storeys. `level`: 1 the cell's far level,
+ * 2 a tile's, 3 a plate's (each leaves out what 4.0's leaves out: massing.ts CELL/TILE/PLATE_DETAIL). `style` is the
+ * window table row (world/arch.ts) the shader draws the openings with.
+ */
+export function massLot40(lot: Lot40, mb: MeshBuilder, level: number, style: number): number {
+  const b = building40(lot);
+  const detail = level >= 3 ? PLATE_DETAIL : level === 2 ? TILE_DETAIL : CELL_DETAIL;
+  const m = emitMassing(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), false, undefined, detail);
+  if (!m) return 0;
+  const P = m.position, N = m.normal, C = m.colour, F = m.facade, G = m.glazing, I = m.index;
+  const base = mb.v, seed = lot.seed & 255;
+  for (let i = 0; i < P.length / 3; i++) {
+    const bay = F[i * 4 + 1], storey = F[i * 4 + 2], z0 = F[i * 4 + 3], share = G[i * 2];
+    const wall = bay > 0 && Math.abs(N[i * 3 + 1]) < 0.5;
+    if (wall) {
+      const curtain = share >= 0.95;
+      mb.curFac[0] = style; mb.curFac[1] = seed;
+      mb.curFac[2] = (curtain ? 1 : 0) | (Math.max(0, Math.min(31, Math.round((storey - 2.5) * 10))) << 3);
+      mb.curFac[3] = Math.min(127, Math.max(1, Math.round(bay * 10))) * 2;
+      mb.curU = F[i * 4] / bay;
+      mb.curBase = z0;
+    } else { mb.curFac[3] = 0; mb.curU = 0; }
+    const mat = wall ? MAT.Wall : MAT.Plain;
+    mb.vert(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], N[i * 3], N[i * 3 + 1], N[i * 3 + 2], hexOf(C[i * 3], C[i * 3 + 1], C[i * 3 + 2]), mat);
+  }
+  for (let t = 0; t < I.length; t += 3) {
+    const A = I[t], B2 = I[t + 1], Cc = I[t + 2];
+    mb.tri(base + A, base + B2, base + Cc, N[A * 3], N[A * 3 + 1], N[A * 3 + 2]);
+  }
+  mb.curFac[3] = 0; mb.curU = 0;
+  letGoEmitted(b);
+  return P.length / 3;
 }

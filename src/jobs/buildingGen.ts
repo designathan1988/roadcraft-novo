@@ -18,7 +18,7 @@ import { CIVIC_CATALOG, CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign,
 import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
 import { BAY, catalogFacade } from '../world/catalogFacade.ts';
 import { FIN } from './buildingFinishes.ts';
-import { layLot40, type PartSink } from './building40.ts';
+import { layLot40, massLot40, type Lot40, type PartSink } from './building40.ts';
 import { FLAT_ROOFS, ROOF_COLOURS, planRoofPlant, type RoofPlantItem } from '../world/roofPlant.ts';
 
 export const GEN_VERSION = 15;
@@ -744,6 +744,14 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
   return mb.pack(originX, originZ, extent);
 }
 
+/** The lot as the 4.0 path takes it (jobs/building40.ts): one description, the same building at every level. */
+function lot40Of(b: BoxColumns, i: number, fit: { cx: number; cz: number; W: number; D: number }, zone: number, floors: number, heights: Float32Array): Lot40 {
+  const dens = zoneDensity(zone);
+  const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
+  const density = dens === 0 || (use === 'residential' && floors <= 2) ? 'low' : dens === 2 || (use === 'commercial' && floors >= 8) ? 'high' : 'medium';
+  return { cx: fit.cx, cz: fit.cz, W: fit.W, D: fit.D, rot: b.rot[i], use, density, seed: b.seed[i] || i + 1, groundAt: (x: number, z: number) => heightAt(heights, x, z) };
+}
+
 /** One building of the boxes (the cell plan already made) into mb, at level lod. */
 function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number, plan: CellPlan, lod: number): void {
   const rot = b.rot[i];
@@ -788,14 +796,15 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     const ch = chimneyOf(b.seed[i], W, D, floors);
     if (ch) chimney(g.mb, f, ch[0], ch[1], f.base, hi + ch[2], g.lod);
   }
+  else if (lod >= 1 && R40_ZONES.has(zone)) {
+    // the same 4.0 building from afar (jobs/building40.ts massLot40): never another building than the near one
+    massLot40(lot40Of(b, i, fit, zone, floors, heights), mb, lod, arch);
+  }
   else if (lod <= 0 && lod !== -3 && R40_ZONES.has(zone)) {
     // the Roadcraft 4.0 building (jobs/building40.ts), near: its shell in the cell's mesh (level 0), its parts to the
     // props pool (the parts pass, level -2, when the props job asks for them); nothing in the detail layer (level -1);
     // the old body is still made, into nothing, for the footprint the yard's props avoid
-    const dens = zoneDensity(zone);
-    const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
-    const density = dens === 0 || (use === 'residential' && floors <= 2) ? 'low' : dens === 2 || (use === 'commercial' && floors >= 8) ? 'high' : 'medium';
-    const lot40 = { cx: fit.cx, cz: fit.cz, W, D, rot, use, density, seed: b.seed[i] || i + 1, groundAt: (x: number, z: number) => heightAt(heights, x, z) } as const;
+    const lot40 = lot40Of(b, i, fit, zone, floors, heights);
     if (lod === 0) layLot40(lot40, mb, null, PANE_ROW);
     else if (lod === -2 && parts40Out) layLot40(lot40, null, parts40Out, PANE_ROW);
     if (lod === -2) {
