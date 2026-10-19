@@ -340,6 +340,16 @@ const SCENARIOS = {
     w.unlimited = false;
     check('turning it off gives the saved balance', w.money === 12345, 'money ' + w.money);
   `,
+  // A43: the test city sets each tile's height range from its own terrain, not the previous map's
+  'test-city-heights': `
+    w.tileMin[0] = -500; w.tileMax[0] = 900;
+    const r = await within(g.testCity(), 300000);
+    check('the test city is made', r === 'returned' && !g.busy, 'testCity() ' + r);
+    const per = w.heights.length / w.tileInSave.length;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < per; i++) { const h = w.heights[i]; if (h < lo) lo = h; if (h > hi) hi = h; }
+    check('tile 0 has its own height range', Math.abs(w.tileMin[0] - lo) < 1 && Math.abs(w.tileMax[0] - hi) < 1, 'range ' + w.tileMin[0] + '..' + w.tileMax[0] + ', terrain ' + lo + '..' + hi);
+  `,
   // B1: changing the language (which reloads the page) saves the city first
   'language-saves': [`
     road(1500, 1500, 1700, 1500);

@@ -2034,8 +2034,9 @@ export class Game {
       const nodes: Float32Array[] = [], segs: Int32Array[] = [];
       await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
         const r = await this.pool.run('debugTile', { seed: w.seed, tile: t }, { priority: 1 });
-        w.tileMin[r.tile] = Math.min(w.tileMin[r.tile], r.min);
-        w.tileMax[r.tile] = Math.max(w.tileMax[r.tile], r.max);
+        // the tile's terrain is made again here: its range is its own (never widened by the previous map's)
+        w.tileMin[r.tile] = r.min;
+        w.tileMax[r.tile] = r.max;
         w.layerDirty.add(r.tile);
         nodes.push(r.roadNodes); segs.push(r.roadSegs);
       }));
