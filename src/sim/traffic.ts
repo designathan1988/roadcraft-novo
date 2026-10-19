@@ -1061,7 +1061,7 @@ export class Traffic {
   /** End of the lane in meso mode: picks the next one, waits if it is full. */
   private mesoAdvance(v: number): void {
     const c = this.veh.cols, sim = this.sim;
-    const lane = c.lane[v];
+    let lane = c.lane[v];
     if (!sim.net.segs.alive[laneSeg(lane)]) { c.why[v] = End.Lost; this.finish(v); return; }
     if (c.dying[v]) { this.finish(v); return; }
     if (this.atDestination(v)) {
@@ -1077,8 +1077,24 @@ export class Traffic {
       ns = this.nextSeg(v);
       if (ns < 0) { this.lose(v); this.finish(v); return; }
     }
-    const conn = sim.connToward(lane, ns, c.line[v] >= 0);
-    const node = sim.laneTo(lane);
+    const bus = c.line[v] >= 0, node = sim.laneTo(lane);
+    let conn = sim.connToward(lane, ns, bus);
+    for (let tries = 0; conn < 0 && tries < 2; tries++) {
+      // its lane does not make the route's turn (the turn was banned, the lanes rearranged): another lane of this
+      // segment that makes it (the far model changes lanes at the end of the lane), else a new route from here
+      const alt = sim.laneToward(laneSeg(lane), laneDir(lane), ns, laneIdx(lane), bus);
+      if (alt >= 0 && alt !== lane) {
+        this.setLaneCount(lane, -1); this.setLaneCount(alt, 1);
+        c.lane[v] = lane = alt; this.mesoLink(v, alt);
+      } else {
+        this.replanFrom(v, node);
+        if (c.dying[v]) { this.finish(v); return; }
+        ns = this.nextSeg(v);
+        if (ns < 0) break;
+      }
+      conn = sim.connToward(lane, ns, bus);
+    }
+    if (conn < 0) { this.lose(v); this.finish(v); return; }
     // the light: red for this arm, wait for its next green (the far model obeys the lights too)
     if (sim.nodePhases[node] > 0) {
       const arm = sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)];
@@ -1087,14 +1103,11 @@ export class Traffic {
     const dir = sim.net.segs.cols.a[ns] === node ? 1 : -1;
     // meso: enters the least full lane among those valid for the next turn (all lanes carry cars,
     // as in micro; otherwise everyone reaches the window in a single lane)
-    let to = conn >= 0 ? this.pickLane(ns, dir, this.segAfter(v, 1), c.line[v] >= 0, sim.conns.cols.to[conn]) : sim.laneToward(ns, dir, ns, 0);
-    if (to < 0 && ns === laneSeg(lane)) to = laneId(ns, dir, 0); // U-turn at a dead end
+    const to = this.pickLane(ns, dir, this.segAfter(v, 1), bus, sim.conns.cols.to[conn]);
     if (to < 0 || !sim.net.segs.alive[ns]) { this.lose(v); this.finish(v); return; }
     // queue: a full lane holds the vehicle
     const cap = sim.laneLen(to) / 7.5;
-    // queue: wait for room; stuck too long (deadlock far from the camera, where nobody sees), go anyway. Meso
-    // does not reconsider routes: detouring around full meso lanes sent the cars into the micro window
-    // (measured: the window filled up and the centre dropped from 16 to 8 km/h)
+    // queue: wait for room; stuck too long (deadlock far from the camera, where nobody sees), go anyway
     this.mesoTries++;
     if (this.laneCount[to] >= cap && c.wait[v] < 40) { c.wait[v] += 2; this.mesoFull++; this.schedule(v, this.time + 2); return; }
     c.wait[v] = 0;

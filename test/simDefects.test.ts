@@ -356,3 +356,29 @@ test('C17: upgrading a road keeps the vehicles that are on it', async () => {
     }
   }
 });
+
+test('C3: far from the camera a car whose turn was banned on the way finds another route instead of turning anyway', async () => {
+  const { recordOps, mirror, syncNet } = await import('./simCity.ts');
+  const { w, sim } = gridCity(4, 120);
+  const ops = recordOps(w);
+  const tr = traffic(sim, 8000, 8000);
+  tr.density = 0;
+  const k = sim.conns.cols, conn = someConn(sim);
+  const from = k.from[conn], to = k.to[conn], node = k.node[conn];
+  // a destination well past the turn, so there is somewhere to go another way
+  const v = place(tr, from, sim.laneLen(from), to, false);
+  const c = tr.veh.cols, nc = sim.net.nodes.cols;
+  let dest = -1;
+  for (let n = 0; n < sim.net.nodes.end; n++) if (sim.net.nodes.alive[n] && nc.deg[n] >= 3 && Math.hypot(nc.x[n] - nc.x[node], nc.z[n] - nc.z[node]) > 200) { dest = n; break; }
+  c.dest[v] = dest;
+  inner(tr).replanFrom(v, node);
+  // the route turns somewhere at the node: the player bans exactly that movement
+  const nextSeg = inner(tr).nextSeg(v), inSeg = from >> 4;
+  w.roads.setJunction(node, { ctl: 0, bans: [inSeg, nextSeg] });
+  mirror(sim, ops.splice(0)); syncNet(sim, tr);
+  for (let i = 0; i < 20 * 10 && tr.veh.alive[v] && c.lane[v] === from; i++) tr.step(0.05);
+  assert.ok(tr.veh.alive[v], `the car disappeared (lost ${tr.lost})`);
+  assert.notEqual(c.lane[v] >> 4, nextSeg, 'the car went through the banned turn');
+  assert.ok(c.lane[v] !== from, 'the car never moved on');
+  assert.ok(sim.turnOk(node, inSeg, c.lane[v] >> 4, false), 'the movement it made exists');
+});
