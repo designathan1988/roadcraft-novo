@@ -136,7 +136,8 @@ export const SCENARIOS = {
     const undone = Q('.v2-stepper-value') && Q('.v2-stepper-value').textContent;
     check('+ adds a floor', after === '4', 'shows ' + after);
     check('undo shows the floors back', undone === String(w.buildings.cols.floors[id]) && undone === '3', 'panel ' + undone + ', building ' + w.buildings.cols.floors[id]);
-    key('KeyZ', { ctrlKey: true }); await frames(2);
+    // a.lot is two steps (the lot, then its floors)
+    for (let k = 0; k < 3 && w.buildings.alive[id]; k++) { key('KeyZ', { ctrlKey: true }); await frames(2); }
     check('undoing the lot leaves no building in the panel', !w.buildings.alive[id] && !Q('.v2-toolopts .v2-stepper-value'), 'alive ' + w.buildings.alive[id] + ', panel stepper ' + (Q('.v2-toolopts .v2-stepper-value') && Q('.v2-toolopts .v2-stepper-value').textContent));
   `,
   // B19: the road furniture choice shows what was chosen, after the game is opened again

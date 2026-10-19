@@ -406,7 +406,10 @@ export class Game {
         : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place');
     };
     this.commands.onChange = () => {
-      this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh(); };
+      this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh();
+      // the building panel shows the building as it is now (or none, once undo took it away)
+      if (this.selected >= 0) this.select(this.selected);
+    };
     // changing the language reloads the page: the city is saved first; if that fails, the player decides
     onLanguageReload(async () => {
       if (!this.unsaved && !this.world.saveDirty.includes(1)) return true;
