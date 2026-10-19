@@ -533,11 +533,22 @@ function splitSeg(j: RoadJournal, net: RoadNetwork, s: number, t: number, y: num
   return n;
 }
 
+/**
+ * Segment s still runs through (x, z) as it did when the point was taken: a split frees its id and one of the pieces
+ * may take it, and the old `t` would cut the piece in the wrong place.
+ */
+function stillThere(net: RoadNetwork, s: number, x: number, z: number): boolean {
+  if (!net.segs.alive[s]) return false;
+  const sc = net.segs.cols, nc = net.nodes.cols;
+  const [, d] = closestT(net.quad(s), x, z);
+  return d < 0.5 && Math.hypot(nc.x[sc.a[s]] - x, nc.z[sc.a[s]] - z) > 0.5 && Math.hypot(nc.x[sc.b[s]] - x, nc.z[sc.b[s]] - z) > 0.5;
+}
+
 /** Resolves an anchor to a node (splitting the segment if needed). */
 function anchorNode(j: RoadJournal, net: RoadNetwork, a: Anchor, y: number): number {
   if (a.node >= 0 && net.nodes.alive[a.node]) return a.node;
-  if (a.seg >= 0 && net.segs.alive[a.seg]) return splitSeg(j, net, a.seg, a.t, null);
-  // the segment may have been split by the other end: search again
+  if (a.seg >= 0 && stillThere(net, a.seg, a.x, a.z)) return splitSeg(j, net, a.seg, closestT(net.quad(a.seg), a.x, a.z)[0], null);
+  // the segment may have been split by the other end (and its id taken by a piece): search again
   const again = snap(net, a.x, a.z, 3);
   if (again.node >= 0) return again.node;
   if (again.seg >= 0) return splitSeg(j, net, again.seg, again.t, null);
@@ -564,7 +575,8 @@ function buildLive(j: RoadJournal, world: World, plan: RoadPlan, start: Anchor, 
     // the crossed segment may already have been split by another junction: find the right piece
     const p = new Float64Array(2); bez(q, tn, p);
     let seg = s, tt = to;
-    if (!net.segs.alive[seg]) {
+    if (stillThere(net, seg, p[0], p[1])) tt = closestT(net.quad(seg), p[0], p[1])[0];
+    else {
       const near = net.nearestSeg(p[0], p[1], 3);
       if (!near) continue;
       seg = near[0]; tt = near[1];

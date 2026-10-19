@@ -519,3 +519,18 @@ test('D13: a roundabout over roads that meet the circle close together makes one
     checkRing(w, 0, 0, 4);
   }
 });
+
+test('D14: a road from one point of a segment to another point of the same segment splits it at both points', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 0, 0);
+  const a = snap(w.roads, -80, 0, 8), b = snap(w.roads, -20, 0, 8);
+  assert.ok(a.seg >= 0 && a.seg === b.seg, 'both ends are on the same segment');
+  const p = planRoad(w, a, { x: -50, z: 50 }, b, 0, 0);
+  assert.ok(p.ok, p.reason);
+  assert.ok(buildRoad(w, p, a, b, 0).settle());
+  for (const x of [-80, -20]) {
+    const n = w.roads.nearestNode(x, 0, 1);
+    assert.ok(n >= 0, `no node where the new road meets the old one at x = ${x}`);
+    assert.equal(w.roads.nodes.cols.deg[n], 3, `the node at x = ${x} has ${w.roads.nodes.cols.deg[n]} roads`);
+  }
+});
