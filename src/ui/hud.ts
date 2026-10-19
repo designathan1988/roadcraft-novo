@@ -260,8 +260,6 @@ export class Hud {
     this.loading = document.getElementById('loading')!;
     this.loadingText = document.getElementById('loading-text')!;
     this.catalog = new RoadCatalog({ use: (id) => a.profile(id), toast: (text) => this.toast(text) });
-    const st = a.settings();
-    this.s.furniture = st.furniture;
 
     // ============================================================ top bar
     const hud = el('header', 'v2-hud');

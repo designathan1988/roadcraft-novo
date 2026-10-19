@@ -86,7 +86,6 @@ export class ShellState {
   snap = 0;
   elevation = 0;
   cutWalls = false;
-  furniture = 0;
   ring = 22;
   blocks = { cols: 3, rows: 3, size: 100, angle: 0 };
   zoneUse: ZoneUse = 'residential';
@@ -214,8 +213,10 @@ export function renderRoads(h: DrawerHost, p: DrawerParts): void {
     };
     p.options.append(orow(t('cutSides.row'), seg([[t('cutSides.batter'), !s.cutWalls, () => { s.cutWalls = false; a.cutWalls(false); }],
       [t('cutSides.walls'), s.cutWalls, () => { s.cutWalls = true; a.cutWalls(true); }]], 'cut')));
-    const furn = orow(t('roadFurniture.row'), seg((['complete', 'basic', 'none'] as const).map((k, i) => [t(`roadFurniture.${k}`), s.furniture === i,
-      () => { s.furniture = i; a.furniture(i); }] as [string, boolean, () => void]), 'furniture'));
+    // read from the game's options each time (they load after the interface is built)
+    const furnNow = a.settings().furniture;
+    const furn = orow(t('roadFurniture.row'), seg((['complete', 'basic', 'none'] as const).map((k, i) => [t(`roadFurniture.${k}`), furnNow === i,
+      () => a.furniture(i)] as [string, boolean, () => void]), 'furniture'));
     furn.title = t('roadFurniture.tip');
     p.options.append(furn);
     const keys = button('v2-pill rp-open', h.roadKeys(), () => a.options(), svg('keyboard', 16));
