@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
 import { SMALL_CASTER } from './sun.ts';
+import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
@@ -396,23 +397,58 @@ export function impostorSources(defs: PropDef[]): THREE.BufferGeometry[] {
     defs[PROP.Tree].alts![0].lods[0]!, defs[PROP.Oak].alts![0].lods[0]!];
 }
 
-/** Parked car: same proportions as the street cars; the paint comes from the variant. */
-function parkedCar(): PropDef {
-  const P = 0xffffff, GL = 0x1a2430, TI = 0x161616;
-  // the same profile as the street cars (render/vehicles.ts carModel): bonnet, windscreen, roof, boot
-  const profile = (pts: Array<[number, number]>, width: number) => {
-    const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y))), { depth: width, bevelEnabled: false, curveSegments: 1 });
-    g.deleteAttribute('uv');
-    return g.translate(0, 0, -width / 2).rotateY(-Math.PI / 2);
-  };
+/**
+ * Parked car: roadcraft 4.0's body (render/carBody.ts buildCarBody, the street cars' own) near the camera, its coarse
+ * silhouette (buildCarSilhouette) in the middle distance; the paint comes from the variant. Variants pick the style
+ * (MODELS): sedan, hatchback, SUV.
+ */
+const PARKED: Array<[CarStyle, CarArchetype]> = [
+  ['sedan', { length: 4.4, width: 1.84, height: 1.45, wheelRadius: 0.33 }],
+  ['hatch', { length: 3.9, width: 1.72, height: 1.48, wheelRadius: 0.31 }],
+  ['suv', { length: 4.6, width: 1.95, height: 1.78, wheelRadius: 0.37 }],
+];
+
+/** A 4.0 car geometry (x forward, z right, white where painted) as prop parts: z forward, the paint where it was white. */
+function carParts(g: THREE.BufferGeometry, mat: number, colour?: number): THREE.BufferGeometry {
+  const ng = (g.index ? g.toNonIndexed() : g.clone()).rotateY(-Math.PI / 2);
+  if (!ng.getAttribute('normal')) ng.computeVertexNormals();
+  const src = ng.getAttribute('color') as THREE.BufferAttribute | undefined;
+  const n = ng.attributes.position.count;
+  const col = new Float32Array(n * 4);
+  const fixed = colour === undefined ? null : new THREE.Color(colour).convertSRGBToLinear();
+  for (let i = 0; i < n; i++) {
+    const r = src ? src.getX(i) : 1, gg = src ? src.getY(i) : 1, b = src ? src.getZ(i) : 1;
+    const white = r > 0.99 && gg > 0.99 && b > 0.99;
+    col[i * 4] = fixed ? fixed.r : r; col[i * 4 + 1] = fixed ? fixed.g : gg; col[i * 4 + 2] = fixed ? fixed.b : b;
+    col[i * 4 + 3] = (mat === PMAT.Paint && !white ? PMAT.Plain : mat) / 255;
+  }
+  for (const k of Object.keys(ng.attributes)) if (k !== 'position' && k !== 'normal') ng.deleteAttribute(k);
+  ng.setAttribute('pcol', new THREE.BufferAttribute(col, 4));
+  ng.setAttribute('pext', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
+  return ng;
+}
+
+function parkedCarOf(style: CarStyle, a: CarArchetype): PropDef {
+  const TI = 0x161616, RIM = 0x9a9ea3;
+  const wheels = (sides: number): THREE.BufferGeometry[] => [a.length * 0.31, -a.length * 0.31].flatMap((ax) => [a.width / 2 - 0.14, -(a.width / 2 - 0.14)].flatMap((x) => [
+    part(new THREE.CylinderGeometry(a.wheelRadius, a.wheelRadius, 0.22, sides).rotateZ(Math.PI / 2), TI, PMAT.Plain, x, a.wheelRadius, ax),
+    part(new THREE.CircleGeometry(a.wheelRadius * 0.62, sides).rotateY(x > 0 ? Math.PI / 2 : -Math.PI / 2), RIM, PMAT.Metal, x + Math.sign(x) * 0.112, a.wheelRadius, ax),
+  ]));
+  const body = buildCarBody(a, style, 12, 4, 2);
+  const lamp = (l: Lamp, c: number) => part(new THREE.BoxGeometry(l.sz, l.sy, l.sx), c, PMAT.Plain, -l.z, l.y, l.x);
   const near = merge([
-    part(profile([[2.2, 0.3], [2.2, 0.68], [1.95, 0.8], [1.0, 0.88], [0.32, 1.4], [-1.05, 1.42], [-1.75, 0.98], [-2.18, 0.9], [-2.2, 0.3]], 1.76), P, PMAT.Paint),
-    part(profile([[1.05, 0.9], [0.34, 1.41], [-1.04, 1.44], [-1.79, 0.99], [-1.6, 0.9]], 1.79), GL, PMAT.Metal),
-    part(box(1.74, 0.22, 0.12), 0x2a2b2d, PMAT.Plain, 0, 0.22, 2.17), part(box(1.74, 0.22, 0.12), 0x2a2b2d, PMAT.Plain, 0, 0.22, -2.17),
-    ...[[0.8, 1.38], [-0.8, 1.38], [0.8, -1.38], [-0.8, -1.38]].map(([x, z]) => part(new THREE.CylinderGeometry(0.33, 0.33, 0.22, 8).rotateZ(Math.PI / 2), TI, PMAT.Plain, x, 0.33, z)),
+    carParts(body.shell, PMAT.Paint), carParts(body.glass, PMAT.Glass, 0x1a2430), carParts(body.trim, PMAT.Plain),
+    ...body.headlamps.map((l) => lamp(l, 0xe8e2cf)), ...body.taillamps.map((l) => lamp(l, 0x7a1414)),
+    ...body.indicators.map((l) => lamp(l, 0xb8741a)), ...body.plates.map((l) => lamp(l, 0xe9e9e2)),
+    ...wheels(12),
   ]);
-  const mid = merge([part(box(1.8, 1.4, 4.4), P, PMAT.Paint, 0, 0.05, 0)]);
-  return { lods: [near, mid, null], dist: [200, 650, 0], radius: 3 };
+  const mid = merge([carParts(buildCarSilhouette(a, style, 12), PMAT.Paint), ...wheels(6).filter((_, i) => i % 2 === 0)]);
+  return { lods: [near, mid, null], dist: [55, 320, 0], radius: 3 };
+}
+
+function parkedCar(): PropDef {
+  const [first, ...rest] = PARKED.map(([s, a]) => parkedCarOf(s, a));
+  return { ...first, alts: rest };
 }
 
 /** Ground elements: the 11 variants in the same mesh (the shader shows only the instance's), a ~1.5 m clump. */
@@ -526,6 +562,7 @@ const MODELS: Record<number, number[]> = {
   [PROP.Tree]: Array.from({ length: VARIANTS }, (_, v) => (v === 3 ? 1 : 0)),
   [PROP.Oak]: Array.from({ length: VARIANTS }, (_, v) => (v === 3 ? 1 : 0)),
   [PROP.Bush]: Array.from({ length: VARIANTS }, (_, v) => (v === 2 ? 1 : v === 3 ? 2 : 0)),
+  [PROP.ParkedCar]: Array.from({ length: VARIANTS }, (_, v) => v % 3),
 };
 
 /** Kind of each (type, variant): index = type × VARIANTS + variant. The same table on the CPU and in the cull pass. */

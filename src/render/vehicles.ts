@@ -11,6 +11,7 @@ import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
 import { PeopleRenderer } from './people/crowd.ts';
 import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
+import { buildBusBody, buildTruckBody, type HeavyArchetype, type HeavyBody } from './heavyBody.ts';
 
 const {
   attribute, vec2, vec3, vec4, float, abs, cos, sin, mix, transformNormalToView, normalize,
@@ -111,14 +112,9 @@ function withBlob(g: THREE.BufferGeometry, w: number, l: number): THREE.BufferGe
   return mergeGeometries([g.index ? g.toNonIndexed() : g, q])!;
 }
 
-/** Occupant (a silhouette in the window): `glow` = OCC + seat (1-16); shown if the seat is within the pose's load. */
-const OCC = 10, HEAD = 0x9c7a62, SHIRT = 0x56677a;
-/** Occupant silhouettes 3 cm outside the glass (the glass is opaque): head and shoulders, seat `seat`. */
-function occupant(parts: THREE.BufferGeometry[], x: number, y: number, z: number, side: number, seat: number): void {
-  const head = new THREE.BoxGeometry(0.02, 0.24, 0.2); head.translate(x + side * 0.01, y + 0.42, z);
-  const body = new THREE.BoxGeometry(0.02, 0.3, 0.42); body.translate(x + side * 0.01, y + 0.15, z);
-  for (const [g, col] of [[head, HEAD], [body, SHIRT]] as const) { const t = tagged(g, col); t.getAttribute('glow').array.fill(OCC + seat); parts.push(t); }
-}
+
+/** A rider's parts (the motorbike's, the bicycle's): `glow` = OCC + seat, shown when the seat is within the load. */
+const OCC = 10;
 
 /** Colour, paint and light attributes on a finished geometry (not indexed, to merge). */
 function tagged(g: THREE.BufferGeometry, col: number, limb = 0): THREE.BufferGeometry {
@@ -276,15 +272,6 @@ function motoModel(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-const BUS: Part[] = [
-  [0, 0.35, 0, 2.5, 1.2, 11.8, -1],
-  [0, 1.55, 0, 2.52, 1.0, 11.2, GLASS],
-  [0, 2.55, 0, 2.5, 0.5, 11.8, -1],
-  [0, 0.6, 5.91, 2.0, 0.2, 0.02, LIGHT],
-  [0.8, 0.7, -5.91, 0.4, 0.2, 0.02, RED], [-0.8, 0.7, -5.91, 0.4, 0.2, 0.02, RED],
-  [1.15, 0.6, 5.92, 0.16, 0.14, 0.02, AMBER_L], [-1.15, 0.6, 5.92, 0.16, 0.14, 0.02, AMBER_R],
-  [1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_L], [-1.15, 0.95, -5.92, 0.16, 0.14, 0.02, AMBER_R],
-];
 /** Bicycle with its rider (1.8 m): thin wheels, frame, handlebar, the rider bent forward and a helmet in the colour. */
 export function bikeModel(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
@@ -320,38 +307,43 @@ export function bikeModel(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-/** Bus with its passengers in the windows: 16 seats alternating sides, front to back (1 is the driver). */
-function busModel(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [model(BUS).toNonIndexed()];
-  for (const z of [3.8, -3.6]) for (const x of [1.1, -1.1]) wheel(parts, x, 0.47, z, 0.47, 0.3, z > 0);
-  puff(parts, 0.8, 0.35, -6.1);
-  occupant(parts, 1.29, 1.35, 5.0, 1, 1);
-  for (let k = 2; k <= 16; k++) {
-    const side = k % 2 ? 1 : -1, row = Math.floor((k - 1) / 2);
-    occupant(parts, side * 1.29, 1.35, 4.2 - row * 1.25, side, k);
+/** Bus and lorry classes (4.0 sim/vehicles/archetypes.ts; the lorry's length is the simulation's), metres. */
+const BUS_A: HeavyArchetype = { length: 12, width: 2.55, height: 3.2, wheelRadius: 0.5, cabinFraction: 0.98 };
+const TRUCK_A: HeavyArchetype = { length: 9.5, width: 2.5, height: 3.5, wheelRadius: 0.52, cabinFraction: 0.24 };
+
+/**
+ * A 4.0 bus or lorry (heavyBody.ts) in this renderer's frame: shell in the paint (a bus in its line's colour), glass,
+ * trim, the lorry's box in its own pale grey, lamps, plates (the bus's destination blind lit like a lamp), wheels.
+ */
+function heavyModel(b: HeavyBody, a: HeavyArchetype): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [fromBody(b.shell, 0), fromBody(b.glass, GLASS_GLOW), fromBody(b.trim, 0)];
+  const gc = parts[1].getAttribute('color').array as Float32Array, glassC = new THREE.Color(GLASS).convertSRGBToLinear();
+  for (let k = 0; k < gc.length; k += 3) { gc[k] = glassC.r; gc[k + 1] = glassC.g; gc[k + 2] = glassC.b; }
+  // the trim keeps its colours: never the paint
+  (parts[2].getAttribute('paint').array as Float32Array).fill(0);
+  if (b.accent) {
+    const acc = fromBody(b.accent, 0);
+    (acc.getAttribute('paint').array as Float32Array).fill(0);
+    const ac = acc.getAttribute('color').array as Float32Array, box = new THREE.Color(0xd9d6cf).convertSRGBToLinear();
+    for (let k = 0; k < ac.length; k += 3) if (ac[k] > 0.9) { ac[k] = box.r; ac[k + 1] = box.g; ac[k + 2] = box.b; }
+    parts.push(acc);
   }
+  for (const l of b.headlamps) lampBox(parts, l, LIGHT);
+  for (const l of b.taillamps) lampBox(parts, l, RED);
+  for (const l of b.indicators) lampBox(parts, l, l.side < 0 ? AMBER_L : AMBER_R);
+  b.plates.forEach((l, i) => lampBox(parts, l, i === 2 ? LIGHT : 0xe9e9e2));
+  const r = a.wheelRadius, half = a.width / 2 - 0.2;
+  b.axles.forEach((ax, i) => { for (const x of [half, -half]) wheel(parts, x, r, ax, r, 0.32, i === 0); });
+  puff(parts, a.width * 0.32, 0.38, -a.length / 2 - 0.2);
   return mergeGeometries(parts)!;
 }
 
-/** Truck with its driver in the cab. */
-function truckModel(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [model(TRUCK).toNonIndexed()];
-  for (const z of [3.6, -3.2]) for (const x of [1.1, -1.1]) wheel(parts, x, 0.48, z, 0.48, 0.32, z > 0);
-  puff(parts, 0.9, 0.4, -4.9);
-  for (const side of [1, -1]) occupant(parts, side * 1.18, 1.45, 3.85, side, 1);
-  return mergeGeometries(parts)!;
-}
+/** Bus (4.0 buildBusModel), its outside: no figures at the windows. */
+function busModel(): THREE.BufferGeometry { return heavyModel(buildBusBody(BUS_A), BUS_A); }
 
-const TRUCK: Part[] = [
-  [0, 0.4, 3.65, 2.4, 1.3, 2.2, -1], // cabine
-  [0, 1.7, 3.85, 2.3, 0.75, 1.6, GLASS],
-  [0, 2.45, 3.65, 2.4, 0.25, 2.2, -1],
-  [0, 0.9, -1.1, 2.5, 2.7, 7.1, 0xd9d6cf], // box body
-  [0, 0.35, -1.1, 2.0, 0.55, 7.1, 0x2b2b2b],
-  [0.9, 0.55, -4.67, 0.36, 0.16, 0.02, RED], [-0.9, 0.55, -4.67, 0.36, 0.16, 0.02, RED],
-  [1.12, 0.75, 4.77, 0.14, 0.12, 0.02, AMBER_L], [-1.12, 0.75, 4.77, 0.14, 0.12, 0.02, AMBER_R],
-  [1.12, 0.75, -4.67, 0.14, 0.12, 0.02, AMBER_L], [-1.12, 0.75, -4.67, 0.14, 0.12, 0.02, AMBER_R],
-];
+/** Lorry (4.0 buildTruckModel), its outside. */
+function truckModel(): THREE.BufferGeometry { return heavyModel(buildTruckBody(TRUCK_A), TRUCK_A); }
+
 const SKIN = 0xc89a78, PANTS = 0x2c3140, HAIR = 0x2a1f18;
 /** Train/metro wagon (20 m): a box painted in the line's colour, a band of windows, roof, bogies. */
 const WAGON: Part[] = [
