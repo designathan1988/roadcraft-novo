@@ -22,7 +22,7 @@ import { T, withPrevious, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
 
 const {
-  Fn, If, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
+  Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
   attribute, positionLocal, normalLocal, varyingProperty, transformNormalToView, normalize, cos, sin, min, select, length, dot,
   textureLoad, time, interleavedGradientNoise, screenCoordinate, mix, step, abs, fract, hash, sRGBTransferEOTF,
   texture, vec2, cross, clamp, floor, uniformArray: uArr, cameraPosition, positionWorld: positionWorldP, cameraViewMatrix, max,
@@ -30,7 +30,8 @@ const {
 
 const CAP = 1 << 20;
 const BLOCK = 64;
-const REGION = 1 << 17;
+/** Entries of the visible list: an instance is in at most two levels at once (the fading band). */
+const VISIBLE = CAP * 2;
 const LODS = 3;
 const DRAWS = PROP_TYPES * LODS;
 const FADE_BAND = 0.12;
@@ -47,6 +48,10 @@ export class PropRenderer {
   private poolAttr: THREE.StorageBufferAttribute;
   private extraAttr: THREE.StorageBufferAttribute;
   private visAttr: THREE.StorageBufferAttribute;
+  /** Where each draw's run starts in the visible list (prefix sum of the counts, every frame). */
+  private offsetAttr: THREE.StorageBufferAttribute;
+  /** Next free entry of each draw's run while the list is filled. */
+  private cursorAttr: THREE.StorageBufferAttribute;
   private drawAttr: THREE.IndirectStorageBufferAttribute;
   private blocks = new PropBlocks(CAP / BLOCK, CELL_COUNT);
   private cellVer = new Uint32Array(CELL_COUNT);
@@ -66,8 +71,9 @@ export class PropRenderer {
   private distU: Node;
   private radiusU: Node;
   private reset: Node;
+  private count: Node;
+  private prefix: Node;
   private cull: Node;
-  private clamp: Node;
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   /** Traffic light state texture (node → 1 + arm * 4 + state). */
@@ -101,7 +107,9 @@ export class PropRenderer {
     impostorFrames(impostorSources(this.defs));
     this.poolAttr = new THREE.StorageBufferAttribute(this.data, 4);
     this.extraAttr = new THREE.StorageBufferAttribute(this.extra, 1);
-    this.visAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS * REGION), 1);
+    this.visAttr = new THREE.StorageBufferAttribute(new Uint32Array(VISIBLE), 1);
+    this.offsetAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
+    this.cursorAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
     const draw = new Uint32Array(DRAWS * 5);
     this.defs.forEach((d, t) => d.lods.forEach((g, l) => { if (g) draw[(t * LODS + l) * 5] = g.attributes.position.count; }));
     this.drawAttr = new THREE.IndirectStorageBufferAttribute(draw, 1);
@@ -115,15 +123,21 @@ export class PropRenderer {
     this.distU = uniformArray(this.distArr, 'float');
     this.radiusU = uniformArray(this.defs.map((d) => d.radius), 'float');
 
-    // ---- compute: zera, recorta, limita
+    // ---- compute. The visible list is compact: each draw's instances in one run, the runs back to back. Count (how
+    // many each draw gets), prefix (where each run starts), fill. No draw has a cap of its own: a forest of 250,000
+    // trees in view is drawn whole (a fixed 131,072 per draw cut a different part every frame and the forest blinked).
     const drawsA = storage(this.drawAttr, 'uint', DRAWS * 5).toAtomic();
+    const cursorA = storage(this.cursorAttr, 'uint', DRAWS).toAtomic();
+    const offsetW = storage(this.offsetAttr, 'uint', DRAWS);
     this.reset = Fn(() => {
       atomicStore(drawsA.element(instanceIndex.mul(5).add(1)), uint(0));
+      atomicStore(cursorA.element(instanceIndex), uint(0));
     })().compute(DRAWS);
     const poolC = storage(this.poolAttr, 'vec4', CAP).toReadOnly();
     const extraC = storage(this.extraAttr, 'uint', CAP).toReadOnly();
-    const visW = storage(this.visAttr, 'uint', DRAWS * REGION);
-    this.cull = Fn(() => {
+    const visW = storage(this.visAttr, 'uint', VISIBLE);
+    /** Culls instance i and calls `emit(slot, code)` for each level it is drawn in (one, or two while fading). */
+    const classify = (emit: (slot: Node, code: Node) => void) => {
       const i = instanceIndex;
       If(i.lessThan(this.usedU), () => {
         const type = extraC.element(i).bitAnd(uint(31)).toVar();
@@ -151,20 +165,30 @@ export class PropRenderer {
                 // code: 8 bits of coverage; bit 31 = complementary mask (the incoming one)
                 const comp = select(d.lessThan(start), uint(1), uint(0));
                 const cov = uint(min(a, 1).mul(255));
-                const n = atomicAdd(drawsA.element(slot.mul(5).add(1)), uint(1));
-                If(n.lessThan(uint(REGION)), () => {
-                  visW.element(slot.mul(REGION).add(n)).assign(i.bitOr(cov.shiftLeft(uint(22))).bitOr(comp.shiftLeft(uint(31))));
-                });
+                emit(slot, i.bitOr(cov.shiftLeft(uint(22))).bitOr(comp.shiftLeft(uint(31))));
               });
             }
           });
         });
       });
+    };
+    this.count = Fn(() => {
+      classify((slot) => { atomicAdd(drawsA.element(slot.mul(5).add(1)), uint(1)); });
     })().compute(CAP, [64]);
-    this.clamp = Fn(() => {
-      const e = drawsA.element(instanceIndex.mul(5).add(1));
-      atomicStore(e, min(atomicLoad(e), uint(REGION)));
-    })().compute(DRAWS);
+    this.prefix = Fn(() => {
+      const sum = uint(0).toVar();
+      Loop(DRAWS, ({ i }: { i: Node }) => {
+        offsetW.element(i).assign(sum);
+        sum.addAssign(atomicLoad(drawsA.element(uint(i).mul(5).add(1))));
+      });
+    })().compute(1);
+    const offsetC = storage(this.offsetAttr, 'uint', DRAWS).toReadOnly();
+    this.cull = Fn(() => {
+      classify((slot, code) => {
+        const n = atomicAdd(cursorA.element(slot), uint(1));
+        visW.element(offsetC.element(slot).add(n)).assign(code);
+      });
+    })().compute(CAP, [64]);
 
     // ---- desenho
     if (!this.enabled) {
@@ -181,7 +205,7 @@ export class PropRenderer {
       g.setIndirect(this.drawAttr, (t * LODS + l) * 5 * 4);
       const mesh = new THREE.Mesh(g, material);
       mesh.frustumCulled = false;
-      mesh.userData.base = (t * LODS + l) * REGION;
+      mesh.userData.slot = t * LODS + l;
       // only the near level casts shadows (and not the wires)
       mesh.castShadow = l === 0 && t !== PROP.Wire;
       mesh.receiveShadow = true;
@@ -197,8 +221,9 @@ export class PropRenderer {
   private createMaterial(source: 'gpu' | 'cpu'): THREE.MeshStandardNodeMaterial {
     const m = new THREE.MeshStandardNodeMaterial();
     const gpu = source === 'gpu';
-    const baseU = gpu ? uniform(0, 'uint').onObjectUpdate(({ object }: { object: THREE.Object3D }) => object.userData.base as number) : null;
-    const visR = gpu ? storage(this.visAttr, 'uint', DRAWS * REGION).toReadOnly() : null;
+    const slotU = gpu ? uniform(0, 'uint').onObjectUpdate(({ object }: { object: THREE.Object3D }) => object.userData.slot as number) : null;
+    const visR = gpu ? storage(this.visAttr, 'uint', VISIBLE).toReadOnly() : null;
+    const offsetR = gpu ? storage(this.offsetAttr, 'uint', DRAWS).toReadOnly() : null;
     const poolR = gpu ? storage(this.poolAttr, 'vec4', CAP).toReadOnly() : null;
     const extraR = gpu ? storage(this.extraAttr, 'uint', CAP).toReadOnly() : null;
     const vN = varyingProperty('vec3', 'vPropN');
@@ -218,7 +243,7 @@ export class PropRenderer {
     m.positionNode = Fn(() => {
       let inst: Node, keyRaw: Node;
       if (gpu) {
-        const code = visR.element(instanceIndex.add(baseU)).toVar();
+        const code = visR.element(offsetR.element(slotU).add(instanceIndex)).toVar();
         const idx = code.bitAnd(uint(0x3fffff));
         fadeN = float(code.shiftRight(uint(22)).bitAnd(uint(255))).div(255);
         compN = float(code.shiftRight(uint(31)));
@@ -593,8 +618,9 @@ export class PropRenderer {
     for (let k = 0; k < DRAWS; k++) { const m = this.slotMesh[k]; if (m) m.visible = this.distArr[k] > nearest; }
     this.usedU.value = this.blocks.highBlock * BLOCK;
     renderer.compute(this.reset);
+    renderer.compute(this.count);
+    renderer.compute(this.prefix);
     renderer.compute(this.cull);
-    renderer.compute(this.clamp);
   }
 
   /** Forgets everything (another city): results still on their way are ignored by version. */
