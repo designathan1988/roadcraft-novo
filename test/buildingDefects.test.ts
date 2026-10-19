@@ -290,3 +290,30 @@ test('B9, B14: the inside view stays in its building and cuts only above the flo
   assert.ok(view.showBuilding(w, tower, 19));
   assert.equal(view.plan!.floors, 20);
 });
+
+test('B11: the inside view goes with its building (demolished, a new city) and follows its edits', async () => {
+  const { InsideView, cutYU } = await import('../src/render/inside.ts');
+  const { RoadJournal } = await import('../src/roads/build.ts');
+  const w = new World();
+  w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.unlimited = true;
+  const j = new RoadJournal(w, 'build');
+  const house = j.addBuilding({ x: 300, z: 300, w: 14, d: 34, h: 0, rot: 0, color: 0, seed: 4242, zone: Zone.Residential, floors: 2, style: 139 });
+  const tower = j.addBuilding({ x: 400, z: 300, w: 40, d: 50, h: 0, rot: 0.4, color: 0, seed: 99, zone: Zone.Commercial, floors: 20, style: 100 });
+  j.settle();
+  const view = new InsideView();
+  assert.ok(view.showBuilding(w, tower, 19));
+  // B11: editing the building lays it out again; demolishing it, undoing its building, a new city: gone
+  const before = view.plan!.storey.y;
+  w.editBuilding(tower, 30, w.buildings.cols.style[tower]);
+  view.follow(w);
+  assert.ok(view.on && (view.plan!.floors as number) === 30 && view.plan!.storey.y === before, 'edited: same floor, 30 storeys');
+  const k = new RoadJournal(w, 'demolish');
+  k.removeBuilding(tower); k.settle();
+  view.follow(w);
+  assert.equal(view.on, false, 'demolished: the inside view is gone');
+  assert.equal(cutYU.value, 1e9, 'and nothing is cut');
+  assert.ok(view.showBuilding(w, house, 0));
+  w.clearBuildings();
+  view.follow(w);
+  assert.equal(view.on, false, 'another city: gone');
+});

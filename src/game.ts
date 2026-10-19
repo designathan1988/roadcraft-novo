@@ -597,6 +597,11 @@ export class Game {
     const { renderer, scene } = this.parts;
 
     this.rig.update(dt);
+    // inside view: gone with its building (demolished, undone, another city), laid out again when it is edited
+    if (this.insideId >= 0) {
+      this.inside.follow(this.world);
+      if (!this.inside.on) { this.insideId = -1; this.hud.setInside(-1); }
+    }
     const cam = this.rig.camera;
     if (this.skyMode === 'dia') this.hour = 12;
     else if (this.skyMode === 'noite') this.hour = 22;

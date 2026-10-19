@@ -105,9 +105,10 @@ export class InsideView {
     wood: new THREE.MeshStandardNodeMaterial({ color: 0x8a6a4a, roughness: 0.7 }),
   };
   private box = new THREE.BoxGeometry(1, 1, 1);
-  /** The plan shown (null = off) and the building it is of. */
+  /** The plan shown (null = off), the building it is of and that building's record when it was laid out. */
   plan: InsidePlan | null = null;
   id = -1;
+  private rec = new Float64Array(10);
 
   constructor() { this.group.visible = false; }
 
@@ -158,8 +159,26 @@ export class InsideView {
     const p = insidePlanOf(world, id, k);
     if (!p) { this.hide(); return false; }
     this.id = id;
+    this.readRec(world, id, this.rec);
     this.show(p);
     return true;
+  }
+
+  /**
+   * Each frame while on: the building demolished, its id taken by another building, or a new city: hide; the same
+   * building edited (floors, design, style): lay the floor out again. Reads one record.
+   */
+  follow(world: World): void {
+    if (!this.on || !this.plan) return;
+    const id = this.id, r = this.rec, col = world.buildings.cols;
+    if (!world.buildings.alive[id] || col.seed[id] !== r[0] || col.x[id] !== r[1] || col.z[id] !== r[2]) { this.hide(); return; }
+    if (col.floors[id] !== r[3] || col.color[id] !== r[4] || col.h[id] !== r[5] || col.style[id] !== r[6] || col.fn[id] !== r[7] || col.w[id] !== r[8] || col.d[id] !== r[9]) this.showBuilding(world, id, this.plan.floor);
+  }
+
+  private readRec(world: World, id: number, r: Float64Array): void {
+    const col = world.buildings.cols;
+    r[0] = col.seed[id]; r[1] = col.x[id]; r[2] = col.z[id]; r[3] = col.floors[id]; r[4] = col.color[id];
+    r[5] = col.h[id]; r[6] = col.style[id]; r[7] = col.fn[id]; r[8] = col.w[id]; r[9] = col.d[id];
   }
 
   /** Compiles the materials at load (drawn far below, cut off). */
