@@ -10,6 +10,7 @@ import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
 import { PeopleRenderer } from './people/crowd.ts';
+import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
 
 const {
   attribute, vec2, vec3, vec4, float, abs, cos, sin, mix, transformNormalToView, normalize,
@@ -175,73 +176,82 @@ function personModel(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-/** A passenger car's body by its side profile (z forward, y up). */
-interface CarSpec {
-  /** Outline of the body, of the windows (a little wider: they show at the sides) and of the roof. */
-  body: Array<[number, number]>; glass: Array<[number, number]>; roof: Array<[number, number]>;
-  width: number; half: number;
-  /** Wheels: distance from the axle to the centre (z), radius. */
-  axle: number; wheel: number;
-  /** Height of the lights. */
-  lamp: number;
-  /** The pickup's bed: z0, z1, y0, y1. */
-  bed?: [number, number, number, number];
-}
-
-/** Sedan, hatchback, SUV, van and pickup (the simulation's styles 0-4; 5 is the motorbike), as roadcraft's archetypes. */
-const CAR_SPECS: CarSpec[] = [
-  {
-    body: [[2.2, 0.3], [2.2, 0.68], [1.95, 0.8], [1.0, 0.88], [0.32, 1.4], [-1.05, 1.42], [-1.75, 0.98], [-2.18, 0.9], [-2.2, 0.3]],
-    glass: [[1.05, 0.9], [0.34, 1.41], [-1.04, 1.44], [-1.79, 0.99], [-1.6, 0.9]],
-    roof: [[0.3, 1.38], [0.33, 1.43], [-1.06, 1.45], [-1.04, 1.38]], width: 1.76, half: 2.2, axle: 1.38, wheel: 0.33, lamp: 0.6,
-  },
-  {
-    body: [[1.95, 0.3], [1.95, 0.66], [1.72, 0.78], [0.86, 0.86], [0.22, 1.42], [-1.55, 1.44], [-1.9, 1.05], [-1.95, 0.3]],
-    glass: [[0.9, 0.88], [0.24, 1.43], [-1.52, 1.46], [-1.86, 1.05], [-1.72, 0.9]],
-    roof: [[0.2, 1.38], [0.23, 1.45], [-1.56, 1.46], [-1.54, 1.38]], width: 1.72, half: 1.95, axle: 1.25, wheel: 0.31, lamp: 0.64,
-  },
-  {
-    body: [[2.3, 0.4], [2.3, 0.86], [2.02, 0.98], [1.12, 1.06], [0.5, 1.68], [-1.92, 1.7], [-2.26, 1.24], [-2.3, 0.4]],
-    glass: [[1.15, 1.08], [0.52, 1.69], [-1.9, 1.72], [-2.22, 1.25], [-2.02, 1.08]],
-    roof: [[0.48, 1.64], [0.5, 1.72], [-1.93, 1.73], [-1.9, 1.64]], width: 1.86, half: 2.3, axle: 1.45, wheel: 0.38, lamp: 0.82,
-  },
-  {
-    body: [[2.45, 0.35], [2.45, 0.9], [2.12, 1.06], [1.62, 1.88], [-2.45, 1.95], [-2.45, 0.35]],
-    glass: [[1.98, 1.1], [1.64, 1.86], [-2.2, 1.9], [-2.2, 1.15]],
-    roof: [[1.56, 1.87], [1.58, 1.97], [-2.45, 1.98], [-2.44, 1.87]], width: 1.9, half: 2.45, axle: 1.62, wheel: 0.34, lamp: 0.8,
-  },
-  {
-    body: [[2.65, 0.42], [2.65, 0.9], [2.35, 1.0], [1.32, 1.08], [0.82, 1.72], [-0.5, 1.74], [-0.6, 1.0], [-0.6, 0.42]],
-    glass: [[1.36, 1.1], [0.84, 1.71], [-0.42, 1.73], [-0.44, 1.1]],
-    roof: [[0.8, 1.68], [0.82, 1.75], [-0.52, 1.76], [-0.5, 1.68]], width: 1.86, half: 2.65, axle: 1.78, wheel: 0.38, lamp: 0.86,
-    bed: [-2.65, -0.62, 0.42, 1.02],
-  },
+/**
+ * The simulation's car styles 0-4 (sedan, hatchback, SUV, van, pickup) as roadcraft 4.0 builds them (render/carBody.ts,
+ * sizes from sim/vehicles/archetypes.ts; lengths kept at the simulation's), metres.
+ */
+const CAR_BODIES: Array<[CarStyle, CarArchetype]> = [
+  ['sedan', { length: 4.4, width: 1.84, height: 1.45, wheelRadius: 0.33 }],
+  ['hatch', { length: 3.9, width: 1.72, height: 1.48, wheelRadius: 0.31 }],
+  ['suv', { length: 4.6, width: 1.95, height: 1.78, wheelRadius: 0.37 }],
+  ['van', { length: 4.9, width: 2.0, height: 2.2, wheelRadius: 0.35 }],
+  ['pickup', { length: 5.3, width: 1.95, height: 1.8, wheelRadius: 0.37 }],
 ];
 
-/** Passenger car: body by its profile (bonnet, windscreen, roof, rear), windows, wheels, bumpers, lights and indicators. */
-function carModel(k: CarSpec = CAR_SPECS[0]): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [tagged(profile(k.body, k.width), -1), tagged(profile(k.glass, k.width + 0.03), GLASS), tagged(profile(k.roof, k.width - 0.14), -1)];
-  const box = (x: number, y: number, z: number, w: number, h: number, l: number, col: number) => {
-    const b = new THREE.BoxGeometry(w, h, l); b.translate(x, y + h / 2, z); parts.push(tagged(b, col));
-  };
-  const H = k.half, W = k.width;
-  if (k.bed) {
-    const [z0, z1, y0, y1] = k.bed;
-    box(0, y0, (z0 + z1) / 2, W, y1 - y0, z1 - z0, -1);
-    box(0, y1, (z0 + z1) / 2, W - 0.16, 0.03, z1 - z0 - 0.14, 0x2a2b2d); // the bed seen from above
+/**
+ * A 4.0 car geometry (x forward, z right, vertex colours white where painted) in this renderer's frame and attributes:
+ * turned so z is forward and +x the driver's left, the paint flag where it was white, `glow` for the whole part.
+ */
+function fromBody(g: THREE.BufferGeometry, glow: number): THREE.BufferGeometry {
+  const out = g.index ? g.toNonIndexed() : g;
+  out.rotateY(-Math.PI / 2);
+  for (const k of Object.keys(out.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'color') out.deleteAttribute(k);
+  if (!out.getAttribute('normal')) out.computeVertexNormals();
+  const n = out.attributes.position.count;
+  const src = out.getAttribute('color') as THREE.BufferAttribute | undefined;
+  const c = new Float32Array(n * 3), paint = new Float32Array(n), gl = new Float32Array(n).fill(glow);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const r = src ? src.getX(i) : 1, gg = src ? src.getY(i) : 1, b = src ? src.getZ(i) : 1;
+    const white = r > 0.99 && gg > 0.99 && b > 0.99;
+    tmp.setRGB(r, gg, b);
+    c[i * 3] = tmp.r; c[i * 3 + 1] = tmp.g; c[i * 3 + 2] = tmp.b;
+    paint[i] = white && glow === 0 ? 1 : 0;
   }
-  const by = k.wheel - 0.11;
-  box(0, by, H - 0.03, W - 0.02, 0.22, 0.12, 0x2a2b2d); // bumpers
-  box(0, by, -H + 0.03, W - 0.02, 0.22, 0.12, 0x2a2b2d);
-  box(W * 0.34, k.lamp, H + 0.01, 0.42, 0.12, 0.02, LIGHT); box(-W * 0.34, k.lamp, H + 0.01, 0.42, 0.12, 0.02, LIGHT);
-  box(W * 0.37, k.lamp + 0.06, -H - 0.01, 0.36, 0.12, 0.02, RED); box(-W * 0.37, k.lamp + 0.06, -H - 0.01, 0.36, 0.12, 0.02, RED);
-  // indicators at the four corners (+x = the driver's left), 3 cm in front of the lights (nothing in the same plane)
-  for (const zz of [H + 0.04, -H - 0.04]) { box(W / 2 - 0.09, k.lamp - 0.02, zz, 0.18, 0.14, 0.02, AMBER_L); box(-W / 2 + 0.09, k.lamp - 0.02, zz, 0.18, 0.14, 0.02, AMBER_R); }
-  // the driver in the windows on both sides (seat 1)
-  const gy = k.lamp + 0.22, gz = k.glass[1][0] - 0.35;
-  for (const side of [1, -1]) occupant(parts, side * (W / 2 + 0.03), gy, gz, side, 1);
-  for (const z of [k.axle, -k.axle]) for (const x of [W / 2 - 0.08, -W / 2 + 0.08]) wheel(parts, x, k.wheel, z, k.wheel, 0.22, z > 0);
-  puff(parts, W * 0.3, 0.28, -H - 0.2);
+  out.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  out.setAttribute('paint', new THREE.BufferAttribute(paint, 1));
+  out.setAttribute('glow', new THREE.BufferAttribute(gl, 1));
+  out.setAttribute('limb', new THREE.BufferAttribute(new Float32Array(n), 1));
+  return out;
+}
+
+/** A 4.0 lamp box (x forward, z right) in this frame, lit as `col` (headlight, tail light, indicator, plate). */
+function lampBox(parts: THREE.BufferGeometry[], l: Lamp, col: number): void {
+  const b = new THREE.BoxGeometry(l.sz, l.sy, l.sx);
+  b.translate(-l.z, l.y, l.x);
+  parts.push(tagged(b, col));
+}
+
+/**
+ * Passenger car near the camera: roadcraft 4.0's body (carBody.ts buildCarModel: lofted shell, glass, frames and
+ * pillars, arch liners, grille, handles, mirrors), its lamps and plates, and the wheels that roll and steer. No figure
+ * in or at the windows: the cooked people sit inside when the cabin is drawn (render/people).
+ */
+function carModel(i: number): THREE.BufferGeometry {
+  const [style, a] = CAR_BODIES[i];
+  const body = buildCarBody(a, style, 24, 8, 3);
+  const parts: THREE.BufferGeometry[] = [fromBody(body.shell, 0), fromBody(body.glass, GLASS_GLOW), fromBody(body.trim, 0)];
+  // the glass's own colour (vertex colours were white: the glass region)
+  const gc = parts[1].getAttribute('color').array as Float32Array, glassC = new THREE.Color(GLASS).convertSRGBToLinear();
+  for (let k = 0; k < gc.length; k += 3) { gc[k] = glassC.r; gc[k + 1] = glassC.g; gc[k + 2] = glassC.b; }
+  for (const l of body.headlamps) lampBox(parts, l, LIGHT);
+  for (const l of body.taillamps) lampBox(parts, l, RED);
+  for (const l of body.indicators) lampBox(parts, l, l.side < 0 ? AMBER_L : AMBER_R);
+  for (const l of body.plates) lampBox(parts, l, 0xe9e9e2);
+  const r = a.wheelRadius, half = a.width / 2 - 0.14;
+  for (const ax of body.axles) for (const x of [half, -half]) wheel(parts, x, r, ax, r, 0.22, ax > 0);
+  puff(parts, a.width * 0.28, 0.28, -a.length / 2 - 0.2);
+  return mergeGeometries(parts)!;
+}
+
+/** The same car for the middle distance: the style's silhouette (carBody.ts buildCarSilhouette) and dark wheels. */
+function carMidModel(i: number): THREE.BufferGeometry {
+  const [style, a] = CAR_BODIES[i];
+  const parts: THREE.BufferGeometry[] = [fromBody(buildCarSilhouette(a, style), 0)];
+  const r = a.wheelRadius;
+  for (const ax of [a.length * 0.31, -a.length * 0.31]) for (const x of [a.width / 2 - 0.14, -a.width / 2 + 0.14]) {
+    const t = new THREE.CylinderGeometry(r, r, 0.22, 8, 1, false); t.rotateZ(Math.PI / 2); t.translate(x, r, ax); parts.push(tagged(t, TIRE));
+  }
   return mergeGeometries(parts)!;
 }
 
@@ -558,6 +568,8 @@ export class VehicleRenderer {
   /** Detailed cars, buses and trucks beyond SHADOW_NEAR: the same model, without a shadow. */
   private nearFar: Batch[];
   private mid: Batch;
+  /** Cars in the middle distance, by style (their silhouette). */
+  private midCars: Batch[];
   private reader: PoseReader;
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
@@ -569,17 +581,19 @@ export class VehicleRenderer {
   constructor(reader: PoseReader) {
     this.reader = reader;
     // one model per car style (the same material: one more call per style on screen)
-    const cars = [...CAR_SPECS.map((k) => carModel(k)), motoModel()];
+    const cars = [...CAR_BODIES.map((_, i) => carModel(i)), motoModel()];
     const bus = busModel(), truck = truckModel();
     const carCap = (i: number) => (i < 2 ? CAP_NEAR : CAP_NEAR / 2);
     this.near = [...cars.map((g, i) => new Batch(g, carCap(i), false)), new Batch(bus, 1024, false), new Batch(truck, 1024, false), new Batch(personModel(), 8000, false, true, true), new Batch(model(WAGON), 512, false), new Batch(bikeModel(), 2000, false)];
     // beyond the cascades' shadow: the same model with the blob shadow under it
-    const blobs = [...CAR_SPECS.map((k) => [k.width, k.half * 2]), [0.7, 2.1]];
+    const blobs = [...CAR_BODIES.map(([, a]) => [a.width, a.length]), [0.7, 2.1]];
     this.nearFar = [...cars.map((g, i) => new Batch(withBlob(g, blobs[i][0], blobs[i][1]), carCap(i), false, false)),
       new Batch(withBlob(bus, 2.5, 11.8), 1024, false, false), new Batch(withBlob(truck, 2.5, 9.5), 1024, false, false)];
     // far (boxes up to 1.7 km): no shadow (less than a pixel, and up to 30,000 in the three shadow passes)
     this.mid = new Batch(model(BOX), CAP_MID, true, false);
-    for (const b of [...this.near, ...this.nearFar, this.mid]) this.group.add(b.mesh);
+    // the cars in the middle distance keep their silhouette (not a box): one light model per style
+    this.midCars = CAR_BODIES.map((_, i) => new Batch(carMidModel(i), CAP_MID / 2, false, false));
+    for (const b of [...this.near, ...this.nearFar, this.mid, ...this.midCars]) this.group.add(b.mesh);
     this.group.add(this.people.group);
     void this.people.load();
   }
@@ -619,6 +633,7 @@ export class VehicleRenderer {
     for (const b of this.near) b.count = 0;
     for (const b of this.nearFar) b.count = 0;
     this.mid.count = 0;
+    for (const b of this.midCars) b.count = 0;
     const people = this.people.ready ? this.people : null;
     people?.begin(camera);
     const n = r.count;
@@ -684,7 +699,10 @@ export class VehicleRenderer {
           const mi = modelOf(kind, style);
           if (fadeNear > 0) (kind < 3 && dist > SHADOW_NEAR ? this.nearFar[mi] : this.near[mi]).push(x, y, z, yaw, color, alpha, kind, fadeNear, px, py, pz, pyaw);
           const farFade = small ? Math.min(1, Math.max(0, (PERSON_MID - dist) / 40)) : 1;
-          if (fadeNear < 1) this.mid.push(x, y, z, yaw, color, alpha * farFade, dimsOf(kind, style), -1 - fadeNear, px, py, pz, pyaw);
+          if (fadeNear < 1) {
+            if (kind === 0 && style < this.midCars.length) this.midCars[style].push(x, y, z, yaw, color, alpha, kind, -1 - fadeNear, px, py, pz, pyaw);
+            else this.mid.push(x, y, z, yaw, color, alpha * farFade, dimsOf(kind, style), -1 - fadeNear, px, py, pz, pyaw);
+          }
         }
       }
       this.trackFollow(fbest < 12 * 12);
@@ -694,6 +712,7 @@ export class VehicleRenderer {
     for (const b of this.near) b.commit();
     for (const b of this.nearFar) b.commit();
     this.mid.commit();
+    for (const b of this.midCars) b.commit();
   }
 
   /** Updates the followed vehicle after the frame: out of sight for half a second, let go. */
@@ -706,6 +725,6 @@ export class VehicleRenderer {
 
   /** Meshes to compile the shaders at load. */
   warmup(): void {
-    for (const b of [...this.near, ...this.nearFar, this.mid]) { b.count = 0; b.push(0, -1000, 0, 0, 0, 1, 0); b.commit(); }
+    for (const b of [...this.near, ...this.nearFar, this.mid, ...this.midCars]) { b.count = 0; b.push(0, -1000, 0, 0, 0, 1, 0); b.commit(); }
   }
 }
