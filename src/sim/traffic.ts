@@ -59,12 +59,13 @@ const CROWD_OCC = 0.15, CROWD_SLOPE = 5;
 export const REGION = 400, REGION_OCC = 0.1, REGION_SLOPE = 7, REGION_EVERY = 4;
 const REGION_N = Math.ceil(MAP_SIZE / REGION);
 /**
- * Fleet governor (roadcraft `populationGovernor`, here driven by traffic rather than step cost): the average speed of
- * the micro window (what the player sees, stopped vehicles included) below GOV_SLOW gradually cuts the fleet target,
- * above GOV_FAST gives it back. Measured: the generated city's network cannot carry the peak fleet (all-micro drops
- * to 8.6 km/h and keeps falling); with the governor the peak has fewer cars and keeps moving.
+ * Fleet governor (roadcraft `populationGovernor`, here driven by traffic rather than step cost): the share of the
+ * whole city's fleet on jammed streets (a direction of a segment 80% full or more, near the camera or not) above
+ * GOV_JAM gradually cuts the fleet target, below GOV_FREE gives it back. It never reads the camera: looking at a jam
+ * must not change the city's traffic. Measured: the generated city's network cannot carry the peak fleet; with the
+ * governor the peak has fewer cars and keeps moving.
  */
-const GOV_SLOW = 15 / 3.6, GOV_FAST = 18 / 3.6, GOV_MIN = 0.75;
+const GOV_JAM = 0.3, GOV_FREE = 0.15, GOV_MIN = 0.75, JAMMED = 0.8;
 /** A reconsidering driver's detour rejoins the route up to this many nodes ahead. */
 const REJOIN = 6;
 
@@ -807,30 +808,31 @@ export class Traffic {
     this.regionT = this.time;
     const net = this.sim.net, sc = net.segs.cols, L = this.regionLoad, C = this.regionCap;
     L.fill(0); C.fill(0);
+    let fleet = 0, jammed = 0;
     for (let s = 0; s < net.segs.end; s++) {
       if (!net.segs.alive[s]) continue;
       const info = PROFILE_INFO[sc.profile[s]];
       if (info.rail) continue;
       const r = this.regionOf(sc.mx[s], sc.mz[s]);
-      L[r] += this.segLoad[s * 2] + this.segLoad[s * 2 + 1];
-      C[r] += sc.len[s] * (info.lanesFwd + info.lanesBack) / 7.5;
+      const fwd = this.segLoad[s * 2], back = this.segLoad[s * 2 + 1], slots = sc.len[s] / 7.5;
+      L[r] += fwd + back;
+      C[r] += slots * (info.lanesFwd + info.lanesBack);
+      fleet += fwd + back;
+      if (info.lanesFwd && fwd >= JAMMED * slots * info.lanesFwd) jammed += fwd;
+      if (info.lanesBack && back >= JAMMED * slots * info.lanesBack) jammed += back;
     }
     for (let r = 0; r < L.length; r++) this.regionOcc[r] = C[r] > 0 ? L[r] / C[r] : 0;
-    // governor: average speed of the micro window (only with enough vehicles to measure)
-    let sum = 0;
-    const cv = this.veh.cols.v;
-    for (let i = 0; i < this.microN; i++) sum += cv[this.micro[i]];
-    const avg = this.microN > 200 ? sum / this.microN : GOV_FAST;
-    this.windowSpeed = avg;
-    if (this.governed) {
-      if (avg < GOV_SLOW) this.gov = Math.max(GOV_MIN, this.gov - 0.02);
-      else if (avg > GOV_FAST) this.gov = Math.min(1, this.gov + 0.01);
+    // governor: the share of the whole city's fleet on jammed streets
+    this.jamShare = fleet > 0 ? jammed / fleet : 0;
+    if (this.governed && fleet >= 200) {
+      if (this.jamShare > GOV_JAM) this.gov = Math.max(GOV_MIN, this.gov - 0.02);
+      else if (this.jamShare < GOV_FREE) this.gov = Math.min(1, this.gov + 0.01);
     }
   }
 
-  /** Fraction of the fleet the network carries now (governor) and the window's average speed (m/s). */
+  /** Fraction of the fleet the network carries now (governor) and the share of the fleet on jammed streets. */
   gov = 1;
-  windowSpeed = 0;
+  jamShare = 0;
   /** Turns off the governor (A/B measurement). */
   governed = true;
 

@@ -199,3 +199,16 @@ test('C6: a traffic light far from the camera is not frozen and open: far vehicl
     assert.equal(tr.walkOk(n, ga), false, 'a far pedestrian may cross in front of a green');
   }
 });
+
+test('C1: looking at a traffic jam does not cut the traffic of the whole city (the fleet governor reads the city, not the camera)', () => {
+  const run = (camX: number) => {
+    const { sim } = gridCity(6, 100);
+    const tr = traffic(sim, camX, 0);
+    tr.density = 1 / 9; tr.hour = 8; // more than the grid carries
+    for (let i = 0; i < 20 * 480; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
+    return { gov: tr.gov, fleet: tr.count };
+  };
+  const on = run(0), off = run(8000);
+  assert.ok(Math.abs(on.gov - off.gov) <= 0.05, `fleet share ${on.gov.toFixed(2)} with the camera on the jam, ${off.gov.toFixed(2)} away`);
+  assert.ok(Math.abs(on.fleet - off.fleet) <= 0.1 * off.fleet, `fleet ${on.fleet} with the camera on the jam, ${off.fleet} away`);
+});
