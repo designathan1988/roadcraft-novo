@@ -333,7 +333,11 @@ export class Game {
       pause: () => this.togglePause(),
       line: (id) => { this.lineSel = id; },
       newLine: () => this.newLine(),
-      lineMode: (m) => { this.lineMode = m; },
+      // a station tab works on a line of its mode: the last one of that mode, or a new one at the first click
+      lineMode: (m) => {
+        this.lineMode = m;
+        if ((this.transit.line(this.lineSel)?.mode ?? 0) !== m) this.lineSel = [...this.transit.lines].reverse().find((l) => (l.mode ?? 0) === m)?.id ?? 0;
+      },
       buses: (d) => { const l = this.transit.line(this.lineSel); const c = l && this.transit.setBuses(l.id, l.buses + d); if (c) this.commands.run(c); },
       deleteLine: () => { const c = this.transit.removeLine(this.lineSel); if (c) { this.commands.run(c); this.lineSel = this.transit.lines[0]?.id ?? 0; } },
       profile: (p) => { this.roadTool.setProfile(p); },
@@ -1568,7 +1572,8 @@ export class Game {
       this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l), loop: !!l.loop })) } satisfies ToSim);
     }
     if (this.tool === 'transit') {
-      const ids = this.transit.lines.map((l) => l.id);
+      // no line chosen: the first of the tab's mode (none: the first click makes one)
+      const ids = this.transit.lines.filter((l) => (l.mode ?? 0) === this.lineMode).map((l) => l.id);
       if (!this.transit.line(this.lineSel) && ids.length) this.lineSel = ids[0];
       const stats = this.simStats?.type === 'stats' ? this.simStats.lines : [];
       this.hud.setLines(this.transit.lines.map((l) => {
