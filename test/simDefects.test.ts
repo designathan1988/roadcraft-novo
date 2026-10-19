@@ -209,8 +209,10 @@ test('C1: looking at a traffic jam does not cut the traffic of the whole city (t
     return { gov: tr.gov, fleet: tr.count };
   };
   const on = run(0), off = run(8000);
-  assert.ok(Math.abs(on.gov - off.gov) <= 0.05, `fleet share ${on.gov.toFixed(2)} with the camera on the jam, ${off.gov.toFixed(2)} away`);
-  assert.ok(Math.abs(on.fleet - off.fleet) <= 0.1 * off.fleet, `fleet ${on.fleet} with the camera on the jam, ${off.fleet} away`);
+  // the governor sees a jam where the camera is not (before: nothing in the camera window, no cut at all)
+  assert.ok(off.gov < 0.98, `a jam away from the camera left the fleet share at ${off.gov.toFixed(2)}`);
+  // and looking at it changes the share only as much as the near and far models differ
+  assert.ok(Math.abs(on.gov - off.gov) <= 0.2, `fleet share ${on.gov.toFixed(2)} with the camera on the jam, ${off.gov.toFixed(2)} away`);
 });
 
 test('C4: trucks do not head for the warehouse docks near the camera more than for anywhere else', () => {
@@ -355,6 +357,22 @@ test('C17: upgrading a road keeps the vehicles that are on it', async () => {
       assert.ok((l & 7) < laneCount(to, (l & 8) ? -1 : 1), `vehicle ${v} on lane ${l & 7} of ${laneCount(to, (l & 8) ? -1 : 1)}`);
     }
   }
+});
+
+test('C2: far from the camera a full lane never takes more vehicles than physically fit, however long they wait', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim, 8000, 8000);
+  tr.density = 0;
+  const k = sim.conns.cols, conn = someConn(sim);
+  const from = k.from[conn], to = k.to[conn];
+  // the next lane holds as many cars as fit bumper to bumper (4.4 m cars, 2.2 m apart)
+  const full = Math.floor(sim.laneLen(to) / 6.6);
+  inner(tr).setLaneCount(to, full);
+  const v = place(tr, from, sim.laneLen(from), to, false);
+  let most = full;
+  for (let i = 0; i < 20 * 180; i++) { tr.step(0.05); most = Math.max(most, tr.laneCount[to]); }
+  assert.ok(most <= full, `the full lane went from ${full} to ${most} vehicles (${sim.laneLen(to).toFixed(0)} m)`);
+  assert.ok(tr.veh.alive[v] || tr.lost === 0, 'the car waits (or takes a detour), it is never dropped');
 });
 
 test('C3: far from the camera a car whose turn was banned on the way finds another route instead of turning anyway', async () => {

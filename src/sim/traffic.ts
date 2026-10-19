@@ -61,11 +61,12 @@ const REGION_N = Math.ceil(MAP_SIZE / REGION);
 /**
  * Fleet governor (roadcraft `populationGovernor`, here driven by traffic rather than step cost): the share of the
  * whole city's fleet on jammed streets (a direction of a segment 80% full or more, near the camera or not) above
- * GOV_JAM gradually cuts the fleet target, below GOV_FREE gives it back. It never reads the camera: looking at a jam
+ * GOV_FREE cuts the fleet target in proportion, down to GOV_MIN at GOV_JAM (approached gradually, without the jumps of
+ * an on/off rule at a threshold). It never reads the camera: looking at a jam
  * must not change the city's traffic. Measured: the generated city's network cannot carry the peak fleet; with the
  * governor the peak has fewer cars and keeps moving.
  */
-const GOV_JAM = 0.3, GOV_FREE = 0.15, GOV_MIN = 0.75, JAMMED = 0.8;
+const GOV_JAM = 0.5, GOV_FREE = 0.15, GOV_MIN = 0.75, JAMMED = 0.8;
 /** A reconsidering driver's detour rejoins the route up to this many nodes ahead. */
 const REJOIN = 6;
 
@@ -836,8 +837,8 @@ export class Traffic {
     // governor: the share of the whole city's fleet on jammed streets
     this.jamShare = fleet > 0 ? jammed / fleet : 0;
     if (this.governed && fleet >= 200) {
-      if (this.jamShare > GOV_JAM) this.gov = Math.max(GOV_MIN, this.gov - 0.02);
-      else if (this.jamShare < GOV_FREE) this.gov = Math.min(1, this.gov + 0.01);
+      const over = Math.min(1, Math.max(0, (this.jamShare - GOV_FREE) / (GOV_JAM - GOV_FREE)));
+      this.gov += (1 - over * (1 - GOV_MIN) - this.gov) * 0.1;
     }
   }
 
@@ -1105,12 +1106,24 @@ export class Traffic {
     // as in micro; otherwise everyone reaches the window in a single lane)
     const to = this.pickLane(ns, dir, this.segAfter(v, 1), bus, sim.conns.cols.to[conn]);
     if (to < 0 || !sim.net.segs.alive[ns]) { this.lose(v); this.finish(v); return; }
-    // queue: a full lane holds the vehicle
-    const cap = sim.laneLen(to) / 7.5;
-    // queue: wait for room; stuck too long (deadlock far from the camera, where nobody sees), go anyway
+    // queue: a full lane holds the vehicle. As in micro: stopped STUCK_SECONDS, the driver reconsiders the route (a
+    // local detour toward an exit with room); a junction jammed for JAM_SECONDS lets one vehicle in every
+    // RELEASE_EVERY s, but never more than physically fit (bumper to bumper)
     this.mesoTries++;
-    if (this.laneCount[to] >= cap && c.wait[v] < 40) { c.wait[v] += 2; this.mesoFull++; this.schedule(v, this.time + 2); return; }
-    c.wait[v] = 0;
+    const L = sim.laneLen(to);
+    const room = Math.max(1, Math.floor(L / 7.5)), fit = Math.max(room, Math.floor(L / 6.6));
+    if (this.laneCount[to] >= room) {
+      c.wait[v] += 2; this.mesoFull++;
+      if (c.wait[v] >= STUCK_SECONDS && !bus && this.routeBudget > 0 && c.held[v] < c.wait[v] - STUCK_SECONDS + 1) {
+        c.held[v] = c.wait[v]; // (reconsiders once every STUCK_SECONDS)
+        if (this.reconsider(v, lane, ns)) { this.schedule(v, this.time + 0.5); return; }
+      }
+      const jammed = c.wait[v] >= JAM_SECONDS && this.time - this.lastAdmit[node] >= JAM_SECONDS && this.time >= this.releaseAt[node];
+      if (!jammed || this.laneCount[to] >= fit) { this.schedule(v, this.time + 2); return; }
+      this.released++; this.releaseAt[node] = this.time + RELEASE_EVERY;
+      if (this.jamAt[node] < this.lastAdmit[node]) { this.jamAt[node] = this.time; this.jams++; }
+    }
+    c.wait[v] = 0; c.held[v] = 0;
     const enterMicro = this.inWindow(to);
     const tail = this.laneTail[to];
     if (enterMicro && tail >= 0 && c.s[tail] < c.len[tail] + S0 + 4) { this.schedule(v, this.time + 0.6); return; }
