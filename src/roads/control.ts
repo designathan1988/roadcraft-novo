@@ -33,6 +33,8 @@ export interface JunctionSpec {
   bans?: number[];
   /** Lane connections by hand: [arriving segment, lane (0 = the rightmost), leaving segments]. */
   lanes?: Array<[number, number, number[]]>;
+  /** A dead end's shape chosen by the player (Roadcraft node end): a turning bulb, or a plain end; absent = automatic. */
+  end?: 'bulb' | 'plain';
 }
 
 export interface Control { ctl: number; /** rule per segment at the node */ legs: Map<number, number>; auto: boolean }

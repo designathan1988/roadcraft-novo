@@ -7,7 +7,7 @@
 // the live numbers only rewrite their own text.
 
 import type { CommandStack } from '../core/commands.ts';
-import { RoadJournal, addCrossing, addUTurn, changeProfiles, roadBetweenJunctions, demolishSeg, duplicateRoad, joinAt, reverseRoad, splitAt, streetChain } from '../roads/build.ts';
+import { RoadJournal, addCrossing, addUTurn, bulbAt, changeProfiles, roadBetweenJunctions, demolishSeg, duplicateRoad, joinAt, reverseRoad, splitAt, streetChain } from '../roads/build.ts';
 import { Ctl, Rule, dirOut, effectiveControl, signalStages, type JunctionSpec } from '../roads/control.ts';
 import { PROFILE_INFO, withParking } from '../roads/profiles.ts';
 import { armAngle } from '../roads/geometry.ts';
@@ -178,6 +178,22 @@ export class Inspector {
         this.edit(j, t('ui.insp.joined'));
         this.close();
       }, 'primary')));
+      return;
+    }
+    if (segs.length === 1) {
+      // a dead end: its shape, chosen by the player or left to the automatic rule (Roadcraft node end)
+      this.head(t('inspector.node'), t('insp.end.title'));
+      box.append(height, section(t('insp.end.title')));
+      const r = row(), now = net.junctions.get(n)?.end;
+      for (const [end, key] of [[undefined, 'insp.end.auto'], ['bulb', 'inspector.end.bulb'], ['plain', 'insp.end.plain']] as Array<['bulb' | 'plain' | undefined, string]>) {
+        r.append(chip(t(key), `out${now === end ? '' : ' off'}`, () => {
+          const s0 = net.junctions.get(n);
+          const next = s0 ? { ...s0, end } : end ? { ctl: Ctl.Auto, end } : null;
+          if (next && !next.end) delete next.end;
+          this.apply(next && (next.end || next.ctl !== Ctl.Auto) ? next : null, 'ponta da via');
+        }));
+      }
+      box.append(r, note(t(bulbAt(net, n) ? 'insp.end.hasBulb' : 'insp.end.noBulb')));
       return;
     }
     this.head(t('inspector.junction'), plural('ui.insp.roads', segs.length));

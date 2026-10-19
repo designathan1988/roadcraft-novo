@@ -62,20 +62,23 @@ export function bulbAt(net: RoadNetwork, n: number): boolean {
   if (!c || c.version !== net.version) { c = { version: net.version, at: new Map() }; bulbCache.set(net, c); }
   const known = c.at.get(n);
   if (known !== undefined) return known;
-  const v = bulbClear(net, n);
+  const v = bulbClear(net, n, net.junctions.get(n)?.end);
   c.at.set(n, v);
   return v;
 }
 
 const bulbCache = new WeakMap<RoadNetwork, { version: number; at: Map<number, boolean> }>();
 
-function bulbClear(net: RoadNetwork, n: number): boolean {
+function bulbClear(net: RoadNetwork, n: number, end?: 'bulb' | 'plain'): boolean {
+  if (end === 'plain') return false;
   const nc = net.nodes.cols;
   const sc = net.segs.cols;
   const s = net.segsOf(n, [])[0];
   // trains do not turn round at the end of the line
   if (PROFILE_INFO[sc.profile[s]].rail) return false;
   if (bulbRetreat(armOf(net.quad(s), sc.profile[s], sc.a[s] === n ? 0 : 1), sc.len[s]) <= 0) return false;
+  // the player asked for a bulb: it goes even with another road near (the automatic rule keeps clear of it)
+  if (end === 'bulb') return true;
   const x = nc.x[n], z = nc.z[n], reach = BULB_R + BULB_WALK + 3;
   let clear = true;
   net.forSegsNear(x - reach - 30, z - reach - 30, x + reach + 30, z + reach + 30, (o) => {

@@ -36,6 +36,8 @@ export class RoadTool {
   cutWalls = false;
   /** Blocks at once: columns, rows, block side (m) and turn (degrees). */
   blocks = { cols: 3, rows: 3, size: 100, angle: 0 };
+  /** Shift is held (the roundabout preview shows whether it may cut roads in). */
+  shiftHeld = false;
   /** Move node: the node being dragged (−1 = none). */
   moving = -1;
   private world: World;
@@ -149,7 +151,7 @@ export class RoadTool {
     if (this.mode === 'roundabout') {
       const a = snap(net, hit.x, hit.z, 14);
       pv.hide();
-      pv.showCircle(a.x, this.anchorY(a), a.z, this.ringRadius, !roundaboutRefusal(this.world, a.x, a.z, this.ringRadius));
+      pv.showCircle(a.x, this.anchorY(a), a.z, this.ringRadius, !roundaboutRefusal(this.world, a.x, a.z, this.ringRadius, a.node >= 0 || this.shiftHeld));
       pv.showMarker(a.x, this.anchorY(a), a.z, 1.2, a.node >= 0 ? 'node' : a.seg >= 0 ? 'seg' : 'free');
       return;
     }
@@ -213,8 +215,11 @@ export class RoadTool {
     }
     if (this.mode === 'roundabout') {
       const a = snap(net, hit.x, hit.z, 14);
-      const why = roundaboutRefusal(this.world, a.x, a.z, this.ringRadius);
-      const j = why ? null : buildRoundabout(this.world, a.x, a.z, this.ringRadius);
+      // on vacant ground it brings its own approaches; roads in the circle are cut in only when asked: Shift, or a
+      // click on a junction (turning it into a roundabout)
+      const cut = shift || a.node >= 0;
+      const why = roundaboutRefusal(this.world, a.x, a.z, this.ringRadius, cut);
+      const j = why ? null : buildRoundabout(this.world, a.x, a.z, this.ringRadius, cut);
       if (!j) this.hud.toast(why || 'Já existe uma rotatória aqui.');
       else this.commit(j);
       return;

@@ -930,17 +930,25 @@ export function alongStreet(world: World, segs: number[], ref: number): Map<numb
  */
 /**
  * Why a roundabout cannot go at (cx, cz), or '' when it can (the tool shows it and the preview turns red): another
- * roundabout in the circle, or water under the ring (a roundabout never fills the sea or a river).
+ * roundabout in the circle, water under the ring (a roundabout never fills the sea or a river), or, unless `cut`, a
+ * road the ring would cut (Roadcraft puts roundabouts on vacant ground; cutting roads in is asked for).
  */
-export function roundaboutRefusal(world: World, cx: number, cz: number, radius: number): string {
+export function roundaboutRefusal(world: World, cx: number, cz: number, radius: number, cut = true): string {
   const net = world.roads, p = new Float64Array(2);
-  let ring = false;
-  net.forSegsNear(cx - radius, cz - radius, cx + radius, cz + radius, (s) => {
-    if (ring || !(net.segs.cols.flags[s] & SegFlag.Ring)) return;
-    const q = net.quad(s);
-    for (let k = 0; k <= 16 && !ring; k++) { bez(q, k / 16, p); if (Math.hypot(p[0] - cx, p[1] - cz) < radius) ring = true; }
+  let ring = false, road = false;
+  const reach = radius + PROFILE_INFO[RING_PROFILE].right;
+  net.forSegsNear(cx - reach, cz - reach, cx + reach, cz + reach, (s) => {
+    if (ring) return;
+    const q = net.quad(s), isRing = (net.segs.cols.flags[s] & SegFlag.Ring) !== 0;
+    for (let k = 0; k <= 16; k++) {
+      bez(q, k / 16, p);
+      const d = Math.hypot(p[0] - cx, p[1] - cz);
+      if (isRing && d < radius) { ring = true; return; }
+      if (!isRing && d < reach) road = true;
+    }
   });
   if (ring) return text('road.ring.exists');
+  if (road && !cut) return text('road.ring.cuts');
   const half = PROFILE_INFO[RING_PROFILE].right;
   for (const r of [radius - half, radius, radius + half]) for (let k = 0; k < 48; k++) {
     const a = (k / 48) * Math.PI * 2;
@@ -949,9 +957,13 @@ export function roundaboutRefusal(world: World, cx: number, cz: number, radius: 
   return '';
 }
 
-export function buildRoundabout(world: World, cx: number, cz: number, radius: number): RoadJournal | null {
+/**
+ * Roundabout at (cx, cz). On vacant ground: the ring and four approaches of APPROACH m (Roadcraft). Over roads, when
+ * `cutRoads`: the roads inside are cut and their ends joined to the ring.
+ */
+export function buildRoundabout(world: World, cx: number, cz: number, radius: number, cutRoads = true): RoadJournal | null {
   const net = world.roads;
-  if (roundaboutRefusal(world, cx, cz, radius)) return null;
+  if (roundaboutRefusal(world, cx, cz, radius, cutRoads)) return null;
   const j = new RoadJournal(world, 'rotatória');
   const y = smoothGround(world.heights, cx, cz);
   const cut = radius;
@@ -981,6 +993,9 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
   j.guard(() => roundaboutLive(j, world, cx, cz, radius, y, hits));
   return j;
 }
+
+/** Length of each approach a roundabout on vacant ground gets (m, Roadcraft). */
+const APPROACH = 40;
 
 /** Roads that meet a roundabout's circle closer than this (m) enter the ring at the same node. */
 const ENTRY_MERGE = 6;
@@ -1046,6 +1061,18 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
   net.nodeIndex.query(cx - cut, cz - cut, cx + cut, cz + cut, (n) => { if (net.nodes.cols.deg[n] === 0) loose.push(n); });
   for (const n of loose) j.removeNode(n);
 
+  // vacant ground: four approaches, two-way local streets out from the ring (Roadcraft editor/roundabout.ts)
+  if (entries.length === 0) {
+    for (let k = 0; k < 4; k++) {
+      const ang = k * Math.PI / 2, ux = Math.cos(ang), uz = -Math.sin(ang);
+      const e = j.addNode(cx + ux * radius, cz + uz * radius, y);
+      entries.push({ angle: ang, node: e });
+      const fx = cx + ux * (radius + APPROACH), fz = cz + uz * (radius + APPROACH);
+      const far = j.addNode(fx, fz, smoothGround(world.heights, fx, fz));
+      j.setJunction(far, { ctl: 0, end: 'plain' }); // an approach waits to be extended: no turning bulb
+      approaches.push(j.addSeg({ a: far, b: e, cx: cx + ux * (radius + APPROACH / 2), cz: cz + uz * (radius + APPROACH / 2), profile: 0, flags: 0 }));
+    }
+  }
   // ring: entry nodes (already on the circle) + extra nodes for arcs of at most 50°
   const ring = entries.map((e) => ({ angle: e.angle, node: e.node }));
   const maxArc = Math.PI * 50 / 180;

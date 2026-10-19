@@ -886,6 +886,7 @@ export class Game {
       const dx = e.offsetX - this.pointer.x, dy = e.offsetY - this.pointer.y;
       this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
       this.pointer.inside = true;
+      this.roadTool.shiftHeld = e.shiftKey;
       if (this.drag === 'click' && (this.tool === 'bulldoze' || this.tool === 'streetscape') && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
         const px = this.pointer.x, py = this.pointer.y;
         this.pointer.x = down.x; this.pointer.y = down.y;
