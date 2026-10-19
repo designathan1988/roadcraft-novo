@@ -13,6 +13,7 @@ export const ENGINE_PT: Record<string, string> = {
   'history.redoFailed': 'Não foi possível refazer "{label}": {message}. Nada mudou; o passo continua lá para refazer.',
   'tool.failed': 'A ferramenta não conseguiu terminar: {message}.',
   'road.reason.fullNode': 'um nó ali ficaria com mais de {max} vias',
+  'road.reason.overlap': 'passaria por cima de outra via',
   'road.ring.exists': 'Já existe uma rotatória aqui.',
   'road.ring.water': 'A rotatória não cabe aqui: o anel passaria sobre a água.',
   'road.move.tooLong': 'uma via ali ficaria mais longa que {max} m (divida-a antes)',

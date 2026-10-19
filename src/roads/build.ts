@@ -491,6 +491,7 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
     for (const [tn, s, to] of junctions) fixed.push({ at: arcAtT(table, tn), y: segHeightAt(net, s, to) });
     pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed, 6, world.water);
   }
+  if (overlapsRoad(net, q, table, profile, pr)) return { ...fail(text('road.reason.overlap')), junctions };
   // no node may end up with more roads than it holds: an end on a node takes one more, a junction on a node two more
   const extra = new Map<number, number>();
   const more = (n: number, k: number) => extra.set(n, (extra.get(n) ?? 0) + k);
@@ -509,6 +510,38 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
     if (Math.abs(pr.y[i] - pr.y[i - 1]) / (pr.at[i] - pr.at[i - 1]) > maxGrade * 1.9) return { ...fail('rampa íngreme demais'), junctions };
   }
   return { ok: true, reason: '', quad: q, profile: pr, len, junctions };
+}
+
+/**
+ * The new road would run over another one: along it (nearly parallel, at the same level) closer than three quarters
+ * of their half widths added, for 8 m or more away from its ends. A second road between the same two nodes is one.
+ */
+function overlapsRoad(net: RoadNetwork, q: Quad, table: Float64Array, profile: number, pr: { at: Float64Array; y: Float64Array }): boolean {
+  const len = table[table.length - 1], half = PROFILE_INFO[profile].right;
+  const cands: number[] = [];
+  net.forSegsNear(Math.min(q.x0, q.cx, q.x1) - half - 30, Math.min(q.z0, q.cz, q.z1) - half - 30, Math.max(q.x0, q.cx, q.x1) + half + 30, Math.max(q.z0, q.cz, q.z1) + half + 30, (s) => cands.push(s));
+  if (!cands.length) return false;
+  const p = new Float64Array(2), d = new Float64Array(2), e = new Float64Array(2), oq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
+  const gap = half + 10;
+  let run = 0;
+  for (let s = gap; s <= len - gap; s += 4) {
+    const t = tAtLength(table, s);
+    bez(q, t, p); bezD(q, t, d);
+    const dl = Math.hypot(d[0], d[1]) || 1;
+    let over = false;
+    for (const o of cands) {
+      net.quad(o, oq);
+      const [to, dist] = closestT(oq, p[0], p[1]);
+      if (dist >= (half + PROFILE_INFO[net.segs.cols.profile[o]].right) * 0.75) continue;
+      bezD(oq, to, e);
+      if (Math.abs(d[0] * e[0] + d[1] * e[1]) / (dl * (Math.hypot(e[0], e[1]) || 1)) < 0.9) continue;
+      if (Math.abs(profileY(pr, s) - segHeightAt(net, o, to)) >= 4.5) continue;
+      over = true; break;
+    }
+    run = over ? run + 4 : 0;
+    if (run >= 8) return true;
+  }
+  return false;
 }
 
 function arcAtT(table: Float64Array, t: number): number {

@@ -507,12 +507,14 @@ function checkRing(w: World, cx: number, cz: number, min: number): void {
 }
 
 test('D13: a roundabout over roads that meet the circle close together makes one clean ring', () => {
-  for (const gap of [1, 3, 6]) {
+  for (const gap of [-1, 1, 3, 6]) {
     const w = flatWorld(1e9);
-    // two roads that cross the circle (radius 25) a few metres apart on its east side
-    road(w, 0, 0, 120, gap);
-    road(w, 0, 0, 120, -gap - 2);
-    road(w, -120, 0, 0, 0);
+    // two roads that cross the circle (radius 25) a few metres apart on its east side (−1: the same road twice), put
+    // straight into the network as the generated city or an old save can have them (planning refuses overlaps, D21)
+    generatedRoad(w, 0, 0, 60, gap, 0); generatedRoad(w, 60, gap, 110, gap, 0);
+    if (gap < 0) generatedRoad(w, 0, 0, 60, gap, 0);
+    else { generatedRoad(w, 0, 0, 60, -gap - 2, 0); generatedRoad(w, 60, -gap - 2, 110, -gap - 2, 0); }
+    generatedRoad(w, -100, 0, 0, 0, 0);
     const j = buildRoundabout(w, 0, 0, 25);
     if (!j) continue; // refusing is fine; a broken ring is not
     assert.ok(j.settle());
@@ -681,4 +683,23 @@ test('D20: a mid-block crossing or U-turn node that gets a third road becomes an
     assert.equal(c.legs.size, 3, `the ${kind} node with a third road has rules for ${c.legs.size} legs`);
     assert.ok(c.ctl !== Ctl.Zebra && c.ctl !== Ctl.UTurn, `the ${kind} node kept its two-road control (${c.ctl})`);
   }
+});
+
+test('D21: a road over another one, or a second road between the same two nodes, is refused', () => {
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  const before = shape(w);
+  const tryRoad = (ax: number, az: number, bx: number, bz: number, r: number) => {
+    const a = snap(w.roads, ax, az, r), b = snap(w.roads, bx, bz, r);
+    const p = planRoad(w, a, null, b, 0, 0);
+    if (p.ok) assert.ok(buildRoad(w, p, a, b, 0).settle());
+    return p;
+  };
+  assert.equal(tryRoad(-100, 0, 100, 0, 8).ok, false, 'a second road between the same two ends was allowed');
+  assert.equal(tryRoad(-60, 0, 60, 0, 8).ok, false, 'a road along the same road was allowed');
+  assert.equal(tryRoad(-60, 6, 60, 6, 1).ok, false, 'a road 6 m alongside, over half of the other, was allowed');
+  assert.equal(shape(w), before);
+  // a road that crosses it, or one alongside with room between, is fine
+  assert.ok(tryRoad(0, -60, 0, 60, 1).ok, 'a crossing road was refused');
+  assert.ok(tryRoad(-60, 40, 60, 40, 1).ok, 'a road 40 m alongside was refused');
 });

@@ -13,6 +13,7 @@ export const ENGINE_EN: Record<string, string> = {
   'history.redoFailed': 'Could not redo "{label}": {message}. Nothing was changed; the step is still there to redo.',
   'tool.failed': 'The tool could not finish: {message}.',
   'road.reason.fullNode': 'a node there would have more than {max} roads',
+  'road.reason.overlap': 'it would run over another road',
   'road.ring.exists': 'There is a roundabout here already.',
   'road.ring.water': 'The roundabout does not fit here: the ring would sit over water.',
   'road.move.tooLong': 'a road there would be longer than {max} m (split it first)',
