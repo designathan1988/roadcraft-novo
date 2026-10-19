@@ -340,3 +340,24 @@ test('E27: the cull sphere of every prop holds the whole piece at its largest sc
   }
   assert.deepEqual(out, [], 'pieces that stick out of their cull sphere (cut at the screen edge)');
 });
+
+test('E14: a building outside the view whose shadow falls into it is drawn into the shadow maps', async () => {
+  const { sunDirection } = await import('../src/render/sun.ts');
+  const w = new World();
+  const c = 18 * 40 + 16;
+  const layer = new CellLayer({ ...recordingSource(), hasContent: (cc: number) => cc === c }, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40 });
+  const L = inside(layer);
+  // camera at (0, 60, 0) looking north (−z), 60° view: x = ±0.58·depth is the edge of the view
+  const camera = new THREE.PerspectiveCamera(60, 1, 1, 30000);
+  const eye = new THREE.Vector3(0, 60, 0);
+  camera.position.copy(eye); camera.lookAt(0, 0, -1000); camera.updateMatrixWorld();
+  // low sun from the west (+x is east): shadows fall east
+  sunDirection.set(-1, 0.35, 0).normalize();
+  // a 300 m tower in cell (16, 18) of the 10 km map (x −1024..−768, z −512..−256), wholly west of the view; its
+  // shadow (300 m / tan 19° ≈ 850 m) reaches east into it
+  L.setMesh(L.cells[0][c], { ...triangle(), originX: -1024, originZ: -512, minY: 0, maxY: 300 }, 1);
+  for (let i = 0; i < 2; i++) layer.update(camera, eye);
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  assert.equal(frustum.intersectsBox(new THREE.Box3(new THREE.Vector3(-1064, 0, -552), new THREE.Vector3(-728, 300, -216))), false, 'the tower is outside the view');
+  assert.ok(layer.group.children.includes(L.cells[0][c].mesh!), 'the tower west of the view, whose shadow falls into it, is a shadow caster');
+});

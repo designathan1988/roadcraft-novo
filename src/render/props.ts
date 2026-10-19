@@ -20,6 +20,7 @@ import { PAINTS } from './vehicles.ts';
 import { windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
+import { SHADOW_LENGTH, sunDirection } from './sun.ts';
 
 const {
   Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
@@ -84,6 +85,10 @@ export class PropRenderer {
   private distU: Node;
   private radiusU: Node;
   private stretchU: Node;
+  /** 1 for the kinds whose near level casts a sun shadow. */
+  private castU: Node;
+  /** Toward the sun (xyz). */
+  private sunU = uniform(new THREE.Vector3(0, 1, 0));
   private reset: Node;
   private count: Node;
   private prefix: Node;
@@ -141,6 +146,7 @@ export class PropRenderer {
     this.distU = uniformArray(this.distArr, 'float');
     this.radiusU = uniformArray(this.kinds.map((d) => d.radius), 'float');
     this.stretchU = uniformArray(this.kinds.map((d) => propStretch(d)), 'float');
+    this.castU = uniformArray(this.kinds.map((d) => (propCastsShadow(d, 0) ? 1 : 0)), 'float');
 
     // ---- compute. The visible list is compact: each draw's instances in one run, the runs back to back. Count (how
     // many each draw gets), prefix (where each run starts), fill. No draw has a cap of its own: a forest of 250,000
@@ -173,12 +179,18 @@ export class PropRenderer {
           const bits = float(uint(pose.w).shiftRight(uint(16)).bitAnd(uint(63)));
           const mode = this.stretchU.element(kind);
           const r = select(mode.lessThan(0.5), rk.mul(bits.div(42).add(0.5)), rk.add(bits.mul(select(mode.lessThan(1.5), float(1), float(0.1)))));
-          let inside: Node = float(1);
+          // in the view, or (near level only) its shadow is: the sphere swept along the shadow, away from the sun,
+          // as long as its height casts it (a tree outside the edge of the screen shadows the street in it)
+          const sun = this.sunU;
+          const len = select(sun.y.greaterThan(0.02), min(r.div(sun.y.max(0.02)), float(SHADOW_LENGTH)), float(0));
+          let inView: Node = float(1), inShadow: Node = float(1);
           for (let k = 0; k < 6; k++) {
             const pl = this.planesU.element(k);
-            inside = inside.mul(step(r.negate(), dot(pl.xyz, p).add(pl.w)));
+            const s0 = dot(pl.xyz, p).add(pl.w);
+            inView = inView.mul(step(r.negate(), s0));
+            inShadow = inShadow.mul(step(r.negate(), s0.add(max(dot(pl.xyz, sun.xyz.negate()).mul(len), float(0)))));
           }
-          If(inside.greaterThan(0.5), () => {
+          If(inView.add(inShadow).greaterThan(0.5), () => {
             const d = length(p.sub(this.camU)).toVar();
             for (let l = 0; l < LODS; l++) {
               const slot = kind.mul(LODS).add(l);
@@ -186,7 +198,9 @@ export class PropRenderer {
               const start = l === 0 ? float(-1) : this.distU.element(slot.sub(1));
               // enters level l at the end of the previous one (fading), leaves at the end of its own
               const bandIn = start.mul(1 - FADE_BAND);
-              If(end.greaterThan(0).and(d.lessThan(end)).and(d.greaterThanEqual(bandIn)), () => {
+              // shadow-only instances go into the near level of the kinds that cast (the main pass culls them on screen)
+              const seen = l === 0 ? inView.greaterThan(0.5).or(this.castU.element(kind).greaterThan(0.5)) : inView.greaterThan(0.5);
+              If(seen.and(end.greaterThan(0)).and(d.lessThan(end)).and(d.greaterThanEqual(bandIn)), () => {
                 // fade out (near the end) and in (inside the previous one's band)
                 const outA = select(d.greaterThan(end.mul(1 - FADE_BAND)), end.sub(d).div(end.mul(FADE_BAND)), float(1));
                 const inA = select(d.lessThan(start), d.sub(bandIn).div(start.mul(FADE_BAND).max(0.001)), float(1));
@@ -684,6 +698,7 @@ export class PropRenderer {
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
+    (this.sunU.value as THREE.Vector3).copy(sunDirection);
     this.kinds.forEach((d, k) => d.dist.forEach((x, l) => { this.distArr[k * LODS + l] = d.lods[l] && this.kindNear[k] > 0 ? x * this.pixelScale : 0; }));
     this.updateResidency(camPos);
     if (this.kindNearDue) this.countKindsNear(camPos);

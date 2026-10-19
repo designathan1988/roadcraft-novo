@@ -71,6 +71,37 @@ const SCENARIOS = {
     const d = await drawCounts();
     check('the cull pass keeps them', d[(kind * 3) * 5 + 1] >= 20, 'count ' + d[(kind * 3) * 5 + 1]);
   `,
+  // E14: a tree just outside the edge of the view, on the low sun's side, still casts its shadow into it
+  'offscreen-shadow': `
+    await g.view(0, 0, 0, 25, 120, 7);
+    await frames(10);
+    const sun = g.parts.sun.position.clone().normalize();
+    const r = P.kinds[0].radius; // a tree at scale 1
+    const side = (x, z, y) => Math.min(...P.planes.map((pl) => pl.x * x + pl.y * y + pl.z * z + pl.w));
+    let spot = null;
+    for (const edge of [-0.95, 0.95]) {
+      const q = g.rig.pick(edge, -0.2);
+      if (!q) continue;
+      const h = Math.hypot(sun.x, sun.z);
+      for (let k = 0; k < 80 && !spot; k++) {
+        const x = q.x + sun.x / h * k, z = q.z + sun.z / h * k;
+        if (side(x, z, q.y) < -(r + 3) && side(q.x, q.z, q.y) > -1) spot = { x, z, y: q.y, k };
+      }
+      if (spot) break;
+    }
+    check('found a spot just outside the view on the side of the sun', !!spot, 'no edge goes outward toward the sun');
+    if (spot) {
+      const slot = slotOf(0, 0);
+      // the cell's own props are replaced: compare with the same cell holding the tree 5 km under the ground
+      putProps([{ x: spot.x, z: spot.z, y: spot.y - 5000, type: 0, variant: 0 }]);
+      await frames(5);
+      const before = (await drawCounts())[slot * 5 + 1];
+      putProps([{ x: spot.x, z: spot.z, y: spot.y, type: 0, variant: 0 }]);
+      await frames(5);
+      const after = (await drawCounts())[slot * 5 + 1];
+      check('the tree ' + spot.k + ' m outside the view (shadow ' + Math.round(15 / Math.tan(Math.asin(sun.y))) + ' m long) is drawn for the shadow maps', after > before, 'near trees ' + before + ' -> ' + after);
+    }
+  `,
 };
 
 const pick = process.argv.slice(2);

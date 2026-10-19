@@ -8,6 +8,7 @@ import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
 import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, type DirtyCells, type DirtyKind, type DirtyReader } from '../core/grid.ts';
 import type { PackedMesh } from '../jobs/protocol.ts';
+import { SHADOW_LENGTH, SHADOW_REACH, sunDirection } from './sun.ts';
 
 export interface LayerSource {
   /** Asks for a cell's mesh at level 0 (everything) or 1 (without small parts). */
@@ -302,7 +303,18 @@ export class CellLayer {
     const m = this.opt.margin;
     this.box.min.set(x - m, s.minY, z - m);
     this.box.max.set(x + size + m, s.maxY, z + size + m);
-    if (this.frustum.intersectsBox(this.box)) this.next.add(mesh);
+    if (this.frustum.intersectsBox(this.box)) { this.next.add(mesh); return; }
+    // outside the view but within the shadows' reach: its shadow may fall into the view. The box is stretched along
+    // the shadow (away from the sun, as long as its height casts it); three culls the mesh out of the main pass and
+    // draws it only into the cascades it reaches
+    const sun = sunDirection;
+    if ((this.opt.shadows ?? true) && sun.y > 0.02 && this.distTo(x, z, size) < SHADOW_REACH * this.pixelScale) {
+      const len = Math.min(SHADOW_LENGTH, (s.maxY - s.minY) / sun.y);
+      const dx = -sun.x * len, dz = -sun.z * len;
+      this.box.min.set(Math.min(this.box.min.x, this.box.min.x + dx), s.minY - (s.maxY - s.minY), Math.min(this.box.min.z, this.box.min.z + dz));
+      this.box.max.set(Math.max(this.box.max.x, this.box.max.x + dx), s.maxY, Math.max(this.box.max.z, this.box.max.z + dz));
+      if (this.frustum.intersectsBox(this.box)) this.next.add(mesh);
+    }
   }
 
   /**

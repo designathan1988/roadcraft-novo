@@ -1,6 +1,7 @@
 // Base scene: renderer, sky, sun, sky fill, the sky as the PBR environment (PMREM), distance fog and the sea.
 
 import * as THREE from 'three/webgpu';
+import { sunDirection } from './sun.ts';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { MAP_SIZE, SEA_LEVEL } from '../config.ts';
 import { T } from './tsl.ts';
@@ -174,6 +175,7 @@ export function setSun(p: { sun: THREE.DirectionalLight; sky: SkyMesh }, elevati
   const q = (deg: number) => THREE.MathUtils.degToRad(Math.round(deg / SUN_STEP) * SUN_STEP);
   _sunDir.setFromSphericalCoords(1, q(90 - elevation), q(azimuth));
   p.sun.position.copy(_sunDir).multiplyScalar(1000);
+  sunDirection.copy(_sunDir);
   p.sun.target.position.set(0, 0, 0);
 }
 

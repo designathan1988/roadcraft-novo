@@ -11,6 +11,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
+import { SHADOW_REACH } from './sun.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
@@ -20,7 +21,7 @@ const {
 } = T;
 
 /** How far the sun's shadows reach from the perspective camera (m). */
-const PERSP_SHADOW_FAR = 1600;
+const PERSP_SHADOW_FAR = SHADOW_REACH;
 
 /** CAS strength (Roadcraft's "high" quality: 0.35). */
 const SHARPEN = 0.35;
