@@ -423,3 +423,20 @@ test('C27: the motorbike rider keeps the same body when the bike brakes or signa
   const plain = riderHash(base, 77, 0);
   for (const lights of [1, 2, 4, 3, 5]) assert.equal(riderHash(base + lights * 65536, 77, 0), plain, `lights ${lights} changed the rider`);
 });
+
+test('C21: where pedestrians walk to is not drawn with a bias to the south', async () => {
+  const { Peds } = await import('../src/sim/peds.ts');
+  const { sim } = gridCity(25, 60, -1); // dense: more nodes within a walk than the old candidate list held
+  const peds = new Peds(sim);
+  peds.density = 1 / 20;
+  for (let i = 0; i < 20 * 3; i++) peds.step(0.05);
+  const P = inner(peds), nc = sim.net.nodes.cols, c = peds.t.cols;
+  let n = 0, dz = 0, dx = 0;
+  for (let p = 0; p < peds.t.end; p++) {
+    if (!peds.t.alive[p] || c.bike[p]) continue;
+    const a = P.routes[p * 32], b = P.routes[p * 32 + c.rLen[p] - 1];
+    dz += nc.z[b] - nc.z[a]; dx += nc.x[b] - nc.x[a]; n++;
+  }
+  assert.ok(n > 300, `walkers ${n}`);
+  assert.ok(Math.abs(dz / n) < 60 && Math.abs(dx / n) < 60, `mean trip offset x ${(dx / n).toFixed(0)} m, z ${(dz / n).toFixed(0)} m`);
+});

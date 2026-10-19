@@ -281,9 +281,7 @@ export class Peds {
         const [li, from, to, stopNode] = trip;
         const net = this.sim.net, nc = net.nodes.cols;
         if (!net.nodes.alive[stopNode]) return;
-        const cand: number[] = [];
-        net.nodeIndex.query(nc.x[stopNode] - 500, nc.z[stopNode] - 500, nc.x[stopNode] + 500, nc.z[stopNode] + 500, (n) => { if (cand.length < 200) cand.push(n); });
-        const a = cand.length ? cand[this.rng.int(0, cand.length)] : -1;
+        const a = this.nodeAround(nc.x[stopNode], nc.z[stopNode], 60, 500);
         if (a >= 0 && a !== stopNode) this.spawnRoute(a, stopNode, li, from, to);
         return;
       }
@@ -314,14 +312,7 @@ export class Peds {
     const L = sim.segLen(s), r0 = sim.segS0(s), r1 = sim.segS1(s), dA = Math.max(r0, Math.min(r1, t * L));
     // walk towards the end closest to the destination
     const n0a = sc.a[s], n0b = sc.b[s];
-    const cand: number[] = [];
-    net.nodeIndex.query(x - 900, z - 900, x + 900, z + 900, (n) => { if (cand.length < 400) cand.push(n); });
-    let b = -1;
-    for (let i = 0; i < 8 && cand.length; i++) {
-      const n = cand[this.rng.int(0, cand.length)];
-      const d = Math.hypot(nc.x[n] - x, nc.z[n] - z);
-      if (d > 150 && d < 900 && nc.deg[n] > 0) { b = n; break; }
-    }
+    const b = this.nodeAround(x, z, 150, 900);
     if (b < 0) return false;
     const towardB = Math.hypot(nc.x[n0b] - nc.x[b], nc.z[n0b] - nc.z[b]) < Math.hypot(nc.x[n0a] - nc.x[b], nc.z[n0a] - nc.z[b]);
     const from = towardB ? n0a : n0b, to = towardB ? n0b : n0a;
@@ -395,19 +386,29 @@ export class Peds {
     return true;
   }
 
+  /**
+   * A node between `rMin` and `rMax` metres from (x, z), uniform over the area: the node nearest to a random point
+   * of the ring (a small query each try). A list of the nodes in the box, cut at a few hundred, came out in the
+   * index's order, south first. −1 if none in a few tries.
+   */
+  private nodeAround(x: number, z: number, rMin: number, rMax: number): number {
+    const net = this.sim.net, nc = net.nodes.cols;
+    for (let i = 0; i < 8; i++) {
+      const ang = this.rng.next() * Math.PI * 2, r = Math.sqrt(rMin * rMin + this.rng.next() * (rMax * rMax - rMin * rMin));
+      const n = net.nearestNode(x + Math.cos(ang) * r, z + Math.sin(ang) * r, 90);
+      if (n < 0 || nc.deg[n] === 0) continue;
+      const d = Math.hypot(nc.x[n] - x, nc.z[n] - z);
+      if (d >= rMin && d <= rMax) return n;
+    }
+    return -1;
+  }
+
   /** Spawns at `a` and walks to a random node up to `radius` metres away. */
   private spawnFrom(a: number, radius: number, li: number, from: number, to: number, frac: number): void {
     const net = this.sim.net, nc = net.nodes.cols;
     if (!net.nodes.alive[a]) return;
-    const cand: number[] = [];
-    net.nodeIndex.query(nc.x[a] - radius, nc.z[a] - radius, nc.x[a] + radius, nc.z[a] + radius, (n) => { if (cand.length < 400) cand.push(n); });
-    let b = -1;
-    for (let i = 0; i < 8 && cand.length; i++) {
-      const n = cand[this.rng.int(0, cand.length)];
-      const d = Math.hypot(nc.x[n] - nc.x[a], nc.z[n] - nc.z[a]);
-      if (n !== a && d > 150 && d < radius && nc.deg[n] > 0) { b = n; break; }
-    }
-    if (b < 0) return;
+    const b = this.nodeAround(nc.x[a], nc.z[a], 150, radius);
+    if (b < 0 || b === a) return;
     this.spawnRoute(a, b, li, from, to, frac);
   }
 
