@@ -282,8 +282,10 @@ export const SCENARIOS = {
     check('PageUp shows in the height selector', /4/.test(h), 'elevation ' + g.roadTool.elevation + ', shows ' + h);
     click(byText('.v2-tab', 'Rotatória|Roundabout')); await frames(2);
     key('BracketRight'); await frames(2);
-    const r = Q('.v2-toolopts .v2-stepper-value').textContent;
-    check('] shows in the roundabout radius', r !== '22 m', 'shows ' + r);
+    // the radius is a slider since the 4.0 drawers: its number and its knob follow ]
+    const ring = QA('.v2-toolopts .v2-orow').find((x) => /Raio|Radius/.test(x.getAttribute('aria-label')));
+    const r = ring ? ring.querySelector('.v2-range-out').textContent : 'none';
+    check('] shows in the roundabout radius', r !== '22 m' && r === g.roadTool.ringRadius + ' m' && ring.querySelector('input').value === String(g.roadTool.ringRadius), 'shows ' + r + ', radius ' + g.roadTool.ringRadius);
   `,
   // B22: the next drawn lot shows the style and function that will be used
   'B22-next-lot-choice': `
@@ -298,6 +300,8 @@ export const SCENARIOS = {
     A.water({ waves: 0.9, foam: 0.1, current: 2 });
     await g.save(false); A.water({ waves: 0.3, foam: 0.4, current: 0.5 }); await g.load();
     click('[data-cat=landscape]'); await frames(2);
+    // the water rows show with the river brush (as Roadcraft 4.0)
+    click(byText('.v2-card', '^Rio|^River')); await frames(2);
     const waves = QA('.v2-range').find((e) => /Ondas|Waves/.test(e.getAttribute('aria-label')));
     check('the waves slider shows the map', waves && waves.value === '90', 'slider ' + (waves && waves.value) + ', map ' + g.waterCtl.waves);
   `,
