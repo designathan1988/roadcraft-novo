@@ -434,3 +434,23 @@ test('A44: the undo history drops its oldest steps past a byte budget; flattenin
   while (commands.undo()) steps++;
   assert.ok(steps * 100 <= 512 && steps >= 1, `${steps} steps of 100 MB kept in the history`);
 });
+
+test('D10: the terrain brush and the river redraw the roads and redo the lots they reshape', async () => {
+  const { BrushStroke } = await import('../src/world/brush.ts');
+  const { RiverCommand } = await import('../src/world/ground.ts');
+  const w = flatWorld(0);
+  const cell = cellId(cellX(0), cellX(0));
+  for (const k of [Dirty.Roads, Dirty.RoadPaint, Dirty.Lots]) w.dirty.drain(k);
+  const b = new BrushStroke(w);
+  b.dab(0, 0, { mode: 'raise', radius: 20, strength: 2 }, 0.5);
+  for (const [name, k] of [['roads', Dirty.Roads], ['road paint', Dirty.RoadPaint], ['lots', Dirty.Lots]] as const) {
+    assert.ok(w.dirty.drain(k).includes(cell), `the brush did not mark the ${name}`);
+  }
+  b.finish();
+  const r = new RiverCommand(w, [[-100, 300], [100, 300]], 12, 2);
+  r.apply();
+  const rc = cellId(cellX(0), cellX(300));
+  for (const [name, k] of [['roads', Dirty.Roads], ['road paint', Dirty.RoadPaint], ['lots', Dirty.Lots]] as const) {
+    assert.ok(w.dirty.drain(k).includes(rc), `the river did not mark the ${name}`);
+  }
+});

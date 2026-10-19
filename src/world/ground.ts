@@ -225,7 +225,7 @@ export class RiverCommand implements Command {
       if (wv[j] !== NO_WATER) w.tileWater[tile] = 1;
     }
     const [gx0, gz0, gx1, gz1] = this.box;
-    w.touchRect(worldOfSample(gx0) - 4, worldOfSample(gz0) - 4, worldOfSample(gx1) + 4, worldOfSample(gz1) + 4, Dirty.Terrain | Dirty.Buildings | Dirty.Roads);
+    w.touchRect(worldOfSample(gx0) - 4, worldOfSample(gz0) - 4, worldOfSample(gx1) + 4, worldOfSample(gz1) + 4, Dirty.Terrain | Dirty.Buildings | Dirty.Roads | Dirty.RoadPaint | Dirty.Lots);
   }
 
   apply(): void { this.write(this.hNew, this.wNew); }

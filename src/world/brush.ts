@@ -27,8 +27,11 @@ function touchSamples(world: World, gx0: number, gz0: number, gx1: number, gz1: 
   }
   // prédios em cima do terreno dependem da altura
   world.touchRect(worldOfSample(gx0) - HEIGHT_SPACING, worldOfSample(gz0) - HEIGHT_SPACING,
-    worldOfSample(gx1) + HEIGHT_SPACING, worldOfSample(gz1) + HEIGHT_SPACING, Dirty.Terrain | Dirty.Buildings);
+    worldOfSample(gx1) + HEIGHT_SPACING, worldOfSample(gz1) + HEIGHT_SPACING, Dirty.Terrain | Dirty.Buildings | TERRAIN_FOLLOWERS);
 }
+
+/** What sits on the terrain besides buildings: the road meshes and their paint follow it, lots are cut by slope. */
+export const TERRAIN_FOLLOWERS = Dirty.Roads | Dirty.RoadPaint | Dirty.Lots;
 
 function extendBounds(world: World, idx: number, v: number): void {
   const tile = idx >> (2 * Math.log2(HEIGHT_TILE_RES));
