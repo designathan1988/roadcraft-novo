@@ -794,3 +794,22 @@ test('D25: Backspace in the wall tool takes back its own last run, never another
   tool.back();
   assert.equal(w.roads.segs.size, roads, 'Backspace in the wall tool undid the road');
 });
+
+test('D26: lot edits never put a lot over a road or over another lot', async () => {
+  const { polygonLot, moveLotCorner, curveLotSide, nearestCorner } = await import('../src/world/lotEdit.ts');
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0); // half width 5.9: the road covers −5.9 < z < 5.9
+  const lot = (x: number, z: number) => w.addBuilding({ x, z, w: 16, d: 24, h: 0, rot: Math.PI, color: 0, seed: x, zone: Zone.Residential, floors: 0, style: 1 });
+  const a = lot(0, 20), b = lot(30, 20);
+  // a drawn polygon over the road, and one over lot b
+  assert.equal(typeof polygonLot([[-50, -3], [-30, -3], [-30, 20], [-50, 20]], w), 'string', 'a drawn lot over the road was accepted');
+  assert.equal(typeof polygonLot([[25, 15], [45, 15], [45, 40], [25, 40]], w), 'string', 'a drawn lot over another lot was accepted');
+  assert.equal(typeof polygonLot([[-50, 10], [-30, 10], [-30, 30], [-50, 30]], w), 'object', 'a drawn lot on free ground was refused');
+  // dragging a corner of lot a onto the road, or into lot b
+  const [k] = nearestCorner(w, a, 8, 8);
+  assert.equal(typeof moveLotCorner(w, a, k, 8, 2), 'string', 'a corner was dragged onto the road');
+  assert.equal(typeof moveLotCorner(w, a, k, 26, 8), 'string', 'a corner was dragged into the next lot');
+  // curving the front side out over the road
+  assert.equal(typeof curveLotSide(w, a, 0, 8, 0, 0), 'string', 'a side was curved over the road');
+  assert.equal(w.buildings.alive[b], 1);
+});

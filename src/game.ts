@@ -57,7 +57,7 @@ import { InsideView } from './render/inside.ts';
 import { Blast } from './render/blast.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
-import { curveLotSide, deleteLot, joinLots, lotAt, lotToWorld, moveLotCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotByLine } from './world/lotEdit.ts';
+import { curveLotSide, deleteLot, joinLots, lotAt, lotFits, lotToWorld, moveLotCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotByLine } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt } from './roads/streetNames.ts';
 import { Ground, GroundStroke, RiverCommand, WATER_TILE_RES } from './world/ground.ts';
@@ -1243,7 +1243,7 @@ export class Game {
       this.lotUse = use; this.polyPts = [];
       for (let i = 0; i + 1 < pts.length; i += 2) this.polyPts.push([pts[i], pts[i + 1]]);
       const before = this.world.buildings.end, size = this.world.buildings.size;
-      const r = polygonLot(this.polyPts);
+      const r = polygonLot(this.polyPts, this.world);
       this.finishPoly();
       if (typeof r === 'string') return r;
       if (this.world.buildings.size === size) return 'não criou';
@@ -1625,6 +1625,8 @@ export class Game {
     if (pts.length < 2) { pts.push([hit.x, hit.z]); return; }
     const r = this.lotRect([hit.x, hit.z]);
     if (!r) { this.hud.toast('Lote estreito demais.'); pts.length = 0; return; }
+    const fits = lotFits(this.world, [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => lotToWorld(r, u * r.w / 2, v * r.d / 2)));
+    if (fits) { this.hud.toast(fits[0].toUpperCase() + fits.slice(1) + '.'); pts.length = 0; this.preview.hide(); return; }
     const seed = (Math.random() * 2 ** 31) >>> 0;
     const zone = this.lotUse;
     const rec = {
@@ -1719,7 +1721,7 @@ export class Game {
   }
 
   private finishPoly(): void {
-    const r = polygonLot(this.polyPts);
+    const r = polygonLot(this.polyPts, this.world);
     this.polyPts.length = 0;
     this.preview.hideAll();
     if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
