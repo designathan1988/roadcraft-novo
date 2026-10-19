@@ -102,6 +102,8 @@ const vehSchema = {
   why: Uint8Array,
   // far model: the lane whose list it is in (−1 = none) and its neighbours in that list (in order of entry)
   ml: Int32Array, mnext: Int32Array, mprev: Int32Array,
+  // when it entered its current lane and where (for the speed actually driven on each lane, near and far)
+  tIn: Float64Array, s0: Float32Array,
 };
 
 /** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
@@ -220,30 +222,73 @@ export class Traffic {
   private windowSignals = new Set<number>();
 
   /** Average speed of the cars near the camera (m/s). */
+  /**
+   * Average speed of the whole city (m/s): length driven over time taken by every vehicle that finished a lane since
+   * the last call, near the camera or not (smoothed). Also counts the city's stopped vehicles (`stopped`).
+   */
   avgSpeed(): number {
-    const c = this.veh.cols;
-    let s = 0, stopped = 0;
-    for (let i = 0; i < this.microN; i++) { const v = c.v[this.micro[i]]; s += v; if (v < 0.5) stopped++; }
+    if (this.timeSum > 0) { const sp = this.distSum / this.timeSum; this.cityV = this.cityV > 0 ? this.cityV * 0.7 + sp * 0.3 : sp; }
+    this.distSum = 0; this.timeSum = 0;
+    // stopped: everyone on a jammed street (whole city, from the last region pass), and near the camera those stopped
+    // on a street that is not jammed
+    const c = this.veh.cols, sc = this.sim.net.segs.cols;
+    let stopped = this.jammedNow;
+    for (let i = 0; i < this.microN; i++) {
+      const v = this.micro[i];
+      if (c.v[v] >= 0.5 || c.conn[v] >= 0 || c.lane[v] < 0 || c.dying[v] === 2) continue;
+      const sg = laneSeg(c.lane[v]), fwd = laneDir(c.lane[v]) > 0, lanes = laneCount(sc.profile[sg], fwd ? 1 : -1);
+      if (this.segLoad[sg * 2 + (fwd ? 0 : 1)] < JAMMED * lanes * sc.len[sg] / 7.5) stopped++;
+    }
     this.stopped = stopped;
-    return this.microN ? s / this.microN : 0;
+    return this.cityV;
   }
 
-  /** Stopped vehicles near the camera (counted along with the average speed). */
+  /** The city's stopped vehicles (counted along with the average speed). */
   stopped = 0;
+  /** Lane length driven and time taken since the last `avgSpeed`, and the smoothed city speed. */
+  private distSum = 0; private timeSum = 0; private cityV = 0;
+  /** Vehicles on jammed streets at the last region pass. */
+  private jammedNow = 0;
+  /** Speed actually driven on each lane by the last vehicles that finished it (m/s, smoothed), and when. */
+  laneVel = new Float32Array((1 << 14) * 16);
+  private laneVelT = new Float64Array((1 << 14) * 16);
+
+  /** The vehicle starts lane c.lane[v] at position `s`. */
+  private enterLane(v: number, s: number): void { const c = this.veh.cols; c.tIn[v] = this.time; c.s0[v] = Math.max(0, s); }
+
+  /** The vehicle finishes `lane`: its speed on it goes into the lane's and the city's figures. */
+  private leaveLane(v: number, lane: number): void {
+    const c = this.veh.cols, dist = this.sim.laneLen(lane) - c.s0[v], t = this.time - c.tIn[v];
+    if (!(t > 0.2) || dist < 1) return;
+    const sp = dist / t;
+    this.laneVel[lane] = this.laneVel[lane] > 0 ? this.laneVel[lane] * 0.6 + sp * 0.4 : sp;
+    this.laneVelT[lane] = this.time;
+    this.distSum += dist; this.timeSum += t;
+  }
 
   /** A segment right now: vehicles (micro and meso), average speed of the visible ones, queue (stopped) and capacity. */
   probe(seg: number): { vehicles: number; speed: number; queue: number; capacity: number } {
     const sim = this.sim, c = this.veh.cols;
     if (!sim.net.segs.alive[seg]) return { vehicles: 0, speed: 0, queue: 0, capacity: 0 };
     const p = sim.net.segs.cols.profile[seg];
-    let vehicles = 0, seen = 0, sum = 0, queue = 0, capacity = 0;
+    let vehicles = 0, seen = 0, sum = 0, queue = 0, capacity = 0, far = 0, farSum = 0;
     for (const dir of [1, -1]) for (let i = 0; i < laneCount(p, dir); i++) {
-      const l = laneId(seg, dir, i);
+      const l = laneId(seg, dir, i), cap = Math.floor(sim.laneLen(l) / 7.5);
       vehicles += this.laneCount[l];
-      capacity += Math.floor(sim.laneLen(l) / 7.5);
+      capacity += cap;
+      // near the camera: the vehicles themselves
       for (let v = this.laneHead[l]; v >= 0; v = c.next[v]) { seen++; sum += c.v[v]; if (c.v[v] < 0.5) queue++; }
+      // far: a jammed lane is a queue; otherwise those held at the line (waiting for room or for the green)
+      if (this.mesoHead[l] < 0) continue;
+      let held = 0, n = 0;
+      for (let v = this.mesoHead[l]; v >= 0; v = c.mnext[v]) { n++; if (c.wait[v] > 0 || c.tExit[v] - this.time > 30) held++; }
+      queue += this.laneCount[l] >= JAMMED * cap ? n : held;
+      // the speed driven on the lane lately; nobody out of a full lane for a minute: standing still
+      const stale = this.time - this.laneVelT[l] > 60;
+      far += n; farSum += n * (stale ? (this.laneCount[l] >= JAMMED * cap ? 0 : laneSpeed(p) * 0.85) : this.laneVel[l]);
     }
-    return { vehicles, speed: seen ? sum / seen : laneSpeed(p) * 0.85, queue, capacity };
+    const speed = seen + far ? (sum + farSum) / (seen + far) : laneSpeed(p) * 0.85;
+    return { vehicles, speed, queue, capacity };
   }
 
   /** Network cleared (new map, load): all vehicles leave, queues and signals reset. */
@@ -348,6 +393,8 @@ export class Traffic {
       this.laneTail = grow(this.laneTail, cap * 16, -1);
       this.mesoHead = grow(this.mesoHead, cap * 16, -1);
       this.mesoTail = grow(this.mesoTail, cap * 16, -1);
+      this.laneVel = grow(this.laneVel, cap * 16, 0);
+      this.laneVelT = grow(this.laneVelT, cap * 16, 0);
       this.laneCount = grow(this.laneCount, cap * 16, 0);
       this.laneLastExit = grow(this.laneLastExit, cap * 16, 0);
       this.exitClaim = grow(this.exitClaim, cap * 16, -1);
@@ -839,6 +886,7 @@ export class Traffic {
     for (let r = 0; r < L.length; r++) this.regionOcc[r] = C[r] > 0 ? L[r] / C[r] : 0;
     // governor: the share of the whole city's fleet on jammed streets
     this.jamShare = fleet > 0 ? jammed / fleet : 0;
+    this.jammedNow = jammed;
     if (this.governed && fleet >= 200) {
       const over = Math.min(1, Math.max(0, (this.jamShare - GOV_FREE) / (GOV_JAM - GOV_FREE)));
       this.gov += (1 - over * (1 - GOV_MIN) - this.gov) * 0.1;
@@ -910,6 +958,7 @@ export class Traffic {
     const c = this.veh.cols;
     c.lane[v] = lane; c.conn[v] = -1;
     c.s[v] = this.rng.next() * this.sim.laneLen(lane);
+    this.enterLane(v, c.s[v]);
     this.setLaneCount(lane, 1);
     if (this.leaveBay(v, lane)) return;
     this.mesoEnter(v, lane, true);
@@ -1132,9 +1181,11 @@ export class Traffic {
     if (enterMicro && tail >= 0 && c.s[tail] < c.len[tail] + S0 + 4) { this.schedule(v, this.time + 0.6); return; }
     // counted only once it really goes through (flow inspector, automatic control, jammed-junction detection)
     this.admit(node, sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)]);
+    this.leaveLane(v, lane);
     this.setLaneCount(lane, -1);
     this.setLaneCount(to, 1);
     c.lane[v] = to;
+    this.enterLane(v, 0);
     c.rIdx[v]++;
     if (enterMicro) {
       // entered the window: becomes micro at the start of the lane
@@ -1420,6 +1471,7 @@ export class Traffic {
       this.setLaneCount(c.lane[v], -1);
       this.setLaneCount(kept, 1);
       c.lane[v] = kept; c.s[v] = 0; c.rIdx[v]++;
+      this.enterLane(v, 0);
       if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== sim.laneTo(kept)) this.replanFrom(v, sim.laneTo(kept));
       this.insert(v, false, kept);
       v = next;
@@ -1642,6 +1694,7 @@ export class Traffic {
       if (conn < 0) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
       if (!release && !this.gateFor(conn, v, 0)) { c.s[v] = L - 0.01; c.v[v] = 0; return; }
       // enter the connection
+      this.leaveLane(v, lane);
       this.unlink(v);
       c.s[v] -= L;
       c.conn[v] = conn;
@@ -1809,6 +1862,7 @@ export class Traffic {
     this.setLaneCount(to, 1);
     c.lane[v] = to;
     c.s[v] -= L;
+    this.enterLane(v, c.s[v]);
     c.rIdx[v]++;
     // the route may have been broken (wrong lane): replan from the end of this lane;
     // heading to a median U-turn, replan (whoever overshot the destination turns there: the U-turn is a connection)
@@ -2113,6 +2167,7 @@ export class Traffic {
     c.rLen[v] = 2; c.rIdx[v] = 1; c.dest[v] = sim.laneTo(lane);
     c.lane[v] = lane; c.conn[v] = -1;
     c.s[v] = this.rng.next() * Math.max(0, ln.stopV[stop] - 6);
+    this.enterLane(v, c.s[v]);
     this.setLaneCount(lane, 1);
     this.mesoEnter(v, lane, true);
   }

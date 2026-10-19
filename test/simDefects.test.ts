@@ -473,3 +473,19 @@ test('C50: drawing the people waiting at stops looks only at the stops near the 
   for (const ln of tr.lines) ln.lastT.fill(-1000); // people have been arriving for a while
   assert.ok(tr.writeStopPeople(out, 11, 0, 1000) > 0, 'nobody drawn at the stops near the camera');
 });
+
+test('C22: the HUD speed and stopped count and the road inspector cover the whole city, not the camera window', () => {
+  const { sim } = gridCity(6, 100);
+  const tr = traffic(sim, 8000, 8000); // nothing near the camera
+  tr.density = 1 / 9; tr.hour = 8; // a jam
+  for (let i = 0; i < 20 * 300; i++) tr.step(0.05);
+  const speed = tr.avgSpeed();
+  assert.ok(speed > 0.5 && speed < 12, `city speed ${(speed * 3.6).toFixed(1)} km/h in a jam away from the camera`);
+  assert.ok(tr.stopped > 50, `${tr.stopped} stopped in a jam of ${tr.count} vehicles away from the camera`);
+  // the inspector on the fullest segment shows its queue and a slow speed
+  let seg = -1, most = -1;
+  for (let s = 0; s < sim.net.segs.end; s++) if (sim.net.segs.alive[s] && tr.segLoad[s * 2] + tr.segLoad[s * 2 + 1] > most) { most = tr.segLoad[s * 2] + tr.segLoad[s * 2 + 1]; seg = s; }
+  const p = tr.probe(seg);
+  assert.ok(p.queue > 0, `inspector: ${p.vehicles} vehicles, queue ${p.queue}`);
+  assert.ok(p.speed < 0.6 * 50 / 3.6, `inspector: ${(p.speed * 3.6).toFixed(0)} km/h on a jammed street`);
+});
