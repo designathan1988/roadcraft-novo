@@ -24,7 +24,7 @@ import { heightAt } from '../world/heights.ts';
 export const gridU = T.uniform(0);
 
 const {
-  Fn, attribute, clamp, float, floor, fract, int, ivec2, max, min, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot, dFdx, dFdy, If,
+  Fn, attribute, clamp, float, floor, fract, int, ivec2, max, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot, dFdx, dFdy, If,
   transformNormalToView, uniform, varyingProperty, vec2, vec3, vec4, length, abs, sRGBTransferEOTF,
   positionWorld, fwidth, mx_noise_float, select, texture, instanceIndex, hash, sin, cos, time, positionLocal, step,
 } = T;
@@ -480,12 +480,24 @@ export class TerrainRenderer {
       // red-brown dirt (4.0's latossolo: tone × (1.22, 0.8, 0.58)), rock from the baked granite tinted by the strata,
       // scree at the rock's fringe
       // the 4.0's dirt (terrain-land layer 8, 13.6 m)
-      const dirtC = sRGBTransferEOTF(texture(COOKED['terrain-land.map'], p.xz.div(13.6)).depth(int(LAND.Dirt)).xyz);
+      // the soil is the rock it weathered from: granite's tint (4.0 terrain.ts:876)
+      const dirtC = sRGBTransferEOTF(texture(COOKED['terrain-land.map'], p.xz.div(13.6)).depth(int(LAND.Dirt)).xyz).mul(vec3(0.88, 0.86, 0.88));
       void dirt;
       // the baked texture is sRGB: to linear, then tinted by the strata (relative to the granite's mean tone)
       const rockC = sRGBTransferEOTF(triplanar(COOKED['terrain-land.map'], n, p, blend.rockW).xyz).mul(rock.div(sRGBTransferEOTF(vec3(0.46, 0.455, 0.44))));
-      c = mix(c, dirtC, blend.dirtW);
-      c = mix(c, rockC, blend.rockW);
+      // height blending (4.0 terrain.ts:877-888, Mishkinis): each layer's weight lifted by its own texture's
+      // brightness, the top 0.3 kept; the soil shows only where it beats the turf, in a narrow ragged edge
+      {
+        const lw = vec3(0.3, 0.6, 0.1);
+        const grassW = max(float(0), float(1).sub(blend.rockW).sub(blend.dirtW));
+        const hG = grassW.add(dot(c, lw).mul(1.4).mul(smoothstep(0, 0.35, grassW)));
+        const hD = blend.dirtW.add(dot(dirtC, lw).mul(0.9).mul(smoothstep(0, 0.35, blend.dirtW)));
+        const hR = blend.rockW.add(dot(rockC, lw).mul(1.1).mul(smoothstep(0, 0.35, blend.rockW)));
+        const top = max(hG, max(hD, hR)).sub(0.3);
+        const bG = max(hG.sub(top), 0), bD = max(hD.sub(top), 0), bR = max(hR.sub(top), 0);
+        const sum = max(bG.add(bD).add(bR), 1e-4);
+        c = c.mul(bG).add(dirtC.mul(bD)).add(rockC.mul(bR)).div(sum);
+      }
       const scree = mix(rockC.mul(0.7), dirtC.mul(0.8), 0.4).mul(mix(float(0.75), float(1.2), texture(TERRAIN_NOISE, p.xz.mul(1.325 / 8)).b));
       c = mix(c, scree, blend.talus.mul(0.75));
       // the ecology field (Roadcraft 4.0 terrain.ts:937-957): straw on dry grass in patches, sodden ground near the
@@ -724,15 +736,18 @@ export class TerrainRenderer {
     const level = sea ? float(SEA_LEVEL) : vW.x, flowDir = sea ? vec2(1, 0) : vW.yz, run = sea ? float(0) : vW.w;
     // depth per pixel: the level over the ground under this pixel
     const depth = max(level.sub(heightAt(p.xz)), 0);
-    const waves = min(float(1), waveU.add(windU.mul(0.5)));
+    // 4.0 water.ts:389: the waves are the map's setting alone; the wind only drives the swell (it doubled the whitecaps)
+    const waves = waveU;
     const tex = (uv: N) => texture(WATER_TEX, uv);
     // drifting layers (13.6 m and 4.4 m) and the swell (36 m) along the wind
     const uvA = p.xz.div(13.6).add(vec2(0.035, 0.021).mul(t)), uvB = p.xz.div(4.4).add(vec2(-0.026, 0.047).mul(t));
     const W = tex(p.xz.div(36).add(windDirU.mul(t.mul(windU.mul(7).add(0.6)).div(36))));
     // the current: two phases of a 2 s cycle, each carrying the ripples downstream, cross-faded
     const p0 = fract(t.div(2)), p1 = fract(t.div(2).add(0.5)), w0 = float(1).sub(abs(float(1).sub(p0.mul(2))));
-    // 4.0 water.ts:289: the flow × the current × the 2 s cycle
-    const shift = flowDir.mul(currentU.mul(2));
+    // 4.0 water.ts:289: the flow × the current × the 2 s cycle; fastest down the middle, 0.4 of it at the banks
+    // (terrain.ts:2589: 1 − 0.6 s² across the ribbon; here the depth tells the middle: the bed's section is that shape)
+    const pace = float(0.4).add(clamp(depth.div(6), 0, 1).mul(0.6));
+    const shift = flowDir.mul(currentU.mul(2)).mul(pace);
     const flowed = (uv: N, scale: number) => mix(tex(uv.sub(shift.mul(p1).div(scale)).add(vec2(0.37, 0.61))), tex(uv.sub(shift.mul(p0).div(scale))), w0);
     const runC = run.mul(step(float(0.001), currentU));
     const A = mix(tex(uvA), flowed(p.xz.div(13.6), 13.6), runC), B = mix(tex(uvB), flowed(p.xz.div(4.4), 4.4), runC);

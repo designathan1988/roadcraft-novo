@@ -5,8 +5,8 @@
 // strength 24): a bed with a flat floor and ramped banks that wander in and out (`world/terrain.ts:249-277`), its
 // water down from the lowest bank (`render/terrain.ts:1772-1779`), smoothed along the course and never dry
 // (`render/terrain.ts:2566-2574`). Here its level also only falls downstream (the water shader reads the current
-// from the level's slope). Lakes are 4.0's single river dabs: a carved hollow whose water floods the basin round it,
-// a basin too big to be one withdrawn to its shore (`render/terrain.ts:2338-2401`).
+// from the level's slope). Lakes are 4.0's flood (`render/terrain.ts:2338-2401`) filling the land's basins: the
+// water rises in a basin until it would spill, and its shore follows the land.
 
 import { HEIGHT_TILE_RES, MAP_HALF, MAP_TILES, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { fbm } from '../core/rng.ts';
@@ -20,22 +20,35 @@ const RIVER_RADIUS = 80, RIVER_STRENGTH = 24;
 const RIVER_CARVE = 1.45, RIVER_BED_DEPTH = 0.42, RIVER_BED_FLOOR = 0.72, ROUGH_REACH_MIN = 0.78;
 /** The carve under the banks at the bed's floor: 24 × 1.45 × 0.42 = 14.6 m. */
 const BED_CARVE = RIVER_STRENGTH * RIVER_CARVE * RIVER_BED_DEPTH;
-/** `render/terrain.ts:83-89`: water disc share, spread past the brush, share of the channel filled, rim margin. */
-const WATER_RADIUS = 0.92, WATER_SPREAD = 1.6, WATER_FILL = 0.45, WATER_MARGIN = 0.16;
+/** `render/terrain.ts:87-89`: share of a channel's depth the water fills, its margin under the banks. */
+const WATER_FILL = 0.45, WATER_MARGIN = 0.16;
 /** `render/terrain.ts:2536`: the least water over a river's bed. */
 const RIVER_MIN_DEPTH = 0.5;
 /** `world/terrain.ts:40`: what counts as wet. */
 const TERRAIN_WATER_HEIGHT = 0.048;
-/** `render/terrain.ts:2339`, `:2343`: 40 000 cells of 1.6 m flood at most (here in 8 m samples), else only a 6-cell shore stays. */
+/** `render/terrain.ts:2339`: 40 000 cells of 1.6 m flood at most (here in 8 m samples). */
 const MAX_FLOOD = Math.round(40_000 * 1.6 * 1.6 / (WATER_SPACING * WATER_SPACING));
-const SHORE_BAND = Math.max(1, Math.round(6 * 1.6 / WATER_SPACING));
 
 /** The least height of the river valley's floor (it was 2-7 m up: 4.0's water, 6.6 m under the banks, was under the sea). */
 const VALLEY_FLOOR = 12;
 /** The least fall of the river's level, per metre (0.3 m/km: the water shader reads the current from it). */
 const MIN_FALL = 0.0003;
-/** Lakes: one candidate per square of this side. */
-const LAKE_GRID = 2200;
+/** Lakes: one candidate basin per square of this side; its radius and depth. */
+const LAKE_GRID = 2200, BASIN_RADIUS = 170, BASIN_DEPTH = 9;
+
+/** The basin of a lake square, if it has one: away from the river's valley and the map's edges. */
+function basinOf(i: number, j: number, seed: number): [number, number] | null {
+  const r = (k: number) => 0.5 + 0.5 * hash2(i * 7 + k + seed * 13, j * 11 - k);
+  if (r(3) > 0.6) return null;
+  const x = (i + 0.25 + 0.5 * r(1)) * LAKE_GRID, z = (j + 0.25 + 0.5 * r(2)) * LAKE_GRID;
+  if (Math.max(Math.abs(x), Math.abs(z)) / MAP_HALF > 0.74 || Math.abs(z - courseZ(x, seed)) < 760) return null;
+  return [x, z];
+}
+function basinsNear(x: number, z: number, seed: number): Array<[number, number]> {
+  const i0 = Math.floor(x / LAKE_GRID), j0 = Math.floor(z / LAKE_GRID), out: Array<[number, number]> = [];
+  for (let j = j0 - 1; j <= j0 + 1; j++) for (let i = i0 - 1; i <= i0 + 1; i++) { const b = basinOf(i, j, seed); if (b) out.push(b); }
+  return out;
+}
 
 // 4.0's value noise (`world/terrain.ts:65-84`): the wandering banks
 function hash2(x: number, y: number): number {
@@ -72,6 +85,14 @@ function land(x: number, z: number, seed: number): number {
   const open = valley * valley;
   h = h * (0.25 + 0.75 * open);
   if (h < VALLEY_FLOOR) h += (VALLEY_FLOOR - h) * (1 - open);
+  // the basins the lakes fill: soft bowls with a wandering outline
+  for (const [bx, bz] of basinsNear(x, z, seed)) {
+    const d = Math.hypot(x - bx, z - bz);
+    if (d >= BASIN_RADIUS * 1.4) continue;
+    const r = BASIN_RADIUS * (1 + 0.38 * valueNoise(x / 95 + bx * 0.01, z / 95 - bz * 0.01));
+    const t = Math.min(1, d / r);
+    h -= BASIN_DEPTH * (1 - t * t) * (1 - t * t);
+  }
   // ranges along the map's edges, with a pass where the river comes in and goes out
   const edge = Math.max(Math.abs(x), Math.abs(z)) / MAP_HALF;
   if (edge > 0.82) {
@@ -81,8 +102,8 @@ function land(x: number, z: number, seed: number): number {
   return h;
 }
 
-/** A lake: a few overlapping river dabs (x, z, radius each), as a player paints one, at one level. */
-interface Lake { dabs: Array<[number, number, number]>; level: number; flooded: Map<number, number> | null }
+/** A lake: the water filling a basin of the land, at one level, as water-grid samples (made when first asked). */
+interface Lake { level: number; flooded: Map<number, number> }
 interface Plan {
   /** Per 8 m of x from the map's west edge: the river's middle, its water level and its depth over the floor. */
   z: Float32Array; level: Float32Array; depth: Float32Array;
@@ -138,48 +159,91 @@ function riverAt(x: number, z: number, seed: number): { level: number; floor: nu
   return { level, floor: level - depth, section: d < reach ? bedProfile(d, reach) : 0, d, reach };
 }
 
-/** The lake of a grid square, if it has one (a hollow away from the river and the edges), with its level. */
+/**
+ * The lake of a grid square: the water of its basin, as 4.0's flood (render/terrain.ts:2338-2401) fills a hollow: from
+ * the basin's lowest sample the water rises, lowest ground first, until it would spill over the rim (or reaches 4.0's
+ * most, 40 000 cells of 1.6 m). It stands at the rim less 4.0's share of the depth (:1797: the rim − max(0.16,
+ * 0.45 × depth)), and covers the ground under that level joined to the bottom: a shore that follows the land.
+ */
 function lakeOf(i: number, j: number, seed: number): Lake | null {
   const P = plan(seed), key = (i + 512) * 1024 + (j + 512);
   if (P.lakes.has(key)) return P.lakes.get(key)!;
   let lake: Lake | null = null;
-  // the most hollow of 5 × 5 spots in the square's middle (lower than the ring 250 m round it), if it is one
-  const ringOf = (x: number, z: number) => {
-    let ring = 0;
-    for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; ring += land(x + Math.cos(a) * 250, z + Math.sin(a) * 250, seed) / 8; }
-    return ring;
-  };
-  let x = 0, z = 0, best = Infinity;
-  for (let v = 0; v < 5; v++) for (let u = 0; u < 5; u++) {
-    const px = (i + 0.2 + 0.15 * u) * LAKE_GRID, pz = (j + 0.2 + 0.15 * v) * LAKE_GRID;
-    if (Math.max(Math.abs(px), Math.abs(pz)) / MAP_HALF > 0.74 || riverAt(px, pz, seed).d < 600) continue;
-    const h = land(px, pz, seed), k = h - ringOf(px, pz);
-    if (k < best) { best = k; x = px; z = pz; }
-  }
-  if (best < -1) {
-    // the dabs: one on the hollow, 2-3 more overlapping it (35-60 m off, 65-80 m wide), one body with a lobed shore
-    const r = (k: number) => 0.5 + 0.5 * hash2(i * 7 + k + seed * 13, j * 11 - k);
-    const dabs: Array<[number, number, number]> = [[x, z, RIVER_RADIUS]];
-    const more = 2 + (r(1) < 0.5 ? 1 : 0), a0 = r(2) * Math.PI * 2;
-    for (let k = 0; k < more; k++) {
-      const a = a0 + k * (Math.PI * 2 / more) + (r(3 + k) - 0.5), d = 35 + 25 * r(6 + k);
-      dabs.push([x + Math.cos(a) * d, z + Math.sin(a) * d, 65 + 15 * r(9 + k)]);
+  const b = basinOf(i, j, seed);
+  if (b) {
+    const at = (g: number) => g * WATER_SPACING - MAP_HALF;
+    const hOf = (gx: number, gz: number) => baseHeight(at(gx), at(gz), seed);
+    // the bottom: down the steepest way from the basin's middle
+    let gx = Math.round((b[0] + MAP_HALF) / WATER_SPACING), gz = Math.round((b[1] + MAP_HALF) / WATER_SPACING);
+    for (let moved = true, k = 0; moved && k < 200; k++) {
+      moved = false;
+      let best = hOf(gx, gz), bx = gx, bz = gz;
+      for (const [dx, dz] of N8) { const v = hOf(gx + dx, gz + dz); if (v < best) { best = v; bx = gx + dx; bz = gz + dz; } }
+      if (bx !== gx || bz !== gz) { gx = bx; gz = bz; moved = true; }
     }
-    // 4.0 render/terrain.ts:1790-1798, per dab: the level down from its lowest bank, its bed cut at its middle; the
-    // lake stands at the lowest of them
-    let level = Infinity;
-    for (const [dx, dz, dr] of dabs) {
-      const c = land(dx, dz, seed);
-      let bank = c;
-      for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; bank = Math.min(bank, land(dx + Math.cos(a) * dr, dz + Math.sin(a) * dr, seed)); }
-      const bed = c - BED_CARVE * dr / RIVER_RADIUS;
-      level = Math.min(level, bank - Math.max(WATER_MARGIN, WATER_FILL * (bank - bed)));
+    // priority flood: a binary heap of samples by height
+    const kOf = (x: number, z: number) => z * 65_536 + x;
+    const heap: number[] = [], hh: number[] = [], seen = new Set<number>();
+    const push = (x: number, z: number) => {
+      const k = kOf(x, z);
+      if (seen.has(k)) return;
+      seen.add(k);
+      let n = heap.length; heap.push(k); hh.push(hOf(x, z));
+      while (n > 0) { const p = (n - 1) >> 1; if (hh[p] <= hh[n]) break; [heap[p], heap[n]] = [heap[n], heap[p]]; [hh[p], hh[n]] = [hh[n], hh[p]]; n = p; }
+    };
+    const pop = (): [number, number] => {
+      const k = heap[0], h = hh[0], lk = heap.pop()!, lh = hh.pop()!;
+      if (heap.length) {
+        heap[0] = lk; hh[0] = lh;
+        for (let n = 0; ;) {
+          const l = n * 2 + 1, r = l + 1;
+          let m = n;
+          if (l < heap.length && hh[l] < hh[m]) m = l;
+          if (r < heap.length && hh[r] < hh[m]) m = r;
+          if (m === n) break;
+          [heap[m], heap[n]] = [heap[n], heap[m]]; [hh[m], hh[n]] = [hh[n], hh[m]]; n = m;
+        }
+      }
+      return [k, h];
+    };
+    const bottom = hOf(gx, gz);
+    let rim = bottom, filled = 0;
+    push(gx, gz);
+    while (heap.length && filled < MAX_FLOOD * 2) {
+      const [k, h] = pop();
+      // lower than the water reached so far: past the rim, the water would run out here
+      if (h < rim - TERRAIN_WATER_HEIGHT) break;
+      rim = Math.max(rim, h);
+      filled++;
+      const x = k % 65_536, z = Math.floor(k / 65_536);
+      for (const [dx, dz] of N4) push(x + dx, z + dz);
     }
-    if (level > SEA_LEVEL + 1) lake = { dabs, level, flooded: null };
+    const level = rim - Math.max(WATER_MARGIN, WATER_FILL * (rim - bottom));
+    if (level - bottom > 1 && level > SEA_LEVEL + 1) {
+      // the water: the ground under the level joined to the bottom (4.0 :2368-2392), at most 4.0's flood
+      const W = new Map<number, number>([[kOf(gx, gz), level]]);
+      const queue = [gx, gz];
+      for (let head = 0; head < queue.length && W.size < MAX_FLOOD; head += 2) {
+        const x = queue[head], z = queue[head + 1];
+        for (const [dx, dz] of N4) {
+          const nx = x + dx, nz = z + dz, k = kOf(nx, nz);
+          if (W.has(k) || hOf(nx, nz) >= level - TERRAIN_WATER_HEIGHT) continue;
+          W.set(k, level); queue.push(nx, nz);
+        }
+      }
+      // and one sample past it all round (its shore: the water's mesh reaches the bank under it)
+      for (const k of [...W.keys()]) {
+        const x = k % 65_536, z = Math.floor(k / 65_536);
+        for (const [dx, dz] of N8) if (!W.has(kOf(x + dx, z + dz))) W.set(kOf(x + dx, z + dz), level);
+      }
+      lake = { level, flooded: W };
+    }
   }
   P.lakes.set(key, lake);
   return lake;
 }
+const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const;
 
 /** The lakes whose water could reach (x, z) (their square and the 8 round it). */
 function lakesNear(x: number, z: number, seed: number): Lake[] {
@@ -188,59 +252,13 @@ function lakesNear(x: number, z: number, seed: number): Lake[] {
   return out;
 }
 
-/** Ground height at (x, z): the land, cut by the river's bed and the lakes' hollows. */
+/** Ground height at (x, z): the land (with the lakes' basins), cut by the river's bed. */
 export function baseHeight(x: number, z: number, seed: number): number {
   let h = land(x, z, seed);
   const r = riverAt(x, z, seed);
   // the bed: from the land down to the floor by the bed's section (4.0 world/terrain.ts:272-277), never raised
   if (r.section > 0 && h > r.floor) h -= (h - r.floor) * r.section;
-  for (const l of lakesNear(x, z, seed)) {
-    // a stroke's dabs move the ground by the most of them, not the sum (4.0 world/terrain.ts:279-283)
-    let low = h;
-    for (const [dx, dz, dr] of l.dabs) {
-      const d = Math.hypot(x - dx, z - dz), reach = roughReach(x, z, dr);
-      if (d >= reach) continue;
-      const floor = land(dx, dz, seed) - BED_CARVE * dr / RIVER_RADIUS;
-      if (h > floor) low = Math.min(low, h - (h - floor) * bedProfile(d, reach));
-    }
-    h = low;
-  }
   return Math.min(TERRAIN_MAX_Y, Math.max(TERRAIN_MIN_Y, h));
-}
-
-/** A lake's water: its disc and the basin it floods, as water-grid samples → level (computed once per lake). */
-function lakeWater(l: Lake, seed: number): Map<number, number> {
-  if (l.flooded) return l.flooded;
-  const W = new Map<number, number>();
-  const key = (gx: number, gz: number) => gz * 65_536 + gx;
-  const at = (g: number) => g * WATER_SPACING - MAP_HALF;
-  // the discs: every sample within the spread of a dab (4.0 render/terrain.ts:2416-2441)
-  const queue: number[] = [];
-  for (const [dx, dz, dr] of l.dabs) {
-    const reach = dr * WATER_RADIUS * WATER_SPREAD;
-    const g0x = Math.floor((dx - reach + MAP_HALF) / WATER_SPACING), g1x = Math.ceil((dx + reach + MAP_HALF) / WATER_SPACING);
-    const g0z = Math.floor((dz - reach + MAP_HALF) / WATER_SPACING), g1z = Math.ceil((dz + reach + MAP_HALF) / WATER_SPACING);
-    for (let gz = g0z; gz <= g1z; gz++) for (let gx = g0x; gx <= g1x; gx++) {
-      if (W.has(key(gx, gz)) || Math.hypot(at(gx) - dx, at(gz) - dz) >= reach) continue;
-      W.set(key(gx, gz), l.level); queue.push(gx, gz);
-    }
-  }
-  // the flood, breadth first from the disc's whole edge into ground under the level (4.0 :2368-2392)
-  const steps = new Map<number, number>(), added: number[] = [];
-  let overflow = false;
-  for (let head = 0; head < queue.length && !overflow; head += 2) {
-    const gx = queue[head], gz = queue[head + 1], out = steps.get(key(gx, gz)) ?? 0;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = gx + dx, nz = gz + dz, k = key(nx, nz);
-      if (W.has(k) || baseHeight(at(nx), at(nz), seed) >= l.level - TERRAIN_WATER_HEIGHT) continue;
-      W.set(k, l.level); steps.set(k, out + 1); added.push(k); queue.push(nx, nz);
-      if (added.length > MAX_FLOOD) { overflow = true; break; }
-    }
-  }
-  // open country is not a basin: that flood is withdrawn but for the shore (4.0 :2393-2395)
-  if (overflow) for (const k of added) if ((steps.get(k) ?? 0) > SHORE_BAND) W.delete(k);
-  l.flooded = W;
-  return W;
 }
 
 /** The water's level at the water-grid sample (gx, gz) (river or lake), or NO_WATER. */
@@ -251,7 +269,7 @@ function waterAtSample(gx: number, gz: number, seed: number): number {
   if (r.d < r.reach + WATER_SPACING) return r.level;
   let best = NO_WATER;
   for (const l of lakesNear(x, z, seed)) {
-    const v = lakeWater(l, seed).get(gz * 65_536 + gx);
+    const v = l.flooded.get(gz * 65_536 + gx);
     if (v !== undefined && v > best) best = v;
   }
   return best;

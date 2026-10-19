@@ -109,4 +109,16 @@ test('lakes as in 4.0: hollows away from the river, each one body at one flat le
     for (let i = 0; i < p.length; i += 2) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); z0 = Math.min(z0, p[i + 1]); z1 = Math.max(z1, p[i + 1]); }
     assert.ok(x1 - x0 < 600 && z1 - z0 < 600, `lake at level ${k / 1000} spans ${x1 - x0} × ${z1 - z0} m`);
   }
+  // its shore follows the land, not a circle: the wet ground fills less than 92 % of the circle round it
+  for (const [k, p] of lakes) {
+    const wet: number[] = [];
+    for (let i = 0; i < p.length; i += 2) if (gen.baseHeight(p[i], p[i + 1], SEED) < k / 1000) wet.push(p[i], p[i + 1]);
+    if (wet.length < 40) continue;
+    let cx = 0, cz = 0;
+    for (let i = 0; i < wet.length; i += 2) { cx += wet[i] * 2 / wet.length; cz += wet[i + 1] * 2 / wet.length; }
+    let r = 0;
+    for (let i = 0; i < wet.length; i += 2) r = Math.max(r, Math.hypot(wet[i] - cx, wet[i + 1] - cz));
+    const fill = (wet.length / 2) * 24 * 24 / (Math.PI * (r + 12) * (r + 12));
+    assert.ok(fill < 0.92, `lake at level ${k / 1000} is a disc (${fill.toFixed(2)} of its circle)`);
+  }
 });
