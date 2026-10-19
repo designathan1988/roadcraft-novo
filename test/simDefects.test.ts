@@ -987,3 +987,17 @@ test('C39: bus riders of the background demand do not step off as extra pedestri
   for (let i = 0; i < 20 * 900 && off === 0; i++) { tr.step(0.05); if (i % 20 === 0) tr.checkWindow(); }
   assert.equal(off, 1, `${off} stepped off for one person who boarded on foot`);
 });
+
+test('the camera does not change how fast the city drives: the far model runs at the near model\'s pace from light to heavy traffic', () => {
+  for (const d of [1 / 100, 1 / 30, 1 / 15]) {
+    const speed = (camX: number) => {
+      const { sim } = gridCity(6, 100);
+      const tr = traffic(sim, camX, 0);
+      tr.density = d; tr.hour = 8;
+      for (let i = 0; i < 20 * 480; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
+      return tr.avgSpeed() * 3.6;
+    };
+    const near = speed(0), far = speed(8000);
+    assert.ok(Math.abs(far - near) <= 0.25 * near, `density 1/${Math.round(1 / d)}: ${near.toFixed(1)} km/h with the camera on it, ${far.toFixed(1)} km/h away`);
+  }
+});

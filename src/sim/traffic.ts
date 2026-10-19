@@ -23,11 +23,13 @@ export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
 const WINDOW = 1500;
 // meso (far from the camera) at the pace of micro: the fleet is a single one, so if meso runs faster the cars
-// pile up in the window until it jams, and if it runs slower the window empties (that was the case: meso at
-// 6 km/h, micro at 20). Meso takes this factor times the `mesoEnter` estimate (free driving scaled by
-// occupancy + junction wait). Checked in scripts/transito.ts against the whole map in micro (JANELA=1e6): cars
-// within 1.5 km of the centre move along with those of the all-micro run (2.0 fills the window, 4.0 empties it)
-const MESO_ALPHA = 2.5;
+// pile up in the window until it jams, and if it runs slower the window empties; and the camera must not change how
+// fast the city drives. Meso takes MESO_ALPHA times the `mesoEnter` estimate: free driving slowed by occupancy
+// (1 + MESO_CROWD × occupancy²) plus the junction's wait (the lights and zebras themselves are simulated at the line).
+// Measured on a 6 × 6 grid at 8:00, the camera on it against 8 km away (test "the camera does not change how fast the
+// city drives"): 23.7 / 21.8, 11.0 / 11.0 and 5.9 / 6.3 km/h at densities 1/100, 1/30 and 1/15 (with the old 2.5 and 3,
+// set before the lights were simulated far away: 23.7 / 10.0 km/h in light traffic)
+const MESO_ALPHA = 0.85, MESO_CROWD = 12;
 const WINDOW_OUT = 1750;
 /** Stopped for this long (s), the driver reconsiders the route (roadcraft STUCK_SECONDS). */
 export const STUCK_SECONDS = 10;
@@ -394,7 +396,7 @@ export class Traffic {
   /** Meso pace factor (MESO_ALPHA; a field so measurements can try others). */
   mesoAlpha = MESO_ALPHA;
   /** How much a full lane slows the far model (the BPR term: 1 + mesoCrowd × occupancy²). */
-  mesoCrowd = 3;
+  mesoCrowd = MESO_CROWD;
   /** Target density (vehicles per metre of lane). */
   density = 1 / 100;
 
