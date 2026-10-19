@@ -14,7 +14,7 @@ import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, Pattern, Win, chimneyOf
 import { cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { CELL_SIZE } from '../config.ts';
 import { SHAPE_SCALE, SHAPE_STRIDE, type BoxColumns, type PackedMesh } from './protocol.ts';
-import { CATALOG, CIVIC_CATALOG, CIVIC_DESIGNS, CatElem, CatFill, GEAR, decodeDesign, footprint, hasDesign, type CatalogEntry, type Design } from '../world/design.ts';
+import { CATALOG, CIVIC_CATALOG, CIVIC_DESIGNS, CatElem, CatFill, GEAR, catalogLevels, decodeDesign, footprint, hasDesign, type CatalogEntry, type Design } from '../world/design.ts';
 import { FIN } from './buildingFinishes.ts';
 
 export const GEN_VERSION = 15;
@@ -66,6 +66,34 @@ export function buildingVolumes(heights: Float32Array, b: BoxColumns, i: number)
   layoutOut = out;
   try { genOne(NO_MESH, heights, b, i, planCells(b), -3); } finally { layoutOut = null; lotPoly = null; detailOut = null; }
   return out.sort((p, q) => q.hw * q.hd - p.hw * p.hd);
+}
+
+/** Height of the civic buildings' tallest walls (m), by function (the shapes in civic()). */
+const CIVIC_TOP: number[] = [];
+CIVIC_TOP[Fn.School] = 10.8; CIVIC_TOP[Fn.Church] = 20; CIVIC_TOP[Fn.Hospital] = 36; CIVIC_TOP[Fn.Clinic] = 7.2;
+CIVIC_TOP[Fn.Square] = 2.4; CIVIC_TOP[Fn.Park] = 1; CIVIC_TOP[Fn.GasStation] = 6; CIVIC_TOP[Fn.Supermarket] = 7;
+CIVIC_TOP[Fn.CityHall] = 13.6; CIVIC_TOP[Fn.Police] = 8; CIVIC_TOP[Fn.FireStation] = 18; CIVIC_TOP[Fn.Mall] = 14;
+CIVIC_TOP[Fn.SportsCourt] = 4; CIVIC_TOP[Fn.Cemetery] = 5; CIVIC_TOP[Fn.Playground] = 2.4;
+
+/**
+ * How high a building's walls rise above its ground storey (m), from the record alone, by the generator's storey
+ * rules (style, shop ground storey, design, catalog project, civic shape). Cheap: for the camera and the collapse,
+ * which ask every frame or for many buildings; the inside view takes the exact layout (buildingVolumes).
+ */
+export function wallsHeight(zone: number, floors: number, x: number, z: number, style: number, fn: number, color: number, h: number): number {
+  const fl = Math.max(1, floors);
+  if (hasDesign(color)) {
+    const ds = decodeDesign(color, h), e = ds.catalog ? CATALOG[ds.catalog - 1] : undefined;
+    if (e) return e.gh + (catalogLevels(e) - 1) * e.sh;
+    return fl * (ds.finish === 2 ? 3.6 : 3.2);
+  }
+  if (CIVIC_DESIGNS[fn]) { const [ds, minF] = CIVIC_DESIGNS[fn]; return Math.max(minF, Math.min(fl, minF * 2)) * (ds.finish === 2 ? 3.6 : 3.2); }
+  if (fn) return CIVIC_TOP[fn] ?? 3.6 * fl;
+  if (zone === Zone.Industrial) return 6 + fl * 2.5 + 2;
+  const arch = pickArch(zone, fl, x, z, style), a = ARCHES[arch];
+  if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) return (arch === ArchId.Sobrado ? Math.max(2, fl) : fl) * a.floorH + 0.2;
+  const shop = zone === Zone.Commercial || zone === Zone.Mixed;
+  return (shop ? 4.4 : a.floorH) + (fl - 1) * a.floorH;
 }
 
 /**

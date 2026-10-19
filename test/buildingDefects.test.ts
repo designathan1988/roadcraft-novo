@@ -333,3 +333,20 @@ test('B11: the inside view goes with its building (demolished, a new city) and f
   view.follow(w);
   assert.equal(view.on, false, 'another city: gone');
 });
+
+test('B15: the camera and the collapse use the height the generator builds', async () => {
+  const { wallsHeight, buildingVolumes } = await import('../src/jobs/buildingGen.ts');
+  const { storeyLevels } = await import('../src/render/inside.ts');
+  const heights = flatHeights(10);
+  const failures: string[] = [];
+  const cases: Array<[string, number, number, number, number, number]> = [
+    ['tower 30', Zone.Commercial, 30, 40, 50, 100], ['tower 45', Zone.Commercial, 45, 40, 50, 20], ['shops 5', Zone.Commercial, 5, 24, 30, 60],
+    ['flats 9', Zone.Residential, 9, 26, 36, 40], ['house 1', Zone.Residential, 1, 14, 30, 10], ['sobrado 2', Zone.Residential, 2, 12, 30, 90], ['mixed 7', Zone.Mixed, 7, 20, 30, 70]];
+  for (const [name, zone, floors, W, D, style] of cases) for (const seed of [5, 77, 901]) {
+    const b = oneBuilding(zone, floors, W, D, seed * 7919, style);
+    const top = windowTop(buildBuildings(heights, b, 0, 0, 256, 0)!), ground = storeyLevels(buildingVolumes(heights, b, 0))[0].y;
+    const est = wallsHeight(zone, floors, 128, 128, style, 0, 0, 0) + ground;
+    if (Math.abs(est - top) > 0.6) failures.push(`${name} seed ${seed}: walls estimated up to ${est.toFixed(2)}, built up to ${top.toFixed(2)}`);
+  }
+  assert.deepEqual(failures, []);
+});
