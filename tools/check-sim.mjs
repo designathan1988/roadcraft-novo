@@ -193,7 +193,7 @@ const MOTION_CHECK = `
   const name = S.place, smp = S.samples;
   if (!smp.length) console.log('CHECK INFO ' + name + ': no place, skipped');
   else await (async () => {
-  const V = 18, Q = 11, W = [1.8, 2.55, 2.5, 0.8, 3.0];
+  const V = 18, Q = 12, W = [1.8, 2.55, 2.5, 0.8, 3.0];
   const RED = 1, BAY = 2, LEAVING = 4, STOP = 8, GATE = 32;
   const f1 = (x) => x.toFixed(1);
   // vehicles
@@ -265,8 +265,9 @@ const MOTION_CHECK = `
       const prev = lastP.get(id);
       const walking = !bike && (mode === 0 || mode === 1);
       if (walking) {
-        walkS++;
-        if (speed < 1.15 || speed > 1.55) { offSpeed++; if (!speedEx) speedEx = 'person ' + id + ' at ' + f1(speed) + ' m/s'; }
+        // its own pace when nothing is in its way (behind someone it walks at theirs, or stops: p[o + 11] < 1)
+        if (p[o + 11] > 0.999) walkS++;
+        if (p[o + 11] > 0.999 && (speed < 1.15 || speed > 1.55)) { offSpeed++; if (!speedEx) speedEx = 'person ' + id + ' at ' + f1(speed) + ' m/s'; }
         if (prev && prev[3] === i - 1 && (prev[2] === 0 || prev[2] === 1) && Math.hypot(x - prev[0], z - prev[1]) < 0.05 && speed > 0.5) { inPlace++; if (!inPlaceEx) inPlaceEx = 'person ' + id + ' at ' + f1(x) + ',' + f1(z) + ' in mode ' + mode; }
       }
       // on a lane, parking strip or bike lane beyond the crosswalks (they lie within 4.5 m of the junction's edge)

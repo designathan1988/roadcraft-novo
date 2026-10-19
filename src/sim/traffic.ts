@@ -2529,6 +2529,9 @@ export class Traffic {
     // only the cells within 600 m of the camera (the stop index), never every stop of every line
     const i0 = Math.max(0, Math.floor((this.camX - 600 + MAP_HALF) / STOP_CELL)), i1 = Math.min(STOP_CELLS - 1, Math.floor((this.camX + 600 + MAP_HALF) / STOP_CELL));
     const j0 = Math.max(0, Math.floor((this.camZ - 600 + MAP_HALF) / STOP_CELL)), j1 = Math.min(STOP_CELLS - 1, Math.floor((this.camZ + 600 + MAP_HALF) / STOP_CELL));
+    // the stops of several lines at one place share it: each person gets the next free place there
+    const placed = this.stopPlaced;
+    placed.clear();
     for (let cj = j0; cj <= j1; cj++) for (let ci = i0; ci <= i1; ci++) {
       const cell = cj * STOP_CELLS + ci;
       for (let e = this.stopStart[cell]; e < this.stopStart[cell + 1]; e++) {
@@ -2538,10 +2541,15 @@ export class Traffic {
         const w = Math.min(14, Math.floor(Math.min(120, ln.waiting[i] + (this.time - ln.lastT[i]) * WAIT_RATE)));
         const yaw = ln.stopYaw[i];
         const ax = Math.cos(yaw), az = -Math.sin(yaw); // along the sidewalk
+        const spot = Math.round(x / 3) * 100003 + Math.round(z / 3);
+        const first = placed.get(spot) ?? 0;
+        placed.set(spot, first + w);
         for (let k = 0; k < w && start + n < max; k++) {
           const h = ((i * 7 + k * 13 + ln.id * 31) % 97) / 97;
-          const along = (k - w / 2) * 0.75 + (h - 0.5) * 0.4;
-          const back = -0.6 + ((k * 5) % 3) * 0.45;
+          // places in three rows, 0.8 m apart along the kerb, spreading out both ways from the stop's sign
+          const j = first + k, col = Math.floor(j / 3), row = j % 3;
+          const along = (col % 2 ? -1 : 1) * Math.ceil(col / 2) * 0.8 + (h - 0.5) * 0.12;
+          const back = -0.6 + row * 0.7;
           const px = x + ax * along + Math.sin(yaw) * back, pz = z + az * along + Math.cos(yaw) * back;
           const o = (start + n) * stride;
           const fy = yaw + (h - 0.5) * 0.9;
@@ -2556,6 +2564,8 @@ export class Traffic {
     }
     return n;
   }
+
+  private stopPlaced = new Map<number, number>();
 
   /** Line figures for the interface (passengers per hour). */
   lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> {
