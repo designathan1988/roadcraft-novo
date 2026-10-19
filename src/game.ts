@@ -974,7 +974,14 @@ export class Game {
       this.drag = 'none';
     };
     c.addEventListener('pointerup', end);
-    c.addEventListener('dblclick', () => { if (this.tool === 'river') this.finishRiver(); if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly(); });
+    c.addEventListener('dblclick', () => {
+      if (this.tool === 'river') this.finishRiver();
+      if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly();
+      // the building picked by the first click: see it inside (the hint of "See inside" says so)
+      else if (this.tool === 'building' && this.lotMode === 'edit' && !this.lotExtra && this.selected >= 0 && !(this.inside.on && this.insideId === this.selected)) this.insideCmd('toggle');
+      // a wall ends (the barrier hint: double click or Enter)
+      if (this.tool === 'barrier' && this.wallOpen) { this.itemTool.cancel(); this.wallOpen = false; }
+    });
     c.addEventListener('pointercancel', end);
     c.addEventListener('pointerleave', () => { this.pointer.inside = false; });
     c.addEventListener('wheel', (e) => {

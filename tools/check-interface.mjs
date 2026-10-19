@@ -407,6 +407,20 @@ export const SCENARIOS = {
       check('the building uses the chosen style and function', id >= 0 && c.style[id] === 128 + 4 && c.fn[id] === 2, 'id ' + id + ', style ' + c.style[id] + ', fn ' + c.fn[id]);
     }
   `,
+  // B45: what the hints promise for a double click happens (inside view of a building; the end of a wall)
+  'B45-double-clicks': `
+    click('[data-cat=build]'); await frames(2);
+    const id = a.lot(1500, 1500, 1530, 1500, 1515, 1530, 1, 4);
+    await mapClick(w.buildings.cols.x[id], w.buildings.cols.z[id]);
+    g.canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: innerWidth / 2, clientY: innerHeight / 2 })); await frames(4);
+    check('a double click on a building shows it inside', g.inside.on && g.insideId === id, 'inside ' + g.inside.on + ', building ' + g.insideId + ' (clicked ' + id + ')');
+    click('[data-cat=landscape]'); await frames(2);
+    click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
+    click(byText('.v2-card', '^Muro|^Wall')); await frames(2);
+    await mapClick(1700, 1600); await mapClick(1760, 1600);
+    g.canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: innerWidth / 2, clientY: innerHeight / 2 })); await frames(2);
+    check('a double click ends the wall', !g.wallOpen && g.tool === 'barrier', 'wall still open ' + g.wallOpen + ', tool ' + g.tool);
+  `,
   // B27: the People tab opened before the people loaded: the click places what the panel shows
   'B27-people-before-load': `
     for (let k = 0; k < 120 && !A.peopleCatalog(); k++) await wait(500);
