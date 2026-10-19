@@ -1,21 +1,21 @@
-// Contrato entre a página e o pool de workers. Só tipos e dados planos.
+// Contract between the page and the worker pool. Types and plain data only.
 
 import type { Profile } from '../roads/profiles.ts';
 
 export interface SharedWorld {
-  /** Alturas do terreno (ver world/heights.ts). */
+  /** Terrain heights (see world/heights.ts). */
   heights: SharedArrayBuffer;
-  /** Chão pintado e água (ver world/ground.ts). */
+  /** Painted ground and water (see world/ground.ts). */
   ground: SharedArrayBuffer;
   water: SharedArrayBuffer;
 }
 
-/** Prédios genéricos de um ladrilho/célula, em colunas. */
+/** Generic buildings of a tile/cell, in columns. */
 /**
- * Prédios em colunas. Um prédio é o lote (centro, frente w, fundo d, giro) +
- * zona + andares + semente + estilo: o gerador procedural faz o resto. A
- * frente do lote olha para +z local (para a via). Zona 0 = caixa genérica
- * de altura h e cor color (carregador de pior caso antigo).
+ * Buildings in columns. A building is the lot (centre, front w, depth d, turn) +
+ * zone + floors + seed + style: the procedural generator does the rest. The
+ * lot's front faces local +z (towards the road). Zone 0 = a generic box
+ * of height h and colour color (the old worst-case loader).
  */
 export interface BoxColumns {
   count: number;
@@ -25,7 +25,7 @@ export interface BoxColumns {
   color: Uint32Array; // 0xRRGGBB
   seed: Uint32Array;
   zone: Uint8Array; floors: Uint8Array; style: Uint8Array;
-  /** Função do prédio (0 = comum). */
+  /** The building's function (0 = ordinary). */
   fn: Uint8Array;
   /**
    * Polygon lot (save version 7). shapeN[i] = number of corners (0 = the lot is the rectangle w × d). The corners
@@ -41,7 +41,7 @@ export interface BoxColumns {
   /**
    * How run-down it is, in tenths: 0 (new) to 10 (falling apart). Roadcraft's ageing: 5 days of grace, then 30
    * days to fall apart without maintenance (world/decay.ts). Filled by the page when it gathers the boxes; the
-   * cell is marked dirty only when a building passes a tenth. The drawing reads it (stains, broken windows…).
+   * cell is marked dirty only when a building passes a tenth. The drawing does not read it yet (no stains or broken windows).
    */
   decay: Uint8Array;
 }
@@ -52,22 +52,22 @@ export const SHAPE_STRIDE = SHAPE_MAX * 2;
 /** Decimetres per unit of BoxColumns.shape. */
 export const SHAPE_SCALE = 10;
 
-/** Malha compacta pronta para a GPU. Posições relativas à origem, em snorm16 × escala. */
+/** A compact mesh ready for the GPU. Positions relative to the origin, as snorm16 × scale. */
 export interface PackedMesh {
   originX: number; originY: number; originZ: number;
   scale: number;
   vertexCount: number;
   position: Int16Array; // xyzw, snorm
-  normal: Int8Array; // oct xy + 2 livres, snorm
+  normal: Int8Array; // oct xy + 2 spare, snorm
   color: Uint8Array; // rgb + material, unorm
   index: Uint16Array | Uint32Array;
-  /** Atributo extra por vértice (vias: u, v, até o fim, código). */
+  /** An extra attribute per vertex (roads: u, v, to the end, code). */
   extra?: Float32Array;
-  /** Fachada por vértice (prédios): estilo, semente, tipo, largura da coluna. */
+  /** Facade per vertex (buildings): style, seed, kind, column width. */
   fac?: Uint8Array;
-  /** Coordenadas na parede (u em colunas, h em metros sobre a base), snorm16 × 512. */
+  /** Wall coordinates (u in columns, h in metres above the base), snorm16 × 512. */
   fuv?: Int16Array;
-  /** Caixa local (metros, relativa à origem). */
+  /** Local box (metres, relative to the origin). */
   minY: number; maxY: number;
 }
 
@@ -106,11 +106,11 @@ export interface JobResults {
 
 export type JobKind = keyof JobPayloads;
 
-/** Vias de um ladrilho no salvamento: nós [id, x, z, y] e trechos [id, a, b, cx, cz, perfil, bits, zona esq., zona dir.]. */
-export interface RoadSave { nodes: Float32Array; segs: Float32Array; /** Itens de rua (versão 4): 6 números por item. */ items?: Float32Array }
+/** A tile's roads in the save: nodes [id, x, z, y] and segments [id, a, b, cx, cz, profile, bits, left zone, right zone]. */
+export interface RoadSave { nodes: Float32Array; segs: Float32Array; /** Street items (version 4): 6 numbers per item. */ items?: Float32Array }
 export const NODE_REC = 4;
 export const SEG_REC = 9;
-/** Registro de trecho na versão 2 do salvamento (sem zonas). */
+/** A segment record in save version 2 (without zones). */
 export const SEG_REC_V2 = 7;
 
 export type ToWorker =
@@ -122,7 +122,7 @@ export type FromWorker =
   | { type: 'done'; id: number; result: unknown }
   | { type: 'error'; id: number; message: string };
 
-/** Lista de buffers de colunas, para transferir. */
+/** The column buffers, to transfer. */
 export function boxTransfer(b: BoxColumns): ArrayBuffer[] {
   return boxColumnList(b).map((a) => a.buffer as ArrayBuffer);
 }
@@ -147,12 +147,12 @@ export function emptyBoxes(n: number): BoxColumns {
   };
 }
 
-/** Lotes de uma célula (frente para +z local, como os prédios). */
+/** A cell's lots (front towards local +z, like the buildings). */
 export interface LotColumns {
   count: number;
   x: Float32Array; z: Float32Array; w: Float32Array; d: Float32Array; rot: Float32Array;
   zone: Uint8Array; seed: Uint32Array;
-  /** Perfil da via em frente (avenida dá prédio mais alto). */
+  /** Profile of the road in front (an avenue gives a taller building). */
   profile: Uint8Array;
 }
 
@@ -161,9 +161,9 @@ export function lotTransfer(l: LotColumns): ArrayBuffer[] {
 }
 
 /**
- * Peças de uma célula (árvores, postes, semáforos, bancos...). Por instância:
- * x, y, z e w = rumo (12 bits) + variante (4) * 4096 + escala (6) * 65536;
- * extra = tipo (4 bits) + chave * 16 (semáforo: nó * 8 + braço; outros: aleatório).
+ * A cell's props (trees, poles, traffic lights, benches...). Per instance:
+ * x, y, z and w = heading (12 bits) + variant (4) * 4096 + scale (6) * 65536;
+ * extra = kind (4 bits) + key * 16 (traffic light: node * 8 + arm; others: random).
  */
 export interface PropColumns {
   count: number;
@@ -183,27 +183,27 @@ export function meshTransfer(m: PackedMesh): ArrayBuffer[] {
   return list.map((a) => a.buffer as ArrayBuffer);
 }
 
-/** Pedaço da rede viária mandado a um worker: os trechos e nós a montar e os vizinhos que definem os recuos. */
+/** A piece of the road network sent to a worker: the segments and nodes to build and the neighbours that set the set-backs. */
 export interface RoadGraph {
   nodeCount: number;
   nx: Float32Array; nz: Float32Array; ny: Float32Array;
-  /** 1 = montar o cruzamento/ponta deste nó aqui. */
+  /** 1 = build this node's junction/end here. */
   nodeOwn: Uint8Array;
   segCount: number;
-  sa: Int32Array; sb: Int32Array; // índices nos arrays de nós
+  sa: Int32Array; sb: Int32Array; // indices into the node arrays
   scx: Float32Array; scz: Float32Array;
   sprofile: Uint8Array; sflags: Uint8Array;
-  /** 1 = montar este trecho aqui. */
+  /** 1 = build this segment here. */
   segOwn: Uint8Array;
-  /** Id real do trecho (para a ocupação do trânsito no shader). */
+  /** The segment's real id (for the traffic occupancy in the shader). */
   sid: Int32Array;
-  /** Zonas dos lados esquerdo/direito. */
+  /** Zones of the left/right sides. */
   szl: Uint8Array; szr: Uint8Array;
-  /** Id real de cada nó (semáforos). */
+  /** Each node's real id (traffic lights). */
   nid: Int32Array;
-  /** Controle efetivo de cada nó (Ctl). */
+  /** Each node's effective control (Ctl). */
   nctl: Uint8Array;
-  /** Regra de cada ponta de trecho: ponta a nos bits 0-2, ponta b nos bits 3-5 (Rule). */
+  /** Each segment end's rule: end a in bits 0-2, end b in bits 3-5 (Rule). */
   srule: Uint8Array;
 }
 
