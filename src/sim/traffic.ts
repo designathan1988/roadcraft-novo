@@ -17,6 +17,7 @@ import { FlowAdvisor } from './advisor.ts';
 import { bez, bezD } from '../roads/geometry.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
+import { archOf, desiredSpeed, drawDriver, driverSchema } from './drivers.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
@@ -71,10 +72,11 @@ const GOV_JAM = 0.5, GOV_FREE = 0.15, GOV_MIN = 0.75, JAMMED = 0.8;
 const REJOIN = 6;
 
 /**
- * IDM. Cars accelerate at 2.8 m/s² (with 2.2 the centre was ~2 km/h slower, measured); buses, trucks and
- * trains, being heavy, at 2.2 (and stop at the right spot). 0.9 s headway.
+ * IDM figures for what is not a driver's own (sim/drivers.ts has each driver's): the standstill gap kept from a
+ * bus stop or the tail entering a lane, and the headway a vehicle entering the window is given. The fleet's sedan
+ * keeps these (2.8 m/s², 2.2 m/s², 2.2 m, 0.9 s; with 2.2 m/s² the centre was ~2 km/h slower, measured).
  */
-const A_MAX = 2.8, A_HEAVY = 2.2, B_COMF = 2.2, S0 = 2.2, T_HEAD = 0.9;
+const S0 = 2.2, T_HEAD = 0.9;
 
 const vehSchema = {
   lane: Int32Array, conn: Int32Array, s: Float32Array, v: Float32Array,
@@ -108,6 +110,8 @@ const vehSchema = {
   moved: Uint32Array,
   // the dock or bay it has reserved (Traffic.spots key; 0 = none)
   spot: Float64Array,
+  // the driver (sim/drivers.ts): aggression, comfort figures, gap acceptance, politeness, patience
+  ...driverSchema,
 };
 
 /** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
@@ -1074,14 +1078,16 @@ export class Traffic {
   private initVehicle(v: number, kind = 0): void {
     const c = this.veh.cols;
     c.kind[v] = kind; c.len[v] = KIND_LEN[kind];
-    c.vf[v] = (kind === 0 ? 0.9 : 0.8) + this.rng.next() * 0.2;
     c.color[v] = this.rng.int(0, 16);
+    let style = 0;
     if (kind === 0) {
-      let u = this.rng.next(), style = 0;
+      let u = this.rng.next();
       while (style < CAR_STYLE_SHARE.length - 1 && u >= CAR_STYLE_SHARE[style]) u -= CAR_STYLE_SHARE[style++];
       c.color[v] |= style << 4;
       c.len[v] = CAR_STYLE_LEN[style];
     }
+    // the driver: its class's comfort figures and its own aggression; the share of the limit it drives at
+    c.vf[v] = drawDriver(c, v, archOf(kind, style), this.sample);
     c.lane[v] = -1; c.conn[v] = -1;
     c.brk[v] = 0; c.exitC[v] = -1; c.pk[v] = 0; c.mv[v] = -1; c.ms[v] = 0;
     c.micro[v] = 0; c.dying[v] = 0; c.fade[v] = 1; c.has[v] = 0;
@@ -1253,8 +1259,8 @@ export class Traffic {
     const room = Math.max(1, Math.floor(L / 7.5)), fit = Math.max(room, Math.floor(L / 6.6));
     if (this.laneCount[to] >= room) {
       c.wait[v] += 2; this.mesoFull++;
-      if (c.wait[v] >= STUCK_SECONDS && !bus && this.routeBudget > 0 && c.held[v] < c.wait[v] - STUCK_SECONDS + 1) {
-        c.held[v] = c.wait[v]; // (reconsiders once every STUCK_SECONDS)
+      if (c.wait[v] >= c.patience[v] && !bus && this.routeBudget > 0 && c.held[v] < c.wait[v] - c.patience[v] + 1) {
+        c.held[v] = c.wait[v]; // (reconsiders once every patience)
         if (this.reconsider(v, lane, ns)) { this.schedule(v, this.time + 0.5); return; }
       }
       const jammed = c.wait[v] >= JAM_SECONDS && this.time - this.lastAdmit[node] >= JAM_SECONDS && this.time >= this.releaseAt[node];
@@ -1353,12 +1359,12 @@ export class Traffic {
     // the one with right of way is stopped because its exit is full: it will not go now, the other passes
     if (c.v[h] < 0.5 && !this.exitRoom(d, h)) return false;
     // impatience (roadcraft): whoever waits accepts a smaller gap, 0.06 s per second waited, up to 1.5 s (minimum 2.2 s)
-    const imp = Math.min(1.5, c.wait[me] * 0.06);
-    if (strict) return dist < 5 || dist / Math.max(1, c.v[h]) < Math.max(2.2, 3 - imp);
+    const imp = Math.min(1.5, c.wait[me] * 0.06), gf = c.gapF[me];
+    if (strict) return dist < 5 || dist / Math.max(1, c.v[h]) < Math.max(2.2, (3 - imp) * gf);
     // same rule, stopped at the line: first come, first served
     if (c.v[h] < 0.5 && dist < 5) return c.wait[h] > c.wait[me] + 0.3;
     if (sim.nodePhases[k.node[d]] > 0 && !this.stageGreen(d, true)) return false;
-    return dist < 6 || dist / Math.max(1, c.v[h]) < Math.max(2.2, 3.5 - imp);
+    return dist < 6 || dist / Math.max(1, c.v[h]) < Math.max(2.2, (3.5 - imp) * gf);
   }
 
   /** Is there room on the exit lane? (do not enter the junction only to get stuck in it) */
@@ -1668,13 +1674,17 @@ export class Traffic {
 
   // ------------------------------------------------------------ micro
 
-  /** IDM acceleration with a leader `gap` metres ahead moving at `vl`. */
-  private idm(v: number, v0: number, gap: number, vl: number, am = A_MAX): number {
+  /** Uniform in [0, 1) from the simulation's generator (for drawing drivers). */
+  private readonly sample = () => this.rng.next();
+
+  /** IDM acceleration of driver `u` at speed `v` (its own comfort figures) with a leader `gap` metres ahead at `vl`. */
+  private idm(u: number, v: number, v0: number, gap: number, vl: number): number {
+    const c = this.veh.cols, am = c.da[u], b = c.db[u];
     const dv = v - vl;
     // queue discharge (roadcraft): the one ahead has left and I am still slow → keep a shorter gap and react
     // faster (up to 60%, gone at 4 m/s); the queue moves off together, without an accordion effect
     const rel = vl > 0.3 && v < 4 ? 0.6 * (1 - v / 4) * Math.min(1, vl / 1.5) : 0;
-    const sStar = S0 * (1 - rel) + Math.max(0, v * T_HEAD * (1 - rel) + (v * dv) / (2 * Math.sqrt(am * B_COMF)));
+    const sStar = c.ds0[u] * (1 - rel) + Math.max(0, v * c.dT[u] * (1 - rel) + (v * dv) / (2 * Math.sqrt(am * b)));
     const g = Math.max(0.1, gap);
     return am * (1 - Math.pow(v / Math.max(0.1, v0), 4) - (sStar / g) * (sStar / g));
   }
@@ -1717,7 +1727,7 @@ export class Traffic {
     if (c.dying[v] === 4) { this.kerbStep(v, lane, dt); return; }
     const L = sim.laneLen(lane);
     const p = sim.net.segs.cols.profile[laneSeg(lane)];
-    const v0 = laneSpeed(p) * c.vf[v];
+    const v0 = desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time);
     let gap = 1e9, vl = 99;
     const lead = c.prev[v];
     if (lead >= 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
@@ -1760,7 +1770,7 @@ export class Traffic {
       // stopped for 10 s in the queue of a full lane (not at the red of a lane with room): reconsider the
       // route, avoiding what is full (roadcraft reconsiderRoute). At the line it is too late to change (as in
       // roadcraft): there `detour` handles it, and only toward an exit with room
-      if (c.held[v] >= STUCK_SECONDS && lead >= 0 && c.line[v] < 0 && this.routeBudget > 0) {
+      if (c.held[v] >= c.patience[v] && lead >= 0 && c.line[v] < 0 && this.routeBudget > 0) {
         c.held[v] = 0;
         if (this.laneCount[lane] >= 0.6 * L / 7.5 && this.reconsider(v, lane, -1)) {
           const ns2 = this.nextSeg(v);
@@ -1791,7 +1801,7 @@ export class Traffic {
         if (sg >= 0 && toEnd + sg < gap) { gap = toEnd + sg; vl = 0; }
       }
     }
-    let a = this.idm(c.v[v], v0, gap, vl, c.kind[v] ? A_HEAVY : A_MAX);
+    let a = this.idm(v, c.v[v], v0, gap, vl);
     if (c.dying[v]) a = Math.min(a, 0); // an arrived vehicle disappears without braking in front of others
     if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // in the bay, waiting to pull out
     if (c.mv[v] >= 0) a = -9; // pulling out of the bay: held until the manoeuvre is back in the lane
@@ -1948,7 +1958,7 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim, k = sim.conns.cols;
     const L = k.len[conn];
     const to = k.to[conn];
-    const v0 = Math.min(laneSpeed(sim.net.segs.cols.profile[laneSeg(to)]), k.turn[conn] === Turn.Straight ? 99 : 8) * c.vf[v];
+    const v0 = desiredSpeed(c, v, Math.min(laneSpeed(sim.net.segs.cols.profile[laneSeg(to)]), k.turn[conn] === Turn.Straight ? 99 : 8) * c.vf[v], this.time);
     let gap = 1e9, vl = 99;
     const lead = c.prev[v];
     if (lead >= 0) { gap = c.s[lead] - c.len[lead] - c.s[v]; vl = c.v[lead]; }
@@ -1969,7 +1979,7 @@ export class Traffic {
     const sg = this.stopAhead(v, conn);
     if (sg >= 0 && sg - c.s[v] < gap) { gap = Math.max(0, sg - c.s[v]); vl = 0; }
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2); // a lane change finishing on the way through
-    const a = Math.max(-9, this.idm(c.v[v], v0, gap, vl, c.kind[v] ? A_HEAVY : A_MAX));
+    const a = Math.max(-9, this.idm(v, c.v[v], v0, gap, vl));
     const nv = Math.max(0, c.v[v] + a * dt);
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
     c.v[v] = nv;
@@ -2027,16 +2037,15 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim;
     const [lead, follow] = this.around(target, c.s[v]);
     const p = sim.net.segs.cols.profile[laneSeg(target)];
-    const v0 = laneSpeed(p) * c.vf[v];
+    const v0 = desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time);
     const gapF = lead >= 0 ? c.s[lead] - c.len[lead] - c.s[v] : 1e9;
     const gapB = follow >= 0 ? c.s[v] - c.len[v] - c.s[follow] : 1e9;
     if (gapF < 2 || gapB < 3) return false;
     // safety: the new follower does not brake hard
-    const am = c.kind[v] ? A_HEAVY : A_MAX;
-    if (follow >= 0 && this.idm(c.v[follow], v0, gapB, c.v[v], c.kind[follow] ? A_HEAVY : A_MAX) < -3.5) return false;
-    const aNew = this.idm(c.v[v], v0, gapF, lead >= 0 ? c.v[lead] : 99, am);
+    if (follow >= 0 && this.idm(follow, c.v[follow], v0, gapB, c.v[v]) < -3.5) return false;
+    const aNew = this.idm(v, c.v[v], v0, gapF, lead >= 0 ? c.v[lead] : 99);
     const oldLead = c.prev[v];
-    const aOld = oldLead >= 0 ? this.idm(c.v[v], v0, c.s[oldLead] - c.len[oldLead] - c.s[v], c.v[oldLead], am) : am;
+    const aOld = oldLead >= 0 ? this.idm(v, c.v[v], v0, c.s[oldLead] - c.len[oldLead] - c.s[v], c.v[oldLead]) : c.da[v];
     return aNew - aOld + bias > 0.25;
   }
 
@@ -2287,7 +2296,9 @@ export class Traffic {
     this.initVehicle(v);
     const c = this.veh.cols;
     const train = ln.mode > 0;
-    c.kind[v] = train ? 4 : 1; c.len[v] = KIND_LEN[train ? 4 : 1]; c.vf[v] = train ? 1 : 0.9;
+    c.kind[v] = train ? 4 : 1; c.len[v] = KIND_LEN[train ? 4 : 1];
+    c.vf[v] = train ? 1 : drawDriver(c, v, archOf(1, 0), this.sample);
+    if (train) drawDriver(c, v, archOf(4, 0), this.sample);
     c.color[v] = ln.color & 15;
     c.line[v] = li; c.stopI[v] = stop; c.served[v] = 0;
     this.busSets[li].add(v);
