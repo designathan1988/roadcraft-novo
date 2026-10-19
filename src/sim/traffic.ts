@@ -695,11 +695,11 @@ export class Traffic {
     return -1;
   }
 
-  private plan(v: number, from: number, dest: number, allowBack = false): boolean {
+  /** Route from `from`, reached by the vehicle's current lane (if any): only movements the lanes make, U-turns too. */
+  private plan(v: number, from: number, dest: number): boolean {
     const c = this.veh.cols;
-    const ban = c.lane[v] >= 0 && !allowBack ? laneSeg(c.lane[v]) : -1;
-    let n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP, false, ban);
-    if (n < 2 && ban >= 0) n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP); // dead end: turn back
+    const inSeg = c.lane[v] >= 0 && this.sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
+    const n = this.router.route(from, dest, this.routes, v * ROUTE_CAP, ROUTE_CAP, false, inSeg);
     c.rLen[v] = n;
     c.rIdx[v] = 1;
     c.dest[v] = dest;
@@ -735,11 +735,11 @@ export class Traffic {
   }
 
   /** Replans with the current lane leading to `node` (rIdx = 0 points at it). */
-  private replanFrom(v: number, node: number, allowBack = false): void {
+  private replanFrom(v: number, node: number): void {
     const c = this.veh.cols;
     if (c.line[v] >= 0) { this.busPlan(v, node); return; }
     if (node === c.dest[v]) { this.routes[v * ROUTE_CAP] = node; c.rLen[v] = 1; c.rIdx[v] = 0; return; }
-    if (!this.plan(v, node, c.dest[v], allowBack)) { c.dying[v] = 1; return; }
+    if (!this.plan(v, node, c.dest[v])) { c.dying[v] = 1; return; }
     c.rIdx[v] = 0;
   }
 
@@ -946,6 +946,7 @@ export class Traffic {
       c.color[v] |= style << 4;
       c.len[v] = CAR_STYLE_LEN[style];
     }
+    c.lane[v] = -1; c.conn[v] = -1;
     c.brk[v] = 0; c.exitC[v] = -1; c.pk[v] = 0; c.mv[v] = -1; c.ms[v] = 0;
     c.micro[v] = 0; c.dying[v] = 0; c.fade[v] = 1; c.has[v] = 0;
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
@@ -1733,9 +1734,9 @@ export class Traffic {
     c.s[v] -= L;
     c.rIdx[v]++;
     // the route may have been broken (wrong lane): replan from the end of this lane;
-    // heading to a median U-turn, replan allowing turning back (whoever overshot the destination turns there)
+    // heading to a median U-turn, replan (whoever overshot the destination turns there: the U-turn is a connection)
     const endNode = sim.laneTo(to);
-    if (sim.nodeCtl[endNode] === Ctl.UTurn && c.line[v] < 0) this.replanFrom(v, endNode, true);
+    if (sim.nodeCtl[endNode] === Ctl.UTurn && c.line[v] < 0) this.replanFrom(v, endNode);
     else if (c.rIdx[v] >= c.rLen[v] || this.routeAt(v, c.rIdx[v]) !== endNode) this.replanFrom(v, endNode);
     if (!this.inWindowOut(to)) {
       // left the window: back to meso
@@ -2025,10 +2026,9 @@ export class Traffic {
     let n: number;
     if (from === a) { this.routes[o] = a; n = 1; }
     else {
-      const ban = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
+      const inSeg = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
       const rail = ln.mode > 0;
-      n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, ban, rail);
-      if (n < 2 && ban >= 0) n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, -1, rail); // dead end: turn back
+      n = this.router.route(from, a, this.routes, o, ROUTE_CAP - 1, false, inSeg, rail, -1, true);
       if (n < 2) { c.dying[v] = 1; return; }
       if (this.routes[o + n - 1] !== a) { c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = a; return; } // truncated route: go on and replan at the end
     }

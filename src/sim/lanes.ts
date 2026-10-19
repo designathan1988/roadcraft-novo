@@ -56,6 +56,13 @@ export class SimNet {
   armDz = new Float32Array((1 << 14) * 8);
   /** Braço de cada ponta de trecho no seu nó (trecho * 2 + ponta; 0 = ponta a). Para a rota pesar o cruzamento. */
   segArm = new Uint8Array((1 << 14) * 2);
+  /**
+   * Movements the node's connections make, per node and incoming arm (n * 8 + arm): bit k = some lane goes out by arm
+   * k. Banned turns and hand-made lane connectors leave their bits off, so the router never plans what the lanes cannot
+   * do. `turnCar`: the same without the connections that start in a bus-only lane.
+   */
+  turnAll = new Uint8Array((1 << 14) * 8);
+  turnCar = new Uint8Array((1 << 14) * 8);
   /** Conexões que cruzam ou juntam com cada conexão (refeitas com o nó). */
   readonly conflicts = new Map<number, Int32Array>();
   /** Nó de rotatória (entradas dão preferência ao anel). */
@@ -81,6 +88,8 @@ export class SimNet {
       this.armRule = grow(this.armRule, cap * 8, 0);
       this.armDx = grow(this.armDx, cap * 8, 0);
       this.armDz = grow(this.armDz, cap * 8, 0);
+      this.turnAll = grow(this.turnAll, cap * 8, 0);
+      this.turnCar = grow(this.turnCar, cap * 8, 0);
       this.nodeRing = grow(this.nodeRing, cap, 0);
       this.nodeFlow = grow(this.nodeFlow, cap, 0);
       this.armMain = grow(this.armMain, cap, 0);
@@ -134,6 +143,7 @@ export class SimNet {
       case 'clear':
         net.clear(); this.conns.clear(); this.nodeConn.fill(-1); this.laneConn.fill(-1);
         this.nodePhases.fill(0); this.nodeRing.fill(0); this.dirtyNodes.clear(); this.laneMeters = 0;
+        this.turnAll.fill(0); this.turnCar.fill(0);
         this.nodeCtl.fill(0); this.conflicts.clear(); this.nodeFlow.fill(0); this.armMain.fill(0); this.nodeAuto.fill(0);
         this.removedSegs.length = 0;
         break;
@@ -266,6 +276,14 @@ export class SimNet {
     this.nodeConn[n] = -1;
     this.nodePhases[n] = 0;
     this.nodeRing[n] = 0;
+    for (let a = 0; a < 8; a++) { this.turnAll[n * 8 + a] = 0; this.turnCar[n * 8 + a] = 0; }
+  }
+
+  /** Can a vehicle that reaches node `n` by segment `sIn` leave by segment `sOut`? (`bus`: bus-only lanes too) */
+  turnOk(n: number, sIn: number, sOut: number, bus: boolean): boolean {
+    const sc = this.net.segs.cols;
+    const ai = this.segArm[sIn * 2 + (sc.a[sIn] === n ? 0 : 1)], ao = this.segArm[sOut * 2 + (sc.a[sOut] === n ? 0 : 1)];
+    return ((bus ? this.turnAll : this.turnCar)[n * 8 + ai] & (1 << ao)) !== 0;
   }
 
   /** Trecho novo: as pontas sem saída perto dele refazem o balão (pode sumir com a via ao lado). */
@@ -354,6 +372,9 @@ export class SimNet {
         else ok.forEach((a, r) => pairs.push([a, Math.min(r, k - 1)]));
         for (const [a, b] of pairs) {
           const from = laneId(si, inDir, a), to = laneId(sj, outDir, b);
+          const tb = 1 << (armIndex.get(j) ?? 0), ta = n * 8 + (armIndex.get(i) ?? 0);
+          this.turnAll[ta] |= tb;
+          if (!laneBus(sc.profile[si], inDir, a)) this.turnCar[ta] |= tb;
           this.lanePoint(from, this.laneLen(from), pa);
           this.lanePoint(to, 0, pb);
           const c = this.conns.alloc();
