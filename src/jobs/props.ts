@@ -460,12 +460,12 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   // the buildings' parts (one generator pass), with the footprints of what they put on their lot floors, then the
   // yards: trees at the back of the houses, shrubs along the fronts, never inside those footprints
   const foot: number[][] = Array.from({ length: b.count }, () => []);
-  buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot,
+  const yards40 = buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot,
     env?.parts40 ? (kind, x, y, z, yaw, sx, sy, sz, rgb) => {
       const tv = POOL_PARTS[kind];
       if (tv) out.addPart(tv[0], x, y, z, partW(yaw, rgb), partKey(tv[0], sx, sy, sz, tv[1]));
     } : undefined);
-  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot);
+  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot, yards40);
 
   // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio
   {
@@ -548,10 +548,11 @@ function yAt(g: RoadGraph, s: number, len: number, v: number): number {
  * Yard props of each lot: trees at the back of the houses, shrubs along the residential and mixed fronts. Laid in the
  * building's rectangle (`lotFit`: on a polygon lot, the one inside the outline the player drew).
  */
-export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => void, foot?: number[][]): void {
+export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => void, foot?: number[][], yards40?: boolean[]): void {
   for (let i = 0; i < b.count; i++) {
     const zone = b.zone[i];
     if (zone !== Zone.Residential && zone !== Zone.Mixed) continue;
+    if (yards40?.[i]) continue; // the 4.0 lot furnished its own yard (its parts went through the 4.0 sink)
     const r = new Rng((b.seed[i] * 2246822519) >>> 0);
     const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
     const fit = lotFit(b, i), W = fit.W, D = fit.D;

@@ -819,7 +819,11 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
       // With the 4.0 sink the parts come from layLot40; without one this pass has to fall back to the generic parts,
       // or a caller that does not ask for the 4.0 pool silently loses every part.
       const keep = partsOut;
-      if (parts40Out) { layLot40(lot40, null, parts40Out, PANE_ROW); partsOut = null; }
+      if (parts40Out) {
+        layLot40(lot40, null, parts40Out, PANE_ROW);
+        partsOut = null;
+        if (yards40Out) yards40Out[i] = true;
+      }
       try { if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g); else if (zone === Zone.Commercial && floors >= 8) tower(g); else block(g); }
       finally { partsOut = keep; }
     }
@@ -837,17 +841,23 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
  * Peças repetidas dos prédios (ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água) para o pool de
  * props: o mesmo gerador, no modo peças, com o mesmo sorteio da malha. Roda no job de peças da célula.
  */
-export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink, legacy = false): void {
+export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink, legacy = false): boolean[] {
+  const yards40 = new Array<boolean>(b.count).fill(false);
+  const outerYards = yards40Out;
+  yards40Out = yards40;
   partsOut = emit;
   footOut = foot ?? null;
   parts40Out = parts40 ?? null;
-  try { buildBuildings(heights, b, 0, 0, 256, -2, legacy); } finally { partsOut = null; footOut = null; footI = -1; parts40Out = null; }
+  try { buildBuildings(heights, b, 0, 0, 256, -2, legacy); } finally { partsOut = null; footOut = null; footI = -1; parts40Out = null; yards40Out = outerYards; }
+  return yards40;
 }
 
 /** The generic parts pass for its regression tests; production R/C/M parts go through the 4.0 sink. */
-export function buildBuildingPartsLegacy(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink): void {
-  buildBuildingParts(heights, b, emit, foot, parts40, true);
+export function buildBuildingPartsLegacy(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink): boolean[] {
+  return buildBuildingParts(heights, b, emit, foot, parts40, true);
 }
+/** Per-lot flag for the parts pass in progress: the 4.0 sink took this lot, so it owns the yard too. */
+let yards40Out: boolean[] | null = null;
 /** Where the parts pass sends the 4.0 buildings' parts (pool instances), when the props job asks for them. */
 let parts40Out: PartSink | null = null;
 
