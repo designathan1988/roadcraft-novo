@@ -17,6 +17,7 @@ import { FINISHES, roofMaterial, wallMaterial } from '../r40/world/buildings/mat
 import type { Building } from '../r40/world/buildings/types.ts';
 import type { BufferGeometry } from 'three';
 import { FIN } from './buildingFinishes.ts';
+import { levelElevation, levelHeight } from '../r40/world/buildings/geometry.ts';
 import { MeshBuilder } from './meshBuilder.ts';
 
 /** Building materials as the generator writes them (jobs/buildingGen.ts BMAT). */
@@ -113,6 +114,33 @@ function building40(lot: Lot40): Building {
   const c = Math.cos(lot.rot), s = Math.sin(lot.rot);
   const fx = lot.cx + (lot.D / 2) * s, fz = lot.cz + (lot.D / 2) * c;
   return { ...body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: -fz, rotation: lot.rot } as Building;
+}
+
+/** The 4.0 building's volumes as the engine's layout shape: world rects with their storey ranges, grounded at the
+ *  highest ground under the closed volumes (the ground storey is never under the ground at a corner). */
+export interface Volume40 { cx: number; cz: number; hw: number; hd: number; rot: number; y0: number; y1: number; base: number; ground: number; fh: number }
+export function volumes40(lot: Lot40): Volume40[] {
+  const b = building40(lot);
+  const cb = Math.cos(b.rotation), sb = Math.sin(b.rotation);
+  let g0 = -Infinity;
+  for (const v of b.volumes) {
+    if (v.open) continue;
+    for (const [ux, uy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const lx = v.x + ux * v.w, ly = v.y + uy * v.d;
+      g0 = Math.max(g0, lot.groundAt(b.x + lx * cb - ly * sb, -(b.y + lx * sb + ly * cb)));
+    }
+  }
+  if (g0 === -Infinity) g0 = lot.groundAt(b.x, -b.y);
+  const out: Volume40[] = [];
+  for (const v of b.volumes) {
+    if (v.open) continue;
+    let top = 0;
+    for (let k = 0; k < v.storeys.length; k++) top += levelHeight(b, v.base + k);
+    const base = g0 + levelElevation(b, v.base);
+    out.push({ cx: b.x + v.x * cb - v.y * sb, cz: -(b.y + v.x * sb + v.y * cb), hw: v.w / 2, hd: v.d / 2, rot: lot.rot,
+      y0: base, y1: base + top, base, ground: levelHeight(b, v.base), fh: levelHeight(b, v.base + 1) });
+  }
+  return out;
 }
 
 export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number, far = false): Laid40 {

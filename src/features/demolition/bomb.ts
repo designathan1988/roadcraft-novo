@@ -7,7 +7,7 @@ import type { World } from '../../world/world.ts';
 import { heightAt } from '../../world/heights.ts';
 import { Item, ItemsCommand } from '../../world/items.ts';
 import { RoadJournal } from '../../roads/build.ts';
-import { wallsHeight } from '../../jobs/buildingGen.ts';
+import { wallsHeightOf } from '../../jobs/buildingGen.ts';
 import { bombRadius } from '../../shared/contracts/bomb.ts';
 import { plural, t } from '../../shared/i18n/index.ts';
 import type { ToSim } from '../../sim/worker.ts';
@@ -59,7 +59,7 @@ export function dropBomb(ctx: BombContext, x: number, z: number): void {
     for (const id of doomed) {
       const gy = heightAt(w.heights, col.x[id], col.z[id]);
       ctx.blast.collapse(col.x[id], gy, col.z[id], col.w[id], col.d[id],
-        Math.max(3, wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id])), col.rot[id], col.floors[id]);
+        Math.max(3, wallsHeightOf(col, id)), col.rot[id], col.floors[id]);
       ctx.particles.burst(col.x[id], gy + 1, col.z[id], 4, 14, 10);
       const rec = w.buildingRec(id);
       j.removeBuilding(id);
