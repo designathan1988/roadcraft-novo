@@ -20,14 +20,14 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 228 |
-| Bytes / linhas | 3.681.559 / 65.979 |
-| Arquivos >= 50 KB | 12 |
+| Arquivos TS | 232 |
+| Bytes / linhas | 3.695.128 / 66.228 |
+| Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
-| Arestas de import | 899 (140 só de tipo) |
-| Ciclos de runtime | **0** (eram 2; corrigidos em 2026-10-29) |
-| Ciclos só de tipos | 4 |
+| Arestas de import | 906 (143 só de tipo) |
+| Ciclos de runtime | **0** |
+| Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.120 linhas), `jobs/buildingGen.ts` (2.650),
@@ -186,12 +186,14 @@ Ordem por risco e valor (não por tamanho):
 - Feito: **Fase 3.1** — `features/demolition/bomb.ts` e `shared/contracts/bomb.ts`; `game.ts` só faz a ligação;
   `api.bomb` para teste; `BOMB_BEFORE floors 12 -> BOMB_AFTER floors 0` na cidade de 4 km. O efeito atual é uma caixa
   cinza (`Blast.collapse`), não o interior; fica para a fatia de feature.
-- Próximo slice: **Fase 3.2** — extrair `app/session.ts` (novo/abrir/salvar) e `app/tools.ts` (troca/click) do
-  `game.ts`, um por commit; depois `app/photoHooks.ts`. O `game.ts` fica composição + API.
+- Próximo slice: **Fase 3.2** — `app/photoHooks.ts` já saiu; extrair `app/session.ts` (novo/abrir/salvar) e
+  `app/tools.ts` (troca/click) do `game.ts`, um por commit. O `game.ts` fica composição + API.
+- Feito: `src/platform/` (save, saveFiles, mapFile, steam, audio); `ui/hudActions.ts` e zero ciclos de tipos;
+  `src/app/photoHooks.ts` (`view`/`settle`).
 - Depois: `sim/traffic.ts`, `jobs/buildingGen.ts`, `r40/render/buildings/buildingMesh.ts` (este por último, atrás de
   `r40/api.ts`), e mover `platform` para `src/platform/`.
-- A suíte `npm test` travou sem saída no ambiente; isso é uma dívida separada a investigar antes de declarar qualquer
-  slice “verde”. Build, budget e cidade pequena são as provas atuais.
+- `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; `simDefects` fecha 44/44 em 232 s. C11/C25
+  ainda são lentos, então a suíte completa não foi declarada verde; o item segue como dívida de teste.
 
 ## 8. Fontes
 
