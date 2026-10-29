@@ -20,10 +20,10 @@ import { PeopleCreator, creatorCatalog, type PlacedPerson } from './creator.ts';
 const {
   Fn, attribute, storage, uniformArray, vertexIndex, uint, float, int, vec3, vec4, cos, sin, floor, fract, mod, min, max,
   select, mix, normalize, transformNormalToView, varyingProperty, unpackUnorm4x8, unpackUnorm2x16, sRGBTransferEOTF,
-  interleavedGradientNoise, screenCoordinate, vec2, time, abs, dot, clamp,
+  interleavedGradientNoise, screenCoordinate, time, abs, dot, clamp,
 } = T;
 
-/** Person height on screen (px) above which level 0 is drawn, with a dithered band above it. */
+/** Person height on screen (px) above which level 0 is drawn; the level changes at a hard cut (opaque). */
 const LOD0_PX = 60;
 const LOD1_PX = 15;
 const LOD_BAND_PX = 10;
@@ -209,7 +209,7 @@ export class PeopleRenderer {
       const n = interleavedGradientNoise(screenCoordinate.xy);
       const fade = info.z;
       const lodOk = select(fade.greaterThanEqual(0), n.lessThan(fade), n.greaterThanEqual(fade.negate().sub(1)));
-      const alphaOk = info.w.sub(select(info.w.greaterThan(1.5), float(2), float(0))).greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(23.0, 41.0))));
+      const alphaOk = info.w.sub(select(info.w.greaterThan(1.5), float(2), float(0))).greaterThan(0.5);
       m.maskNode = lodOk.and(alphaOk);
       m.maskShadowNode = alphaOk;
       const mesh = new THREE.Mesh(g, m);
@@ -313,11 +313,12 @@ export class PeopleRenderer {
   private levels(px1: number, dist: number, x: number, y: number, z: number, yaw: number, px: number, py: number, pz: number, pyaw: number, l: LookChoice, alpha: number, scale: number, slope: number): void {
     const f0 = Math.min(1, Math.max(0, (px1 - LOD0_PX) / LOD_BAND_PX));
     const f1 = Math.min(1, Math.max(0, (px1 - LOD1_PX) / LOD2_BAND_PX));
-    if (f0 > 0) this.write(0, x, y, z, yaw, px, py, pz, pyaw, l, f0, alpha, scale, slope, false);
-    // a person fully at level 0 casts with a shadow-only level-1 copy
-    if (f0 >= 1) this.write(1, x, y, z, yaw, px, py, pz, pyaw, l, 2, alpha, scale, slope, dist < SHADOW_NEAR);
-    else if (f1 > 0) this.write(1, x, y, z, yaw, px, py, pz, pyaw, l, f0 > 0 ? -1 - f0 : f1, alpha, scale, slope, false);
-    if (f1 < 1) this.write(2, x, y, z, yaw, px, py, pz, pyaw, l, -1 - f1, alpha * Math.min(1, (px1 - MIN_PX) / 2), scale, slope, false);
+    // Opaque people: one level at a time. The old complementary dither made the body see-through in every band.
+    if (f0 >= 1) {
+      this.write(0, x, y, z, yaw, px, py, pz, pyaw, l, 1, alpha, scale, slope, false);
+      this.write(1, x, y, z, yaw, px, py, pz, pyaw, l, 2, alpha, scale, slope, dist < SHADOW_NEAR);
+    } else if (f1 >= 1) this.write(1, x, y, z, yaw, px, py, pz, pyaw, l, 1, alpha, scale, slope, false);
+    else this.write(2, x, y, z, yaw, px, py, pz, pyaw, l, 1, alpha * Math.min(1, (px1 - MIN_PX) / 2), scale, slope, false);
   }
 
   private write(lod: number, x: number, y: number, z: number, yaw: number, px: number, py: number, pz: number, pyaw: number, l: LookChoice, fade: number, alpha: number, scale = 1, slope = 0, cast = false): void {
