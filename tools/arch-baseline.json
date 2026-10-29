@@ -1,13 +1,13 @@
 {
   "summary": {
-    "files": 235,
-    "bytes": 3769739,
-    "lines": 67828,
+    "files": 228,
+    "bytes": 3681559,
+    "lines": 65979,
     "over50k": 12,
     "over100k": 5,
     "over150k": 4,
-    "edges": 917,
-    "typeOnlyEdges": 149,
+    "edges": 899,
+    "typeOnlyEdges": 140,
     "valueCycles": 0,
     "allCycles": 4,
     "typeOnlyCycles": 4,
@@ -41,7 +41,7 @@
     },
     {
       "rel": "src/sim/traffic.ts",
-      "bytes": 167126
+      "bytes": 167035
     },
     {
       "rel": "src/game.ts",
@@ -172,10 +172,6 @@
       "bytes": 28671
     },
     {
-      "rel": "src/r40/render/lotOverlay.ts",
-      "bytes": 28577
-    },
-    {
       "rel": "src/world/lotEdit.ts",
       "bytes": 28021
     },
@@ -240,10 +236,6 @@
       "bytes": 19171
     },
     {
-      "rel": "src/r40/world/changes.ts",
-      "bytes": 18445
-    },
-    {
       "rel": "src/world/world.ts",
       "bytes": 18428
     },
@@ -258,10 +250,6 @@
     {
       "rel": "src/r40/world/buildings/recordTable.ts",
       "bytes": 18270
-    },
-    {
-      "rel": "src/r40/render/lotLattice.ts",
-      "bytes": 18108
     },
     {
       "rel": "src/r40/world/buildings/architecture.ts",
@@ -308,12 +296,12 @@
       "bytes": 14526
     },
     {
-      "rel": "src/r40/render/buildings/finishes.ts",
-      "bytes": 13990
-    },
-    {
       "rel": "src/ui/options.ts",
       "bytes": 13964
+    },
+    {
+      "rel": "src/r40/render/buildings/finishes.ts",
+      "bytes": 13952
     },
     {
       "rel": "src/r40/render/bake/finishRecipes.ts",
@@ -350,6 +338,18 @@
     {
       "rel": "src/mapFile.ts",
       "bytes": 12579
+    },
+    {
+      "rel": "src/sim/worker.ts",
+      "bytes": 12162
+    },
+    {
+      "rel": "src/r40/render/buildings/facadeLevel.ts",
+      "bytes": 12034
+    },
+    {
+      "rel": "src/roads/control.ts",
+      "bytes": 11825
     }
   ]
 }

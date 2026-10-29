@@ -20,15 +20,15 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 232 |
-| Bytes / linhas | 3.766.259 / 67.760 |
+| Arquivos TS | 228 |
+| Bytes / linhas | 3.681.559 / 65.979 |
 | Arquivos >= 50 KB | 12 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
-| Arestas de import | 904 (145 só de tipo) |
+| Arestas de import | 899 (140 só de tipo) |
 | Ciclos de runtime | **0** (eram 2; corrigidos em 2026-10-29) |
 | Ciclos só de tipos | 4 |
-| Vazamentos de camada (valor) | 11 |
+| Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.120 linhas), `jobs/buildingGen.ts` (2.650),
 `sim/traffic.ts` (3.118), `game.ts` (2.807), `r40/render/buildings/signature.ts` (1.781),
@@ -139,6 +139,11 @@ O `r40` é um subsistema portado do 4.0; ele fica atrás de uma fachada (`r40/ap
    `shared/contracts/people.ts`; UI não importa `render` em valor.
 
 Resultado: **0 ciclos de runtime, 0 vazamentos de valor**; 4 ciclos só de tipos; 12 arquivos >=50 KB.
+
+**Integração da linha paralela (2026-10-29):** `b96ba41` (semáforo real em toda parte) e `eab1214` (cluster
+morto do r40 removido, -1.846 linhas) e `e84a2cd` (docs/ESTRUTURA.md) cherry-picks `91e6e6f`, `23f2958`, `596d319`.
+`cd34522` (encosta) foi rejeitado: usa `groundAt` local num contrato world; ver `docs/VERIFY-PORT.md`. O audit caiu
+para 228 arquivos/65.979 linhas, 899 arestas e 0 vazamentos; 0 ciclos de runtime; 4 só de tipos.
 
 ### Fase 3 — arquivos gigantes, um por vez (em andamento)
 

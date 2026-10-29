@@ -5,11 +5,13 @@ cresça com o mapa. Medir antes/depois; toda otimização é um commit separado.
 
 ## Baseline medido
 
-- Cidade pequena `?teste&mapa=4` (4 km): ~8.689 prédios, 92 draws, 1,64 M tris, ~7–15 s até pronto.
+- Cidade pequena `?teste&mapa=4` (4 km): ~8.689 prédios, 92 draws, 1,64 M tris, 7,2 s até pronto (após a integração; idêntico ao baseline).
 - B0 10 km/70k: 125 draws, 3,54 M tris, 60,5 fps a 1600×900 (vsync), 5,44 GB WS, 2.389 MB VRAM.
 - `traffic.test.ts`: 113 s; o teste "ônibus levam pedestres" sozinho levou 96 s.
-- `simDefects.test.ts`: >150 s; ainda precisa ser isolado por teste (pode ser lento ou travado).
-- `npm run budget` (10 km): city 166 draws / 3,80 M tris; map 211 / 4,46 M; night 574 / 17,80 M; budget ok.
+- `simDefects.test.ts`: três testes lentos (C11, C48, C25); C25 passa em 75 s. Não é um laço único; o arquivo completo passa de 150 s.
+- `npm run budget` (10 km, após integração signals/r40): street 451 draws / 14,88 M tris; district 191 / 9,27 M; city 151 / 3,51 M; map 178 / 4,46 M; night 465 / 14,85 M; budget ok.
+- Antes da integração o budget era street 496 / 16,97 M, district 205 / 10,30 M, city 166 / 3,80 M, map 211 / 4,46 M, night 574 / 17,80 M; as contagens caíram com a remoção do cluster morto do r40.
+- Auditoria após integração: 228 arquivos, 65.979 linhas, 0 ciclos de runtime, 0 vazamentos de valor, 4 ciclos só de tipos.
 
 ## Caminhos quentes conhecidos
 
