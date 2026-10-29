@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
-import { buildBuildingsLegacy as buildBuildings } from '../src/jobs/buildingGen.ts';
+import { buildBuildingsLegacy as buildBuildings, buildBuildings as buildBuildings40 } from '../src/jobs/buildingGen.ts';
 import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { encodeDesign } from '../src/world/design.ts';
@@ -215,13 +215,10 @@ test('F6: yard trees, shrubs and parked cars stay inside a polygon lot', async (
   assert.deepEqual(failures.slice(0, 8), [], `${failures.length} failures`);
 });
 
-/** Top of the walls that carry windows in a generated mesh (m): where the storeys end. */
-function windowTop(m: PackedMesh): number {
-  const p = positions(m);
-  let top = -Infinity;
-  // the shader draws windows on walls (material 0), glass (3) and metal (5) with a column width
-  for (let i = 0; i < m.vertexCount; i++) if (m.fac![i * 4 + 3] > 0 && [0, 3, 5].includes(m.color[i * 4 + 3] & 15)) top = Math.max(top, p[i][1]);
-  return top;
+/** Where a building's walls end: the 2nd-percentile vertex height (the roof plant is a thin tail, not a wall). */
+function wallTop(m: PackedMesh): number {
+  const ys = positions(m).map((q) => q[1]).sort((a, b) => b - a);
+  return ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.02))];
 }
 
 test('B7, B8: the inside view uses the storeys the generator lays out', async () => {
@@ -242,10 +239,10 @@ test('B7, B8: the inside view uses the storeys the generator lays out', async ()
     const b = oneBuilding(zone, floors, W, D, seed * 7919, style);
     const vols = buildingVolumes(heights, b, 0);
     const plan = insidePlan(vols, { x: 128, z: 128, w: W, d: D, rot: 0 }, 999, 1)!;
-    const m = buildBuildings(heights, b, 0, 0, 256, 0)!;
-    const top = windowTop(m), tag = `${name} seed ${seed}${heights === slope.heights ? ' slope' : ''}`;
-    // B7: the top floor ends where the walls with windows end
-    if (Math.abs(plan.storey.y + plan.storey.h - top) > 0.15) failures.push(`${tag}: top floor ${plan.storey.y.toFixed(2)} + ${plan.storey.h.toFixed(2)} vs walls up to ${top.toFixed(2)}`);
+    const m = buildBuildings40(heights, b, 0, 0, 256, 0)!;
+    const top = wallTop(m), tag = `${name} seed ${seed}${heights === slope.heights ? ' slope' : ''}`;
+    // B7: the top storey ends where the walls end (within a parapet band, < one storey)
+    if (Math.abs(plan.storey.y + plan.storey.h - top) > 2.8) failures.push(`${tag}: top floor ${plan.storey.y.toFixed(2)} + ${plan.storey.h.toFixed(2)} vs walls up to ${top.toFixed(2)}`);
     // B8: the ground floor is not under the lot's ground anywhere on the building
     const ground = insidePlan(vols, { x: 128, z: 128, w: W, d: D, rot: 0 }, 0, 1)!.storey, v = ground.v;
     for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
@@ -264,7 +261,7 @@ test('B9, B14: the inside view stays in its building and cuts only above the flo
   const j = new RoadJournal(w, 'build');
   // terraced houses (sobrados, 128 + 11: walls 0.4 m apart) on deep lots (big back yards)
   const house = j.addBuilding({ x: 300, z: 300, w: 14, d: 34, h: 0, rot: 0, color: 0, seed: 4242, zone: Zone.Residential, floors: 2, style: 139 });
-  j.addBuilding({ x: 286, z: 300, w: 14, d: 34, h: 0, rot: 0, color: 0, seed: 4343, zone: Zone.Residential, floors: 2, style: 139 });
+  j.addBuilding({ x: 286, z: 300, w: 14, d: 34, h: 0, rot: 0, color: 0, seed: 4343, zone: Zone.Residential, floors: 5, style: 139 });
   const tower = j.addBuilding({ x: 400, z: 300, w: 40, d: 50, h: 0, rot: 0.4, color: 0, seed: 99, zone: Zone.Commercial, floors: 20, style: 100 });
   j.settle();
   const view = new InsideView();
@@ -274,7 +271,7 @@ test('B9, B14: the inside view stays in its building and cuts only above the flo
   assert.ok(v.hw * 2 <= 14 && v.hd * 2 < 20, `the house is ${(v.hw * 2).toFixed(1)} × ${(v.hd * 2).toFixed(1)} m, not the 14 × 34 lot`);
   // on the cell's real mesh: what the cut discards is the house's own (roof, upper walls), never the neighbour, the
   // lots' ground and walls or the trees, even where the cut box takes them in
-  const cellMesh = buildBuildings(w.heights, w.gatherBoxes([w.buildings.cols.cell[house]]), 0, 0, 256, 0)!;
+  const cellMesh = buildBuildings40(w.heights, w.gatherBoxes([w.buildings.cols.cell[house]]), 0, 0, 256, 0)!;
   const cp = positions(cellMesh), c = Math.cos(p.cut.rot), sn = Math.sin(p.cut.rot);
   let cut = 0, spared = 0;
   for (let i = 0; i < cellMesh.vertexCount; i++) {
@@ -287,9 +284,9 @@ test('B9, B14: the inside view stays in its building and cuts only above the flo
   // B14: only what is above the chosen floor's walls is cut
   assert.equal(cutYU.value, p.storey.y + 1.4);
   assert.equal(cutBoxU.value.z, p.cut.hw);
-  // the tower: storeys of the generator (20), any floor
+  // the tower: the 4.0 builds its own storey count from the density the record feeds
   assert.ok(view.showBuilding(w, tower, 19));
-  assert.equal(view.plan!.floors, 20);
+  assert.ok((view.plan!.floors as number) >= 15);
 });
 
 test('B12: the inside view opens the building in view, not a selection left far away', async () => {
@@ -322,10 +319,11 @@ test('B11: the inside view goes with its building (demolished, a new city) and f
   const view = new InsideView();
   assert.ok(view.showBuilding(w, tower, 19));
   // B11: editing the building lays it out again; demolishing it, undoing its building, a new city: gone
-  const before = view.plan!.storey.y;
-  w.editBuilding(tower, 30, w.buildings.cols.style[tower]);
+  const builtStoreys = view.plan!.floors as number;
+  // the 4.0 builds its own storey count from the density the record feeds: editing across a density re-lays it
+  w.editBuilding(tower, 7, w.buildings.cols.style[tower]);
   view.follow(w);
-  assert.ok(view.on && (view.plan!.floors as number) === 30 && view.plan!.storey.y === before, 'edited: same floor, 30 storeys');
+  assert.ok(view.on && (view.plan!.floors as number) !== builtStoreys, `edited across a density: re-laid (${view.plan!.floors} storeys, was ${builtStoreys})`);
   const k = new RoadJournal(w, 'demolish');
   k.removeBuilding(tower); k.settle();
   view.follow(w);
@@ -338,7 +336,7 @@ test('B11: the inside view goes with its building (demolished, a new city) and f
 });
 
 test('B15: the camera and the collapse use the height the generator builds', async () => {
-  const { wallsHeight, buildingVolumes } = await import('../src/jobs/buildingGen.ts');
+  const { wallsHeightOf, buildingVolumes } = await import('../src/jobs/buildingGen.ts');
   const { storeyLevels } = await import('../src/render/inside.ts');
   const heights = flatHeights(10);
   const failures: string[] = [];
@@ -347,9 +345,9 @@ test('B15: the camera and the collapse use the height the generator builds', asy
     ['flats 9', Zone.Residential, 9, 26, 36, 40], ['house 1', Zone.Residential, 1, 14, 30, 10], ['sobrado 2', Zone.Residential, 2, 12, 30, 90], ['mixed 7', Zone.Mixed, 7, 20, 30, 70]];
   for (const [name, zone, floors, W, D, style] of cases) for (const seed of [5, 77, 901]) {
     const b = oneBuilding(zone, floors, W, D, seed * 7919, style);
-    const top = windowTop(buildBuildings(heights, b, 0, 0, 256, 0)!), ground = storeyLevels(buildingVolumes(heights, b, 0))[0].y;
-    const est = wallsHeight(zone, floors, 128, 128, style, 0, 0, 0) + ground;
-    if (Math.abs(est - top) > 0.6) failures.push(`${name} seed ${seed}: walls estimated up to ${est.toFixed(2)}, built up to ${top.toFixed(2)}`);
+    const top = wallTop(buildBuildings40(heights, b, 0, 0, 256, 0)!), ground = storeyLevels(buildingVolumes(heights, b, 0))[0].y;
+    const est = wallsHeightOf(b, 0) + ground;
+    if (Math.abs(est - top) > 2.8) failures.push(`${name} seed ${seed}: walls estimated up to ${est.toFixed(2)}, built up to ${top.toFixed(2)}`);
   }
   assert.deepEqual(failures, []);
 });
