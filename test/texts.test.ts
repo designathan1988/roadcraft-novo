@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The interface's files (other areas own creator.ts, inspector.ts, roadCatalog.ts) and game.ts. */
-const FILES = ['src/game.ts', 'src/main.ts', 'src/audio.ts', 'src/steam.ts',
+const FILES = ['src/game.ts', 'src/main.ts', 'src/platform/audio.ts', 'src/platform/steam.ts',
   ...fs.readdirSync(path.join(root, 'src/ui')).filter((f) => f.endsWith('.ts') && !['creator.ts', 'inspector.ts', 'roadCatalog.ts', 'icons.ts', 'css.d.ts'].includes(f)).map((f) => `src/ui/${f}`)];
 /** Lines whose strings are not for the player: logs, undo labels (B60), errors for developers, test hooks. */
 const NOT_PLAYER = /console\.|label: '|label: `|new ItemsCommand\(|new RoadJournal\(|setClouds\(|phase\(|throw new Error|health\?\.add|this\.health\.(add|context)|return '|return `|\.context = /;

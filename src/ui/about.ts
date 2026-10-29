@@ -4,7 +4,7 @@
 
 import { el } from './dom.ts';
 import { fmtInt, t, onLanguageChange } from '../shared/i18n/index.ts';
-import { steamName } from '../steam.ts';
+import { steamName } from '../platform/steam.ts';
 
 declare const __BUILD__: string;
 

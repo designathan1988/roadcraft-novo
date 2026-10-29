@@ -102,8 +102,8 @@ test('A6: a keyed job superseded while queued or while running tells its sender 
 
 // ------------------------------------------------------------------ save generations (saveFiles.ts)
 
-import { SaveSlot, StoreError, type FileEntry, type FileStore } from '../src/saveFiles.ts';
-import { encodeMeta } from '../src/save.ts';
+import { SaveSlot, StoreError, type FileEntry, type FileStore } from '../src/platform/saveFiles.ts';
+import { encodeMeta } from '../src/platform/save.ts';
 import { TILE_COUNT } from '../src/core/grid.ts';
 
 /** Folders in memory; `failWrite(name)` returning true makes that write fail like a full disk. */
@@ -185,7 +185,7 @@ test('A9: a save from before generations opens as generation 0 and the first new
 });
 
 test('A14: the same damaged save goes to quarantine once, and only the last three quarantines are kept', async () => {
-  const { quarantineSlot } = await import('../src/mapFile.ts');
+  const { quarantineSlot } = await import('../src/platform/mapFile.ts');
   const store = new MemoryStore(), slot = new SaveSlot(store, 'cidade-1');
   await store.write('cidade-1', 'meta.bin', bytes(1, 2, 3));
   const q = (why: string) => (quarantineSlot as (s: SaveSlot, why: string) => Promise<string | null>)(slot, why);
@@ -241,7 +241,7 @@ test('desktop saves: real files, written whole (temporary file, flush, rename), 
 });
 
 test('desktop saves: the saves kept in the browser storage are copied to files once, and never removed from it', async () => {
-  const { migrateOnce } = await import('../src/saveFiles.ts');
+  const { migrateOnce } = await import('../src/platform/saveFiles.ts');
   const opfs = new MemoryStore(), files = new MemoryStore();
   await opfs.write('cidade-1', 'meta.bin', bytes(1));
   await opfs.write('cidade-1', 'tile_0003.bin', bytes(2, 2));

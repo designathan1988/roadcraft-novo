@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TILE_COUNT } from '../src/core/grid.ts';
-import { decodeMeta, encodeMeta } from '../src/save.ts';
+import { decodeMeta, encodeMeta } from '../src/platform/save.ts';
 
 test('meta: céu e clima do jogador vão e voltam; salvamento antigo (sem eles) ainda abre', () => {
   const tiles = new Uint8Array(TILE_COUNT); tiles[4] = 1;

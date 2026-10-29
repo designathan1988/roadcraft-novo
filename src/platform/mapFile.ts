@@ -5,7 +5,7 @@
 
 import { metaHeader } from './save.ts';
 import { CURRENT, SaveSlot, StoreError, type FileRef, type FileStore } from './saveFiles.ts';
-import { sha256 } from './jobs/storage.ts';
+import { sha256 } from '../jobs/storage.ts';
 
 const MAGIC = 'CIDADE-MAPA-1';
 

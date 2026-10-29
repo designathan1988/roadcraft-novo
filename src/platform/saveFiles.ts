@@ -13,7 +13,7 @@
 // files written by the Electron main process (electron/files.mjs) in the app data folder, which Steam Cloud can sync.
 
 import { metaHeader } from './save.ts';
-import { sha256 } from './jobs/storage.ts';
+import { sha256 } from '../jobs/storage.ts';
 
 export interface FileEntry { name: string; size: number }
 

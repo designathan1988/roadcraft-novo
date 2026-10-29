@@ -1,8 +1,8 @@
 // Save metadata: seed, game id, which tiles exist in the file, the camera,
 // the hour and the bus lines. The tiles themselves are written by the workers.
 
-import { SAVE_VERSION } from './config.ts';
-import { TILE_COUNT } from './core/grid.ts';
+import { SAVE_VERSION } from '../config.ts';
+import { TILE_COUNT } from '../core/grid.ts';
 
 const MAGIC_META = 0x314d4443; // 'CDM1'
 
