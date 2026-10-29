@@ -167,9 +167,9 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
         const back = exactShift(cx, cz, tx, tz, lx, lz, w, D);
         if (back > 0 && back < 3) { cx += lx * (back + 0.05); cz += lz * (back + 0.05); }
         if (back >= 3 || (back > 0 && (exactShift(cx, cz, tx, tz, lx, lz, w, D) > 0 || !lotFree(grid, W, ax, az, cx, cz, tx, tz, lx, lz, w, D)))) continue;
-        // água ou encosta forte: sem lote
+        // água ou encosta forte neste fundo: tenta o próximo (mais raso), o raso pode caber onde o fundo não coube
         const hc = heightAt(heights, cx, cz);
-        if (hc < SEA_LEVEL + 0.5) break;
+        if (hc < SEA_LEVEL + 0.5) continue;
         let lo = hc, hi = hc, wet = water ? waterAt(water, cx, cz) > hc - 0.5 : false;
         for (const [fx, fz] of [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]]) {
           const px = cx + tx * w * fx + lx * D * fz, pz = cz + tz * w * fx + lz * D * fz;
@@ -177,8 +177,8 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
           lo = Math.min(lo, y); hi = Math.max(hi, y);
           if (water && waterAt(water, px, pz) > y - 0.5) wet = true;
         }
-        if (wet) break; // rio ou lago
-        if (hi - lo > 7) break;
+        if (wet) continue; // rio ou lago
+        if (hi - lo > 10) continue;
         markLot(grid, W, ax, az, cx, cz, tx, tz, lx, lz, w, D);
         taken.push(...corners(cx, cz, tx, tz, lx, lz, w - 0.6, D, 0.15));
         if (Math.floor((cx - cx0) / CELL_SIZE) === 0 && Math.floor((cz - cz0) / CELL_SIZE) === 0) {
@@ -193,7 +193,7 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
       }
       if (!placed && w > size.w[0] + 1 && !narrowTried) { narrowTried = true; continue; }
       narrowTried = false;
-      at += placed ? w : Math.max(4, w / 2);
+      at += placed ? w : Math.max(2, w / 4);
     }
   }
   const n = out.x.length;
