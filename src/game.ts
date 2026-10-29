@@ -85,6 +85,7 @@ import { FLAT_BIT } from './jobs/terrainGen.ts';
 import { MapFileError, QUARANTINE_UNREADABLE_TILES, keepPreviousCity, packSlot, previousCities, quarantineSlot, readPackage, restorePrevious, savedIn, type SaveActions } from './mapFile.ts';
 import { KeptFileMissing, SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation, type Opened } from './saveFiles.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
+import { photoView, settlePool } from './app/photoHooks.ts';
 
 const SLOT = 'cidade-1';
 /** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
@@ -627,20 +628,11 @@ export class Game {
 
   /** Camera and hour for automated photos; waits for the meshes to be ready. */
   async view(x: number, z: number, yaw: number, pitch: number, dist: number, hour?: number): Promise<void> {
-    this.rig.restore(new Float64Array([x, z, yaw * Math.PI / 180, pitch * Math.PI / 180, dist, 0]));
-    if (hour !== undefined) { this.hour = hour; this.clockSpeed = 0; }
-    await new Promise((r) => setTimeout(r, 500));
-    await this.settle(4);
+    await photoView(this.rig, (frames) => this.settle(frames), (h) => { this.hour = h; this.clockSpeed = 0; }, x, z, yaw, pitch, dist, hour);
   }
 
   /** Waits for the workers to drain (for photos and tests). */
-  async settle(frames = 20): Promise<void> {
-    let quiet = 0;
-    while (quiet < frames) {
-      await new Promise((r) => requestAnimationFrame(r));
-      quiet = this.pool.isIdle() ? quiet + 1 : 0;
-    }
-  }
+  async settle(frames = 20): Promise<void> { await settlePool(this.pool, frames); }
 
   /** Generates the base terrain from the seed, one tile per job. */
   /** Terrain of every tile from the seed, in the workers; rejects if any tile fails. */
