@@ -50,6 +50,7 @@ export const driverSchema = {
   acc: Float32Array,
 } as const;
 type Cols = { [K in keyof typeof driverSchema]: InstanceType<(typeof driverSchema)[K]> };
+export type VehicleColumns = Cols;
 
 /** Spread of the comfort figures between the timid and the pushy (roadcraft 4.0). */
 const ACCEL_SPREAD = 0.3, BRAKE_SPREAD = 0.22, HEADWAY_SPREAD = 0.32, GAP_SPREAD = 0.28, EMERGENCY_SPREAD = 0.025;

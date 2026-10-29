@@ -19,6 +19,7 @@ import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
 import { stripAt } from './probe.ts';
 import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver, driverSchema } from './drivers.ts';
+import { LaneChanges } from './traffic/laneChanges.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
@@ -254,6 +255,7 @@ export class Traffic {
   private evN = 0;
   /** Traffic lights (plans, timed cycle, actuated near the camera). */
   readonly sig: Signals;
+  private readonly laneChanges: LaneChanges;
   private signalNodes = new Set<number>();
   /** Signals near the camera (only these run; distant ones stay frozen). */
   private windowSignals = new Set<number>();
@@ -486,6 +488,19 @@ export class Traffic {
       this.lastAdmit = grow(this.lastAdmit, cap, 0);
       this.releaseAt = grow(this.releaseAt, cap, 0);
       this.jamAt = grow(this.jamAt, cap, 0);
+    });
+    const g = this;
+    this.laneChanges = new LaneChanges({
+      sim,
+      get cols() { return g.veh.cols; },
+      get laneHead() { return g.laneHead; },
+      get rng() { return g.rng; },
+      get time() { return g.time; },
+      idm: (v, speed, v0, gap, vl) => g.idm(v, speed, v0, gap, vl),
+      unlink: (v) => g.unlink(v),
+      setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      insert: (v, onConn, lane) => g.insert(v, onConn, lane),
+      nextSeg: (v) => g.nextSeg(v),
     });
   }
 
@@ -2002,9 +2017,9 @@ export class Traffic {
       if (ns >= 0) conn = sim.connToward(lane, ns, c.line[v] >= 0);
       if (conn < 0) {
         // wrong lane: try to change; otherwise take any connection and replan
-        if (ns >= 0) this.mandatoryChange(v, lane, ns);
+        if (ns >= 0) this.laneChanges.mandatory(v, lane, ns);
         conn = sim.laneConn[lane];
-        if (conn < 0 && lead < 0 && c.lane[v] === lane) this.escapeLane(v, lane);
+        if (conn < 0 && lead < 0 && c.lane[v] === lane) this.laneChanges.escape(v, lane);
       }
       // it just moved to the next lane over: it goes on from there in the next step (this lane's leader, length and
       // connection no longer apply)
@@ -2016,7 +2031,7 @@ export class Traffic {
         c.held[v] = 0;
         if (this.laneCount[lane] >= 0.6 * L / 7.5 && this.reconsider(v, lane, -1)) {
           const ns2 = this.nextSeg(v);
-          if (ns2 >= 0 && sim.connToward(lane, ns2, false) < 0) this.mandatoryChange(v, lane, ns2);
+          if (ns2 >= 0 && sim.connToward(lane, ns2, false) < 0) this.laneChanges.mandatory(v, lane, ns2);
           if (c.lane[v] !== lane) return;
         }
       }
@@ -2112,7 +2127,7 @@ export class Traffic {
       this.insert(v, true, conn);
       return;
     }
-    if (c.lcCool[v] <= 0 && lead >= 0) this.discretionaryChange(v, lane);
+    if (c.lcCool[v] <= 0 && lead >= 0) this.laneChanges.discretionary(v, lane);
   }
 
   /** Someone went through node `n` from arm `arm` (micro or meso): arm flow and "the node is moving". */
@@ -2300,106 +2315,6 @@ export class Traffic {
   private inWindowOut(lane: number): boolean {
     const sc = this.sim.net.segs.cols, s = laneSeg(lane);
     return Math.hypot(sc.mx[s] - this.camX, sc.mz[s] - this.camZ) < this.window + WINDOW_OUT - WINDOW;
-  }
-
-  // ------------------------------------------------------------ lane changes
-
-  /** Neighbours on lane `lane` around s: [leader, follower]. */
-  private around(lane: number, s: number): [number, number] {
-    const c = this.veh.cols;
-    let lead = -1;
-    for (let v = this.laneHead[lane]; v >= 0; v = c.next[v]) {
-      if (c.s[v] < s) return [lead, v];
-      lead = v;
-    }
-    return [lead, -1];
-  }
-
-  private canChange(v: number, target: number, bias: number): boolean {
-    const c = this.veh.cols, sim = this.sim;
-    const [lead, follow] = this.around(target, c.s[v]);
-    const p = sim.net.segs.cols.profile[laneSeg(target)];
-    const v0 = desiredSpeed(c, v, laneSpeed(p) * c.vf[v], this.time);
-    const gapF = lead >= 0 ? c.s[lead] - c.len[lead] - c.s[v] : 1e9;
-    const gapB = follow >= 0 ? c.s[v] - c.len[v] - c.s[follow] : 1e9;
-    if (gapF < 2 || gapB < 3) return false;
-    // safety: the new follower does not brake hard
-    if (follow >= 0 && this.idm(follow, c.v[follow], v0, gapB, c.v[v]) < -3.5) return false;
-    const aNew = this.idm(v, c.v[v], v0, gapF, lead >= 0 ? c.v[lead] : 99);
-    const oldLead = c.prev[v];
-    const aOld = oldLead >= 0 ? this.idm(v, c.v[v], v0, c.s[oldLead] - c.len[oldLead] - c.s[v], c.v[oldLead]) : c.da[v];
-    return aNew - aOld + bias > 0.25;
-  }
-
-  private doChange(v: number, from: number, to: number): void {
-    const c = this.veh.cols;
-    this.unlink(v);
-    this.setLaneCount(from, -1);
-    this.setLaneCount(to, 1);
-    c.lane[v] = to;
-    c.lcFrom[v] = from;
-    c.lcT[v] = 0;
-    c.lcCool[v] = 3;
-    this.insert(v, false, to);
-  }
-
-  /**
-   * Stopped at the end of a lane with no exit at all: moves to the adjacent lane that has one (the route is rebuilt
-   * after the junction). Stopped at the line for 5 s, it changes into any physical gap (the neighbour waits).
-   */
-  private escapeLane(v: number, lane: number): void {
-    const c = this.veh.cols, sim = this.sim;
-    if (c.lcCool[v] > 0) return;
-    const seg = laneSeg(lane), dir = laneDir(lane), n = laneCount(sim.net.segs.cols.profile[seg], dir);
-    for (const step of [1, -1]) {
-      const i = laneIdx(lane) + step;
-      if (i < 0 || i >= n) continue;
-      const adj = laneId(seg, dir, i);
-      if (sim.laneConn[adj] < 0 || (c.line[v] < 0 && sim.isBusLane(adj))) continue;
-      if (this.canChange(v, adj, 2) || (c.wait[v] > 5 && this.roomBeside(v, adj))) { this.doChange(v, lane, adj); return; }
-    }
-    c.lcCool[v] = 0.5;
-  }
-
-  /** Physically fits alongside, and whoever is behind can still stop (braking hard) before touching. */
-  private roomBeside(v: number, target: number): boolean {
-    const c = this.veh.cols;
-    const [lead, follow] = this.around(target, c.s[v]);
-    if (lead >= 0 && c.s[lead] - c.len[lead] - c.s[v] < 0.5) return false;
-    return follow < 0 || c.s[v] - c.len[v] - c.s[follow] > 0.5 + (c.v[follow] * c.v[follow]) / (2 * 6);
-  }
-
-  private mandatoryChange(v: number, lane: number, ns: number): void {
-    const c = this.veh.cols, sim = this.sim;
-    if (c.lcCool[v] > 0) return;
-    const seg = laneSeg(lane), dir = laneDir(lane);
-    const target = sim.laneToward(seg, dir, ns, laneIdx(lane), c.line[v] >= 0);
-    if (target < 0 || target === lane) return;
-    const step = laneIdx(target) > laneIdx(lane) ? 1 : -1;
-    const adj = laneId(seg, dir, laneIdx(lane) + step);
-    // stopped at the line for 5 s waiting to change: takes any physical gap (the neighbour waits)
-    if (this.canChange(v, adj, 2) || (c.wait[v] > 5 && c.v[v] < 0.5 && this.roomBeside(v, adj))) this.doChange(v, lane, adj);
-    else c.lcCool[v] = 0.5;
-  }
-
-  private discretionaryChange(v: number, lane: number): void {
-    const c = this.veh.cols, sim = this.sim;
-    c.lcCool[v] = 1 + this.rng.next();
-    const seg = laneSeg(lane), dir = laneDir(lane);
-    const n = laneCount(sim.net.segs.cols.profile[seg], dir);
-    if (n < 2) return;
-    const ns = this.nextSeg(v);
-    const L = sim.laneLen(lane);
-    if (L - c.s[v] < 60) return; // near the node: stay in the lane
-    for (const step of [-1, 1]) {
-      const i = laneIdx(lane) + step;
-      if (i < 0 || i >= n) continue;
-      const target = laneId(seg, dir, i);
-      if (ns >= 0 && sim.connToward(target, ns) < 0) continue;
-      if (c.line[v] < 0 && sim.isBusLane(target)) continue; // cars do not enter the bus lane
-      // slight preference for the right (keep right)
-      if (this.canChange(v, target, step < 0 ? 0.1 : -0.1)) { this.doChange(v, lane, target); return; }
-    }
   }
 
   // ------------------------------------------------------------ buses
