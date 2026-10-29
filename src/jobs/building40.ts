@@ -80,8 +80,13 @@ export interface Lot40 {
   groundAt: (x: number, z: number) => number;
 }
 
-/** What one lot laid: shell vertices and part instances (for the counts). */
-export interface Laid40 { shell: number; parts: number }
+/** What one lot laid: shell vertices, part instances, its lot ground and its solid volumes' footprints. */
+export interface Laid40 {
+  shell: number; parts: number;
+  ground?: (x: number, z: number) => number;
+  /** [centre x, centre z, half width, half depth, turn] in engine world coordinates. */
+  footprints?: Array<[number, number, number, number, number]>;
+}
 
 /** Where a part goes as a pool instance: its kind, place, turn, scale per axis and colour (sRGB hex). */
 export type PartSink = (kind: string, x: number, y: number, z: number, yaw: number, sx: number, sy: number, sz: number, rgb: number) => void;
@@ -234,7 +239,17 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
     }
     parts.curFac[3] = 0;
   }
-  return { shell: laidShell, parts: laidParts };
+  // The 4.0 lot ground (world x/z; NaN off it). The 4.0 skips its own greenery (buildingMesh.ts:2454-2455), so
+  // the old generator's yard plants remain the owner and must stand on this ground, not on the old plan's.
+  const lg = chunk.lotGround;
+  // The solid volumes in engine world coordinates, for the yard props to keep off the building itself.
+  const c = Math.cos(lot.rot), s = Math.sin(lot.rot);
+  const fx = lot.cx + (lot.D / 2) * s, fz = lot.cz + (lot.D / 2) * c;
+  const footprints = b.volumes.filter((v) => !v.open).map((v) => {
+    const lx = v.x + v.w / 2, ly = v.y + v.d / 2;
+    return [fx + lx * c - ly * s, fz - lx * s - ly * c, v.w / 2, v.d / 2, lot.rot] as [number, number, number, number, number];
+  });
+  return { shell: laidShell, parts: laidParts, ground: lg ? (x, z) => lg.heightAt(x, -z) : undefined, footprints };
 }
 
 /**

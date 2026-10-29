@@ -16,7 +16,7 @@ import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from '../shared/contracts/worker.ts';
 import { PART_PROP, POOL_PARTS, partKey, partW } from './parts40.ts';
-import { inFootprints, inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts } from './buildingGen.ts';
+import { inFootprints, inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts, type LotGround40 } from './buildingGen.ts';
 
 /** Tipos de peça (4 bits; 15 = vaga livre). */
 export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17, ...PART_PROP } as const;
@@ -460,12 +460,12 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   // the buildings' parts (one generator pass), with the footprints of what they put on their lot floors, then the
   // yards: trees at the back of the houses, shrubs along the fronts, never inside those footprints
   const foot: number[][] = Array.from({ length: b.count }, () => []);
-  const yards40 = buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot,
+  const grounds40 = buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot,
     env?.parts40 ? (kind, x, y, z, yaw, sx, sy, sz, rgb) => {
       const tv = POOL_PARTS[kind];
       if (tv) out.addPart(tv[0], x, y, z, partW(yaw, rgb), partKey(tv[0], sx, sy, sz, tv[1]));
     } : undefined);
-  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot, yards40);
+  lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot, grounds40);
 
   // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio
   {
@@ -548,22 +548,23 @@ function yAt(g: RoadGraph, s: number, len: number, v: number): number {
  * Yard props of each lot: trees at the back of the houses, shrubs along the residential and mixed fronts. Laid in the
  * building's rectangle (`lotFit`: on a polygon lot, the one inside the outline the player drew).
  */
-export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => void, foot?: number[][], yards40?: boolean[]): void {
+export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => void, foot?: number[][], grounds40?: Array<LotGround40 | undefined>): void {
   for (let i = 0; i < b.count; i++) {
     const zone = b.zone[i];
     if (zone !== Zone.Residential && zone !== Zone.Mixed) continue;
-    if (yards40?.[i]) continue; // the 4.0 lot furnished its own yard (its parts went through the 4.0 sink)
     const r = new Rng((b.seed[i] * 2246822519) >>> 0);
     const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
     const fit = lotFit(b, i), W = fit.W, D = fit.D;
     const at = (lx: number, lz: number): [number, number] => [fit.cx + lx * c + lz * sn, fit.cz - lx * sn + lz * c];
+    // Near 4.0 lots seat the old generator's plants on the 4.0 ground, and only where it laid ground (NaN off it).
+    const ground = grounds40?.[i];
     const house = zone === Zone.Residential && b.floors[i] <= 3;
     if (house && D > 26) {
       const n = r.int(1, 4);
       for (let k = 0; k < n; k++) {
         const [x, z] = at(r.range(-W / 2 + 2.5, W / 2 - 2.5), -D / 2 + r.range(2.2, 3.6));
-        const y = heightAt(heights, x, z);
-        if (y < SEA_LEVEL + 0.3) continue;
+        const y = ground ? ground(x, z) : heightAt(heights, x, z);
+        if (!Number.isFinite(y) || y < SEA_LEVEL + 0.3) continue;
         const pick = r.next();
         // a tree's crown keeps 1.5 m off what the generator built (pool, garage, house)
         if (foot && inFootprints(foot[i], x, z, 1.5)) { r.next(); r.int(0, 4); r.range(0.6, 1.0); r.nextU32(); continue; }
@@ -574,8 +575,8 @@ export function lotYardProps(heights: Float32Array, b: BoxColumns, add: (kind: n
     const n = house ? r.int(1, 4) : r.int(2, 6);
     for (let k = 0; k < n; k++) {
       const [x, z] = at(r.range(-W / 2 + 1, W / 2 - 1), D / 2 - r.range(0.7, 1.4));
-      const y = heightAt(heights, x, z);
-      if (y < SEA_LEVEL + 0.3) continue;
+      const y = ground ? ground(x, z) : heightAt(heights, x, z);
+      if (!Number.isFinite(y) || y < SEA_LEVEL + 0.3) continue;
       // a shrub keeps 0.8 m off the building (shopfronts, a sobrado's front, a design's walls)
       if (foot && inFootprints(foot[i], x, z, 0.8)) { r.next(); r.int(0, 4); r.range(0.7, 1.3); r.nextU32(); continue; }
       add(PROP.Bush, x, y, z, r.next() * 6.283, r.int(0, 4), r.range(0.7, 1.3), r.nextU32());
