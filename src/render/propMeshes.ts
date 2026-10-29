@@ -588,6 +588,11 @@ const SPLIT: Record<number, number[]> = {
   // signs share the post and the face quads; only the street-name blades are a mesh of their own
   [PROP.Sign]: Array.from({ length: VARIANTS }, (_, v) => (v === SIGN.Name ? 1 : 0)),
 };
+// The 4.0 building-part types carry a variant too. Derive their split from POOL_PARTS so a new variant cannot fall
+// back into a mesh that makes every instance process all of them.
+const PART_VARIANT_MAX: Record<number, number> = {};
+for (const [type, variant] of Object.values(POOL_PARTS)) if (VARIANT_TYPES.has(type)) PART_VARIANT_MAX[type] = Math.max(PART_VARIANT_MAX[type] ?? 0, variant);
+for (const type of VARIANT_TYPES) SPLIT[type] = Array.from({ length: VARIANTS }, (_, v) => Math.min(v, PART_VARIANT_MAX[type] ?? 0));
 
 /**
  * Types whose variants are other models (PropDef.alts): variant → model (0 = the type's own). The generator gives trees
