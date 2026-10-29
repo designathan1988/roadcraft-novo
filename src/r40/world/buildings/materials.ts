@@ -1,30 +1,8 @@
-import type { Building, RoofKind, FaceId, Volume } from './types.ts';
+import type { Building, FaceId, RoofKind, Volume } from './types.ts';
 import { volumeSides } from './footprints.ts';
-
-/** What a building is made of. */
-
-export const FINISHES = ['plaster', 'stucco', 'ceramic', 'brick', 'stone', 'concrete', 'wood', 'metal', 'glass', 'tile', 'slate', 'panel', 'roofing'] as const;
-export type Finish = (typeof FINISHES)[number];
-
-export interface MaterialSpec {
-  readonly finish: Finish;
-  /** 0xRRGGBB, in sRGB. */
-  readonly colour: number;
-}
-
-/** Surfaces a building-wide material can be set for. */
-const MATERIAL_SLOTS = ['wall', 'trim', 'roof', 'plinth'] as const;
-type MaterialSlot = (typeof MATERIAL_SLOTS)[number];
-
-export type BuildingMaterials = Partial<Record<MaterialSlot, MaterialSpec>>;
-
-export interface VolumeMaterials {
-  /** Every wall of the volume. */
-  wall?: MaterialSpec;
-  /** One side's walls, over `wall`. */
-  sides?: Partial<Record<FaceId, MaterialSpec>>;
-  roof?: MaterialSpec;
-}
+import { FINISHES, MATERIAL_SLOTS, type BuildingMaterials, type Finish, type MaterialSlot, type MaterialSpec, type VolumeMaterials } from './materialTypes.ts';
+export { FINISHES };
+export type { BuildingMaterials, Finish, MaterialSpec, VolumeMaterials };
 
 /** Each finish's own colour, as its swatch shows it: brick is brick-red before it is painted. */
 export const FINISH_COLOUR: Readonly<Record<Finish, number>> = {

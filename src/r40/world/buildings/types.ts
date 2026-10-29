@@ -1,7 +1,7 @@
 import { internMembers } from './intern.ts';
 import { m } from '../units.ts';
 import type { Vec2 } from '../../core/vec2.ts';
-import type { BuildingMaterials, MaterialSpec, VolumeMaterials } from './materials.ts';
+import type { BuildingMaterials, MaterialSpec, VolumeMaterials } from './materialTypes.ts';
 
 /** The modular building model. */
 
