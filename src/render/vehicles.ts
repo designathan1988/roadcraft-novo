@@ -684,12 +684,11 @@ export class VehicleRenderer {
           const fadeNear = small ? Math.min(1, Math.max(0, (PERSON_NEAR + 5 - dist) / 10)) : Math.min(1, Math.max(0, (NEAR + 15 - dist) / 30));
           const alpha = d[o + 9];
           const mi = modelOf(kind, style);
-          if (fadeNear > 0) (kind < 3 && dist > SHADOW_NEAR ? this.nearFar[mi] : this.near[mi]).push(x, y, z, yaw, color, alpha, kind, fadeNear, px, py, pz, pyaw);
-          const farFade = small ? Math.min(1, Math.max(0, (PERSON_MID - dist) / 40)) : 1;
-          if (fadeNear < 1) {
-            if (kind === 0 && style < this.midCars.length) this.midCars[style].push(x, y, z, yaw, color, alpha, kind, -1 - fadeNear, px, py, pz, pyaw);
-            else this.mid.push(x, y, z, yaw, color, alpha * farFade, dimsOf(kind, style), -1 - fadeNear, px, py, pz, pyaw);
-          }
+          // Opaque bodies: one level or the other at a hard cut, never a dither over the paint (the old
+          // complementary masks made the body see-through for the whole 30 m band).
+          if (fadeNear > 0.5) (kind < 3 && dist > SHADOW_NEAR ? this.nearFar[mi] : this.near[mi]).push(x, y, z, yaw, color, alpha, kind, 1, px, py, pz, pyaw);
+          else if (kind === 0 && style < this.midCars.length) this.midCars[style].push(x, y, z, yaw, color, alpha, kind, -1, px, py, pz, pyaw);
+          else this.mid.push(x, y, z, yaw, color, alpha, dimsOf(kind, style), -1, px, py, pz, pyaw);
         }
       }
       this.trackFollow(fbest < 12 * 12);
