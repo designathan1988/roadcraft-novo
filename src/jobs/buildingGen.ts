@@ -831,11 +831,13 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     // the same 4.0 building from afar (jobs/building40.ts massLot40): never another building than the near one
     massLot40(lot40Of(b, i, fit, zone, floors, heights), mb, lod, arch);
   }
-  else if (!legacy && lod <= 0 && lod !== -3 && R40_ZONES.has(zone) && !b.shapeN[i]) {
+  else if (!legacy && lod <= 0 && R40_ZONES.has(zone) && !b.shapeN[i]) {
     // the Roadcraft 4.0 building (jobs/building40.ts), near: its shell in the cell's mesh (level 0), its parts to the
     // props pool (the parts pass, level -2, when the props job asks for them); nothing in the detail layer (level -1);
-    // the old body is still made, into nothing, for the footprint the yard's props avoid
+    // the old body is still made, into nothing, for the footprint the yard's props avoid. The -3 layout pass takes the
+    // 4.0's own volumes, so the inside view, the camera and the collapse read the building actually drawn.
     const lot40 = lot40Of(b, i, fit, zone, floors, heights);
+    if (lod === -3) { if (layoutOut) for (const v of volumes40(lot40)) layoutOut.push(v as Volume); return; }
     if (lod === 0) layLot40(lot40, mb, null, PANE_ROW);
     else if (lod === -2) {
       // With the 4.0 sink the parts come from layLot40; without one this pass has to fall back to the generic parts,
