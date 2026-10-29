@@ -50,7 +50,7 @@ const NO_MESH = new NoMesh(false, true);
  * and depth along the lot's turn, from y0 to y1; storeys start at `base` (the ground storey `ground` high, then
  * `fh` each). What the inside view and the camera need, without guessing 3.2 m storeys.
  */
-export interface Volume { cx: number; cz: number; hw: number; hd: number; rot: number; y0: number; y1: number; base: number; ground: number; fh: number }
+export interface Volume { cx: number; cz: number; hw: number; hd: number; rot: number; y0: number; y1: number; base: number; ground: number; fh: number; roof?: string; crown?: string }
 /**
  * Footprints of what stands on each building's lot floor (walls, pools, courts, porches, garages, tree trunks), per
  * building of the boxes: [centre x, centre z, half width, half depth, turn] × n, in the world. Filled by the parts pass

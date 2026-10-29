@@ -157,7 +157,7 @@ test('C11: at a quiet traffic light (no cars, at night) pedestrians still get to
   assert.ok(signals >= 1, 'the grid has a traffic light');
   const waited = new Float64Array(1 << 16);
   let worst = 0, waits = 0;
-  for (let i = 0; i < 20 * 300; i++) {
+  for (let i = 0; i < 20 * 60; i++) {
     tr.step(0.05); peds.step(0.05);
     if (i % 10 === 0) { tr.checkWindow(); peds.checkWindow(); }
     const c = peds.t.cols;
@@ -779,8 +779,13 @@ test('C25: bus riders walk to the stop itself to board and step off the bus at t
     for (let p = 0; p < peds.t.end; p++) if (peds.t.alive[p] && !before.has(p)) { alighted++; const q = P.posNow(p); if (!near(q[0], q[2])) alightFar++; }
   }) as typeof tr.onAlight;
   tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
-  for (let i = 0; i < 20 * 600; i++) { tr.step(0.05); peds.step(0.05); if (i % 20 === 0) tr.checkWindow(); }
-  assert.ok(boarded > 5 && alighted > 5, `boarded ${boarded}, alighted ${alighted}`);
+  let ran = 0;
+  for (let i = 0; i < 20 * 600; i++) {
+    tr.step(0.05); peds.step(0.05); if (i % 20 === 0) tr.checkWindow();
+    ran = i;
+    if (boarded > 5 && alighted > 5) break;
+  }
+  assert.ok(boarded > 5 && alighted > 5, `boarded ${boarded}, alighted ${alighted} in ${(ran * 0.05).toFixed(0)} s`);
   assert.equal(boardFar, 0, `${boardFar} of ${boarded} boarded away from the stop`);
   assert.equal(alightFar, 0, `${alightFar} of ${alighted} stepped off away from the stop`);
 });

@@ -14,7 +14,7 @@ import { COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT } from '../r40/re
 import { POSE_FLOATS } from '../r40/render/buildings/partPose.ts';
 import { LOOK_FLOATS } from '../r40/render/buildings/shellParts.ts';
 import { FINISHES, roofMaterial, wallMaterial } from '../r40/world/buildings/materials.ts';
-import type { Building } from '../r40/world/buildings/types.ts';
+import type { Building, RoofKind } from '../r40/world/buildings/types.ts';
 import type { BufferGeometry } from 'three';
 import { FIN } from './buildingFinishes.ts';
 import { levelElevation, levelHeight } from '../r40/world/buildings/geometry.ts';
@@ -118,7 +118,7 @@ function building40(lot: Lot40): Building {
 
 /** The 4.0 building's volumes as the engine's layout shape: world rects with their storey ranges, grounded at the
  *  highest ground under the closed volumes (the ground storey is never under the ground at a corner). */
-export interface Volume40 { cx: number; cz: number; hw: number; hd: number; rot: number; y0: number; y1: number; base: number; ground: number; fh: number }
+export interface Volume40 { cx: number; cz: number; hw: number; hd: number; rot: number; y0: number; y1: number; base: number; ground: number; fh: number; roof: RoofKind; crown?: string }
 export function volumes40(lot: Lot40): Volume40[] {
   const b = building40(lot);
   const cb = Math.cos(b.rotation), sb = Math.sin(b.rotation);
@@ -138,7 +138,7 @@ export function volumes40(lot: Lot40): Volume40[] {
     for (let k = 0; k < v.storeys.length; k++) top += levelHeight(b, v.base + k);
     const base = g0 + levelElevation(b, v.base);
     out.push({ cx: b.x + v.x * cb - v.y * sb, cz: -(b.y + v.x * sb + v.y * cb), hw: v.w / 2, hd: v.d / 2, rot: lot.rot,
-      y0: base, y1: base + top, base, ground: levelHeight(b, v.base), fh: levelHeight(b, v.base + 1) });
+      y0: base, y1: base + top, base, ground: levelHeight(b, v.base), fh: levelHeight(b, v.base + 1), roof: v.roof, crown: v.dress?.crown });
   }
   return out;
 }
