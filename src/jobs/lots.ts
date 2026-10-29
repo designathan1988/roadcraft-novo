@@ -19,15 +19,15 @@ const MARGIN = 120;
 
 /** Faixas de frente e fundo por zona (m). */
 export const LOT_SIZE: Record<number, { w: [number, number]; d: [number, number] }> = {
-  [Zone.Residential]: { w: [12, 19], d: [26, 34] },
-  [Zone.Commercial]: { w: [16, 28], d: [30, 40] },
-  [Zone.Industrial]: { w: [30, 55], d: [40, 60] },
-  [Zone.Mixed]: { w: [14, 22], d: [28, 36] },
+  [Zone.Residential]: { w: [6, 9], d: [16, 22] },
+  [Zone.Commercial]: { w: [9, 13], d: [18, 24] },
+  [Zone.Industrial]: { w: [24, 40], d: [32, 48] },
+  [Zone.Mixed]: { w: [7, 11], d: [16, 22] },
 };
 
 /** Centro (comércio, misto, alta densidade): fundo maior, que alcança o miolo da quadra (o centro fica cheio). */
 // casas: quintal fundo até o quintal do vizinho de trás (sem miolo de quadra vazio, como no roadcraft)
-const DEEP: Record<number, [number, number]> = { [Zone.Residential]: [38, 48], [Zone.Commercial]: [55, 70], [Zone.Mixed]: [45, 58], [Zone.ResHigh]: [45, 58], [Zone.ComHigh]: [58, 72] };
+const DEEP: Record<number, [number, number]> = { [Zone.Residential]: [18, 24], [Zone.Commercial]: [22, 28], [Zone.Mixed]: [20, 26], [Zone.ResHigh]: [45, 58], [Zone.ComHigh]: [58, 72] };
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 
