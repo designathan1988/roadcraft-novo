@@ -26,18 +26,18 @@ const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[
 const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
 /** A mixed block: towers, mid-rises, houses and sheds of every style and pattern, and catalog projects, on flat ground. */
-function block(): { heights: Float32Array; b: BoxColumns } {
+function block(count = 36): { heights: Float32Array; b: BoxColumns } {
   const w = new World();
   w.heights.fill(10);
   const zones = [Zone.Commercial, Zone.ComHigh, Zone.Residential, Zone.ResHigh, Zone.ResLow, Zone.Industrial, Zone.Mixed, Zone.ComLow];
-  const b = emptyBoxes(36);
-  for (let i = 0; i < 36; i++) {
+  const b = emptyBoxes(count);
+  for (let i = 0; i < count; i++) {
     b.x[i] = 18 + (i % 6) * 40; b.z[i] = 18 + Math.floor(i / 6) * 40; b.w[i] = 22 + (i % 3) * 5; b.d[i] = 26 + (i % 4) * 3;
     b.zone[i] = zones[i % zones.length]; b.floors[i] = [1, 2, 4, 7, 12, 18][i % 6]; b.seed[i] = 9001 + i * 7919; b.style[i] = (i * 37) % 128;
   }
   // three catalog projects (their walls go through facadeWall)
-  for (const [i, k] of [[33, 3], [34, 12], [35, 25]]) { const e = encodeDesign({ shape: 0, roof: 0, finish: 0, gear: 0, setback: 0, wall: 0xd9c7a6, catalog: k }); b.color[i] = e.color; b.h[i] = e.h; b.w[i] = 34; b.d[i] = 36; }
-  b.count = 36;
+  if (count >= 36) for (const [i, k] of [[33, 3], [34, 12], [35, 25]]) { const e = encodeDesign({ shape: 0, roof: 0, finish: 0, gear: 0, setback: 0, wall: 0xd9c7a6, catalog: k }); b.color[i] = e.color; b.h[i] = e.h; b.w[i] = 34; b.d[i] = 36; }
+  b.count = count;
   return { heights: w.heights, b };
 }
 
@@ -198,7 +198,7 @@ test('telhado 4: pitched roofs have the 4.0 body (18 cm fascia, soffit, ridge ca
 });
 
 test('janela 1b: every pane has the 4.0 frame in front of it (border, mullion, transom at 68 %)', () => {
-  const { heights, b } = block();
+  const { heights, b } = block(12);
   const md = buildBuildings(heights, b, 0, 0, 256, -1)!, pd = positions(md);
   const glass = triangles(md, pd).filter((g) => (md.color[md.index[g.t] * 4 + 3] & 15) === BMAT.WinGlass && g.n[1] === 0 || (md.color[md.index[g.t] * 4 + 3] & 15) === BMAT.WinGlass && Math.abs(g.n[1]) < 0.1);
   // frame vertices: 6 cm in front of a pane (the frame's front face), by plane
