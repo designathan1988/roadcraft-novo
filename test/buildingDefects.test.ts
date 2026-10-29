@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
-import { buildBuildings } from '../src/jobs/buildingGen.ts';
+import { buildBuildingsLegacy as buildBuildings } from '../src/jobs/buildingGen.ts';
 import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { encodeDesign } from '../src/world/design.ts';
@@ -110,7 +110,7 @@ test('F3: a hip roof deeper than wide covers its plan once, without holes or fol
 });
 
 test('F4: the detail and parts passes write no vertex into a throwaway mesh', async () => {
-  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const { buildBuildingPartsLegacy: buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
   const { MeshBuilder } = await import('../src/jobs/meshBuilder.ts');
   const heights = flatHeights(10);
   const b = emptyBoxes(24);
@@ -399,7 +399,7 @@ test('F9: civic buildings and warehouses fit their lot', () => {
 
 test('F10: the parts, parked cars and yard plants of a building near the cell edge are all kept', async () => {
   const { buildProps, PROP } = await import('../src/jobs/props.ts');
-  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const { buildBuildingPartsLegacy: buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
   const { cellId, cellX, cellOriginX } = await import('../src/core/grid.ts');
   const w = new World();
   w.heights.fill(10);
@@ -731,7 +731,7 @@ test('F15: no two faces of a catalog building lie in one plane over each other',
 
 test('F14, F8: catalog walls run along their facing, and every kind of element is drawn', async () => {
   const { catalogProjects, CAT_ELEMENTS, CAT_UNIT } = await import('../src/world/catalog.ts');
-  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const { buildBuildingPartsLegacy: buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
   const heights = flatHeights(10);
   const failures: string[] = [];
   const kindsDrawn = new Set<string>();

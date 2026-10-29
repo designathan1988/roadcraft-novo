@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
-import { BMAT, WIN_REVEAL, buildBuildings } from '../src/jobs/buildingGen.ts';
+import { BMAT, WIN_REVEAL, buildBuildingsLegacy as buildBuildings } from '../src/jobs/buildingGen.ts';
 import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { facadeWindowTable } from '../src/world/arch.ts';
@@ -212,9 +212,16 @@ test('janela 1b: every pane has the 4.0 frame in front of it (border, mullion, t
     const ys = [g.a[1], g.b[1], g.c[1]], y0 = Math.min(...ys), y1 = Math.max(...ys);
     if (y1 - y0 < 1) continue;
     const ty = y0 + (y1 - y0) * 0.68, c: V3 = [(g.a[0] + g.b[0] + g.c[0]) / 3, ty, (g.a[2] + g.b[2] + g.c[2]) / 3];
-    // a pane cut by the wall's top (no head bar) has its transom where the whole window would have it: not checked
+    // A pane cut by the wall's top has no head bar, so its transom (placed where the whole window would have it) is
+    // not checked. The side bars reach y1 at the pane's edges and the mullion can reach it at the centre when the cut
+    // is deep, so the head bar is recognised by its two ends, both inset from the edges by ~4.5 % of the width.
     const near = (q: V3) => Math.abs(Math.abs(dot(g.n, q) - g.d) - 0.06) < 0.012 && Math.hypot(q[0] - c[0], q[2] - c[2]) < 2;
-    if (!frames.some((q) => Math.abs(q[1] - y1) < 0.01 && near(q))) continue;
+    const axis = Math.abs(g.n[0]) > Math.abs(g.n[2]) ? 2 : 0;
+    const ha = [g.a[axis], g.b[axis], g.c[axis]], h0 = Math.min(...ha), h1 = Math.max(...ha), w = h1 - h0;
+    const yTop = (q: V3) => Math.abs(q[1] - y1) < 0.01 && near(q);
+    const head = frames.some((q) => yTop(q) && q[axis] > h0 + 0.02 && q[axis] < h0 + w * 0.1)
+      && frames.some((q) => yTop(q) && q[axis] > h1 - w * 0.1 && q[axis] < h1 - 0.02);
+    if (!head) continue;
     checked++;
     const hit = frames.some((p) => Math.abs(p[1] - ty) < 0.02 * (y1 - y0) + 0.008 && Math.abs(Math.abs(dot(g.n, p) - g.d) - 0.06) < 0.012 && Math.hypot(p[0] - c[0], p[2] - c[2]) < 2);
     if (!hit && missing.length < 5) missing.push(`pane at ${c.map((v) => v.toFixed(1)).join(', ')} without its transom`);
@@ -255,7 +262,7 @@ test('sacada 5: balconies are the 4.0 ones (gourmet slab in the wall x 0.92 with
 
 test('praça: no box trees and no lawn on vertical faces (the lawn is laid by world x, z: stripes)', async () => {
   const { Fn } = await import('../src/world/arch.ts');
-  const { buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
+  const { buildBuildingPartsLegacy: buildBuildingParts } = await import('../src/jobs/buildingGen.ts');
   const w = new World();
   w.heights.fill(10);
   for (const fn of [Fn.Square, Fn.Park]) for (let seed = 1; seed <= 6; seed++) {

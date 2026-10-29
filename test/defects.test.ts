@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { RoadJournal, buildRoad, planRoad, snap } from '../src/roads/build.ts';
-import { buildBuildings } from '../src/jobs/buildingGen.ts';
+import { buildBuildingsLegacy as buildBuildings } from '../src/jobs/buildingGen.ts';
 import { emptyBoxes, type PackedMesh } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { CommandStack } from '../src/core/commands.ts';

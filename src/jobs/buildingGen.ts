@@ -733,15 +733,20 @@ export function groundRange(heights: Float32Array, f: Frame, w: number, d: numbe
   return [lo, hi];
 }
 
-export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: number, originZ: number, extent: number, lod: number): PackedMesh | null {
+export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: number, originZ: number, extent: number, lod: number, legacy = false): PackedMesh | null {
   const mb = new MeshBuilder(false, true);
   const plan = planCells(b);
   for (let i = 0; i < b.count; i++) {
     mb.curTag = buildingTag(b.seed[i], b.x[i], b.z[i]);
-    genOne(mb, heights, b, i, plan, lod);
+    genOne(mb, heights, b, i, plan, lod, legacy);
     mb.curTag = 0;
   }
   return mb.pack(originX, originZ, extent);
+}
+
+/** The generic generator's entry point for its regression tests: the production R/C/M path is the 4.0 one. */
+export function buildBuildingsLegacy(heights: Float32Array, b: BoxColumns, originX: number, originZ: number, extent: number, lod: number): PackedMesh | null {
+  return buildBuildings(heights, b, originX, originZ, extent, lod, true);
 }
 
 /** The lot as the 4.0 path takes it (jobs/building40.ts): one description, the same building at every level. */
@@ -753,7 +758,7 @@ function lot40Of(b: BoxColumns, i: number, fit: { cx: number; cz: number; W: num
 }
 
 /** One building of the boxes (the cell plan already made) into mb, at level lod. */
-function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number, plan: CellPlan, lod: number): void {
+function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number, plan: CellPlan, lod: number, legacy = false): void {
   const rot = b.rot[i];
   const zone = b.zone[i];
   if (lod < 0 && (b.floors[i] === 0 || zone === 0)) return;
@@ -796,24 +801,25 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     const ch = chimneyOf(b.seed[i], W, D, floors);
     if (ch) chimney(g.mb, f, ch[0], ch[1], f.base, hi + ch[2], g.lod);
   }
-  else if (lod === 1 && R40_ZONES.has(zone)) {
+  else if (!legacy && lod === 1 && R40_ZONES.has(zone)) {
     // the same 4.0 building at 4.0's facade level (L1): its walls, openings and roofs, without the small parts
     layLot40(lot40Of(b, i, fit, zone, floors, heights), mb, null, PANE_ROW, true);
   }
-  else if (lod >= 2 && R40_ZONES.has(zone)) {
+  else if (!legacy && lod >= 2 && R40_ZONES.has(zone)) {
     // the same 4.0 building from afar (jobs/building40.ts massLot40): never another building than the near one
     massLot40(lot40Of(b, i, fit, zone, floors, heights), mb, lod, arch);
   }
-  else if (lod <= 0 && lod !== -3 && R40_ZONES.has(zone)) {
+  else if (!legacy && lod <= 0 && lod !== -3 && R40_ZONES.has(zone)) {
     // the Roadcraft 4.0 building (jobs/building40.ts), near: its shell in the cell's mesh (level 0), its parts to the
     // props pool (the parts pass, level -2, when the props job asks for them); nothing in the detail layer (level -1);
     // the old body is still made, into nothing, for the footprint the yard's props avoid
     const lot40 = lot40Of(b, i, fit, zone, floors, heights);
     if (lod === 0) layLot40(lot40, mb, null, PANE_ROW);
-    else if (lod === -2 && parts40Out) layLot40(lot40, null, parts40Out, PANE_ROW);
-    if (lod === -2) {
+    else if (lod === -2) {
+      // With the 4.0 sink the parts come from layLot40; without one this pass has to fall back to the generic parts,
+      // or a caller that does not ask for the 4.0 pool silently loses every part.
       const keep = partsOut;
-      partsOut = null;
+      if (parts40Out) { layLot40(lot40, null, parts40Out, PANE_ROW); partsOut = null; }
       try { if (arch >= ArchId.ColonialHouse && arch <= ArchId.Sobrado) house(g); else if (zone === Zone.Commercial && floors >= 8) tower(g); else block(g); }
       finally { partsOut = keep; }
     }
@@ -831,11 +837,16 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
  * Peças repetidas dos prédios (ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água) para o pool de
  * props: o mesmo gerador, no modo peças, com o mesmo sorteio da malha. Roda no job de peças da célula.
  */
-export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink): void {
+export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink, legacy = false): void {
   partsOut = emit;
   footOut = foot ?? null;
   parts40Out = parts40 ?? null;
-  try { buildBuildings(heights, b, 0, 0, 256, -2); } finally { partsOut = null; footOut = null; footI = -1; parts40Out = null; }
+  try { buildBuildings(heights, b, 0, 0, 256, -2, legacy); } finally { partsOut = null; footOut = null; footI = -1; parts40Out = null; }
+}
+
+/** The generic parts pass for its regression tests; production R/C/M parts go through the 4.0 sink. */
+export function buildBuildingPartsLegacy(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink): void {
+  buildBuildingParts(heights, b, emit, foot, parts40, true);
 }
 /** Where the parts pass sends the 4.0 buildings' parts (pool instances), when the props job asks for them. */
 let parts40Out: PartSink | null = null;

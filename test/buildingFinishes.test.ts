@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { COOKED_FILES, COOKED_FINISHES, FIN, FINISH_COUNT, FINISH_KEYS, FINISH_SIZE, packFinishes } from '../src/jobs/buildingFinishes.ts';
 import { World } from '../src/world/world.ts';
 import { generateTerrainTile } from '../src/jobs/terrainGen.ts';
-import { buildBuildings } from '../src/jobs/buildingGen.ts';
+import { buildBuildingsLegacy as buildBuildings } from '../src/jobs/buildingGen.ts';
 import { emptyBoxes } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 
@@ -61,7 +61,7 @@ test('gerador: acabamento no nibble alto do material, material no baixo', () => 
 });
 
 test('peças de fachada: mesmo sorteio da malha, determinísticas, variantes 8..15', async () => {
-  const { buildBuildingParts, PART } = await import('../src/jobs/buildingGen.ts');
+  const { buildBuildingPartsLegacy: buildBuildingParts, PART } = await import('../src/jobs/buildingGen.ts');
   const w = new World();
   for (const t of [44, 45, 54, 55]) generateTerrainTile(w.heights, t, 1);
   const b = emptyBoxes(4);
