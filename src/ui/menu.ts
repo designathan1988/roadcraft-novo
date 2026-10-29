@@ -43,7 +43,7 @@ export class StartMenu {
     seed.type = 'number'; seed.min = '1'; seed.value = this.seedNow;
     seed.addEventListener('input', () => { this.seedNow = seed.value; });
     seed.addEventListener('keydown', (e) => e.stopPropagation());
-    const sizes = MAP_SIZES.map((tiles) => [tiles, `${Math.round(tiles * TILE_SIZE / 1000)} km × ${Math.round(tiles * TILE_SIZE / 1000)} km`] as const);
+    const sizes = MAP_SIZES.filter((tiles) => tiles >= 10).map((tiles) => [tiles, `${Math.round(tiles * TILE_SIZE / 1000)} km × ${Math.round(tiles * TILE_SIZE / 1000)} km`] as const);
     const size = select(t('ui.start.size'), sizes, this.tilesNow, (v) => { this.tilesNow = Number(v); });
     // one tile per texture layer: cards with few layers cannot open the larger maps
     for (const o of size.options) if (Number(o.value) ** 2 > maxLayers) o.disabled = true;

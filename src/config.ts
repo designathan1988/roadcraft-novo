@@ -2,8 +2,8 @@
 
 /** Tile side in meters (unit of saving, terrain and the L2 level). */
 export const TILE_SIZE = 1024;
-/** Offered map sizes (tiles per side). */
-export const MAP_SIZES = [10, 16, 20, 24];
+/** Offered map sizes (tiles per side). 4 km is test-only and hidden from the start menu. */
+export const MAP_SIZES = [4, 10, 16, 20, 24];
 
 /**
  * Size chosen before any module builds arrays: on the page it comes from
