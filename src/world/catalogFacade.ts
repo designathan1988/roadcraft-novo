@@ -5,7 +5,7 @@
 // on the vertices). A row's id also picks the trim colour and the 3D frame style (id % ARCH_COUNT): the residue whose
 // style trim is nearest the project's trim colour.
 
-import { ARCHES, ARCH_COUNT, PATTERN_COUNT } from './arch.ts';
+import { ARCHES, ARCH_COUNT, PATTERN_COUNT } from './archData.ts';
 import { CAT_BAYS, CAT_UNIT, catalogProjects, type CatGeometry, type CatProject } from './catalog.ts';
 
 /** Bay components by name (CAT_BAYS indices). */

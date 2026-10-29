@@ -9,6 +9,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "typecheck": "tsc",
+    "arch": "node tools/arch-audit.mjs",
+    "arch:check": "node tools/arch-audit.mjs --check tools/arch-baseline.json",
     "start": "vite build && node tools/serve.mjs",
     "test": "node --test test/*.test.ts",
     "shaders": "node tools/shadercheck/check.mjs ./mats.mjs && WHICH=glsl node tools/shadercheck/check.mjs ./mats.mjs",

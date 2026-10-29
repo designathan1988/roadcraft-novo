@@ -4,7 +4,7 @@
 // Until the cooked people load, the engine's simple creator (colour, height, standing or walking, how many).
 
 import type { DrawerHost, DrawerParts } from './drawers.ts';
-import { section } from './drawers.ts';
+import { section } from './panelParts.ts';
 import { card, choices, dropdown, el, orow, range } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, t } from './i18n.ts';

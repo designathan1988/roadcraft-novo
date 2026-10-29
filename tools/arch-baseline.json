@@ -1,0 +1,442 @@
+{
+  "summary": {
+    "files": 232,
+    "bytes": 3766259,
+    "lines": 67760,
+    "over50k": 12,
+    "over100k": 5,
+    "over150k": 4,
+    "edges": 904,
+    "typeOnlyEdges": 145,
+    "valueCycles": 0,
+    "allCycles": 4,
+    "typeOnlyCycles": 4,
+    "violations": 11,
+    "layers": [
+      "app",
+      "core",
+      "jobs",
+      "r40",
+      "render",
+      "roads",
+      "shared",
+      "sim",
+      "tools",
+      "ui",
+      "world"
+    ]
+  },
+  "valueCycles": [],
+  "violations": [
+    {
+      "from": "src/mapFile.ts",
+      "to": "src/jobs/storage.ts",
+      "typeOnly": false,
+      "fromLayer": "shared",
+      "toLayer": "jobs",
+      "rule": "shared must not import jobs"
+    },
+    {
+      "from": "src/render/vehicles.ts",
+      "to": "src/sim/poses.ts",
+      "typeOnly": false,
+      "fromLayer": "render",
+      "toLayer": "sim",
+      "rule": "render must not import sim"
+    },
+    {
+      "from": "src/roads/build.ts",
+      "to": "src/ui/i18n.ts",
+      "typeOnly": false,
+      "fromLayer": "roads",
+      "toLayer": "ui",
+      "rule": "roads must not import ui"
+    },
+    {
+      "from": "src/roads/network.ts",
+      "to": "src/jobs/protocol.ts",
+      "typeOnly": false,
+      "fromLayer": "roads",
+      "toLayer": "jobs",
+      "rule": "roads must not import jobs"
+    },
+    {
+      "from": "src/save.ts",
+      "to": "src/core/grid.ts",
+      "typeOnly": false,
+      "fromLayer": "shared",
+      "toLayer": "core",
+      "rule": "shared must not import core"
+    },
+    {
+      "from": "src/saveFiles.ts",
+      "to": "src/jobs/storage.ts",
+      "typeOnly": false,
+      "fromLayer": "shared",
+      "toLayer": "jobs",
+      "rule": "shared must not import jobs"
+    },
+    {
+      "from": "src/ui/drawers.ts",
+      "to": "src/render/people/creator.ts",
+      "typeOnly": false,
+      "fromLayer": "ui",
+      "toLayer": "render",
+      "rule": "ui must not import render"
+    },
+    {
+      "from": "src/ui/drawers.ts",
+      "to": "src/render/vehicles.ts",
+      "typeOnly": false,
+      "fromLayer": "ui",
+      "toLayer": "render",
+      "rule": "ui must not import render"
+    },
+    {
+      "from": "src/world/growth.ts",
+      "to": "src/jobs/protocol.ts",
+      "typeOnly": false,
+      "fromLayer": "world",
+      "toLayer": "jobs",
+      "rule": "world must not import jobs"
+    },
+    {
+      "from": "src/world/lotEdit.ts",
+      "to": "src/jobs/protocol.ts",
+      "typeOnly": false,
+      "fromLayer": "world",
+      "toLayer": "jobs",
+      "rule": "world must not import jobs"
+    },
+    {
+      "from": "src/world/world.ts",
+      "to": "src/jobs/protocol.ts",
+      "typeOnly": false,
+      "fromLayer": "world",
+      "toLayer": "jobs",
+      "rule": "world must not import jobs"
+    }
+  ],
+  "files": [
+    {
+      "rel": "src/r40/render/buildings/buildingMesh.ts",
+      "bytes": 214876
+    },
+    {
+      "rel": "src/jobs/buildingGen.ts",
+      "bytes": 171108
+    },
+    {
+      "rel": "src/sim/traffic.ts",
+      "bytes": 167126
+    },
+    {
+      "rel": "src/game.ts",
+      "bytes": 162633
+    },
+    {
+      "rel": "src/r40/render/buildings/signature.ts",
+      "bytes": 108069
+    },
+    {
+      "rel": "src/world/catalogData.ts",
+      "bytes": 89097
+    },
+    {
+      "rel": "src/roads/build.ts",
+      "bytes": 70385
+    },
+    {
+      "rel": "src/r40/world/growth/lotPlan.ts",
+      "bytes": 70231
+    },
+    {
+      "rel": "src/sim/peds.ts",
+      "bytes": 67396
+    },
+    {
+      "rel": "src/ui/roadCatalog.ts",
+      "bytes": 60962
+    },
+    {
+      "rel": "src/render/terrain.ts",
+      "bytes": 59685
+    },
+    {
+      "rel": "src/ui/hud.ts",
+      "bytes": 54457
+    },
+    {
+      "rel": "src/ui/inspector.ts",
+      "bytes": 47720
+    },
+    {
+      "rel": "src/ui/drawers.ts",
+      "bytes": 47676
+    },
+    {
+      "rel": "src/render/props.ts",
+      "bytes": 46653
+    },
+    {
+      "rel": "src/ui/lang/legacy.ts",
+      "bytes": 46170
+    },
+    {
+      "rel": "src/render/vehicles.ts",
+      "bytes": 44939
+    },
+    {
+      "rel": "src/r40/world/buildings/interior.ts",
+      "bytes": 44863
+    },
+    {
+      "rel": "src/jobs/roadMesh.ts",
+      "bytes": 44334
+    },
+    {
+      "rel": "src/r40/world/buildings/procedural.ts",
+      "bytes": 41755
+    },
+    {
+      "rel": "src/render/carBody.ts",
+      "bytes": 39384
+    },
+    {
+      "rel": "src/render/propMeshes.ts",
+      "bytes": 39173
+    },
+    {
+      "rel": "src/r40/render/buildings/massing.ts",
+      "bytes": 38618
+    },
+    {
+      "rel": "src/r40/render/buildings/kit.ts",
+      "bytes": 36639
+    },
+    {
+      "rel": "src/render/city.ts",
+      "bytes": 36503
+    },
+    {
+      "rel": "src/r40/world/buildings/geometry.ts",
+      "bytes": 36170
+    },
+    {
+      "rel": "src/r40/render/buildings/cellArrays.ts",
+      "bytes": 34752
+    },
+    {
+      "rel": "src/ui/lang/engine.pt-BR.ts",
+      "bytes": 34143
+    },
+    {
+      "rel": "src/jobs/props.ts",
+      "bytes": 33402
+    },
+    {
+      "rel": "src/render/roads.ts",
+      "bytes": 33340
+    },
+    {
+      "rel": "src/ui/lang/engine.en.ts",
+      "bytes": 32907
+    },
+    {
+      "rel": "src/jobs/cityGen.ts",
+      "bytes": 31345
+    },
+    {
+      "rel": "src/saveFiles.ts",
+      "bytes": 29081
+    },
+    {
+      "rel": "src/sim/lanes.ts",
+      "bytes": 29008
+    },
+    {
+      "rel": "src/render/cellLayer.ts",
+      "bytes": 28661
+    },
+    {
+      "rel": "src/r40/render/lotOverlay.ts",
+      "bytes": 28577
+    },
+    {
+      "rel": "src/world/lotEdit.ts",
+      "bytes": 28011
+    },
+    {
+      "rel": "src/r40/render/buildings/landmarks.ts",
+      "bytes": 27669
+    },
+    {
+      "rel": "src/render/heavyBody.ts",
+      "bytes": 27598
+    },
+    {
+      "rel": "src/roads/profiles.ts",
+      "bytes": 26904
+    },
+    {
+      "rel": "src/r40/world/buildings/elements.ts",
+      "bytes": 23989
+    },
+    {
+      "rel": "src/r40/render/buildings/facadeKit.ts",
+      "bytes": 22742
+    },
+    {
+      "rel": "src/ui/icons.ts",
+      "bytes": 22328
+    },
+    {
+      "rel": "src/render/people/crowd.ts",
+      "bytes": 22093
+    },
+    {
+      "rel": "src/render/treeMeshes.ts",
+      "bytes": 21034
+    },
+    {
+      "rel": "src/r40/world/buildings/cityBuildings.ts",
+      "bytes": 21000
+    },
+    {
+      "rel": "src/render/traa.ts",
+      "bytes": 20570
+    },
+    {
+      "rel": "src/render/cameraRig.ts",
+      "bytes": 19701
+    },
+    {
+      "rel": "src/render/post.ts",
+      "bytes": 19599
+    },
+    {
+      "rel": "src/tools/roadTool.ts",
+      "bytes": 19530
+    },
+    {
+      "rel": "src/r40/world/buildings/types.ts",
+      "bytes": 19186
+    },
+    {
+      "rel": "src/roads/network.ts",
+      "bytes": 19161
+    },
+    {
+      "rel": "src/r40/world/changes.ts",
+      "bytes": 18445
+    },
+    {
+      "rel": "src/world/world.ts",
+      "bytes": 18418
+    },
+    {
+      "rel": "src/render/weather.ts",
+      "bytes": 18365
+    },
+    {
+      "rel": "src/r40/render/buildings/furnitureKit.ts",
+      "bytes": 18341
+    },
+    {
+      "rel": "src/r40/world/buildings/recordTable.ts",
+      "bytes": 18270
+    },
+    {
+      "rel": "src/r40/render/lotLattice.ts",
+      "bytes": 18108
+    },
+    {
+      "rel": "src/r40/world/buildings/architecture.ts",
+      "bytes": 17780
+    },
+    {
+      "rel": "src/jobs/cityField.ts",
+      "bytes": 17681
+    },
+    {
+      "rel": "src/render/scene.ts",
+      "bytes": 17583
+    },
+    {
+      "rel": "src/r40/world/buildings/pads.ts",
+      "bytes": 17255
+    },
+    {
+      "rel": "src/jobs/terrainGen.ts",
+      "bytes": 17075
+    },
+    {
+      "rel": "src/jobs/building40.ts",
+      "bytes": 16828
+    },
+    {
+      "rel": "src/sim/signals.ts",
+      "bytes": 15180
+    },
+    {
+      "rel": "src/r40/world/buildings/foundation.ts",
+      "bytes": 15000
+    },
+    {
+      "rel": "src/jobs/lots.ts",
+      "bytes": 14674
+    },
+    {
+      "rel": "src/r40/render/buildings/facadePropModels.ts",
+      "bytes": 14544
+    },
+    {
+      "rel": "src/world/growth.ts",
+      "bytes": 14516
+    },
+    {
+      "rel": "src/r40/render/buildings/finishes.ts",
+      "bytes": 13990
+    },
+    {
+      "rel": "src/ui/options.ts",
+      "bytes": 13950
+    },
+    {
+      "rel": "src/r40/render/bake/finishRecipes.ts",
+      "bytes": 13687
+    },
+    {
+      "rel": "src/r40/render/buildings/glassRoom.ts",
+      "bytes": 13520
+    },
+    {
+      "rel": "src/r40/world/buildings/blueprints.ts",
+      "bytes": 13470
+    },
+    {
+      "rel": "src/render/particles.ts",
+      "bytes": 13281
+    },
+    {
+      "rel": "src/sim/routing.ts",
+      "bytes": 13086
+    },
+    {
+      "rel": "src/r40/world/buildings/materials.ts",
+      "bytes": 13018
+    },
+    {
+      "rel": "src/render/surfaceBake.ts",
+      "bytes": 12886
+    },
+    {
+      "rel": "src/world/ground.ts",
+      "bytes": 12617
+    },
+    {
+      "rel": "src/mapFile.ts",
+      "bytes": 12579
+    }
+  ]
+}

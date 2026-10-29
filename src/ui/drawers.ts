@@ -183,15 +183,8 @@ function note(p: DrawerParts, text: string): void { p.note = text; }
 
 const SOON = (): string => t('ui.soon');
 
-/** The section of things in the strip: a group with its title (for screen readers) and its cards. */
-export function section(strip: HTMLElement, label: string): HTMLElement {
-  const box = el('div', 'v2-section');
-  box.append(el('div', 'v2-section-title', label));
-  const items = el('div', 'v2-section-items');
-  box.append(items);
-  strip.append(box);
-  return items;
-}
+import { section } from './panelParts.ts';
+export { section };
 
 // ------------------------------------------------------------------ roads
 export function renderRoads(h: DrawerHost, p: DrawerParts): void {
