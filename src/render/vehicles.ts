@@ -5,7 +5,7 @@
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { POSE_STRIDE, TILE, TILE_GRID, TILES, type PoseReader } from '../sim/poses.ts';
+import { POSE_STRIDE, TILE, TILE_GRID, TILES, type PoseReader } from '../shared/contracts/poses.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';

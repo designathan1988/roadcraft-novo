@@ -14,7 +14,7 @@ import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { Dirty, cellId, cellX } from '../src/core/grid.ts';
 import type { JobPool } from '../src/jobs/pool.ts';
-import type { LotColumns } from '../src/jobs/protocol.ts';
+import type { LotColumns } from '../src/shared/contracts/worker.ts';
 import { decayTenths } from '../src/world/decay.ts';
 import { Ctl, Rule, type JunctionSpec } from '../src/roads/control.ts';
 import { laneExits } from '../src/roads/laneLinks.ts';

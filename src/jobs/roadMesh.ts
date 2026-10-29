@@ -14,7 +14,7 @@ import { SegFlag } from '../roads/flags.ts';
 import { heightAt } from '../world/heights.ts';
 import { ZONE_COLORS } from '../roads/zones.ts';
 import { MeshBuilder } from './meshBuilder.ts';
-import type { PackedMesh, RoadGraph } from './protocol.ts';
+import type { PackedMesh, RoadGraph } from '../shared/contracts/worker.ts';
 
 export const RMAT = { Asphalt: 2, Plain: 3, Sidewalk: 4, Grass: 5, Concrete: 6, Curb: 7, Zone: 8, Pavers: 9, Stone: 10 } as const;
 export const CURB_H = 0.15;

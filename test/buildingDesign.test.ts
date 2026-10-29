@@ -7,7 +7,7 @@ import { catalogWindowRows } from '../src/world/catalogFacade.ts';
 import { World } from '../src/world/world.ts';
 import { generateTerrainTile } from '../src/jobs/terrainGen.ts';
 import { buildBuildings, planCells } from '../src/jobs/buildingGen.ts';
-import { emptyBoxes } from '../src/jobs/protocol.ts';
+import { emptyBoxes } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { facadeWindowTable, ARCHES, PATTERN_COUNT } from '../src/world/arch.ts';
 

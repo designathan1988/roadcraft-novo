@@ -2,7 +2,7 @@
 // camera position; publishes poses (triple buffer) and road occupancy
 // (shared memory). The page only reads.
 
-import { PoseWriter, POSE_STRIDE, MAX_AGENTS, TILES, sortByTile, tileOrigin, viewPoseBuffers } from './poses.ts';
+import { PoseWriter, POSE_STRIDE, MAX_AGENTS, TILES, sortByTile, tileOrigin, viewPoseBuffers } from '../shared/contracts/poses.ts';
 import { SimNet, decodeOp } from './lanes.ts';
 import { Traffic, type LineSpec } from './traffic.ts';
 import { Peds } from './peds.ts';

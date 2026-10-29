@@ -2,7 +2,7 @@
 // Roda no worker. Vértice: posição snorm16×4, normal octaédrica snorm8×4, cor+material unorm8×4.
 
 import { heightAt } from '../world/heights.ts';
-import type { BoxColumns, PackedMesh } from './protocol.ts';
+import type { BoxColumns, PackedMesh } from '../shared/contracts/worker.ts';
 
 /** Normal unitária → octaédrico em [-1, 1]². */
 export function octEncode(x: number, y: number, z: number, out: Float32Array): void {

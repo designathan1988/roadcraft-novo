@@ -67,6 +67,7 @@ for (const abs of files) {
 const layerOf = (rel) => {
   const parts = rel.split('/');
   if (parts[0] !== 'src' || parts.length < 2) return 'other';
+  if (parts[1] === 'shared') return 'shared';
   if (parts.length === 2) return APP_FILES.has(rel) ? 'app' : SHARED_FILES.has(rel) ? 'shared' : 'app';
   const l = parts[1];
   return ['core', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools'].includes(l) ? l : 'other';

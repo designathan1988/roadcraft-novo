@@ -16,7 +16,7 @@ import { CELL_COUNT, Dirty, TILE_COUNT, cellId, tileId, tileOfCell, tileOriginX,
 import { JobPool } from './jobs/pool.ts';
 import { wallsHeight } from './jobs/buildingGen.ts';
 import { packTileHeights } from './jobs/storage.ts';
-import { SEG_REC, SHAPE_SCALE, SHAPE_STRIDE, boxTransfer, roadGraphTransfer, type BoxColumns, type JobResults, type RoadSave } from './jobs/protocol.ts';
+import { SEG_REC, SHAPE_SCALE, SHAPE_STRIDE, boxTransfer, roadGraphTransfer, type BoxColumns, type JobResults, type RoadSave } from './shared/contracts/worker.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
 import { createRoads, createTrafficLook, setPaintStyle, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
@@ -24,7 +24,7 @@ import type { CellLayer } from './render/cellLayer.ts';
 import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
 import { TerrainRenderer, gridU } from './render/terrain.ts';
 import { MapSizeError, decodeMeta, encodeMeta } from './save.ts';
-import { createPoseBuffers, PoseReader, viewPoseBuffers } from './sim/poses.ts';
+import { createPoseBuffers, PoseReader, viewPoseBuffers } from './shared/contracts/poses.ts';
 import { encodeOps } from './sim/lanes.ts';
 import { VehicleRenderer } from './render/vehicles.ts';
 import type { PersonOptions } from './render/people/creator.ts';

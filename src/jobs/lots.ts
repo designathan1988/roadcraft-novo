@@ -12,7 +12,7 @@ import { PROFILE_INFO } from '../roads/profiles.ts';
 import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { waterAt } from '../world/ground.ts';
-import type { LotColumns, RoadGraph } from './protocol.ts';
+import type { LotColumns, RoadGraph } from '../shared/contracts/worker.ts';
 
 const RES = 2;
 const MARGIN = 120;

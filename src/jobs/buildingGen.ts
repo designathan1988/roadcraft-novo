@@ -13,7 +13,7 @@ import { MeshBuilder } from './meshBuilder.ts';
 import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, PANE_ROW, Pattern, Win, chimneyOf, facadeArch, facadeWindowTable, pickArch, type Arch } from '../world/arch.ts';
 import { cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { CELL_SIZE } from '../config.ts';
-import { SHAPE_SCALE, SHAPE_STRIDE, type BoxColumns, type PackedMesh } from './protocol.ts';
+import { SHAPE_SCALE, SHAPE_STRIDE, type BoxColumns, type PackedMesh } from '../shared/contracts/worker.ts';
 import { CIVIC_CATALOG, CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign, type Design } from '../world/design.ts';
 import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
 import { BAY, catalogFacade } from '../world/catalogFacade.ts';

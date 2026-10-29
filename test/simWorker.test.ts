@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FromSim, ToSim } from '../src/sim/worker.ts';
-import { createPoseBuffers, PoseReader, viewPoseBuffers, POSE_STRIDE } from '../src/sim/poses.ts';
+import { createPoseBuffers, PoseReader, viewPoseBuffers, POSE_STRIDE } from '../src/shared/contracts/poses.ts';
 import { Traffic } from '../src/sim/traffic.ts';
 import { encodeOps } from '../src/sim/lanes.ts';
 import type { NetOp } from '../src/roads/network.ts';

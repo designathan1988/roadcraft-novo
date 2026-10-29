@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { buildProps, PROP } from '../src/jobs/props.ts';
-import { emptyBoxes } from '../src/jobs/protocol.ts';
+import { emptyBoxes } from '../src/shared/contracts/worker.ts';
 import { cellId, cellX } from '../src/core/grid.ts';
 
 import { Zone } from '../src/roads/zones.ts';

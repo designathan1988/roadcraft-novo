@@ -7,7 +7,7 @@
 // Messages returned as strings are shown to the player (pt-BR).
 
 import { Rng } from '../core/rng.ts';
-import { SHAPE_MAX } from '../jobs/protocol.ts';
+import { SHAPE_MAX } from '../shared/contracts/worker.ts';
 import { RoadJournal } from '../roads/build.ts';
 import { bez, closestT } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';

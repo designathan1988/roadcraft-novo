@@ -5,7 +5,7 @@ import { CELL_SIZE, MAP_CELLS } from '../config.ts';
 import { CELL_COUNT, Dirty, cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { Rng } from '../core/rng.ts';
 import type { JobPool } from '../jobs/pool.ts';
-import { roadGraphTransfer, type LotColumns } from '../jobs/protocol.ts';
+import { roadGraphTransfer, type LotColumns } from '../shared/contracts/worker.ts';
 import { Zone, baseZone, zoneDensity } from '../roads/zones.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { Fn, archFor, civicFor, eraAt } from './arch.ts';

@@ -7,7 +7,7 @@ import { tileOriginX } from '../core/grid.ts';
 import { arcTable, bez, tAtLength, type Quad } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { heightAt } from '../world/heights.ts';
-import type { RoadGraph } from './protocol.ts';
+import type { RoadGraph } from '../shared/contracts/worker.ts';
 
 const p2 = new Float64Array(2);
 

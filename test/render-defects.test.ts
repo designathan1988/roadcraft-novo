@@ -7,7 +7,7 @@ import * as THREE from 'three/webgpu';
 import { World } from '../src/world/world.ts';
 import { CellLayer, type LayerSource } from '../src/render/cellLayer.ts';
 import { Dirty } from '../src/core/grid.ts';
-import type { PackedMesh } from '../src/jobs/protocol.ts';
+import type { PackedMesh } from '../src/shared/contracts/worker.ts';
 
 /** A one-triangle packed mesh. */
 function triangle(): PackedMesh {

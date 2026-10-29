@@ -5,7 +5,7 @@
 import { CELL_SIZE, CELLS_PER_TILE, MAP_TILES } from '../config.ts';
 import { CELL_COUNT, Dirty, SpatialIndex, cellId, cellX } from '../core/grid.ts';
 import { Table } from '../core/table.ts';
-import { NODE_REC, SEG_REC, type RoadGraph, type RoadSave } from '../jobs/protocol.ts';
+import { NODE_REC, SEG_REC, type RoadGraph, type RoadSave } from '../shared/contracts/worker.ts';
 import { bez, bezLength, closestT, type Quad } from './geometry.ts';
 
 export const MAX_DEG = 8;

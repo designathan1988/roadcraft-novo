@@ -2,7 +2,7 @@
 // normal (never the wrong side), compact packing at the end.
 
 import { octEncode } from './boxMesh.ts';
-import type { PackedMesh } from './protocol.ts';
+import type { PackedMesh } from '../shared/contracts/worker.ts';
 
 export class MeshBuilder {
   pos = new Float32Array(3 * 4096);

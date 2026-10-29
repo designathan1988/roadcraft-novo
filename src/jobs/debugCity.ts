@@ -8,7 +8,7 @@ import { Rng, fbm, hash2 } from '../core/rng.ts';
 import { tileX, tileId } from '../core/grid.ts';
 import { heightIndex, worldOfSample } from '../world/heights.ts';
 import { baseHeight, waterLevelAt } from './terrainGen.ts';
-import { SHAPE_STRIDE, emptyBoxes, type BoxColumns } from './protocol.ts';
+import { SHAPE_STRIDE, emptyBoxes, type BoxColumns } from '../shared/contracts/worker.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 
 export const BLOCK = 88; // grid spacing (m)

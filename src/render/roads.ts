@@ -7,7 +7,7 @@ import * as THREE from 'three/webgpu';
 import { CELLS_PER_TILE, MAP_CELLS, MAP_TILES } from '../config.ts';
 import { Dirty, cellId, cellOriginX, tileOriginX, type DirtyCells } from '../core/grid.ts';
 import type { JobPool } from '../jobs/pool.ts';
-import { roadGraphTransfer } from '../jobs/protocol.ts';
+import { roadGraphTransfer } from '../shared/contracts/worker.ts';
 import { RMAT, RoadCode } from '../jobs/roadMesh.ts';
 import type { RoadNetwork } from '../roads/network.ts';
 import { heightAt } from '../world/heights.ts';

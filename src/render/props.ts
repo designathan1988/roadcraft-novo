@@ -9,7 +9,7 @@ import * as THREE from 'three/webgpu';
 import { CELL_COUNT, Dirty, cellOriginX, tileId, tileX, type DirtyReader } from '../core/grid.ts';
 import { CELL_SIZE, MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
-import { boxTransfer, roadGraphTransfer, type PropColumns } from '../jobs/protocol.ts';
+import { boxTransfer, roadGraphTransfer, type PropColumns } from '../shared/contracts/worker.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';

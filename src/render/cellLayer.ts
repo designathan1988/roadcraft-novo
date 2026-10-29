@@ -7,7 +7,7 @@
 import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
 import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, type DirtyCells, type DirtyKind, type DirtyReader } from '../core/grid.ts';
-import type { PackedMesh } from '../jobs/protocol.ts';
+import type { PackedMesh } from '../shared/contracts/worker.ts';
 import { SHADOW_LENGTH, SHADOW_REACH, sunDirection } from './sun.ts';
 
 export interface LayerSource {

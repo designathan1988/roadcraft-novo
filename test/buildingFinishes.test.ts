@@ -6,7 +6,7 @@ import { COOKED_FILES, COOKED_FINISHES, FIN, FINISH_COUNT, FINISH_KEYS, FINISH_S
 import { World } from '../src/world/world.ts';
 import { generateTerrainTile } from '../src/jobs/terrainGen.ts';
 import { buildBuildings } from '../src/jobs/buildingGen.ts';
-import { emptyBoxes } from '../src/jobs/protocol.ts';
+import { emptyBoxes } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 
 /** Level 0 of a cooked finish file (public/cooked/surfaces), decoded as the worker does. */

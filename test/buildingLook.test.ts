@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { BMAT, WIN_REVEAL, buildBuildings } from '../src/jobs/buildingGen.ts';
-import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/jobs/protocol.ts';
+import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { facadeWindowTable } from '../src/world/arch.ts';
 import { encodeDesign } from '../src/world/design.ts';

@@ -12,7 +12,7 @@ import { debugTileBoxes } from '../src/jobs/debugCity.ts';
 import { buildBoxMesh } from '../src/jobs/boxMesh.ts';
 import { encodeTile, decodeTile, packTileHeights, unpackTileHeights } from '../src/jobs/storage.ts';
 import { encodeMeta, decodeMeta } from '../src/save.ts';
-import { createPoseBuffers, viewPoseBuffers, PoseReader, PoseWriter } from '../src/sim/poses.ts';
+import { createPoseBuffers, viewPoseBuffers, PoseReader, PoseWriter } from '../src/shared/contracts/poses.ts';
 
 test('relevo é determinístico pela semente', () => {
   const a = new World(), b = new World();

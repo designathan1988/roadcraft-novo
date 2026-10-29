@@ -3,7 +3,7 @@
 
 import { HEIGHT_TILE_RES, MAP_TILES, SAVE_VERSION, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { heightIndex } from '../world/heights.ts';
-import { SEG_REC, SEG_REC_V2, boxColumnList, columnStride, emptyBoxes, type BoxColumns, type RoadSave } from './protocol.ts';
+import { SEG_REC, SEG_REC_V2, boxColumnList, columnStride, emptyBoxes, type BoxColumns, type RoadSave } from '../shared/contracts/worker.ts';
 import { generatedBuilt } from '../world/decay.ts';
 
 const MAGIC_TILE = 0x31544443; // 'CDT1'

@@ -3,8 +3,8 @@
 import { setCustomProfiles } from '../roads/profiles.ts';
 import { HEIGHT_TILE_RES } from '../config.ts';
 import { NO_WATER, WATER_TILE_RES } from '../world/ground.ts';
-import type { FromWorker, JobKind, JobPayloads, JobResults, ToWorker } from './protocol.ts';
-import { boxTransfer, lotTransfer, meshTransfer, propTransfer } from './protocol.ts';
+import type { FromWorker, JobKind, JobPayloads, JobResults, ToWorker } from '../shared/contracts/worker.ts';
+import { boxTransfer, lotTransfer, meshTransfer, propTransfer } from '../shared/contracts/worker.ts';
 import { generateTerrainTile } from './terrainGen.ts';
 import { conformTileToGrid, debugTileRoads } from './debugCity.ts';
 import { buildBuildings } from './buildingGen.ts';

@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
 import { CELL_COUNT, Dirty, cellId, cellOriginX, tileOriginX } from '../core/grid.ts';
 import type { JobPool } from '../jobs/pool.ts';
-import { boxTransfer } from '../jobs/protocol.ts';
+import { boxTransfer } from '../shared/contracts/worker.ts';
 import type { World } from '../world/world.ts';
 import { heightAt } from '../world/heights.ts';
 import { CellLayer, type LayerSource } from './cellLayer.ts';

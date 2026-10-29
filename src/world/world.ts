@@ -6,7 +6,7 @@ import { NO_WATER, createGroundBuffers } from './ground.ts';
 import { CELL_COUNT, DirtyCells, Dirty, SpatialIndex, TILE_COUNT, cellX, cellId, tileOfCell, tileX, tileId } from '../core/grid.ts';
 import { Table } from '../core/table.ts';
 import { createHeightBuffer } from './heights.ts';
-import { SHAPE_MAX, SHAPE_SCALE, SHAPE_STRIDE, emptyBoxes, type BoxColumns } from '../jobs/protocol.ts';
+import { SHAPE_MAX, SHAPE_SCALE, SHAPE_STRIDE, emptyBoxes, type BoxColumns } from '../shared/contracts/worker.ts';
 import { MinuteHeap, decayTenths, nextTenthAt } from './decay.ts';
 import { RoadNetwork } from '../roads/network.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';

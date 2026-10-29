@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { generateTerrainTile } from '../src/jobs/terrainGen.ts';
 import { buildBuildings } from '../src/jobs/buildingGen.ts';
-import { emptyBoxes } from '../src/jobs/protocol.ts';
+import { emptyBoxes } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 
 /** Um prédio de cada tipo, lado a lado, numa célula perto do centro. */

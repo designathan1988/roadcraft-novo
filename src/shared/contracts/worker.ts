@@ -1,7 +1,7 @@
 // Contract between the page and the worker pool. Types and plain data only.
 
-import type { CityStyle } from './cityField.ts';
-import type { Profile } from '../roads/profiles.ts';
+import type { CityStyle } from '../../jobs/cityField.ts';
+import type { Profile } from '../../roads/profiles.ts';
 
 export interface SharedWorld {
   /** Terrain heights (see world/heights.ts). */

@@ -14,7 +14,7 @@ import { PROFILE_INFO } from '../roads/profiles.ts';
 import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
-import type { BoxColumns, PropColumns, RoadGraph } from './protocol.ts';
+import type { BoxColumns, PropColumns, RoadGraph } from '../shared/contracts/worker.ts';
 import { PART_PROP, POOL_PARTS, partKey, partW } from './parts40.ts';
 import { inFootprints, inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts } from './buildingGen.ts';
 

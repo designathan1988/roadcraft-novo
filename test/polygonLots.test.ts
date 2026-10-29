@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { World, polygonArea } from '../src/world/world.ts';
 import { curveLotSide, joinLots, lotAt, lotOutlineWorld, moveLotCorner, nearestCorner, polygonLot, splitLot, splitLotByLine } from '../src/world/lotEdit.ts';
 import { RoadJournal } from '../src/roads/build.ts';
-import { SHAPE_MAX, SHAPE_SCALE, SHAPE_STRIDE } from '../src/jobs/protocol.ts';
+import { SHAPE_MAX, SHAPE_SCALE, SHAPE_STRIDE } from '../src/shared/contracts/worker.ts';
 
 function flatWorld(): World {
   const w = new World();

@@ -4,7 +4,7 @@
 // with `fail` (the worker's error, superseded by a newer job of the same key, a
 // message that could not be sent or read, or a worker that died).
 
-import type { FromWorker, JobKind, JobPayloads, JobResults, SharedWorld, ToWorker } from './protocol.ts';
+import type { FromWorker, JobKind, JobPayloads, JobResults, SharedWorld, ToWorker } from '../shared/contracts/worker.ts';
 import { MAP_TAG } from '../config.ts';
 
 interface Pending {
