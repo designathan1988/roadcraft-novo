@@ -188,19 +188,22 @@ test('ônibus levam pedestres: andam até a parada, embarcam e descem a pé', ()
   tr.nodesRebuilt([...Array(sim.net.nodes.end).keys()]);
   tr.density = 0;
   const peds = new Peds(sim);
-  peds.density = 1 / 6;
+  peds.density = 1 / 12;
   peds.transitShare = 0.6;
   let atStop = 0, alighted = 0;
   peds.pickTrip = () => tr.pickTrip();
   peds.onStop = (l, a, b) => { atStop++; tr.pedAtStop(l, a, b); };
   tr.onAlight = (node, n) => { alighted += n; peds.spawnAt(node, n); };
   tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
+  let ran = 0;
   for (let i = 0; i < 20 * 900; i++) {
     tr.step(0.05); peds.step(0.05);
     if (i % 20 === 0) tr.checkWindow();
+    ran = i;
+    if (atStop > 5 && alighted > 5) break;
   }
-  assert.ok(atStop > 5, `chegaram à parada: ${atStop}`);
-  assert.ok(alighted > 5, `desceram: ${alighted}`);
+  assert.ok(atStop > 5, `chegaram à parada: ${atStop} em ${(ran * 0.05).toFixed(0)} s`);
+  assert.ok(alighted > 5, `desceram: ${alighted} em ${(ran * 0.05).toFixed(0)} s`);
 });
 
 test('setas por faixa e faixa de ônibus decidem as conexões', async () => {
