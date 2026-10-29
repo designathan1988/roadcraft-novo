@@ -28,9 +28,9 @@ const WINDOW = 1500;
 // fast the city drives. Meso takes MESO_ALPHA times the `mesoEnter` estimate: free driving slowed by occupancy
 // (1 + MESO_CROWD × occupancy²) plus the junction's wait (the lights and zebras themselves are simulated at the line).
 // Measured on a 6 × 6 grid at 8:00, the camera on it against 8 km away (test "the camera does not change how fast the
-// city drives"): 23.7 / 21.8, 11.0 / 11.0 and 5.9 / 6.3 km/h at densities 1/100, 1/30 and 1/15 (with the old 2.5 and 3,
-// set before the lights were simulated far away: 23.7 / 10.0 km/h in light traffic)
-const MESO_ALPHA = 0.85, MESO_CROWD = 12;
+// city drives"): 21.7 / 20.8, 10.6 / 10.9 and 5.9 / 6.7 km/h at densities 1/100, 1/30 and 1/15 with MESO_ALPHA 0.95
+// (the earlier 0.85 with the same scene gave 5.7 / 7.4 at 1/15, the far model too fast)
+const MESO_ALPHA = 0.95, MESO_CROWD = 12;
 const WINDOW_OUT = 1750;
 /** Stopped for this long (s), the driver reconsiders the route (roadcraft STUCK_SECONDS). */
 export const STUCK_SECONDS = 10;
