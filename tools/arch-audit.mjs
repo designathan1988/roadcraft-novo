@@ -71,7 +71,7 @@ const layerOf = (rel) => {
   if (parts[1] === 'shared') return 'shared';
   if (parts.length === 2) return APP_FILES.has(rel) ? 'app' : PLATFORM_FILES.has(rel) ? 'platform' : SHARED_FILES.has(rel) ? 'shared' : 'app';
   const l = parts[1];
-  return ['core', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools'].includes(l) ? l : 'other';
+  return ['core', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools', 'features'].includes(l) ? l : 'other';
 };
 
 const edges = [];
@@ -134,8 +134,9 @@ const allowed = {
   render: ['core', 'shared', 'world', 'roads', 'jobs', 'r40', 'render'],
   ui: ['core', 'shared', 'world', 'roads', 'sim', 'platform', 'ui'],
   tools: ['core', 'shared', 'world', 'roads', 'sim', 'render', 'ui', 'tools'],
+  features: ['core', 'shared', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'features'],
   r40: ['core', 'shared', 'r40'],
-  app: ['core', 'shared', 'platform', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools', 'app'],
+  app: ['core', 'shared', 'platform', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools', 'features', 'app'],
 };
 const violations = [];
 for (const e of edges) {

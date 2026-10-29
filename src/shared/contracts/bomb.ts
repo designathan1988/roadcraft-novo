@@ -1,4 +1,5 @@
-// The bomb's force and blast, as Roadcraft 4.0 (v2/shell.ts:1632-1634, actionsWiring.ts:230, toolChoices.ts:214).
+// The bomb's force and blast, as Roadcraft 4.0 (v2/shell.ts:1632-1634, actionsWiring.ts:230,
+// toolChoices.ts:214). Pure data and math, shared by the interface and the demolition feature.
 
 /** The force the bomb starts with. */
 export const BOMB_START = 5;

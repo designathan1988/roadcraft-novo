@@ -16,7 +16,7 @@ import { LANE_CHOICES, PARKING_PRESETS } from '../roads/roadVariant.ts';
 import { button, card, choices, dropdown, el, orow, range, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, fmtInt, loose, plural, t } from '../shared/i18n/index.ts';
-import { BOMB_START, bombStep } from './strike.ts';
+import { BOMB_START, bombStep } from '../shared/contracts/bomb.ts';
 import { lineName } from './transitNames.ts';
 import { openRoadKeys } from './roadKeysPanel.ts';
 

@@ -1,13 +1,13 @@
 {
   "summary": {
-    "files": 234,
-    "bytes": 3767605,
-    "lines": 67772,
+    "files": 235,
+    "bytes": 3769739,
+    "lines": 67828,
     "over50k": 12,
     "over100k": 5,
     "over150k": 4,
-    "edges": 907,
-    "typeOnlyEdges": 146,
+    "edges": 917,
+    "typeOnlyEdges": 149,
     "valueCycles": 0,
     "allCycles": 4,
     "typeOnlyCycles": 4,
@@ -15,6 +15,7 @@
     "layers": [
       "app",
       "core",
+      "features",
       "jobs",
       "platform",
       "r40",
@@ -44,7 +45,7 @@
     },
     {
       "rel": "src/game.ts",
-      "bytes": 162668
+      "bytes": 160779
     },
     {
       "rel": "src/r40/render/buildings/signature.ts",
@@ -84,7 +85,7 @@
     },
     {
       "rel": "src/ui/drawers.ts",
-      "bytes": 47697
+      "bytes": 47713
     },
     {
       "rel": "src/render/props.ts",

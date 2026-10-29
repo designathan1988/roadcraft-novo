@@ -52,7 +52,8 @@ import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
 import { installKeys } from './ui/keys.ts';
 import { attachPinch } from './ui/touch.ts';
-import { BOMB_START, bombRadius } from './ui/strike.ts';
+import { BOMB_START } from './shared/contracts/bomb.ts';
+import { dropBomb } from './features/demolition/bomb.ts';
 import { demandFactor, zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
@@ -1462,6 +1463,7 @@ export class Game {
     },
     /** Demolish everything in the rectangle. */
     demolish: (x0: number, z0: number, x1: number, z1: number) => { const r = demolishBox(this.world, x0, z0, x1, z1); if (r) this.commands.push(r.cmd); return r?.count ?? 0; },
+    bomb: (x: number, z: number) => { this.bomb(x, z); },
     /** Terrain height at (x, z). */
     ground: (x: number, z: number) => heightAt(this.world.heights, x, z),
     junction: (x: number, z: number, ctl: number) => { const n = this.world.roads.nearestNode(x, z, 20); if (n >= 0) this.world.roads.setJunction(n, { ctl }); },
@@ -1609,46 +1611,20 @@ export class Game {
     this.sim.postMessage({ type: 'hit', x, z, r: 3, one: true } satisfies ToSim);
   }
 
-  /** Bomb: flash, fire and smoke; buildings in the radius collapse into rubble (one command); the simulation removes whoever was near. */
+  /** Bomb: the feature owns the world change and the effect context; the page only wires them. */
   private bomb(x: number, z: number): void {
-    const w = this.world, col = w.buildings.cols;
-    const r = bombRadius(this.bombForce);
-    const y = heightAt(w.heights, x, z);
-    this.blast.boom(x, y, z, r);
-    this.ambient.sfx('boom');
-    this.particles.burst(x, y + 1, z, 2, 8, 12);
-    this.particles.burst(x, y + 2, z, 0, 10, 40);
-    this.particles.burst(x, y + 0.5, z, 6, 10, 3);
-    this.particles.burst(x, y + 0.5, z, 4, 12, 15);
-    flashU.value = 1;
-    const doomed: number[] = [];
-    w.buildingIndex.query(x - r - 40, z - r - 40, x + r + 40, z + r + 40, (id) => {
-      if (col.floors[id] === 0) return;
-      if (Math.hypot(col.x[id] - x, col.z[id] - z) < r + Math.min(col.w[id], col.d[id]) * 0.3) doomed.push(id);
-    });
-    if (doomed.length) {
-      const j = new RoadJournal(w, 'bomba');
-      const rubble = new ItemsCommand(w.items, 'entulho');
-      for (const id of doomed) {
-        const gy = heightAt(w.heights, col.x[id], col.z[id]);
-        this.blast.collapse(col.x[id], gy, col.z[id], col.w[id], col.d[id], Math.max(3, wallsHeight(col.zone[id], col.floors[id], col.x[id], col.z[id], col.style[id], col.fn[id], col.color[id], col.h[id])), col.rot[id]);
-        this.particles.burst(col.x[id], gy + 1, col.z[id], 4, 14, 10);
-        const rec = w.buildingRec(id);
-        j.removeBuilding(id);
-        // rubble: the lot is left empty and full of stones and gravel
-        j.addBuilding({ x: rec[1], z: rec[2], w: rec[3], d: rec[4], h: 0, rot: rec[6], color: 0, seed: rec[8], zone: rec[9], floors: 0, style: rec[11], fn: 0 });
-        const n = Math.min(40, Math.round(rec[3] * rec[4] / 12));
-        for (let k = 0; k < n; k++) {
-          const lx = (Math.random() - 0.5) * rec[3] * 0.85, lz = (Math.random() - 0.5) * rec[4] * 0.85, c = Math.cos(rec[6]), s = Math.sin(rec[6]);
-          rubble.add([rec[1] + lx * c + lz * s, rec[2] - lx * s + lz * c, Math.random() * 6, 0, k % 3 === 0 ? Item.Gravel : Item.Stones, 12]);
-        }
-      }
-      const both = { label: 'bomba', apply: () => { j.apply(); rubble.apply(); }, invert: () => { rubble.invert(); j.invert(); } };
-      this.commands.push(both);
-    }
-    this.hitKind = 'bomb';
-    this.sim.postMessage({ type: 'hit', x, z, r, one: false } satisfies ToSim);
-    this.hud.toast(doomed.length ? plural('game.toast.collapsed', doomed.length) : t('game.toast.bombGround'));
+    dropBomb({
+      world: this.world,
+      push: (cmd) => this.commands.push(cmd),
+      blast: this.blast,
+      particles: this.particles,
+      sim: { postMessage: (msg) => this.sim.postMessage(msg) },
+      hud: this.hud,
+      ambient: this.ambient,
+      flash: flashU,
+      force: this.bombForce,
+      setHitKind: (kind) => { this.hitKind = kind; },
+    }, x, z);
   }
 
   private onHit(people: number, vehicles: number): void {

@@ -140,7 +140,14 @@ O `r40` é um subsistema portado do 4.0; ele fica atrás de uma fachada (`r40/ap
 
 Resultado: **0 ciclos de runtime, 0 vazamentos de valor**; 4 ciclos só de tipos; 12 arquivos >=50 KB.
 
-### Fase 3 — arquivos gigantes, um por vez
+### Fase 3 — arquivos gigantes, um por vez (em andamento)
+
+**Feito em 2026-10-29:** a bomba saiu do `game.ts` para `features/demolition/bomb.ts` com contexto explícito
+(`world`, `push`, `blast`, `particles`, `sim`, `hud`, `ambient`, `flash`, `force`, `setHitKind`); as constantes puras
+foram para `shared/contracts/bomb.ts`. O `game.ts` só faz a ligação; `api.bomb(x,z)` existe para teste. O teste na
+cidade de 4 km mostrou o alvo com `floors: 12` antes e `floors: 0` depois (a demolição lógica funciona), mas a foto
+mostra uma caixa cinza gigante do `Blast.collapse`, não o interior do Roadcraft. O efeito/interior é a fatia de
+feature seguinte; a extração não mudou o efeito.
 
 Ordem por risco e valor (não por tamanho):
 
@@ -171,9 +178,11 @@ Ordem por risco e valor (não por tamanho):
 - Feito: audit, 2 -> 0 ciclos de runtime, Fase 2 (contratos e plataforma), 0 vazamentos de valor, plano e mapa de
   teste 4 km.
 - Em dívida: 4 ciclos só de tipos, 12 arquivos >50 KB (4 >150 KB), arquivos gigantes de aplicação/geração/render.
-- Próximo slice: **Fase 3.1** — extrair do `game.ts` os módulos de aplicação, um por commit: `app/session.ts`
-  (novo/abrir/salvar), `app/tools.ts` (troca/click), `features/demolition/bomb.ts` (bomba) e `app/photoHooks.ts`.
-  A bomba vira módulo próprio antes de qualquer mudança de efeito; o `game.ts` fica composição + API.
+- Feito: **Fase 3.1** — `features/demolition/bomb.ts` e `shared/contracts/bomb.ts`; `game.ts` só faz a ligação;
+  `api.bomb` para teste; `BOMB_BEFORE floors 12 -> BOMB_AFTER floors 0` na cidade de 4 km. O efeito atual é uma caixa
+  cinza (`Blast.collapse`), não o interior; fica para a fatia de feature.
+- Próximo slice: **Fase 3.2** — extrair `app/session.ts` (novo/abrir/salvar) e `app/tools.ts` (troca/click) do
+  `game.ts`, um por commit; depois `app/photoHooks.ts`. O `game.ts` fica composição + API.
 - Depois: `sim/traffic.ts`, `jobs/buildingGen.ts`, `r40/render/buildings/buildingMesh.ts` (este por último, atrás de
   `r40/api.ts`), e mover `platform` para `src/platform/`.
 - A suíte `npm test` travou sem saída no ambiente; isso é uma dívida separada a investigar antes de declarar qualquer
