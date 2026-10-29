@@ -10,7 +10,8 @@ import { LINE_COLORS } from '../world/transit.ts';
 import { PAINTS } from '../shared/vehiclePaints.ts';
 import { DEFAULT_PERSON_OPTIONS, type PersonOptions } from '../shared/contracts/people.ts';
 import { renderPeople } from './peoplePanel.ts';
-import type { HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hud.ts';
+import type { Category, HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hudActions.ts';
+export type { Category } from './hudActions.ts';
 import { topSwatch, type RoadCatalog } from './roadCatalog.ts';
 import { LANE_CHOICES, PARKING_PRESETS } from '../roads/roadVariant.ts';
 import { button, card, choices, dropdown, el, orow, range, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
@@ -20,7 +21,6 @@ import { BOMB_START, bombStep } from '../shared/contracts/bomb.ts';
 import { lineName } from './transitNames.ts';
 import { openRoadKeys } from './roadKeysPanel.ts';
 
-export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
 
 /** The dock: category, the tool it opens, its key (the key table in keys.ts reads this too). */
 export const CATS: ReadonlyArray<{ id: Category; tool: Tool; key: string; icon: string }> = [

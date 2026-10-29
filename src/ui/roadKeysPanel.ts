@@ -4,8 +4,7 @@
 
 import { t } from '../shared/i18n/index.ts';
 import { keyName, reservedKeys } from './keys.ts';
-
-export interface RoadKeys { roadUp: string; roadDown: string; roadAlign: string }
+import type { RoadKeys } from './hudActions.ts';
 
 /** The defaults, which are game keys too (Page Up / Down tilt the camera elsewhere, V turns the view). */
 const DEFAULTS: RoadKeys = { roadUp: 'PageUp', roadDown: 'PageDown', roadAlign: 'KeyV' };

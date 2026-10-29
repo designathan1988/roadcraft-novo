@@ -7,7 +7,6 @@
 import './shell.css';
 import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
-import type { LaneChoice, ParkingPreset } from '../roads/roadVariant.ts';
 import { button, rename, closeDropdown, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
 import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, onLanguageChange, plural, setLang, t } from '../shared/i18n/index.ts';
@@ -17,9 +16,9 @@ import { keyHelp, keyName } from './keys.ts';
 import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
 import { centreText } from './readouts.ts';
-import { closeRoadKeys, type RoadKeys } from './roadKeysPanel.ts';
-import type { PersonOptions } from '../shared/contracts/people.ts';
-import type { creatorCatalog } from '../render/people/creator.ts';
+import { closeRoadKeys } from './roadKeysPanel.ts';
+import type { CityStatus, HudActions, LotMode, SimSettings, SkyMode, Tool } from './hudActions.ts';
+export type { CityStatus, HudActions, LotMode, SimSettings, SkyMode, SkyToolState, Tool, WeatherCtl } from './hudActions.ts';
 import {
   CATS, ShellState, categoriesOf, lineInfo, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
   type BuilderTab, type BuilderTabRender, type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,
@@ -27,187 +26,13 @@ import {
 
 declare const __BUILD__: string;
 
-export type Tool = 'camera' | 'inspect' | 'road' | 'curve' | 'roundabout' | 'upgrade' | 'blocks' | 'free' | 'move' | 'split' | 'bulldoze' | 'zone' | 'building' | 'transit' | 'streetscape' | 'barrier' | 'raise' | 'lower' | 'smooth' | 'flatten' | 'paint' | 'forest' | 'river' | 'weather' | 'landform' | 'elements' | 'sky' | 'person' | 'pistol' | 'bomb';
-export type SkyMode = 'ciclo' | 'dia' | 'noite';
-export interface SkyToolState { cloud: 'none' | 'add' | 'move' | 'edit' | 'remove'; fog: 'none' | 'lay' | 'erase'; size: number; base: number; density: number; fogHeight: number }
-/** Rain 0..1, wind in m/s, direction in degrees (where it blows to), lightning per minute, thunder 0..1. */
-export interface WeatherCtl { rain: number; wind: number; dir: number; lightning: number; thunder: number }
-export type LotMode = 'edit' | 'rect' | 'poly' | 'split' | 'join' | 'delete' | 'front' | 'corner';
 export const TERRAIN_TOOLS: Tool[] = ['raise', 'lower', 'smooth', 'flatten', 'landform'];
 /** Ground brushes (they share the radius). */
 export const GROUND_TOOLS: Tool[] = ['paint', 'forest', 'elements'];
 export const ROAD_TOOLS: Tool[] = ['road', 'curve', 'free', 'roundabout', 'upgrade', 'blocks', 'move', 'split', 'bulldoze'];
 
 /** The simulation's settings the Simulation panel changes. */
-export interface SimSettings { traffic: number; people: number; demand: 'baixa' | 'normal' | 'pico' }
 
-/** The city's numbers for the top bar and the Simulation panel (counters the engine already keeps). */
-export interface CityStatus {
-  cars: number; peds: number; residents: number; jobs: number; buildings: number;
-  speedKmh: number; tripsPerMin: number; lostPerMin: number; stopped: number; roads: number; nodes: number;
-  /** Junctions that cannot be built (two roads under 25°). */
-  impossible: number;
-}
-
-/**
- * Capabilities other fronts publish in Game.hudActions (the gameplay front's src/tools/featureActions.ts). They are
- * optional here: a panel turns its button on when the action exists, and leaves it "being built" otherwise.
- */
-export interface OptionalActions {
-  /** The road tool's options (Roadcraft 4.0 ui/v2/shell.ts:1244-1299): lanes, total width and parking of the next road,
-   *  null for the road's own; the road's own lane count and width; the road picked. */
-  roadOptions?(): { lanes: LaneChoice | null; width: number | null; parking: ParkingPreset | null; ownLanes: number; ownWidth: number; base: number };
-  roadLanes?(c: LaneChoice | null): void;
-  roadWidth?(m: number | null): void;
-  roadParking?(p: ParkingPreset | null): void;
-  /** Upgrade: the class cards [profile, name key] (4.0 ui/v2/shell.ts:1308-1314). */
-  roadClasses?(): Array<[number, string]>;
-  /** Lot: split by a line drawn across it (two clicks). */
-  lotLine?(): void;
-  /** Lot: curve a side (click near it, then where it should pass). */
-  lotCurve?(): void;
-  /** Leaves the two lot modes above. */
-  lotExtraOff?(): void;
-  /** Renovates the selected building. */
-  renovate?(): void;
-  /** Decay of the selected building, 0..1 (−1: none). */
-  decayOf?(): number;
-  /** Address of the selected building ("Rua X, 124"), '' when none. */
-  addressOf?(): string;
-  /** Name of the street nearest (x, z), '' away from streets. */
-  streetNameAt?(x: number, z: number): string;
-  /** Regional road paint of this map, saved with it. */
-  mapPaint?(style: string): void;
-  /** Colour of the chosen transit line (index into the vehicle paints, world/transit.ts LINE_COLORS). */
-  lineColor?(color: number): void;
-  /** The chosen bus line as a ring (true) or out and back. */
-  lineLoop?(loop: boolean): void;
-  /** Points the camera at the next impossible junction and inspects it (the top bar's warning). */
-  showImpossible?(): void;
-  /** The health panel's state for the dot on its button: ok, slow, broken. */
-  healthLevel?(): string;
-  /** The people creator's choices (people front, src/render/people/creator.ts). */
-  personOptions?(o: Partial<PersonOptions>): void;
-  /** What the people creator offers; null until the cooked people load. */
-  peopleCatalog?(): ReturnType<typeof creatorCatalog> | null;
-}
-
-export interface HudActions extends OptionalActions {
-  tool(t: Tool): void;
-  radius(r: number): void;
-  strength(s: number): void;
-  profile(p: number): void;
-  zone(z: number): void;
-  zoneRadius(r: number): void;
-  floors(delta: number): void;
-  /** Architecture style (−1 = automatic by neighbourhood). */
-  style(arch: number): void;
-  buildingFn(fn: number): void;
-  /** Lot tool: edit building, draw (rectangle, polygon), split, join, delete, front, corners. */
-  lotMode(mode: LotMode): void;
-  /** Split: side by side or front and back, into how many. */
-  lotSplit(kind: 'side' | 'depth', parts: number): void;
-  /** Zone: brush or whole block. */
-  zoneFill(block: boolean): void;
-  lotUse(zone: number): void;
-  demolishBuilding(): void;
-  /** See inside: on/off and floor (+1 / −1). */
-  inside(cmd: 'toggle' | 'up' | 'down'): void;
-  elevation(delta: number): void;
-  /** Road snapping: 0 off, 1 angles, 2 angles and grid. */
-  roadSnap(mode: number): void;
-  /** Sides of a lowered road: batter or retaining walls. */
-  cutWalls(on: boolean): void;
-  /** Blocks: columns, rows, block (m), rotation (°). */
-  blocks(b: { cols: number; rows: number; size: number; angle: number }): void;
-  undo(): void;
-  redo(): void;
-  view(v: 'persp' | 'iso' | 'top'): void;
-  save(): void;
-  load(): void;
-  exportMap(): void;
-  importMap(file: File): void;
-  newMap(): void;
-  testCity(): void;
-  generate(): void;
-  /** The title screen (seed, map size, empty map, last game). */
-  startScreen(): void;
-  options(): void;
-  help(): void;
-  trafficView(): void;
-  follow(): void;
-  /** Map grid (on/off). */
-  grid(): void;
-  /** Compass: north up. */
-  north(): void;
-  line(id: number): void;
-  newLine(): void;
-  lineMode(mode: number): void;
-  buses(delta: number): void;
-  deleteLine(): void;
-  item(kind: number): void;
-  signType(kind: number): void;
-  /** Sign text (street name etc.). */
-  signText(text: string): void;
-  barrierKind(kind: number): void;
-  groundKind(kind: number): void;
-  forestMode(cut: boolean): void;
-  forestSpecies(species: number): void;
-  forestOne(one: boolean): void;
-  poleLights(mode: number): void;
-  biome(b: number): void;
-  riverWidth(w: number): void;
-  landform(mode: string): void;
-  elements(e: { kind: number; mode: 'lay' | 'eraseKind' | 'eraseAll'; density: number; size: number }): void;
-  flattenMap(): void;
-  weather(w: WeatherCtl | null): void;
-  sky(mode: SkyMode): void;
-  water(w: { waves: number; foam: number; current: number }): void;
-  skyTool(s: SkyToolState): void;
-  scatterClouds(count: number, variation: number): void;
-  clearClouds(): void;
-  fogLevel(v: number): void;
-  personSpec(p: { color: number; height: number; walk: boolean; count: number }): void;
-  bombForce(f: number): void;
-  /** The road tool's keys changed in their panel (kept with the options). */
-  roadKeys(patch: Partial<RoadKeys>): void;
-  // ---- added with the Roadcraft interface
-  /** Simulation speed: 0 paused, 1, 2 or 4. */
-  speed(n: number): void;
-  /** The compass dragged: turn and tilt as a right-button drag of so many pixels. */
-  orbit(dx: number, dy: number): void;
-  /** A quarter of a right angle to the left (−1) or right (+1). */
-  turn(dir: number): void;
-  /** Tilt towards the top view (+1) or the horizon (−1). */
-  tilt(dir: number): void;
-  /** The zone colours shown with any tool. */
-  zoneLayer(on: boolean): void;
-  /** Traffic %, people % and demand. */
-  simulation(s: Partial<SimSettings>): void;
-  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string; roadAlign: string; preset: string; webgpu: boolean };
-  /** A quality preset (baixo, medio, alto, ultra), applied and kept. */
-  quality(preset: string): void;
-  /** The view the city opened with (Home). */
-  resetView(): void;
-  /** Regional road markings: br, us, eu, classic. */
-  paint(style: string): void;
-  /** Furniture of new roads: 0 complete, 1 basic, 2 none. */
-  furniture(n: number): void;
-  /** Roundabout radius ×f. */
-  ring(f: number): void;
-  /** Stops become terminals when clicked. */
-  terminal(on: boolean): void;
-  /** The F9 panel (a developer's tool). */
-  health(): void;
-  /** The developer panels are on (?dev, or roadcraft.dev in the browser's storage, or the development server). */
-  developer(): boolean;
-  /** Water, weather set by hand (null: automatic) and overall haze (0..2) of the map on screen (saved with it). */
-  environment(): { water: { waves: number; foam: number; current: number }; weather: WeatherCtl | null; fog: number };
-  /** Street item clicks remove (on) or place (off). */
-  itemRemove(on: boolean): void;
-  /** Camera distance to its target (m) and the target on the map. */
-  cameraNumbers(): { zoom: number; x: number; z: number };
-}
 
 type PopId = 'menu' | 'layers' | 'sim' | 'camera' | 'help';
 

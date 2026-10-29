@@ -3,7 +3,8 @@
 // they do (stand, walk, a group in a ring) and what they hold. A click on the map places them (one undo step).
 // Until the cooked people load, the engine's simple creator (colour, height, standing or walking, how many).
 
-import type { DrawerHost, DrawerParts } from './drawers.ts';
+import type { HudActions } from './hudActions.ts';
+import type { PersonOptions } from '../shared/contracts/people.ts';
 import { section } from './panelParts.ts';
 import { card, choices, dropdown, el, orow, range } from './dom.ts';
 import { svg } from './icons.ts';
@@ -11,7 +12,14 @@ import { fmtDec, t } from '../shared/i18n/index.ts';
 
 const hex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
 
-export function renderPeople(h: DrawerHost, p: DrawerParts, simpleColours: readonly string[]): void {
+interface PeopleHost {
+  s: { person: { color: number; height: number; walk: boolean; count: number }; people: PersonOptions };
+  render(): void;
+  a: Pick<HudActions, 'personSpec' | 'personOptions' | 'peopleCatalog'>;
+}
+interface PeopleParts { options: HTMLElement; strip: HTMLElement }
+
+export function renderPeople(h: PeopleHost, p: PeopleParts, simpleColours: readonly string[]): void {
   const s = h.s, a = h.a;
   const cat = a.peopleCatalog?.() ?? null;
   if (!cat) {

@@ -3,8 +3,8 @@
 // thing at a time: the open menu, then the open panel, then the stroke in progress, then the tool. The help (F1)
 // and the keys the road keys cannot take are read from the same table, so they never drift from what the keys do.
 
-import type { Tool } from './hud.ts';
-import type { Category } from './drawers.ts';
+import type { Tool } from './hudActions.ts';
+import type { Category } from './hudActions.ts';
 import { t } from '../shared/i18n/index.ts';
 
 export type KeyResult = 'done' | 'pass';

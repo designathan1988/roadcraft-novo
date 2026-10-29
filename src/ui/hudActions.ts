@@ -1,0 +1,133 @@
+// The interface between the interface and the game, in a type-only module: drawers/hud/keys do not import
+// each other for it.
+import type { LaneChoice, ParkingPreset } from '../roads/roadVariant.ts';
+import type { PersonOptions } from '../shared/contracts/people.ts';
+import type { creatorCatalog } from '../render/people/creator.ts';
+export interface RoadKeys { roadUp: string; roadDown: string; roadAlign: string }
+
+export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
+export type Tool = 'camera' | 'inspect' | 'road' | 'curve' | 'roundabout' | 'upgrade' | 'blocks' | 'free' | 'move' | 'split' | 'bulldoze' | 'zone' | 'building' | 'transit' | 'streetscape' | 'barrier' | 'raise' | 'lower' | 'smooth' | 'flatten' | 'paint' | 'forest' | 'river' | 'weather' | 'landform' | 'elements' | 'sky' | 'person' | 'pistol' | 'bomb';
+export type SkyMode = 'ciclo' | 'dia' | 'noite';
+export interface SkyToolState { cloud: 'none' | 'add' | 'move' | 'edit' | 'remove'; fog: 'none' | 'lay' | 'erase'; size: number; base: number; density: number; fogHeight: number }
+/** Rain 0..1, wind in m/s, direction in degrees (where it blows to), lightning per minute, thunder 0..1. */
+export interface WeatherCtl { rain: number; wind: number; dir: number; lightning: number; thunder: number }
+export type LotMode = 'edit' | 'rect' | 'poly' | 'split' | 'join' | 'delete' | 'front' | 'corner';
+/** The simulation's settings the Simulation panel changes. */
+export interface SimSettings { traffic: number; people: number; demand: 'baixa' | 'normal' | 'pico' }
+/** The city's numbers for the top bar and the Simulation panel (counters the engine already keeps). */
+export interface CityStatus {
+  cars: number; peds: number; residents: number; jobs: number; buildings: number;
+  speedKmh: number; tripsPerMin: number; lostPerMin: number; stopped: number; roads: number; nodes: number;
+  /** Junctions that cannot be built (two roads under 25°). */
+  impossible: number;
+}
+
+/** Capabilities other fronts publish in Game.hudActions (the gameplay front's src/tools/featureActions.ts). */
+export interface OptionalActions {
+  roadOptions?(): { lanes: LaneChoice | null; width: number | null; parking: ParkingPreset | null; ownLanes: number; ownWidth: number; base: number };
+  roadLanes?(c: LaneChoice | null): void;
+  roadWidth?(m: number | null): void;
+  roadParking?(p: ParkingPreset | null): void;
+  roadClasses?(): Array<[number, string]>;
+  lotLine?(): void;
+  lotCurve?(): void;
+  lotExtraOff?(): void;
+  renovate?(): void;
+  decayOf?(): number;
+  addressOf?(): string;
+  streetNameAt?(x: number, z: number): string;
+  mapPaint?(style: string): void;
+  lineColor?(color: number): void;
+  lineLoop?(loop: boolean): void;
+  showImpossible?(): void;
+  healthLevel?(): string;
+  personOptions?(o: Partial<PersonOptions>): void;
+  peopleCatalog?(): ReturnType<typeof creatorCatalog> | null;
+}
+
+export interface HudActions extends OptionalActions {
+  tool(t: Tool): void;
+  radius(r: number): void;
+  strength(s: number): void;
+  profile(p: number): void;
+  zone(z: number): void;
+  zoneRadius(r: number): void;
+  floors(delta: number): void;
+  /** Architecture style (−1 = automatic by neighbourhood). */
+  style(arch: number): void;
+  buildingFn(fn: number): void;
+  lotMode(mode: LotMode): void;
+  lotSplit(kind: 'side' | 'depth', parts: number): void;
+  zoneFill(block: boolean): void;
+  lotUse(zone: number): void;
+  demolishBuilding(): void;
+  inside(cmd: 'toggle' | 'up' | 'down'): void;
+  elevation(delta: number): void;
+  roadSnap(mode: number): void;
+  cutWalls(on: boolean): void;
+  blocks(b: { cols: number; rows: number; size: number; angle: number }): void;
+  undo(): void;
+  redo(): void;
+  view(v: 'persp' | 'iso' | 'top'): void;
+  save(): void;
+  load(): void;
+  exportMap(): void;
+  importMap(file: File): void;
+  newMap(): void;
+  testCity(): void;
+  generate(): void;
+  startScreen(): void;
+  options(): void;
+  help(): void;
+  trafficView(): void;
+  follow(): void;
+  grid(): void;
+  north(): void;
+  line(id: number): void;
+  newLine(): void;
+  lineMode(mode: number): void;
+  buses(delta: number): void;
+  deleteLine(): void;
+  item(kind: number): void;
+  signType(kind: number): void;
+  signText(text: string): void;
+  barrierKind(kind: number): void;
+  groundKind(kind: number): void;
+  forestMode(cut: boolean): void;
+  forestSpecies(species: number): void;
+  forestOne(one: boolean): void;
+  poleLights(mode: number): void;
+  biome(b: number): void;
+  riverWidth(w: number): void;
+  landform(mode: string): void;
+  elements(e: { kind: number; mode: 'lay' | 'eraseKind' | 'eraseAll'; density: number; size: number }): void;
+  flattenMap(): void;
+  weather(w: WeatherCtl | null): void;
+  sky(mode: SkyMode): void;
+  water(w: { waves: number; foam: number; current: number }): void;
+  skyTool(s: SkyToolState): void;
+  scatterClouds(count: number, variation: number): void;
+  clearClouds(): void;
+  fogLevel(v: number): void;
+  personSpec(p: { color: number; height: number; walk: boolean; count: number }): void;
+  bombForce(f: number): void;
+  roadKeys(patch: Partial<RoadKeys>): void;
+  speed(n: number): void;
+  orbit(dx: number, dy: number): void;
+  turn(dir: number): void;
+  tilt(dir: number): void;
+  zoneLayer(on: boolean): void;
+  simulation(s: Partial<SimSettings>): void;
+  settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string; roadAlign: string; preset: string; webgpu: boolean };
+  quality(preset: string): void;
+  resetView(): void;
+  paint(style: string): void;
+  furniture(n: number): void;
+  ring(f: number): void;
+  terminal(on: boolean): void;
+  health(): void;
+  developer(): boolean;
+  environment(): { water: { waves: number; foam: number; current: number }; weather: WeatherCtl | null; fog: number };
+  itemRemove(on: boolean): void;
+  cameraNumbers(): { zoom: number; x: number; z: number };
+}
