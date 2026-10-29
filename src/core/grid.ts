@@ -60,6 +60,15 @@ export function tileOfCell(cid: number): number {
   return tileId((cx / per) | 0, (cz / per) | 0);
 }
 
+/** The cells of a tile, row by row (the order every per-tile pass uses). */
+export function cellsOfTile(t: number): number[] {
+  const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
+  const per = MAP_CELLS / MAP_TILES;
+  const out: number[] = [];
+  for (let j = 0; j < per; j++) for (let i = 0; i < per; i++) out.push(cellId(tx * per + i, tz * per + j));
+  return out;
+}
+
 /**
  * Spatial index with intrusive linked lists per subcell.
  * One per table. Insert/remove/move is O(1); a rectangle query
