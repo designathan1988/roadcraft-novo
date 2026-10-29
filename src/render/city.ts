@@ -116,7 +116,9 @@ export function createCity(world: World, pool: JobPool): CellLayer {
         (r) => done(r.mesh), { key: `plate:${p}`, priority, transfer: boxTransfer(boxes) });
     },
   };
-  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1400, evict: 2600, margin: 40, detail: 1400, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
+  // L0 full detail near, L1 facade level in the middle, L2 masses far: `detail` has to stay below `near`, or the cell
+  // jumps from L0 straight to the tile's massing and the town turns into boxes at the near boundary (4.0's L1 band).
+  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1800, evict: 3000, margin: 40, detail: 700, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
 }
 
 
