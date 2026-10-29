@@ -171,7 +171,7 @@ const SPAN_REACH = 2.55 / 2 + 0.9 + 0.6;
 
 /** Numbers per vehicle in `Traffic.inspect`, and why a vehicle there may stand still (bits). */
 export const INSPECT_STRIDE = 18;
-export const INSPECT_RED = 1, INSPECT_BAY = 2, INSPECT_LEAVING = 4, INSPECT_STOP = 8, INSPECT_CHANGING = 16, INSPECT_GATE = 32;
+export const INSPECT_RED = 1, INSPECT_BAY = 2, INSPECT_LEAVING = 4, INSPECT_STOP = 8, INSPECT_CHANGING = 16, INSPECT_GATE = 32, INSPECT_PASS = 64;
 
 const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
@@ -1124,7 +1124,9 @@ export class Traffic {
     if (this.laneCount[lane] + 1 > this.sim.laneLen(lane) / 7.5) { this.veh.release(v); return; }
     const c = this.veh.cols;
     c.lane[v] = lane; c.conn[v] = -1;
-    c.s[v] = this.rng.next() * this.sim.laneLen(lane);
+    // Never born on the stop line or the crosswalk: keep the front (and the body) before it.
+    const born = Math.max(0, this.sim.laneLen(lane) - this.stopBack(lane) - c.len[v] - 1);
+    c.s[v] = this.rng.next() * born;
     this.enterLane(v, c.s[v]);
     this.setLaneCount(lane, 1);
     if (this.leaveBay(v, lane)) return;
@@ -2018,12 +2020,13 @@ export class Traffic {
           if (c.lane[v] !== lane) return;
         }
       }
-      if (lead < 0) {
-        // the stop line is before the crosswalk (roadcraft): the last metres of the lane are the zebra, kept clear
+      {
+        // the stop line is before the crosswalk (roadcraft): the last metres of the lane are the zebra, kept clear.
+        // Every vehicle checks it, not only the leader: a follower must not cross on red behind a leader.
         const toEnd = L - c.s[v], back = this.stopBack(lane), toLine = toEnd - back;
         if (toLine < 6 && c.v[v] < 0.5) c.wait[v] += dt;
         // exit blocked for a while: the driver detours via another free exit of this lane
-        if (conn >= 0 && c.wait[v] > 6 && c.lcCool[v] <= 0 && !this.exitRoom(conn, v)) {
+        if (lead < 0 && conn >= 0 && c.wait[v] > 6 && c.lcCool[v] <= 0 && !this.exitRoom(conn, v)) {
           c.lcCool[v] = 5;
           const alt = this.detour(v, lane, conn);
           if (alt >= 0) conn = alt;
@@ -2034,7 +2037,7 @@ export class Traffic {
           if (cl === v || cl < 0 || this.time - this.exitClaimT[to] >= 1 || !this.veh.alive[cl] || c.wait[cl] < c.wait[v]) { this.exitClaim[to] = v; this.exitClaimT[to] = this.time; }
         }
         // jammed junction (nobody through for 20 s and this one waiting 20 s): one at a time, with the box clear
-        if (conn >= 0 && toLine < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
+        if (lead < 0 && conn >= 0 && toLine < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
         // over the stop line with the way open, it goes on through (it is not left standing on the zebra); short of it
         // it stops at the line (on it already, at the end of the lane)
         let open = c.pass[v] === 1;
@@ -2922,6 +2925,7 @@ export class Traffic {
         if ((ctl === Ctl.Crossing && this.crossingDown(node)) || (ctl === Ctl.Zebra && this.pedCrossing(node))) flags |= INSPECT_GATE;
       }
       if (c.pk[v] > 0 || c.mv[v] >= 0) flags |= INSPECT_BAY;
+      if (c.pass[v]) flags |= INSPECT_PASS; // over its line with the way open: it is not an approach violation
       if (c.dying[v]) flags |= INSPECT_LEAVING;
       if (c.line[v] >= 0 && c.dwell[v] > 0) flags |= INSPECT_STOP;
       if (c.lcT[v] < 1) flags |= INSPECT_CHANGING;

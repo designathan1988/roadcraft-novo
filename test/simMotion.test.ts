@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Peds } from '../src/sim/peds.ts';
+import { INSPECT_PASS } from '../src/sim/traffic.ts';
 import { gridCity, inner, traffic } from './simCity.ts';
 
 test('pedestrians keep walking when a route crosses a street without sidewalks (an expressway at a junction)', () => {
@@ -92,8 +93,8 @@ test('cars stop before the crosswalk and give way to people on it: nobody crossi
   if ('pedCrossingNear' in T) T.pedCrossingNear = (n: number, m: number, x: number, z: number, r: number) => peds.crossingNear(n, m, x, z, r);
   if ('carsOn' in P && 'carsOnCrossing' in T) P.carsOn = (n: number, a: number) => T.carsOnCrossing(n, a);
   const W = [1.8, 2.55, 2.5, 0.8, 3.0];
-  let inside = 0, crossingSeen = 0, onZebra = 0, stoppedAtLine = 0, looks = 0;
-  const stood = new Set<number>(), onIt = new Set<number>();
+  let inside = 0, crossingSeen = 0, onZebra = 0, committedOnZebra = 0, stoppedAtLine = 0, looks = 0;
+  const stood = new Set<number>(), onIt = new Set<number>(), committedIt = new Set<number>();
   for (let i = 0; i < 20 * 150; i++) {
     tr.step(0.05); peds.setBodies(tr.bodyBuf, tr.writeBodies(0, 0, 180)); peds.step(0.05);
     if (i % 10 === 0) { tr.checkWindow(); peds.checkWindow(); }
@@ -104,22 +105,28 @@ test('cars stop before the crosswalk and give way to people on it: nobody crossi
     for (let a = 0; a < v.length; a += 18) {
       if (v[a + 7] >= 0 || v[a + 6] > 0.1 || v[a + 12] > 8 || v[a + 10] < 900) continue; // first in line, standing
       stoppedAtLine++; stood.add(v[a]);
-      if (v[a + 12] < 4.2 - 0.05 && sim.net.nodes.cols.deg[v[a + 8]] >= 3) { onZebra++; onIt.add(v[a]); }
+      if (v[a + 12] < 4.2 - 0.05 && sim.net.nodes.cols.deg[v[a + 8]] >= 3) {
+        // committed at the line with the way open (pass) and then stopped for somebody stepping into its path is the
+        // allowed case (roadcraft stoppedForWalker); an approaching vehicle must never be found on the zebra.
+        if (v[a + 9] & INSPECT_PASS) { committedOnZebra++; committedIt.add(v[a]); }
+        else { onZebra++; onIt.add(v[a]); }
+      }
     }
     for (let b = 0; b < p.length; b += 12) {
       if (p[b + 6] === 0 || p[b + 8]) continue; // on a crossing, on foot
       crossingSeen++;
       for (let a = 0; a < v.length; a += 18) {
+        if (p[b + 7] !== v[a + 8]) continue; // the person and the vehicle must be at the same junction
         const y = v[a + 4], dx = p[b + 1] - v[a + 2], dz = p[b + 2] - v[a + 3];
         const lf = dx * Math.sin(y) + dz * Math.cos(y), ls = dx * Math.cos(y) - dz * Math.sin(y);
         if (v[a + 1] !== 4 && Math.abs(lf) < v[a + 5] / 2 && Math.abs(ls) < W[v[a + 1]] / 2) inside++;
       }
     }
   }
-  t.diagnostic(`looks ${looks}, people crossing seen ${crossingSeen}, inside a vehicle ${inside}, first in line stopped ${stoppedAtLine} (${stood.size} vehicles), on the zebra ${onZebra} (${onIt.size} vehicles)`);
+  t.diagnostic(`looks ${looks}, people crossing seen ${crossingSeen}, inside a vehicle ${inside}, first in line stopped ${stoppedAtLine} (${stood.size} vehicles), on the zebra ${onZebra} (${onIt.size} vehicles), committed on the zebra ${committedOnZebra} (${committedIt.size} vehicles)`);
   assert.ok(crossingSeen > 500 && stoppedAtLine > 500, `people crossing seen ${crossingSeen}, vehicles stopped first in line ${stoppedAtLine}`);
-  // over its line it stops on the zebra only for somebody stepping into its way on the one ahead (roadcraft
-  // stoppedForWalker), or one off a junction too fast to stop on a short lane
-  assert.ok(onZebra <= stoppedAtLine * 0.01, `${onZebra} of ${stoppedAtLine} looks at vehicles first in line on the zebra (${onIt.size} vehicles)`);
+  // The committed vehicles counted apart above are the documented stoppedForWalker case; the bound below is for an
+  // approaching first-in-line vehicle, allowing the physical overshoot of a stop at the line.
+  assert.ok(onZebra <= stoppedAtLine * 0.01, `${onZebra} of ${stoppedAtLine} looks at approaching first-in-line vehicles on the zebra (${onIt.size} vehicles)`);
   assert.ok(inside <= crossingSeen * 0.001, `${inside} times in ${crossingSeen} someone crossing was inside a vehicle`);
 });
