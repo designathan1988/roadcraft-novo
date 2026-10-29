@@ -1,4 +1,4 @@
-import type { ChangeRect } from './changes.ts';
+export type ChangeRect = readonly [number, number, number, number];
 import { m } from './units.ts';
 import { ForkMap } from '../core/forkMap.ts';
 import { uniqueCounter } from '../core/identityMemo.ts';

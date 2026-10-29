@@ -1,6 +1,6 @@
 import { Color, MeshDepthMaterial, MeshStandardMaterial } from 'three';
 import { ROOM_LAMP_GLSL } from './roomLamps.ts';
-import { applyLotOverlay } from '../lotOverlay.ts';
+
 
 /** The material of buildings seen from afar (`massing.ts`) */
 
@@ -117,7 +117,7 @@ if (vFacade.y > 0.0) {
   };
   material.customProgramCacheKey = () => (boxes ? 'building-massing-boxes-v2' : 'building-massing-lamps-v4');
   // A built lot's yard, coloured from afar as up close (`lotOverlay.ts`).
-  applyLotOverlay(material, { building: true });
+  // (the 4.0 frame's lot overlay is not part of this engine's materials)
   return material;
 }
 

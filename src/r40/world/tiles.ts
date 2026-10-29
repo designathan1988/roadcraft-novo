@@ -1,4 +1,4 @@
-import type { ChangeRect } from './changes.ts';
+import type { ChangeRect } from './cells.ts';
 import { m } from './units.ts';
 import { lotCentre } from './lotRings.ts';
 

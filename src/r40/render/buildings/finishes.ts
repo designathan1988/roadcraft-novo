@@ -3,7 +3,7 @@ import { DoubleSide, MeshStandardMaterial, ShaderChunk, type WebGLProgramParamet
 import { type Finish, FINISHES } from '../../world/buildings/materials.ts';
 import { LOOKS, finishTiles } from '../bake/finishRecipes.ts';
 import { type SurfaceBake, surfaceMaps } from '../surfaceTextures.ts';
-import { applyLotOverlay } from '../lotOverlay.ts';
+
 import { COLOUR_RANGE, FINISH_ATTRIBUTE, PAINT_ATTRIBUTE, PAINT_UNIT, SHELL_NORMAL, WEAR_STEPS } from './cellArrays.ts';
 import { SHELL_PART_BEGIN, SHELL_PART_PARS, SHELL_UV_GLSL, shellPartVertex } from './shellParts.ts';
 
@@ -217,7 +217,7 @@ export function createShellMaterial(options: { readonly plain?: boolean; readonl
   const key = `building-shell-v2-${plain ? 'plain' : 'weathered'}-${carried ? 'carried' : 'laid'}-${maps ? 'maps' : 'none'}`;
   material.customProgramCacheKey = () => key;
   // A built lot's yard - the paving and paths are this shell's level faces at the lot's ground
-  if (!plain) applyLotOverlay(material, { building: true });
+  // (the 4.0 frame's lot overlay is not part of this engine's materials)
   return material;
 }
 
