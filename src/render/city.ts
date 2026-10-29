@@ -350,8 +350,9 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const glassTint = select(isCurtain.greaterThan(0.5), select(hasWin.greaterThan(0.5), mix(cGlassB, cGlassA, clamp(fy.sub(0.2).div(0.78), 0, 1)).mul(0.45), base.mul(0.35)), vec3(0.03, 0.04, 0.05));
   const refl = max(F, select(isCurtain.greaterThan(0.5), float(0.2), float(0.08)));
 
-  // far: the facade's average before the window has few pixels (the fine pattern shimmered with TRAA)
-  const detail = clamp(float(1.3).sub(max(wu, wy).mul(4.5)), 0, 1);
+  // far: the facade's average only once a window cell is ~2 px (the 4.5 here averaged windows from ~3.5 px, and the
+  // city went flat pastel from ~800 m; 4.0's filtered pulse holds the window to 2 px a bay)
+  const detail = clamp(float(1.3).sub(max(wu, wy).mul(2.6)), 0, 1);
   const avgWin = select(kind.lessThan(0.5), float(0.6 * 0.56), select(kind.lessThan(1.5), float(0.74), select(kind.lessThan(2.5), float(0.2), float(0.2))))
     .mul(hasWin).mul(step(float(0), yy).max(inShop)).mul(mix(avgBay, float(1), inShop));
   const avgLit = mix(float(0.15), float(0.62), sty).max(inShop);
@@ -379,7 +380,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
     .mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(float(1).sub(win)).mul(step(kind, float(0.5)).max(step(float(1.5), kind))).mul(float(1).sub(isGlass));
   const lowerTier = step(float(0.5), fy).mul(step(float(0.022), float(1).sub(fy).mul(fh)));
   const bandC = select(dot(trimC, vec3(0.2126, 0.7152, 0.0722)).lessThan(0.08), wallC.mul(0.86), trimC);
-  wallFinal = mix(wallFinal, bandC.mul(mix(float(1), float(0.94), lowerTier)), bandOn.mul(clamp(float(1.4).sub(wy.mul(fh).mul(4)), 0, 1)));
+  wallFinal = mix(wallFinal, bandC.mul(mix(float(1), float(0.94), lowerTier)), bandOn.mul(clamp(float(1.4).sub(wy.mul(fh).mul(2.8)), 0, 1)));
   const finE = select(plinthAmt.greaterThan(0.5), float(4), fin);
   const hasFinE = max(hasFin, plinthAmt);
   const P = positionWorld;
