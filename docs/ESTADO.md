@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-18, 22h35.
+Atualizado: 2026-10-29, 21h00.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -36,6 +36,21 @@ Atualizado: 2026-10-18, 22h35.
   **`verificar.mjs` 146/146**, budget ok (o 146/146 não pega os defeitos críticos da lista de 2026-10-19: G1). Frentes novas: funcionalidades → escala 16/20/24 km (`docs/ESCALA.md`);
   ex-pessoas → zip sem Node e teste de jogador no `.exe` (`docs/DEFEITOS.md`); interface → ligar ações novas,
   nós impossíveis, painel de linhas, textos nos dicionários; vias → cancela e placas de nome.
+
+## Arquitetura no worktree de port (2026-10-29)
+
+- Branch `port/roadcraft-features`; commits locais `525d963`, `44bc36b`, `cf044bd`, `d47cdb7`,
+  `3aefa27`, `ca893a9`, `e157ca6`, `e24878a`. Sem push e sem merge em main.
+- Extraídos: `src/app/session.ts` (gravação, `SaveHost`), `src/app/tools.ts` (`setTool`/`skyHint`,
+  `ToolHost`), `src/jobs/buildingGen/plan.ts` (plano de célula), `src/sim/traffic/laneChanges.ts`
+  (trocas de faixa, `LaneHost`). `game.ts` 2.691 linhas; `buildingGen.ts` 2.591; `arch:check` 237
+  arquivos/66.394 linhas, 0 ciclos e 0 vazamentos.
+- Testes rápidos: C11 60 s simulados (≈4 s reais), C25 saída antecipada (≈13 s), ônibus/pedestres
+  2,4 s (antes 122 s), `janela 1b` 3,1 s (antes 38 s). Suíte completa ainda em execução; o
+  `telhado 3` foi corrigido e passa isolado.
+- Budget: passou com `PLATE_DETAIL.drop` de 9 m (city 3.509.510 triângulos; limite 4.044.328),
+  mas a mudança visual ainda **não tem foto da vista city** e não foi commitada. Foto da rua
+  aberta: `test-results/plate9/01-rua.png`.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
