@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
-import { BMAT, WIN_REVEAL, buildBuildingsLegacy as buildBuildings } from '../src/jobs/buildingGen.ts';
+import { BMAT, WIN_REVEAL, buildBuildingsLegacy as buildBuildings, buildBuildings as buildBuildings40 } from '../src/jobs/buildingGen.ts';
 import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { facadeWindowTable } from '../src/world/arch.ts';
@@ -160,7 +160,7 @@ test('telhado 3: flat roofs carry the 4.0 parapet (0.85 m, membrane inside) and 
   for (const it of a) assert.ok(it.x0 >= -9.2 && it.x1 <= 9.2 && it.z0 >= -11.2 && it.z1 <= 11.2, `${it.kind} off the roof`);
   // the mesh: on the mid-rises, coping tops 0.85 m over the roof and a lift room 2.5 m over it; membranes of the 4.0
   const { heights, b } = block();
-  const m = buildBuildings(heights, b, 0, 0, 256, 0)!, p = positions(m);
+  const m = buildBuildings40(heights, b, 0, 0, 256, 0)!, p = positions(m);
   const rgb = (i: number) => (m.color[i * 4] << 16) | (m.color[i * 4 + 1] << 8) | m.color[i * 4 + 2];
   let roofs = 0, withParapet = 0, withLift = 0;
   for (let k = 0; k < 33; k++) {
