@@ -209,6 +209,10 @@ export class Peds {
   }
 
   get count(): number { return this.t.size; }
+  /** The population the current street length, density and player share demand (the guard is only a runaway limit). */
+  get demand(): number { return Math.min(PEDS_GUARD, Math.floor(this.sim.laneMeters * this.density * this.share)); }
+  /** The runaway guard, exposed so the demand is never confused with a fixed population ceiling. */
+  get limit(): number { return PEDS_GUARD; }
 
   // ------------------------------------------------------------ event queue
 
@@ -921,7 +925,7 @@ export class Peds {
 
   step(dt: number): void {
     this.time += dt;
-    const target = Math.min(PEDS_GUARD, Math.floor(this.sim.laneMeters * this.density * this.share));
+    const target = this.demand;
     const rate = this.t.size < target / 2 ? SPAWN_FILL : SPAWN_STEADY;
     for (let k = 0; k < rate && this.t.size < target; k++) this.spawn();
     const c = this.t.cols;

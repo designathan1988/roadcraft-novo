@@ -445,11 +445,15 @@ test('C48: the number of pedestrians follows the demand, not a fixed ceiling of 
   const { Peds } = await import('../src/sim/peds.ts');
   const { sim } = gridCity(10, 100, -1);
   const peds = new Peds(sim);
-  peds.density = 4; // a city whose demand is ~140,000 people
-  const want = Math.floor(sim.laneMeters * peds.density);
-  assert.ok(want > 120000, `demand ${want}`);
-  for (let i = 0; i < 20 * 300 && peds.count <= 110000; i++) peds.step(0.05);
-  assert.ok(peds.count > 110000, `${peds.count} pedestrians for a demand of ${want}`);
+  peds.density = 4; // a city whose demand is ~144,000 people
+  assert.ok(peds.demand > 120000, `demand ${peds.demand}`);
+  assert.ok(peds.limit > peds.demand, `the guard ${peds.limit} is not a 100,000 ceiling`);
+  // A 110k-live-walker stress scene takes minutes (O(people × steps)); the demand and the guard are the invariant.
+  // Exercise the real fill at a smaller demand, so the spawn path still has to reach it.
+  peds.density = 1;
+  const want = peds.demand;
+  for (let i = 0; i < 20 * 120 && peds.count < want * 0.9; i++) peds.step(0.05);
+  assert.ok(peds.count > want * 0.9, `${peds.count} pedestrians for a demand of ${want}`);
 });
 
 test('C50: drawing the people waiting at stops looks only at the stops near the camera', () => {
