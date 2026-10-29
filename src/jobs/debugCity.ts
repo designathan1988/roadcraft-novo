@@ -11,7 +11,7 @@ import { baseHeight, waterLevelAt } from './terrainGen.ts';
 import { SHAPE_STRIDE, emptyBoxes, type BoxColumns } from './protocol.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 
-export const BLOCK = 96; // grid spacing (m)
+export const BLOCK = 88; // grid spacing (m)
 export const DEBUG_PROFILE = 1; // street with parking, ~16 m
 export const DEBUG_AVENUE = 3; // an avenue every 5 lines
 const HALF = PROFILE_INFO[DEBUG_PROFILE].right;
