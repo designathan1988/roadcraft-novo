@@ -10,7 +10,7 @@ import {
 import { STEP_LIMITS, fromWork, insertionIndex, movedStrip, newStrip, toWork, withStripWidth, type PaletteKind } from '../roads/profileWork.ts';
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
-import { fmtDec, lang, loose, money, plural, t } from './i18n.ts';
+import { fmtDec, lang, loose, money, plural, t } from '../shared/i18n/index.ts';
 
 const CATS: Array<[Category, string]> = [['ruas', 'catalog.cat.streets'], ['avenidas', 'catalog.cat.avenues'], ['rodovias', 'catalog.cat.highways'],
   ['especiais', 'catalog.cat.special'], ['trilhos', 'catalog.cat.rails'], ['meus', 'catalog.cat.mine']];

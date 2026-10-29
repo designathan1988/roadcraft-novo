@@ -4,7 +4,7 @@
 // nothing runs per frame beyond one comparison.
 
 import { el } from './dom.ts';
-import { onLanguageChange, t } from './i18n.ts';
+import { onLanguageChange, t } from '../shared/i18n/index.ts';
 
 interface Entry { t: number; kind: 'error' | 'slow'; text: string }
 export type HealthTab = 'health' | 'world' | 'state';

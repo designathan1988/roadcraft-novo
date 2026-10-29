@@ -56,8 +56,8 @@ test('B3: Ctrl + a letter, a digit or Space never reaches the plain game shortcu
 
 test('B46: the money tip says the refund the game gives on demolishing (roads/tuning.ts), in both languages', async () => {
   const { ROAD_TUNING } = await import('../src/roads/tuning.ts');
-  const { ENGINE_PT } = await import('../src/ui/lang/engine.pt-BR.ts');
-  const { ENGINE_EN } = await import('../src/ui/lang/engine.en.ts');
+  const { ENGINE_PT } = await import('../src/shared/i18n/lang/engine.pt-BR.ts');
+  const { ENGINE_EN } = await import('../src/shared/i18n/lang/engine.en.ts');
   const pct = String(Math.round(ROAD_TUNING.economy.demolitionRefund * 100));
   for (const [name, tip] of [['pt-BR', ENGINE_PT['ui.money.tip']], ['en', ENGINE_EN['ui.money.tip']]]) {
     assert.ok(tip.includes('{refund}'), `${name}: "${tip}" does not take the refund from the tuning (${pct} %)`);
@@ -65,8 +65,8 @@ test('B46: the money tip says the refund the game gives on demolishing (roads/tu
 });
 
 test('B56: a game that fails to start says why, in words for the player', async () => {
-  const { ENGINE_PT } = await import('../src/ui/lang/engine.pt-BR.ts');
-  const { ENGINE_EN } = await import('../src/ui/lang/engine.en.ts');
+  const { ENGINE_PT } = await import('../src/shared/i18n/lang/engine.pt-BR.ts');
+  const { ENGINE_EN } = await import('../src/shared/i18n/lang/engine.en.ts');
   for (const d of [ENGINE_PT, ENGINE_EN]) assert.ok(!/npm/.test(d['ui.error.isolation']), `the isolation error tells the player to run a developer command: "${d['ui.error.isolation']}"`);
   const { bootGame } = await import('../src/ui/boot.ts');
   const shown: string[] = [];
@@ -78,7 +78,7 @@ test('B56: a game that fails to start says why, in words for the player', async 
 });
 
 test('B59: each language writes money with one currency (the unlimited money too)', async () => {
-  const { t, initLang } = await import('../src/ui/i18n.ts');
+  const { t, initLang } = await import('../src/shared/i18n/index.ts');
   for (const l of ['pt-BR', 'en'] as const) {
     initLang(l);
     const symbol = t('economy.money', { value: '' }).trim();
@@ -96,7 +96,7 @@ test('B35: the road keys cannot take a key the game answers (zoom = − + includ
 
 test('B34: the help lists every key of the table, Ctrl+S as Save, and no bundle of letters', async () => {
   const { keyHelp, DOCK_KEYS, TOOL_KEYS, keyName } = await import('../src/ui/keys.ts');
-  const { t } = await import('../src/ui/i18n.ts');
+  const { t } = await import('../src/shared/i18n/index.ts');
   const h = keyHelp();
   const keys = [...h.game, ...h.tools].map(([k]) => k);
   for (const c of [...Object.keys(DOCK_KEYS), ...Object.keys(TOOL_KEYS)]) assert.ok(keys.includes(keyName(c)), `${c} is not in the help`);

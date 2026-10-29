@@ -1,5 +1,5 @@
 import { Game, status } from './game.ts';
-import { initLang, storedLang, t } from './ui/i18n.ts';
+import { initLang, storedLang, t } from './shared/i18n/index.ts';
 import { bootGame } from './ui/boot.ts';
 
 async function boot(): Promise<void> {

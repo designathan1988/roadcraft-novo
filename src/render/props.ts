@@ -17,7 +17,7 @@ import { buildPropDefs, buildPropKinds, propCastsShadow, propCullRadius, propIsS
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
-import { PAINTS } from './vehicles.ts';
+import { PAINTS } from '../shared/vehiclePaints.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';

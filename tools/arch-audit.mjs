@@ -10,7 +10,8 @@ const src = path.join(root, 'src');
 const outDir = path.join(root, 'test-results', 'architecture');
 const posix = (p) => p.split(path.sep).join('/');
 const relOf = (abs) => posix(path.relative(root, abs));
-const SHARED_FILES = new Set(['src/config.ts', 'src/steam.ts', 'src/save.ts', 'src/saveFiles.ts', 'src/mapFile.ts', 'src/audio.ts']);
+const SHARED_FILES = new Set(['src/config.ts']);
+const PLATFORM_FILES = new Set(['src/save.ts', 'src/saveFiles.ts', 'src/mapFile.ts', 'src/steam.ts', 'src/audio.ts']);
 const APP_FILES = new Set(['src/game.ts', 'src/main.ts']);
 
 function walk(dir, list = []) {
@@ -68,7 +69,7 @@ const layerOf = (rel) => {
   const parts = rel.split('/');
   if (parts[0] !== 'src' || parts.length < 2) return 'other';
   if (parts[1] === 'shared') return 'shared';
-  if (parts.length === 2) return APP_FILES.has(rel) ? 'app' : SHARED_FILES.has(rel) ? 'shared' : 'app';
+  if (parts.length === 2) return APP_FILES.has(rel) ? 'app' : PLATFORM_FILES.has(rel) ? 'platform' : SHARED_FILES.has(rel) ? 'shared' : 'app';
   const l = parts[1];
   return ['core', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools'].includes(l) ? l : 'other';
 };
@@ -124,16 +125,17 @@ for (const e of edges) {
 // application/UI layer above render and ui. Only value imports are checked.
 const allowed = {
   shared: ['shared'],
+  platform: ['core', 'shared', 'jobs', 'platform'],
   core: ['core', 'shared'],
   world: ['core', 'shared', 'world', 'roads'],
   roads: ['core', 'shared', 'world', 'roads'],
   jobs: ['core', 'shared', 'world', 'roads', 'jobs', 'r40'],
   sim: ['core', 'shared', 'world', 'roads', 'sim'],
   render: ['core', 'shared', 'world', 'roads', 'jobs', 'r40', 'render'],
-  ui: ['core', 'shared', 'world', 'roads', 'sim', 'ui'],
+  ui: ['core', 'shared', 'world', 'roads', 'sim', 'platform', 'ui'],
   tools: ['core', 'shared', 'world', 'roads', 'sim', 'render', 'ui', 'tools'],
   r40: ['core', 'shared', 'r40'],
-  app: ['core', 'shared', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools', 'app'],
+  app: ['core', 'shared', 'platform', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools', 'app'],
 };
 const violations = [];
 for (const e of edges) {

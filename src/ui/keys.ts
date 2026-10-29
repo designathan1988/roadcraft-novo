@@ -5,7 +5,7 @@
 
 import type { Tool } from './hud.ts';
 import type { Category } from './drawers.ts';
-import { t } from './i18n.ts';
+import { t } from '../shared/i18n/index.ts';
 
 export type KeyResult = 'done' | 'pass';
 

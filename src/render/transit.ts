@@ -9,7 +9,7 @@ import type { RoadNetwork } from '../roads/network.ts';
 import { heightAt } from '../world/heights.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import type { Transit } from '../world/transit.ts';
-import { PAINTS } from './vehicles.ts';
+import { PAINTS } from '../shared/vehiclePaints.ts';
 import { colorOnly } from './tsl.ts';
 import { Dirty, cellId, cellX, type DirtyCells, type DirtyReader } from '../core/grid.ts';
 

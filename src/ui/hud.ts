@@ -10,7 +10,7 @@ import { RoadCatalog } from './roadCatalog.ts';
 import type { LaneChoice, ParkingPreset } from '../roads/roadVariant.ts';
 import { button, rename, closeDropdown, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
-import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, onLanguageChange, plural, setLang, t } from './i18n.ts';
+import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, onLanguageChange, plural, setLang, t } from '../shared/i18n/index.ts';
 import { MAP_SIZE } from '../config.ts';
 import { mountCompass, type Compass } from './compass.ts';
 import { keyHelp, keyName } from './keys.ts';
@@ -18,7 +18,8 @@ import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
 import { centreText } from './readouts.ts';
 import { closeRoadKeys, type RoadKeys } from './roadKeysPanel.ts';
-import type { PersonOptions, creatorCatalog } from '../render/people/creator.ts';
+import type { PersonOptions } from '../shared/contracts/people.ts';
+import type { creatorCatalog } from '../render/people/creator.ts';
 import {
   CATS, ShellState, categoriesOf, lineInfo, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
   type BuilderTab, type BuilderTabRender, type BuildingInfo, type Category, type DrawerHost, type DrawerParts, type LineRow,

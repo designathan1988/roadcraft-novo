@@ -1,7 +1,7 @@
 // The game's options (quality, resolution, weather, simulation, road markings, sound, language) with presets,
 // in Roadcraft's dialog look. Kept in the browser/Electron (localStorage when it works); without it, the defaults.
 
-import { LANGUAGES, lang, loose, onLanguageChange, setLang, t, type Lang } from './i18n.ts';
+import { LANGUAGES, lang, loose, onLanguageChange, setLang, t, type Lang } from '../shared/i18n/index.ts';
 import { keyName, reservedKeys } from './keys.ts';
 
 export type Preset = 'baixo' | 'medio' | 'alto' | 'ultra';

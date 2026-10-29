@@ -14,7 +14,7 @@ import { heightAt } from '../world/heights.ts';
 import { demolishTarget, targetAt, type Target } from './demolish.ts';
 import { lotToWorld } from '../world/lotEdit.ts';
 import type { World } from '../world/world.ts';
-import { money, t } from '../ui/i18n.ts';
+import { money, t } from '../shared/i18n/index.ts';
 
 const p2 = new Float64Array(2);
 

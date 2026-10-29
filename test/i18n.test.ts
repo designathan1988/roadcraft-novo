@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { translate } from '../src/ui/i18n.ts';
+import { translate } from '../src/shared/i18n/index.ts';
 
 test('tradução: frases fixas, espaços preservados e frases com números', () => {
   assert.equal(translate('Câmera'), 'Camera');

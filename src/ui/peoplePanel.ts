@@ -7,7 +7,7 @@ import type { DrawerHost, DrawerParts } from './drawers.ts';
 import { section } from './panelParts.ts';
 import { card, choices, dropdown, el, orow, range } from './dom.ts';
 import { svg } from './icons.ts';
-import { fmtDec, t } from './i18n.ts';
+import { fmtDec, t } from '../shared/i18n/index.ts';
 
 const hex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
 

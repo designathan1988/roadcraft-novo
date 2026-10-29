@@ -2,7 +2,7 @@
 // key; a click on a chip makes it wait, and the next key pressed is its own (a game key is refused); Esc lets the
 // waiting chip go, then closes the panel; Restore defaults gives the three keys back.
 
-import { t } from './i18n.ts';
+import { t } from '../shared/i18n/index.ts';
 import { keyName, reservedKeys } from './keys.ts';
 
 export interface RoadKeys { roadUp: string; roadDown: string; roadAlign: string }

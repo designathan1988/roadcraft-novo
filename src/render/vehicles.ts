@@ -6,6 +6,7 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { POSE_STRIDE, TILE, TILE_GRID, TILES, type PoseReader } from '../shared/contracts/poses.ts';
+import { PAINTS } from '../shared/vehiclePaints.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
@@ -23,12 +24,6 @@ const NEAR = 200;
 const MID = 1700;
 const CAP_NEAR = 6000;
 const CAP_MID = 30000;
-
-// a real fleet: much white, silver and grey, some black and a few brightly coloured cars
-export const PAINTS = [
-  0xf2f2f0, 0x1c1d20, 0x8c8f94, 0xb5b8bc, 0xe8e8e4, 0xb3221f, 0x2a5aa8, 0xc4c7cb,
-  0x2f7a4a, 0xd8c39a, 0x5f6368, 0xe4b512, 0x3f74c9, 0xd96a1d, 0x8e1b1b, 0x1f6f78,
-];
 
 /** Parts: [x, y, z, width, height, length, fixed colour or -1 = paint]. */
 type Part = [number, number, number, number, number, number, number];

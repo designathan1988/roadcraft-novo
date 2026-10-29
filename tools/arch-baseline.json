@@ -1,21 +1,22 @@
 {
   "summary": {
-    "files": 232,
-    "bytes": 3766597,
-    "lines": 67760,
+    "files": 234,
+    "bytes": 3767605,
+    "lines": 67772,
     "over50k": 12,
     "over100k": 5,
     "over150k": 4,
-    "edges": 904,
-    "typeOnlyEdges": 145,
+    "edges": 907,
+    "typeOnlyEdges": 146,
     "valueCycles": 0,
     "allCycles": 4,
     "typeOnlyCycles": 4,
-    "violations": 6,
+    "violations": 0,
     "layers": [
       "app",
       "core",
       "jobs",
+      "platform",
       "r40",
       "render",
       "roads",
@@ -27,56 +28,7 @@
     ]
   },
   "valueCycles": [],
-  "violations": [
-    {
-      "from": "src/mapFile.ts",
-      "to": "src/jobs/storage.ts",
-      "typeOnly": false,
-      "fromLayer": "shared",
-      "toLayer": "jobs",
-      "rule": "shared must not import jobs"
-    },
-    {
-      "from": "src/roads/build.ts",
-      "to": "src/ui/i18n.ts",
-      "typeOnly": false,
-      "fromLayer": "roads",
-      "toLayer": "ui",
-      "rule": "roads must not import ui"
-    },
-    {
-      "from": "src/save.ts",
-      "to": "src/core/grid.ts",
-      "typeOnly": false,
-      "fromLayer": "shared",
-      "toLayer": "core",
-      "rule": "shared must not import core"
-    },
-    {
-      "from": "src/saveFiles.ts",
-      "to": "src/jobs/storage.ts",
-      "typeOnly": false,
-      "fromLayer": "shared",
-      "toLayer": "jobs",
-      "rule": "shared must not import jobs"
-    },
-    {
-      "from": "src/ui/drawers.ts",
-      "to": "src/render/people/creator.ts",
-      "typeOnly": false,
-      "fromLayer": "ui",
-      "toLayer": "render",
-      "rule": "ui must not import render"
-    },
-    {
-      "from": "src/ui/drawers.ts",
-      "to": "src/render/vehicles.ts",
-      "typeOnly": false,
-      "fromLayer": "ui",
-      "toLayer": "render",
-      "rule": "ui must not import render"
-    }
-  ],
+  "violations": [],
   "files": [
     {
       "rel": "src/r40/render/buildings/buildingMesh.ts",
@@ -92,7 +44,7 @@
     },
     {
       "rel": "src/game.ts",
-      "bytes": 162656
+      "bytes": 162668
     },
     {
       "rel": "src/r40/render/buildings/signature.ts",
@@ -104,7 +56,7 @@
     },
     {
       "rel": "src/roads/build.ts",
-      "bytes": 70385
+      "bytes": 70395
     },
     {
       "rel": "src/r40/world/growth/lotPlan.ts",
@@ -116,7 +68,7 @@
     },
     {
       "rel": "src/ui/roadCatalog.ts",
-      "bytes": 60962
+      "bytes": 60976
     },
     {
       "rel": "src/render/terrain.ts",
@@ -124,31 +76,31 @@
     },
     {
       "rel": "src/ui/hud.ts",
-      "bytes": 54457
+      "bytes": 54525
     },
     {
       "rel": "src/ui/inspector.ts",
-      "bytes": 47720
+      "bytes": 47734
     },
     {
       "rel": "src/ui/drawers.ts",
-      "bytes": 47676
+      "bytes": 47697
     },
     {
       "rel": "src/render/props.ts",
-      "bytes": 46663
+      "bytes": 46676
     },
     {
-      "rel": "src/ui/lang/legacy.ts",
+      "rel": "src/shared/i18n/lang/legacy.ts",
       "bytes": 46170
-    },
-    {
-      "rel": "src/render/vehicles.ts",
-      "bytes": 44952
     },
     {
       "rel": "src/r40/world/buildings/interior.ts",
       "bytes": 44863
+    },
+    {
+      "rel": "src/render/vehicles.ts",
+      "bytes": 44718
     },
     {
       "rel": "src/jobs/roadMesh.ts",
@@ -187,7 +139,7 @@
       "bytes": 34752
     },
     {
-      "rel": "src/ui/lang/engine.pt-BR.ts",
+      "rel": "src/shared/i18n/lang/engine.pt-BR.ts",
       "bytes": 34143
     },
     {
@@ -199,7 +151,7 @@
       "bytes": 33350
     },
     {
-      "rel": "src/ui/lang/engine.en.ts",
+      "rel": "src/shared/i18n/lang/engine.en.ts",
       "bytes": 32907
     },
     {
@@ -276,7 +228,7 @@
     },
     {
       "rel": "src/tools/roadTool.ts",
-      "bytes": 19530
+      "bytes": 19540
     },
     {
       "rel": "src/r40/world/buildings/types.ts",
@@ -360,7 +312,7 @@
     },
     {
       "rel": "src/ui/options.ts",
-      "bytes": 13950
+      "bytes": 13964
     },
     {
       "rel": "src/r40/render/bake/finishRecipes.ts",

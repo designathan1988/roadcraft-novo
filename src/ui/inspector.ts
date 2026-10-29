@@ -17,7 +17,7 @@ import { streetName, streetOf } from '../roads/streetNames.ts';
 import type { World } from '../world/world.ts';
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
-import { fmtDec, fmtInt, money, plural, t } from './i18n.ts';
+import { fmtDec, fmtInt, money, plural, t } from '../shared/i18n/index.ts';
 import { profileName, sectionSvg } from './roadCatalog.ts';
 
 export interface InspectActions {

@@ -3,7 +3,7 @@
 // this build is simply not listed; their legal texts are shown as written, in a fold.
 
 import { el } from './dom.ts';
-import { fmtInt, t, onLanguageChange } from './i18n.ts';
+import { fmtInt, t, onLanguageChange } from '../shared/i18n/index.ts';
 import { steamName } from '../steam.ts';
 
 declare const __BUILD__: string;

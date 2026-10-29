@@ -1,7 +1,7 @@
 // The compass in the bottom-right corner, as Roadcraft's: a click turns the view to north, a drag across it turns
 // and tilts the camera. The needle is rotated only when the shown degree changes.
 
-import { t } from './i18n.ts';
+import { t } from '../shared/i18n/index.ts';
 
 export interface CompassHandlers {
   north(): void;

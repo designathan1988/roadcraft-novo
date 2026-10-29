@@ -128,13 +128,17 @@ O `r40` é um subsistema portado do 4.0; ele fica atrás de uma fachada (`r40/ap
 - `ui/drawers.ts` -> `ui/panelParts.ts` (`section`); `peoplePanel` importa `panelParts`, não `drawers`.
 - Resultado: **2 -> 0 ciclos de runtime**; build limpo.
 
-### Fase 2 — contratos compartilhados e plataforma
+### Fase 2 — contratos compartilhados e plataforma (feita em 2026-10-29)
 
-1. `jobs/protocol.ts` -> `shared/contracts/worker.ts`; atualizar imports (world, roads, render, jobs, app).
-2. `ui/i18n.ts` -> `shared/i18n.ts`; `roads/build.ts` deixa de importar `ui`.
-3. `sim/poses.ts` -> `shared/contracts/poses.ts`; `render/vehicles.ts` deixa de importar `sim`.
-4. `save.ts`, `saveFiles.ts`, `mapFile.ts`, `steam.ts`, `audio.ts` -> `platform/`; o audit passa a ter `platform`.
-5. `ui/drawers.ts`: mover `PAINTS`/`DEFAULT_PERSON_OPTIONS` para `shared`/`ui` dados; UI não importa `render`.
+1. `jobs/protocol.ts` -> `shared/contracts/worker.ts`; imports atualizados (world, roads, render, jobs, app).
+2. `ui/i18n.ts` + `ui/lang` -> `shared/i18n/`; `roads/build.ts` deixou de importar `ui`.
+3. `sim/poses.ts` -> `shared/contracts/poses.ts`; `render/vehicles.ts` deixou de importar `sim`.
+4. `save.ts`, `saveFiles.ts`, `mapFile.ts`, `steam.ts`, `audio.ts` classificados como `platform` no audit (a mover para
+   `src/platform/` numa fatia mecânica; o contrato já está correto).
+5. `PAINTS` -> `shared/vehiclePaints.ts`; `PersonOptions`/`DEFAULT_PERSON_OPTIONS` ->
+   `shared/contracts/people.ts`; UI não importa `render` em valor.
+
+Resultado: **0 ciclos de runtime, 0 vazamentos de valor**; 4 ciclos só de tipos; 12 arquivos >=50 KB.
 
 ### Fase 3 — arquivos gigantes, um por vez
 
@@ -164,12 +168,16 @@ Ordem por risco e valor (não por tamanho):
 
 ## 7. Status e próximo slice
 
-- Feito: audit, 0 ciclos de runtime, plano, pequeno mapa de teste 4 km.
-- Em dívida: 4 ciclos só de tipos, 11 vazamentos de valor, 12 arquivos >50 KB.
-- Próximo slice recomendado: **Fase 2.1** — mover `jobs/protocol.ts` para `shared/contracts/worker.ts`. É mecânico,
-  tem 20 importadores e elimina três vazamentos (`roads`, `world`, `render` -> `jobs`). Depois `ui/i18n` e `sim/poses`.
-- A bomba e qualquer feature ficam paradas até a Fase 2 fechar; a bomba será um módulo de `features/demolition/`,
-  não código novo no `game.ts`.
+- Feito: audit, 2 -> 0 ciclos de runtime, Fase 2 (contratos e plataforma), 0 vazamentos de valor, plano e mapa de
+  teste 4 km.
+- Em dívida: 4 ciclos só de tipos, 12 arquivos >50 KB (4 >150 KB), arquivos gigantes de aplicação/geração/render.
+- Próximo slice: **Fase 3.1** — extrair do `game.ts` os módulos de aplicação, um por commit: `app/session.ts`
+  (novo/abrir/salvar), `app/tools.ts` (troca/click), `features/demolition/bomb.ts` (bomba) e `app/photoHooks.ts`.
+  A bomba vira módulo próprio antes de qualquer mudança de efeito; o `game.ts` fica composição + API.
+- Depois: `sim/traffic.ts`, `jobs/buildingGen.ts`, `r40/render/buildings/buildingMesh.ts` (este por último, atrás de
+  `r40/api.ts`), e mover `platform` para `src/platform/`.
+- A suíte `npm test` travou sem saída no ambiente; isso é uma dívida separada a investigar antes de declarar qualquer
+  slice “verde”. Build, budget e cidade pequena são as provas atuais.
 
 ## 8. Fontes
 

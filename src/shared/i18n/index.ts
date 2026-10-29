@@ -4,8 +4,8 @@
 // i18n/index.ts:95-111): each panel that keeps text listens with `onLanguageChange`.
 // Text that other engine areas still write in Portuguese (toasts, tool hints) goes through `loose()`.
 
-import { PT_BR as RC_PT } from '../../data/textos-roadcraft/pt-BR.ts';
-import { EN as RC_EN } from '../../data/textos-roadcraft/en.ts';
+import { PT_BR as RC_PT } from '../../../data/textos-roadcraft/pt-BR.ts';
+import { EN as RC_EN } from '../../../data/textos-roadcraft/en.ts';
 import { ENGINE_PT } from './lang/engine.pt-BR.ts';
 import { ENGINE_EN } from './lang/engine.en.ts';
 import { translate as legacyTranslate } from './lang/legacy.ts';

@@ -7,30 +7,9 @@
 import { CLIP, type CookedPeople } from './format.ts';
 import { hash32 } from './looks.ts';
 
-export type CreatorMode = 'stand' | 'walk' | 'group';
-export type CreatorHold = 'none' | 'phone' | 'cup' | 'paper' | 'bag' | 'umbrella';
-
-/** What the creator's screen sets. Colours are indices into CREATOR_PALETTES (-1: as the clothes come). */
-export interface PersonOptions {
-  count: number;
-  sex: 'any' | 'female' | 'male';
-  band: 'any' | 'child' | 'young' | 'adult' | 'senior';
-  /** A cooked outfit name (`creatorCatalog().outfits`), or 'any'. */
-  outfit: string;
-  top: number;
-  bottom: number;
-  hair: number;
-  /** 0.85..1.15 of the body's own height. */
-  height: number;
-  mode: CreatorMode;
-  hold: CreatorHold;
-  /** Mixed looks within the group (each person its own variation and colours where not fixed). */
-  mixed: boolean;
-}
-
-export const DEFAULT_PERSON_OPTIONS: PersonOptions = {
-  count: 6, sex: 'any', band: 'any', outfit: 'any', top: -1, bottom: -1, hair: -1, height: 1, mode: 'walk', hold: 'none', mixed: true,
-};
+import { DEFAULT_PERSON_OPTIONS, type CreatorHold, type CreatorMode, type PersonOptions } from '../../shared/contracts/people.ts';
+export { DEFAULT_PERSON_OPTIONS } from '../../shared/contracts/people.ts';
+export type { CreatorHold, CreatorMode, PersonOptions } from '../../shared/contracts/people.ts';
 
 /** The colours the shader can tint to, in its order (`crowd.ts` CLOTHES and HAIR), for the screen's swatches. */
 export const CREATOR_PALETTES = {

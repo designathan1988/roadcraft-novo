@@ -2,7 +2,7 @@
 // as a plain file, or from a server without its headers), a failure building the game (no graphics adapter, say)
 // or a failure while it loads. Never a "Loading…" that stays forever.
 
-import { t } from './i18n.ts';
+import { t } from '../shared/i18n/index.ts';
 
 export interface BootDeps {
   /** The page has cross-origin isolation (SharedArrayBuffer). */

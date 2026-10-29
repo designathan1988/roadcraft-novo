@@ -4,7 +4,7 @@
 import { MAP_SIZES, MAP_TILES, TILE_SIZE } from '../config.ts';
 import { choices, el, orow, select } from './dom.ts';
 import { svg } from './icons.ts';
-import { LANGUAGES, lang, onLanguageChange, setLang, t } from './i18n.ts';
+import { LANGUAGES, lang, onLanguageChange, setLang, t } from '../shared/i18n/index.ts';
 
 export interface MenuActions {
   newCity(seed: number, tiles: number): void;

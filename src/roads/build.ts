@@ -11,7 +11,7 @@ import { cellsOfSamples, heightAt, heightIndex, sampleCoord, worldOfSample } fro
 import type { BuildingRec, World } from '../world/world.ts';
 import { arcTable, bez, bezD, bezLength, closestT, intersectQuads, splitQuad, subQuad, tAtLength, type Quad } from './geometry.ts';
 import { MAX_DEG, MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } from './network.ts';
-import { t as text } from '../ui/i18n.ts';
+import { t as text } from '../shared/i18n/index.ts';
 import { SegFlag } from './flags.ts';
 import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
