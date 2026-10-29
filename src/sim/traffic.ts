@@ -1692,17 +1692,14 @@ export class Traffic {
     return true;
   }
 
-  /** Steps the actuated lights and writes the state of the lights near the camera for the drawing. */
+  /** Steps the actuated lights and writes EVERY signalled node's state for the drawing: the far ones answer by the
+   * timed cycle, so what is drawn always matches what the cars obey — no decorative fake light out of the window. */
   private updateSignals(dt: number): void {
     const sim = this.sim;
     this.sig.step(dt);
-    for (const n of this.windowSignals) {
+    for (const n of this.signalNodes) {
       if (!sim.net.nodes.alive[n] || sim.nodePhases[n] === 0) { this.signalNodes.delete(n); this.windowSignals.delete(n); this.sig.setActive(n, false); if (this.signals && n < this.signals.length) this.signals[n] = 0; continue; }
-      if (this.signals && n < this.signals.length) {
-        // 128 | amber << 6 | arms with green/amber
-        const st = this.sig.state(n), mask = (st & 3) < 2 ? this.sig.arms[n * 8 + (st >> 2)] : 0;
-        this.signals[n] = 128 | ((st & 3) === 1 ? 64 : 0) | (mask & 63);
-      }
+      if (this.signals && n < this.signals.length) this.signals[n] = this.lightState(n);
     }
   }
 
@@ -2753,8 +2750,8 @@ export class Traffic {
     sim.net.nodeIndex.query(this.camX - r, this.camZ - r, this.camX + r, this.camZ + r, (n) => {
       if (sim.nodePhases[n] > 0 && this.signalNodes.has(n)) this.windowSignals.add(n);
     });
-    // those that left the window go back to "unknown" in the drawing and to their timed cycle
-    for (const n of old) if (!this.windowSignals.has(n)) { this.sig.setActive(n, false); if (this.signals && n < this.signals.length) this.signals[n] = 0; }
+    // those that left the window go back to their timed cycle; the drawing keeps the real state (updateSignals writes every signalled node)
+    for (const n of old) if (!this.windowSignals.has(n)) this.sig.setActive(n, false);
     for (const n of this.windowSignals) this.sig.setActive(n, true);
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
