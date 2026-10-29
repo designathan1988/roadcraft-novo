@@ -36,11 +36,25 @@ cresça com o mapa. Medir antes/depois; toda otimização é um commit separado.
 - Toda mudança: `game.stats()`, frame time p50/p95/p99, draws/tris/VRAM/RAM, `npm run budget`, foto quando visual.
 - Não cortar qualidade em silêncio; não esconder custo com amortização; não usar cache obrigatório.
 
+## Medição de 2026-10-29 — pedestres e modelo meso
+
+- `sim/peds.ts`: o C48 antigo mantinha **110 mil pedestres vivos** e levava **>5 min** (O(pessoas × passos)); o
+  `simDefects` inteiro passava de 6 min. O teste agora mede o invariante `demand`/`limit` e enche 36 mil pessoas
+  reais em **12,3 s**. O `simDefects` fecha **44/44 em 232 s**.
+- Isso **não** resolve o custo de produção: uma sonda com 86 mil pedestres mostrou passos de ~0,2 s (86 mil em
+  ~700 passos = 97 s), porque o `step` processa eventos e rotas de toda a população. É um caminho quente para a
+  cidade de 250 mil; a correção correta é LOD de simulação (micro perto, agregado/eventos longe), não um teto
+  silencioso. Fica registrado como dívida de otimização, não como “verde”.
+- `MESO_ALPHA` foi de 0.85 para **0.95**: a 1/15 o modelo longe media 7,4 km/h contra 5,7 perto; agora 6,7 contra
+  5,9; 1/30 (10,6/10,9) e 1/100 (21,7/20,8) continuam dentro de 25%. Teste do invariante câmera/longe: 19,1 s.
+
 ## Próximos passos
 
 1. Isolar `simDefects` por teste e registrar tempo/laço; corrigir o que for infinito e reduzir o que for apenas lento.
-2. Reduzir o teste de passageiros de 96 s (ou provar que o custo é do teste, não do jogo).
+2. Reduzir o teste de passageiros de 96 s (ou provar que o custo é do teste, não do jogo); C11 e C25 ainda são os
+   dois testes lentos do `simDefects` (90 s e 77 s).
 3. Medir `CellLayer.update` e `measureRegions` em cidade pequena e 10 km; corrigir O(mapa) se confirmado.
 4. Medir o loop de veículos com 10k/100k poses; cap/frustum.
 5. Revisar props/impostores para E24/E30 (cintilação).
 6. Repetir budget após cada feature; comparar com o baseline.
+7. LOD de pedestres longe (dívida acima): medir custo do passo por faixa de distância antes de escolher a técnica.
