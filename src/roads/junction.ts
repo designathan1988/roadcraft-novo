@@ -3,7 +3,7 @@
 
 import { armAngle, armRetreats, closestT, lineLine, type Arm, type Quad } from './geometry.ts';
 import { PROFILE_INFO } from './profiles.ts';
-import type { RoadNetwork } from './network.ts';
+import type { NetworkView } from './networkView.ts';
 
 /** Arm of a segment end: direction out of the node and half widths. */
 export function armOf(q: Quad, profile: number, end: 0 | 1): Arm {
@@ -113,7 +113,7 @@ const bulbQ: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
  * plus a margin (generation leaves ends touching other roads: there the circle would cover the other carriageway).
  * The page decides (and marks it in the graph, NODE_BULB); the simulation uses this same rule.
  */
-export function bulbAt(net: RoadNetwork, n: number): boolean {
+export function bulbAt(net: NetworkView, n: number): boolean {
   const nc = net.nodes.cols;
   if (!net.nodes.alive[n] || nc.deg[n] !== 1) return false;
   // every cell touching the node asks again (mesh, lots, props): kept until the network changes
@@ -126,9 +126,9 @@ export function bulbAt(net: RoadNetwork, n: number): boolean {
   return v;
 }
 
-const bulbCache = new WeakMap<RoadNetwork, { version: number; at: Map<number, boolean> }>();
+const bulbCache = new WeakMap<NetworkView, { version: number; at: Map<number, boolean> }>();
 
-function bulbClear(net: RoadNetwork, n: number, end?: 'bulb' | 'plain'): boolean {
+function bulbClear(net: NetworkView, n: number, end?: 'bulb' | 'plain'): boolean {
   if (end === 'plain') return false;
   const nc = net.nodes.cols;
   const sc = net.segs.cols;

@@ -9,7 +9,19 @@ import { HEIGHT_MAP_RES, HEIGHT_TILE_RES, MAP_HALF, MAP_TILES, SEA_LEVEL, TERRAI
 import { Dirty } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
 import { heightAt, heightIndex, sampleCoord, worldOfSample } from './heights.ts';
-import type { World } from './world.ts';
+// The slice of World this module mutates; no import back to world.ts (the type cycle).
+export interface GroundWorld {
+  readonly heights: Float32Array;
+  readonly ground32: Uint32Array;
+  readonly water: Float32Array;
+  readonly groundDirty: Set<number>;
+  readonly waterDirty: Set<number>;
+  readonly layerDirty: Set<number>;
+  readonly tileMin: Float32Array;
+  readonly tileWater: Uint8Array;
+  markSave(tile: number): void;
+  touchRect(minX: number, minZ: number, maxX: number, maxZ: number, kinds: number): void;
+}
 
 /** Ground types (channel R). 0 = automatic (grass, soil and rock by the slope). */
 export const Ground = {
@@ -68,7 +80,7 @@ export const TREE_SPECIES: Array<[number, string]> = [[0, 'Mistas'], [1, 'Carval
 /** Stroke of the ground brush: paint, forest (plants) or cut (clearing). */
 export class GroundStroke implements Command {
   readonly label = 'pintar o chão';
-  private world: World;
+  private world: GroundWorld;
   private before = new Map<number, number>();
   private idx = new Int32Array(0);
   private old = new Uint32Array(0);
@@ -77,7 +89,7 @@ export class GroundStroke implements Command {
   /** The stroke planted or cleared trees (the props change); plain paint only recolours the ground layer. */
   private trees = false;
 
-  constructor(world: World) { this.world = world; }
+  constructor(world: GroundWorld) { this.world = world; }
 
   dab(x: number, z: number, radius: number, mode: GroundMode, kind: number, strength: number, dt: number, species = 0): void {
     const g = this.world.ground32;
@@ -129,7 +141,7 @@ export class GroundStroke implements Command {
 }
 
 /** Ground layers and cells touched (forest changes the props; paint only the ground layer). */
-function touchGround(world: World, gx0: number, gz0: number, gx1: number, gz1: number, props: boolean): void {
+function touchGround(world: GroundWorld, gx0: number, gz0: number, gx1: number, gz1: number, props: boolean): void {
   for (let tz = gz0 >> WSHIFT; tz <= gz1 >> WSHIFT; tz++) for (let tx = gx0 >> WSHIFT; tx <= gx1 >> WSHIFT; tx++) {
     world.groundDirty.add(tz * MAP_TILES + tx);
     world.markSave(tz * MAP_TILES + tx);
@@ -144,12 +156,12 @@ function touchGround(world: World, gx0: number, gz0: number, gx1: number, gz1: n
  */
 export class RiverCommand implements Command {
   readonly label = 'rio';
-  private world: World;
+  private world: GroundWorld;
   private hIdx: Int32Array; private hOld: Float32Array; private hNew: Float32Array;
   private wIdx: Int32Array; private wOld: Float32Array; private wNew: Float32Array;
   private box: [number, number, number, number];
 
-  constructor(world: World, pts: Array<[number, number]>, width: number, depth: number) {
+  constructor(world: GroundWorld, pts: Array<[number, number]>, width: number, depth: number) {
     this.world = world;
     const h = world.heights, wat = world.water;
     // points every 4 m along the stroke

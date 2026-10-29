@@ -6,7 +6,8 @@ import { Table } from '../core/table.ts';
 import { MAP_CELLS } from '../config.ts';
 import { Dirty, SpatialIndex, cellId, cellX } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
-import type { World } from './world.ts';
+// The slice of World this module mutates; no import back to world.ts (the type cycle).
+export interface ItemWorld { touchCell(cell: number, kinds: number): void }
 
 /** What the item is. Objects use (x0, z0) and the heading in x1; runs go from (x0, z0) to (x1, z1). */
 export const Item = {
@@ -39,9 +40,9 @@ export const MAX_RUN = 48;
 export class StreetItems {
   readonly t = new Table(schema, 1 << 12);
   readonly index = new SpatialIndex(1 << 12);
-  private world: World;
+  private world: ItemWorld;
 
-  constructor(world: World) {
+  constructor(world: ItemWorld) {
     this.world = world;
     this.t.onGrow((cap) => this.index.grow(cap));
   }

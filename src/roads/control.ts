@@ -4,7 +4,7 @@
 
 import { PROFILE_INFO } from './profiles.ts';
 import { SegFlag } from './flags.ts';
-import type { RoadNetwork } from './network.ts';
+import type { NetworkView } from './networkView.ts';
 
 /** Control kind. Auto chooses by the importance of the roads. */
 export const Ctl = { Auto: 0, Signal: 1, Priority: 2, AllStop: 3, YieldAll: 4, Mini: 5, None: 6, Ring: 7, Crossing: 8, Zebra: 9, PedSignal: 10, UTurn: 11 } as const;
@@ -61,7 +61,7 @@ export function warrantedControl(major: number, minorMax: number, minorTotal: nu
 }
 
 /** The two arms of the node's main road (the most important; on a tie, the most opposite). */
-export function mainLegs(net: RoadNetwork, n: number): number[] {
+export function mainLegs(net: NetworkView, n: number): number[] {
   const sc = net.segs.cols;
   const segs = net.segsOf(n, tmpSegs).slice();
   if (segs.length < 3) return segs;
@@ -75,7 +75,7 @@ export function mainLegs(net: RoadNetwork, n: number): number[] {
  * Effective control of node `n` (automatic resolved). `flow`: what the measured flow asks for (Flow), automatic
  * only: Signal puts a traffic light; Signs removes the light the importance of the roads would put (signs stay).
  */
-export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctions.get(n), flow: number = Flow.None): Control {
+export function effectiveControl(net: NetworkView, n: number, spec = net.junctions.get(n), flow: number = Flow.None): Control {
   const sc = net.segs.cols;
   const segs = net.segsOf(n, tmpSegs).slice();
   const legs = new Map<number, number>();
@@ -142,12 +142,12 @@ export function effectiveControl(net: RoadNetwork, n: number, spec = net.junctio
 }
 
 /** The two segments are the same road going straight through the node. */
-function throughPair(net: RoadNetwork, n: number, a: number, b: number): boolean {
+function throughPair(net: NetworkView, n: number, a: number, b: number): boolean {
   const da = dirOut(net, n, a), db = dirOut(net, n, b);
   return da[0] * db[0] + da[1] * db[1] < -0.8;
 }
 
-function mostOpposite(net: RoadNetwork, n: number, segs: number[]): number[] {
+function mostOpposite(net: NetworkView, n: number, segs: number[]): number[] {
   let best: number[] = [segs[0], segs[1]], bd = 2;
   for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) {
     const a = dirOut(net, n, segs[i]), b = dirOut(net, n, segs[j]);
@@ -158,7 +158,7 @@ function mostOpposite(net: RoadNetwork, n: number, segs: number[]): number[] {
 }
 
 /** Direction out of the node along the segment (by its control point). */
-export function dirOut(net: RoadNetwork, n: number, s: number): [number, number] {
+export function dirOut(net: NetworkView, n: number, s: number): [number, number] {
   const sc = net.segs.cols, nc = net.nodes.cols;
   let dx = sc.cx[s] - nc.x[n], dz = sc.cz[s] - nc.z[n];
   if (Math.hypot(dx, dz) < 1e-6) { const o = sc.a[s] === n ? sc.b[s] : sc.a[s]; dx = nc.x[o] - nc.x[n]; dz = nc.z[o] - nc.z[n]; }
