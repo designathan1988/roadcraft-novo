@@ -86,6 +86,7 @@ import { SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveSto
 import { repairDanglingEnds } from './roads/repair.ts';
 import { photoView, settlePool } from './app/photoHooks.ts';
 import { saveSession, type SaveHost } from './app/session.ts';
+import { setTool as setGameTool, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
 import { errorText } from './shared/errors.ts';
 
 const SLOT = 'cidade-1';
@@ -1308,36 +1309,21 @@ export class Game {
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
 
-  private setTool(tool: Tool): void {
-    if (tool !== this.tool) this.ambient.sfx('click');
-    this.wallOpen = false;
-    this.tool = tool;
-    zoneOverlayU.value = tool === 'zone' || this.zoneLayer ? 1 : 0;
-    if (TERRAIN_TOOLS.includes(tool)) this.brush.mode = tool === 'landform' ? this.landformMode : tool as BrushParams['mode'];
-    if (ROAD_TOOLS.includes(tool)) this.roadTool.setMode(tool);
-    else { this.roadTool.cancel(); this.hud.setHint(''); }
-    if (tool === 'zone') this.hud.setHint(t('game.hint.zone'));
-    if (tool === 'building') { this.select(-1); this.setLotMode(this.lotMode); }
-    if (tool !== 'inspect') this.inspector?.close();
-    if (tool === 'streetscape' || tool === 'barrier') this.itemTool.setMode(tool); else if (this.itemTool) this.itemTool.cancel(false);
-    if (tool === 'inspect') this.hud.setHint(t('game.hint.inspect'));
-    if (tool === 'paint') this.hud.setHint(t('game.hint.paint'));
-    if (tool === 'forest') this.hud.setHint(t('game.hint.forest'));
-    if (tool === 'elements') this.hud.setHint(t('game.hint.elements'));
-    if (tool === 'landform') this.hud.setHint(t('game.hint.landform'));
-    if (tool === 'sky') this.skyHint();
-    if (tool === 'person') this.hud.setHint(t('game.hint.person'));
-    if (tool === 'pistol') this.hud.setHint(t('game.hint.pistol'));
-    if (tool === 'bomb') this.hud.setHint(t('game.hint.bomb'));
-    if (tool === 'weather') this.hud.setHint(t('game.hint.weather'));
-    if (tool === 'river') this.hud.setHint(t('game.hint.river'));
-    if (tool !== 'river') this.riverPts.length = 0;
-    if (tool === 'transit') this.hud.setHint(t('game.hint.transit'));
-    this.transitView.showPaths = tool === 'transit';
-    if (tool !== 'building') { this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; if (this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); } }
-    this.hud.setTool(tool);
-    if (this.health) this.health.context = `ferramenta ${tool}`;
-    this.canvas.style.cursor = tool === 'camera' ? 'grab' : 'crosshair';
+  private setTool(tool: Tool): void { setGameTool(this.toolHost(), tool); }
+
+  /** The tool state as the tools module sees it: accessors, never copies. */
+  private toolHost(): ToolHost {
+    const g = this;
+    return {
+      get tool() { return g.tool; }, set tool(v) { g.tool = v; },
+      get wallOpen() { return g.wallOpen; }, set wallOpen(v) { g.wallOpen = v; },
+      zoneLayer: g.zoneLayer, brush: g.brush, landformMode: g.landformMode, lotMode: g.lotMode, skyTool: g.skyTool,
+      riverPts: g.riverPts, roadTool: g.roadTool, itemTool: g.itemTool, inspector: g.inspector, transitView: g.transitView,
+      preview: g.preview, creator: g.creator, inside: g.inside,
+      get insideId() { return g.insideId; }, set insideId(v) { g.insideId = v; },
+      hud: g.hud, health: g.health, canvas: g.canvas, ambient: g.ambient,
+      select: (id) => g.select(id), setLotMode: (mode) => g.setLotMode(mode),
+    };
   }
 
   /** For photo scripts and tests: the same actions as the tools. */
@@ -1497,13 +1483,7 @@ export class Game {
     this.preview.hideAll();
   }
 
-  private skyHint(): void {
-    const s = this.skyTool;
-    this.hud.setHint(s.fog === 'lay' ? t('game.hint.fog.lay') : s.fog === 'erase' ? t('game.hint.fog.erase')
-      : s.cloud === 'add' ? t('game.hint.cloud.add')
-        : s.cloud === 'move' ? t('game.hint.cloud.move') : s.cloud === 'edit' ? t('game.hint.cloud.edit')
-          : s.cloud === 'remove' ? t('game.hint.cloud.remove') : t('game.hint.sky'));
-  }
+  private skyHint(): void { skyHintOf(this.toolHost()); }
 
   /** Replaces the cloud list as a command (undo brings back the previous one). */
   private setClouds(next: Cloud[], label: string): void {
