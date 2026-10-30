@@ -21,9 +21,10 @@ import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver } from './drive
 import { CAR_STYLE_LEN, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema } from './traffic/state.ts';
 export { CAR_STYLE_LEN, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, INSPECT_STRIDE, ROUTE_CAP, WAGONS, WAGON_LEN } from './traffic/state.ts';
 import { LaneChanges } from './traffic/laneChanges.ts';
-import { STOP_CELL, STOP_CELLS, indexStops as buildStopIndex, resolveLine, type LineSpec, type SimLine } from './traffic/lines.ts';
+import { resolveLine, type LineSpec, type SimLine } from './traffic/lines.ts';
 import { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE, Regions } from './traffic/regions.ts';
 import { Measure } from './traffic/measure.ts';
+import { Stops, WAIT_RATE } from './traffic/stops.ts';
 export { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE };
 
 const WINDOW = 1500;
@@ -96,7 +97,6 @@ const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
 const TERMINAL_DWELL = 75;
 const BUS_CAP = 70;
-const WAIT_RATE = 1 / 9; // people arriving per second at each stop
 
 /** Parking (roadcraft kerbStops/parking): deceleration, time to pull into the bay (s), and how long it stays before disappearing. */
 const PARK_DECEL = 2.6, PARK_SIDE_S = 2.4, PARK_STAY = 3;
@@ -123,6 +123,8 @@ export class Traffic {
   readonly regions = new Regions();
   /** City speed/stopped measurement and segment probes (traffic/measure.ts). */
   readonly measure = new Measure();
+  /** Bus stop cell index, waiting people and line figures (traffic/stops.ts). */
+  readonly stops = new Stops();
   readonly veh = new Table(vehSchema, 1 << 12);
   routes = new Int32Array((1 << 12) * ROUTE_CAP);
   /** Ordered list of micro vehicles per lane and per connection (head = the frontmost). */
@@ -235,7 +237,7 @@ export class Traffic {
     this.measure.reset(); this.laneVel.fill(0); this.laneVelT.fill(0);
     this.crossingClosed.clear();
     this.docks = new Float32Array(0);
-    this.lines = []; this.busSets = []; this.indexStops();
+    this.lines = []; this.busSets = []; this.stops.index(this.lines);
     this.spawnCredit = 0; this.fleetFloor = 0;
   }
 
@@ -2181,19 +2183,10 @@ export class Traffic {
       for (const v of [...set]) { if (extra <= 0) break; set.delete(v); this.retireBus(v); extra--; }
     });
     this.keepBuses();
-    this.indexStops();
+    this.stops.index(this.lines);
   }
 
-  /** Stops by STOP_CELL cell of the map (first entry of each cell, then line and stop of each entry). */
-  private stopStart = new Int32Array(STOP_CELLS * STOP_CELLS + 1);
-  private stopLine: Int32Array = new Int32Array(0);
-  private stopIdx: Int32Array = new Int32Array(0);
 
-  /** Sorts every stop into its cell (when the lines change), so the drawing reads only the cells near the camera. */
-  private indexStops(): void {
-    const r = buildStopIndex(this.lines, this.stopStart);
-    this.stopLine = r.line; this.stopIdx = r.idx;
-  }
 
   /** A bus leaves its line: fades out where it is (near the camera) or goes at once (far). Not a trip. */
   private retireBus(v: number): void {
@@ -2365,64 +2358,14 @@ export class Traffic {
   }
 
   /** Those waiting at stops near the camera (standing people, up to 14 per stop). */
-  writeStopPeople(data: Float32Array, stride: number, start: number, max: number): number {
-    let n = 0;
-    // only the cells within 600 m of the camera (the stop index), never every stop of every line
-    const i0 = Math.max(0, Math.floor((this.camX - 600 + MAP_HALF) / STOP_CELL)), i1 = Math.min(STOP_CELLS - 1, Math.floor((this.camX + 600 + MAP_HALF) / STOP_CELL));
-    const j0 = Math.max(0, Math.floor((this.camZ - 600 + MAP_HALF) / STOP_CELL)), j1 = Math.min(STOP_CELLS - 1, Math.floor((this.camZ + 600 + MAP_HALF) / STOP_CELL));
-    // the stops of several lines at one place share it: each person gets the next free place there
-    const placed = this.stopPlaced;
-    placed.clear();
-    for (let cj = j0; cj <= j1; cj++) for (let ci = i0; ci <= i1; ci++) {
-      const cell = cj * STOP_CELLS + ci;
-      for (let e = this.stopStart[cell]; e < this.stopStart[cell + 1]; e++) {
-        const ln = this.lines[this.stopLine[e]], i = this.stopIdx[e];
-        const x = ln.stopX[i], z = ln.stopZ[i];
-        if (Math.abs(x - this.camX) > 600 || Math.abs(z - this.camZ) > 600) continue;
-        const w = Math.min(14, Math.floor(Math.min(120, ln.waiting[i] + (this.time - ln.lastT[i]) * WAIT_RATE)));
-        const yaw = ln.stopYaw[i];
-        const ax = Math.cos(yaw), az = -Math.sin(yaw); // along the sidewalk
-        const spot = Math.round(x / 3) * 100003 + Math.round(z / 3);
-        const first = placed.get(spot) ?? 0;
-        placed.set(spot, first + w);
-        for (let k = 0; k < w && start + n < max; k++) {
-          const h = ((i * 7 + k * 13 + ln.id * 31) % 97) / 97;
-          // places in three rows, 0.8 m apart along the kerb, spreading out both ways from the stop's sign
-          const j = first + k, col = Math.floor(j / 3), row = j % 3;
-          const along = (col % 2 ? -1 : 1) * Math.ceil(col / 2) * 0.8 + (h - 0.5) * 0.12;
-          const back = -0.6 + row * 0.7;
-          const px = x + ax * along + Math.sin(yaw) * back, pz = z + az * along + Math.cos(yaw) * back;
-          const o = (start + n) * stride;
-          const fy = yaw + (h - 0.5) * 0.9;
-          data[o] = px; data[o + 1] = ln.stopY[i]; data[o + 2] = pz; data[o + 3] = fy;
-          data[o + 4] = px; data[o + 5] = ln.stopY[i]; data[o + 6] = pz; data[o + 7] = fy;
-          data[o + 8] = 3 * 256 + ((k * 5 + i) % 16);
-          data[o + 9] = 1;
-          data[o + 10] = (Math.imul(ln.id * 131 + i * 31 + k, 2654435761) >>> 16) & 0xffff;
-          n++;
-        }
-      }
-    }
-    return n;
-  }
+  /** Those waiting at stops near the camera (standing people, up to 14 per stop). */
+  writeStopPeople(data: Float32Array, stride: number, start: number, max: number): number { return this.stops.write(this.lines, this.camX, this.camZ, this.time, data, stride, start, max); }
 
-  private stopPlaced = new Map<number, number>();
+
 
   /** Line figures for the interface (passengers per hour). */
-  lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> {
-    return this.lines.map((ln, i) => {
-      const have = this.busSets[i].size;
-      // per simulated hour (paused: nothing to measure, the figure stays)
-      if (dtReport > 0) {
-        const rate = ln.boardings / dtReport * 3600;
-        ln.perHour = ln.perHour === 0 ? rate : ln.perHour * 0.9 + rate * 0.1;
-        ln.boardings = 0;
-      }
-      let w = 0;
-      for (let k = 0; k < ln.waiting.length; k++) w += Math.min(120, ln.waiting[k] + (this.time - ln.lastT[k]) * WAIT_RATE);
-      return { id: ln.id, buses: have, perHour: Math.round(ln.perHour), waiting: Math.round(w) };
-    });
-  }
+  /** Line figures for the interface (passengers per hour). */
+  lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> { return this.stops.stats(this.lines, this.busSets, this.time, dtReport); }
 
   // ------------------------------------------------------------ window
 
