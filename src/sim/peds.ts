@@ -1172,7 +1172,8 @@ export class Peds {
       const k = this.trackOff(p, prof, u), room = Math.max(0, half - 0.25);
       lo = -room - k; hi = room - k;
     }
-    c.lat[p] = Math.max(lo, Math.min(hi, c.lat[p] + d));
+    // (one still out of its room, just in from a crosswalk, is not put back at once: it moves from where it is)
+    c.lat[p] = Math.max(Math.min(lo, c.lat[p]), Math.min(Math.max(hi, c.lat[p]), c.lat[p] + d));
     // it keeps that step aside while they are close (easing back to its track only once clear)
     c.latT[p] = c.lat[p];
   }
@@ -1235,8 +1236,11 @@ export class Peds {
       q = this.posNow(p);
     }
     const rx = -Math.cos(q[3]), rz = Math.sin(q[3]);
-    const [lo, hi] = this.latRoom(p);
-    c.lat[p] = c.latT[p] = Math.max(lo, Math.min(hi, (this.seenAt[0] - q[0]) * rx + (this.seenAt[2] - q[2]) * rz));
+    const [lo, hi] = this.latRoom(p), want = (this.seenAt[0] - q[0]) * rx + (this.seenAt[2] - q[2]) * rz;
+    // seen beyond the sidewalk's room (it stepped aside on a crosswalk, wider): it stays where it is and steps back in
+    // (its aim within the room), instead of being put there at once
+    c.latT[p] = Math.max(lo, Math.min(hi, want));
+    c.lat[p] = Math.max(lo - SEEN_PAST, Math.min(hi + SEEN_PAST, want));
   }
 
   /** The camera moved: nodes whose lists enter the window. */
