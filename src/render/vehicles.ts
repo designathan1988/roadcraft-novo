@@ -17,7 +17,7 @@ import { buildBusBody, buildTruckBody, type HeavyArchetype, type HeavyBody } fro
 const {
   attribute, vec2, vec3, vec4, float, abs, cos, sin, mix, transformNormalToView, normalize,
   interleavedGradientNoise, screenCoordinate, uniformArray, int, floor, sRGBTransferEOTF, max, step, select, mod, time, smoothstep,
-  cameraViewMatrix, fract, hash, clamp, atan, length,
+  cameraViewMatrix, fract, hash, clamp, atan, length, frontFacing, faceDirection,
 } = T;
 
 const NEAR = 200;
@@ -406,7 +406,8 @@ class Batch {
   count = 0;
   readonly cap: number;
 
-  constructor(base: THREE.BufferGeometry, cap: number, scaled: boolean, shadows = true, animated = false, glass = false) {
+  /** `inside`: the body's inner side is drawn too (a near vehicle, seen into through its glass: `vehicleMaterial`). */
+  constructor(base: THREE.BufferGeometry, cap: number, scaled: boolean, shadows = true, animated = false, glass = false, inside = false) {
     this.cap = cap;
     const g = new THREE.InstancedBufferGeometry();
     g.index = base.index;
@@ -425,8 +426,8 @@ class Batch {
     this.geo = g;
     // one material per combination (plain, box, person, glass) for every batch: each extra material is one more shader
     // to build and compile at load (19 batches were 19 materials and the city opened 1.5 s slower)
-    const key = (scaled ? 1 : 0) + (animated ? 2 : 0) + (glass ? 4 : 0);
-    this.mesh = new THREE.Mesh(g, MATERIALS[key] ??= glass ? vehicleGlassMaterial() : vehicleMaterial(scaled, animated));
+    const key = (scaled ? 1 : 0) + (animated ? 2 : 0) + (glass ? 4 : 0) + (inside ? 8 : 0);
+    this.mesh = new THREE.Mesh(g, MATERIALS[key] ??= glass ? vehicleGlassMaterial() : vehicleMaterial(scaled, animated, inside));
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = shadows;
     this.mesh.receiveShadow = true;
@@ -453,8 +454,16 @@ class Batch {
 
 const MATERIALS: Array<THREE.MeshStandardNodeMaterial | undefined> = [];
 
-function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandardNodeMaterial {
+/**
+ * `inside`: for the near vehicles, whose glass is see-through. Their body is a single skin, one-sided: from outside,
+ * through a window, the inner side of the roof, the pillars, the doors and the tail was culled and the street behind
+ * showed through the car (3-7 % of the rays through a car's glass, `test/render-defects.test.ts`). Drawn on both sides
+ * instead (three r186 nodes/display/FrontFacingNode.js `frontFacing`, `faceDirection`), the back faces as the cabin's
+ * trim, lit from inside: no geometry added, one more material.
+ */
+function vehicleMaterial(scaled: boolean, animated: boolean, inside = false): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
+  if (inside) m.side = THREE.DoubleSide;
   const ipos = attribute('ipos', 'vec4');
   const info = attribute('iinfo', 'vec4');
   const iprev = animated ? null : attribute('iprev', 'vec4');
@@ -528,7 +537,7 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   }
   m.positionNode = world;
   withPrevious(m, animated ? undefined : rotBy(iprev.w)(local).add(iprev.xyz));
-  m.normalNode = transformNormalToView(normalize(rot(nrm)));
+  m.normalNode = inside ? transformNormalToView(normalize(rot(nrm))).mul(faceDirection) : transformNormalToView(normalize(rot(nrm)));
   const palette = uniformArray(PAINTS.map((p) => new THREE.Color(p)), 'color');
   // info.x = colour (0-15) + 16 × the simulation's lights (1 brake, 2 left indicator, 4 right indicator)
   const code = floor(info.x.add(0.5));
@@ -550,10 +559,13 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   const isPuffF = step(abs(glowA.sub(PUFF)), float(0.5));
   const isGlass = step(abs(glowA.sub(GLASS_GLOW)), float(0.5));
   const surf = mix(mix(attribute('color', 'vec3'), paint, attribute('paint', 'float')), wheelC, isWheelF);
-  m.colorNode = vec4(mix(mix(surf, vec3(0.015, 0.015, 0.02), isBlob), vec3(0.45, 0.45, 0.44), isPuffF), 1);
+  const outside = vec4(mix(mix(surf, vec3(0.015, 0.015, 0.02), isBlob), vec3(0.45, 0.45, 0.44), isPuffF), 1);
+  // the inner side: the trim's grey (carBody.ts CARD), matte
+  m.colorNode = inside ? select(frontFacing, outside, vec4(sRGBTransferEOTF(vec3(0.23, 0.24, 0.27)), 1)) : outside;
   // paint with a clear coat look, glass smooth (it shows the sky from the environment), the rest matte
-  m.roughnessNode = mix(mix(float(0.28), float(0.62), attribute('paint', 'float').oneMinus()), float(0.05), isGlass).add(isPuffF);
-  m.metalnessNode = attribute('paint', 'float').mul(0.3);
+  const rough = mix(mix(float(0.28), float(0.62), attribute('paint', 'float').oneMinus()), float(0.05), isGlass).add(isPuffF);
+  m.roughnessNode = inside ? select(frontFacing, rough, float(0.85)) : rough;
+  m.metalnessNode = inside ? attribute('paint', 'float').mul(0.3).mul(float(frontFacing)) : attribute('paint', 'float').mul(0.3);
   if (!scaled) {
     const gl = attribute('glow', 'float');
     const on = max(nightU, rainU.mul(0.7));
@@ -565,7 +577,7 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
     const head = vec3(1, 0.93, 0.78).mul(6).mul(on).mul(isK(1));
     const tail = vec3(1, 0.05, 0.03).mul(max(on.mul(3.5), brake.mul(2.6))).mul(isK(2));
     const amber = vec3(1, 0.5, 0.06).mul(7).mul(blink).mul(isK(3).mul(left).add(isK(4).mul(right)));
-    m.emissiveNode = head.add(tail).add(amber);
+    m.emissiveNode = inside ? head.add(tail).add(amber).mul(float(frontFacing)) : head.add(tail).add(amber);
   }
   // appears and disappears by dithering (no transparency)
   const alpha = info.y, lod = info.w;
@@ -635,7 +647,8 @@ export class VehicleRenderer {
     const splitBus = splitGlass(fullBus), splitTruck = splitGlass(fullTruck);
     const bus = splitBus.solid, truck = splitTruck.solid;
     const carCap = (i: number) => (i < 2 ? CAP_NEAR : CAP_NEAR / 2);
-    this.near = [...cars.map((g, i) => new Batch(g, carCap(i), false)), new Batch(bus, 1024, false), new Batch(truck, 1024, false), new Batch(personModel(), 8000, false, true, true), new Batch(model(WAGON), 512, false), new Batch(bikeModel(), 2000, false)];
+    // (the cars, the bus and the lorry are seen into through their glass: their bodies' inner side is drawn)
+    this.near = [...cars.map((g, i) => new Batch(g, carCap(i), false, true, false, false, i < CAR_BODIES.length)), new Batch(bus, 1024, false, true, false, false, true), new Batch(truck, 1024, false, true, false, false, true), new Batch(personModel(), 8000, false, true, true), new Batch(model(WAGON), 512, false), new Batch(bikeModel(), 2000, false)];
     this.nearGlass = [
       ...splitCars.map((s, i) => s.glass ? new Batch(s.glass, carCap(i), false, false, false, true) : null),
       splitBus.glass ? new Batch(splitBus.glass, 1024, false, false, false, true) : null,

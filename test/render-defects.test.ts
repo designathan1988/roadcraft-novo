@@ -806,3 +806,51 @@ test('cars: from above, the road never shows through the near car\'s glass (the 
     assert.equal(road, 0, `${style}: the road shows through the glass at ${road} of ${underGlass} points`);
   }
 });
+
+test('cars: seen at a slant through the glass, the near car is closed (cabin, and its body\'s inner side drawn)', async () => {
+  const { CAR_SIZES, buildCarBody, buildCarCabin } = await import('../src/render/carBody.ts');
+  const flat = (g: THREE.BufferGeometry): Float64Array => {
+    const p = g.getAttribute('position').array, idx = g.index?.array, n = idx ? idx.length : p.length / 3, out = new Float64Array(n * 3);
+    for (let i = 0; i < n; i++) { const k = idx ? idx[i] : i; out[i * 3] = p[k * 3]; out[i * 3 + 1] = p[k * 3 + 1]; out[i * 3 + 2] = p[k * 3 + 2]; }
+    return out;
+  };
+  // nearest hit of a ray on a triangle list (Möller–Trumbore), either side: the near body is drawn on both sides
+  const nearest = (T: Float64Array, o: number[], d: number[]): number => {
+    let best = Infinity;
+    for (let i = 0; i < T.length; i += 9) {
+      const e1 = [T[i + 3] - T[i], T[i + 4] - T[i + 1], T[i + 5] - T[i + 2]], e2 = [T[i + 6] - T[i], T[i + 7] - T[i + 1], T[i + 8] - T[i + 2]];
+      const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+      const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+      if (Math.abs(det) < 1e-12) continue;
+      const t0 = [o[0] - T[i], o[1] - T[i + 1], o[2] - T[i + 2]];
+      const u = (t0[0] * p[0] + t0[1] * p[1] + t0[2] * p[2]) / det; if (u < 0 || u > 1) continue;
+      const q = [t0[1] * e1[2] - t0[2] * e1[1], t0[2] * e1[0] - t0[0] * e1[2], t0[0] * e1[1] - t0[1] * e1[0]];
+      const v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) / det; if (v < 0 || u + v > 1) continue;
+      const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det;
+      if (t > 1e-4 && t < best) best = t;
+    }
+    return best;
+  };
+  for (const style of ['sedan', 'hatch', 'suv', 'van', 'pickup'] as const) {
+    const a = CAR_SIZES[style], b = buildCarBody(a, style, 24, 8, 3);
+    const solid = new Float64Array([...flat(b.shell), ...flat(b.trim), ...flat(buildCarCabin(a, style))]), glass = flat(b.glass);
+    let through = 0, road = 0;
+    for (let pitch = 20; pitch <= 80; pitch += 30) for (let yaw = 0; yaw < 360; yaw += 45) {
+      const pr = pitch * Math.PI / 180, yr = yaw * Math.PI / 180, d = [-Math.cos(pr) * Math.cos(yr), -Math.sin(pr), -Math.cos(pr) * Math.sin(yr)];
+      for (let i = 0; i < 12; i++) for (let j = 0; j < 5; j++) {
+        const x = -a.length / 2 + (i + 0.5) * a.length / 12, z = -a.width / 2 + (j + 0.5) * a.width / 5, y = a.height * 0.75;
+        const o = [x - d[0] * 10, y - d[1] * 10, z - d[2] * 10];
+        const tg = nearest(glass, o, d), ts = nearest(solid, o, d);
+        if (!(tg < ts)) continue;
+        through++;
+        // past the glass: some part of the car before the road (y = 0) under it
+        const o2 = [o[0] + d[0] * tg, o[1] + d[1] * tg, o[2] + d[2] * tg];
+        const t2 = nearest(solid, o2, d), tRoad = -o2[1] / d[1];
+        const gx = o2[0] + d[0] * tRoad, gz = o2[2] + d[2] * tRoad;
+        if (!(t2 < tRoad) && Math.abs(gx) < a.length / 2 && Math.abs(gz) < a.width / 2) road++;
+      }
+    }
+    assert.ok(through > 50, `${style}: rays through the glass ${through}`);
+    assert.equal(road, 0, `${style}: ${road} of ${through} slanting rays through the glass reach the road under the car`);
+  }
+});
