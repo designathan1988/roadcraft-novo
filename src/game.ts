@@ -1266,12 +1266,19 @@ export class Game {
     };
   }
 
-  /** For photo scripts, in-game checks and tests: the same actions as the tools (app/scriptApi.ts). */
+  /**
+   * For photo scripts, in-game checks and tests: the same actions as the tools (app/scriptApi.ts). Built as a field, so
+   * before the constructor's body: every part is read through an accessor when an action runs, never captured here
+   * (most parts are made in the constructor).
+   */
   readonly api: ScriptApi = (() => {
     const g = this;
     return createScriptApi({
-      world: g.world, commands: g.commands, pool: g.pool, vehicles: g.vehicles, rig: g.rig, weather: g.weather, river: g.river, itemTool: g.itemTool,
-      roadTool: g.roadTool, zoneTool: g.zoneTool, lines: g.lines, transit: g.transit, growth: g.growth, saving: g.saving, editing: g.editing,
+      get world() { return g.world; }, get commands() { return g.commands; }, get pool() { return g.pool; },
+      get vehicles() { return g.vehicles; }, get rig() { return g.rig; }, get weather() { return g.weather; },
+      get river() { return g.river; }, get itemTool() { return g.itemTool; }, get roadTool() { return g.roadTool; },
+      get zoneTool() { return g.zoneTool; }, get lines() { return g.lines; }, get transit() { return g.transit; },
+      get growth() { return g.growth; }, get saving() { return g.saving; }, get editing() { return g.editing; },
       get selected() { return g.selected; },
       toggleFollow: () => g.toggleFollow(), setBiome: (b) => g.setBiome(b), bomb: (x, z) => g.bomb(x, z),
       manoeuvres: () => new Promise((resolve) => { g.manoeuvreWait = resolve; g.sim.postMessage({ type: 'probeManoeuvres' } satisfies ToSim); }),
