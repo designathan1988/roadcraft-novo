@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 21h00.
+Atualizado: 2026-10-29, 22h27.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,19 +39,21 @@ Atualizado: 2026-10-29, 21h00.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; commits locais desta rodada até `735220f`/`c0db187`. Sem push
-  e sem merge em main; nenhum agente ativo.
+- Branch `port/roadcraft-features`; HEAD `084425c` (geometria pura do gerador). Sem push e sem
+  merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
-  `src/sim/traffic/laneChanges.ts`, `src/sim/traffic/lines.ts`, `src/jobs/buildingGen/plan.ts` e
-  `polygon.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts` 2.645, `traffic.ts` 2.949,
-  `buildingGen.ts` 2.521; `arch:check` 243 arquivos/66.759 linhas, 0 ciclos e 0 vazamentos.
+  `src/sim/traffic/laneChanges.ts`, `lines.ts` e `state.ts`, `src/jobs/buildingGen/plan.ts`,
+  `polygon.ts`, `geometry.ts` e `materials.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts`
+  2.645, `traffic.ts` 2.894, `buildingGen.ts` 2.379; `arch:check` 246 arquivos/66.788 linhas,
+  0 ciclos (inclusive de tipos) e 0 vazamentos.
 - Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
   `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget válido: city 3.507.096
   (limite 4.044.328), as 5 vistas não vazias; medidor recusa vista com 0 draws/tris.
-- Testes: suíte **370/370 em 61,6 s** na última execução; tsc limpo. Fotos: `vias-fix.png`,
-  `survey3/06..07`, `bomba-nova/01..06` (bomba nova reprovada).
-- Pendente: GenContext e divisão de `traffic`/`r40/buildingMesh`, bomba real, construtor completo,
-  carros/ônibus visuais, cidade organizada/250 mil, reabertura de 10 km.
+- Testes: suíte **370/370 em 112,1 s** antes desta fatia; depois dela, prédios 50/50 em 5,5 s e
+  tsc/build limpos. A suíte completa não foi repetida depois de `084425c`. Fotos antigas:
+  `vias-fix.png`, `survey3/06..07`, `bomba-nova/01..06` (bomba nova reprovada).
+- Pendente: sinks do `GenContext` e divisão de `traffic`/`r40/buildingMesh`, bomba real, construtor
+  completo, carros/ônibus visuais, cidade organizada/250 mil, reabertura de 10 km.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades

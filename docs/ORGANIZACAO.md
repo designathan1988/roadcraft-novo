@@ -20,18 +20,18 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 244 |
-| Bytes / linhas | 3.719.967 / 66.767 |
+| Arquivos TS | 246 |
+| Bytes / linhas | 3.720.630 / 66.788 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
-| Arestas de import | 906 (143 só de tipo) |
+| Arestas de import | 990 (176 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.894),
-`game.ts` (2.645), `jobs/buildingGen.ts` (2.521), `r40/render/buildings/signature.ts` (1.781),
+`game.ts` (2.645), `jobs/buildingGen.ts` (2.379), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
@@ -205,6 +205,9 @@ Ordem por risco e valor (não por tamanho):
   com `test/roadContinuity.test.ts`.
 - Feito: `sim/traffic/state.ts` (vocabulário do worker) e `MeshBuilder.lod` + `GenContext` no gerador, sem estado
   global de nível; `traffic.ts` caiu para 2.894 linhas.
+- Feito em 2026-10-29: `buildingGen/geometry.ts` (quadro do lote, `wx/wz/nx/nz`, planos, telhados inclinados,
+  toldos e `shadeHex`) e `buildingGen/materials.ts` (`BMAT`/`Facade`), com o gerador de 2.521 para 2.379 linhas;
+  junção, platibanda, chaminé e telhado-planta ficam para o `GenContext` porque ainda leem `detailOut`/`layoutOut`.
 - Em andamento: `sim/traffic.ts` por micro/meso/sinais/ônibus; `buildingGen` ainda tem os sinks globais; `r40/buildingMesh.ts`
   continua por último.
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
