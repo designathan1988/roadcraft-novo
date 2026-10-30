@@ -27,7 +27,7 @@ export interface ToolHost {
   readonly skyTool: SkyToolState;
   readonly riverPts: Array<[number, number]>;
   readonly roadTool: RoadTool;
-  readonly itemTool?: ItemTool;
+  readonly itemTool: ItemTool;
   readonly inspector?: Inspector;
   readonly transitView: TransitRenderer;
   readonly preview: RoadPreview;
@@ -54,7 +54,7 @@ export function setTool(host: ToolHost, tool: Tool): void {
   if (tool === 'zone') host.hud.setHint(t('game.hint.zone'));
   if (tool === 'building') { host.select(-1); host.setLotMode(host.lotMode); }
   if (tool !== 'inspect') host.inspector?.close();
-  if (tool === 'streetscape' || tool === 'barrier') host.itemTool?.setMode(tool); else host.itemTool?.cancel(false);
+  if (tool === 'streetscape' || tool === 'barrier') host.itemTool.setMode(tool); else host.itemTool.cancel(false);
   if (tool === 'inspect') host.hud.setHint(t('game.hint.inspect'));
   if (tool === 'paint') host.hud.setHint(t('game.hint.paint'));
   if (tool === 'forest') host.hud.setHint(t('game.hint.forest'));
