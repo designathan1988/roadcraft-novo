@@ -302,6 +302,34 @@ export class Game {
       else if (op.t === 'clear') { arr.fill(0); this.trafficLook.arrows.needsUpdate = true; }
     });
 
+    const ge = this;
+    this.editing = new LotEditing({
+      world: this.world, preview: this.preview, get hud() { return ge.hud; }, commands: this.commands,
+      get growth() { return ge.growth; },
+      get selected() { return ge.selected; },
+      rig: this.rig, inside: this.inside,
+      get insideId() { return ge.insideId; }, set insideId(v) { ge.insideId = v; },
+      get insideFloor() { return ge.insideFloor; }, set insideFloor(v) { ge.insideFloor = v; },
+      get settings() { return ge.settings; },
+      get transit() { return ge.transit; },
+      get lineSel() { return ge.lineSel; }, set lineSel(v) { ge.lineSel = v; },
+      get lotPts() { return ge.lotPts; }, set lotPts(v) { ge.lotPts = v; },
+      get lotMode() { return ge.lotMode; }, set lotMode(v) { ge.lotMode = v; },
+      get lotExtra() { return ge.lotExtra; }, set lotExtra(v) { ge.lotExtra = v; },
+      get lotExtraPts() { return ge.lotExtraPts; }, set lotExtraPts(v) { ge.lotExtraPts = v; },
+      get polyPts() { return ge.polyPts; },
+      get joinFirst() { return ge.joinFirst; }, set joinFirst(v) { ge.joinFirst = v; },
+      get cornerDrag() { return ge.cornerDrag; }, set cornerDrag(v) { ge.cornerDrag = v; },
+      get splitKind() { return ge.splitKind; },
+      get splitParts() { return ge.splitParts; },
+      get lotUse() { return ge.lotUse; },
+      get newArch() { return ge.newArch; },
+      get newFn() { return ge.newFn; },
+      set unsaved(v: boolean) { ge.unsaved = v; },
+      select: (id) => ge.select(id),
+      setTool: (t) => ge.setTool(t),
+      showSelection: () => ge.showSelection(),
+    });
     this.hud = new Hud(this.hudActions = Object.assign(this.featureActions(), this.saveActions(), {
       tool: (t) => this.setTool(t),
       item: (k) => { this.itemTool.item = k; },
@@ -450,34 +478,6 @@ export class Game {
       editProfile: (p, apply) => this.hud.catalog.editFor(p, apply),
       project: (x, z) => { const v = new THREE.Vector3(x, heightAt(this.world.heights, x, z), z).project(this.rig.camera); return { x: v.x * innerWidth / 2, y: -v.y * innerHeight / 2 }; },
       nameStreet: (seg, name) => this.commands.run(nameStreetCommand(this.world, seg, name, () => { this.textSigns.version++; this.unsaved = true; this.inspector.refresh(); })),
-    });
-    const ge = this;
-    this.editing = new LotEditing({
-      world: this.world, preview: this.preview, hud: this.hud, commands: this.commands,
-      get growth() { return ge.growth; },
-      get selected() { return ge.selected; },
-      rig: this.rig, inside: this.inside,
-      get insideId() { return ge.insideId; }, set insideId(v) { ge.insideId = v; },
-      get insideFloor() { return ge.insideFloor; }, set insideFloor(v) { ge.insideFloor = v; },
-      get settings() { return ge.settings; },
-      get transit() { return ge.transit; },
-      get lineSel() { return ge.lineSel; }, set lineSel(v) { ge.lineSel = v; },
-      get lotPts() { return ge.lotPts; }, set lotPts(v) { ge.lotPts = v; },
-      get lotMode() { return ge.lotMode; }, set lotMode(v) { ge.lotMode = v; },
-      get lotExtra() { return ge.lotExtra; }, set lotExtra(v) { ge.lotExtra = v; },
-      get lotExtraPts() { return ge.lotExtraPts; }, set lotExtraPts(v) { ge.lotExtraPts = v; },
-      get polyPts() { return ge.polyPts; },
-      get joinFirst() { return ge.joinFirst; }, set joinFirst(v) { ge.joinFirst = v; },
-      get cornerDrag() { return ge.cornerDrag; }, set cornerDrag(v) { ge.cornerDrag = v; },
-      get splitKind() { return ge.splitKind; },
-      get splitParts() { return ge.splitParts; },
-      get lotUse() { return ge.lotUse; },
-      get newArch() { return ge.newArch; },
-      get newFn() { return ge.newFn; },
-      set unsaved(v: boolean) { ge.unsaved = v; },
-      select: (id) => ge.select(id),
-      setTool: (t) => ge.setTool(t),
-      showSelection: () => ge.showSelection(),
     });
     this.commands.onPush = (c) => {
       const l = c.label;
