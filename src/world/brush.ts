@@ -2,10 +2,11 @@
 // sample it touched and, at the end, the new one. Undo writes the old ones back.
 // Cost in proportion to the samples touched.
 
-import { HEIGHT_MAP_RES, HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_TILES, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
+import { HEIGHT_MAP_RES, HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_TILES, SEA_LEVEL, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
 import { Dirty } from '../core/grid.ts';
 import type { Command } from '../core/commands.ts';
 import { cellsOfSamples, heightAt, heightIndex, sampleCoord, worldOfSample } from './heights.ts';
+import { NO_WATER, WATER_MAP_RES, WATER_SPACING, WATER_TILE_RES, waterCoord, waterIndex } from './ground.ts';
 import type { World } from './world.ts';
 
 export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten' | 'mesa' | 'canyon' | 'escarpment' | 'sugarloaf' | 'gully';
@@ -84,6 +85,10 @@ export class BrushStroke implements Command {
   private after: Float32Array = new Float32Array(0);
   private old: Float32Array = new Float32Array(0);
   private gx0 = Infinity; private gz0 = Infinity; private gx1 = -Infinity; private gz1 = -Infinity;
+  /** Water samples under the stroke: their level before the stroke and the level the land now allows. */
+  private wBefore = new Map<number, number>();
+  private wDesired = new Map<number, number>();
+  private wIdx = new Int32Array(0); private wOld = new Float32Array(0); private wNew = new Float32Array(0);
   private flattenTo: number | null = null;
   finished = false;
 
@@ -139,7 +144,34 @@ export class BrushStroke implements Command {
     }
     this.gx0 = Math.min(this.gx0, gx0); this.gz0 = Math.min(this.gz0, gz0);
     this.gx1 = Math.max(this.gx1, gx1); this.gz1 = Math.max(this.gz1, gz1);
+    this.syncWater(gx0, gz0, gx1, gz1);
     touchSamples(this.world, gx0, gz0, gx1, gz1);
+  }
+
+  /**
+   * Land raised above a water sample dries it; land lowered back under it rewets it from the stroke's original level.
+   * Without this the water plane stayed over the new ground and showed as stripes along the bank.
+   */
+  private syncWater(gx0: number, gz0: number, gx1: number, gz1: number): void {
+    const w = this.world, h = w.heights;
+    const wx0 = Math.max(0, Math.floor(waterCoord(worldOfSample(gx0) - HEIGHT_SPACING)));
+    const wx1 = Math.min(WATER_MAP_RES - 1, Math.ceil(waterCoord(worldOfSample(gx1) + HEIGHT_SPACING)));
+    const wz0 = Math.max(0, Math.floor(waterCoord(worldOfSample(gz0) - HEIGHT_SPACING)));
+    const wz1 = Math.min(WATER_MAP_RES - 1, Math.ceil(waterCoord(worldOfSample(gz1) + HEIGHT_SPACING)));
+    for (let gz = wz0; gz <= wz1; gz++) for (let gx = wx0; gx <= wx1; gx++) {
+      const i = waterIndex(gx, gz);
+      const level = this.wBefore.get(i) ?? w.water[i];
+      if (level === NO_WATER) continue;
+      this.wBefore.set(i, level);
+      const ground = heightAt(h, gx * WATER_SPACING - MAP_HALF, gz * WATER_SPACING - MAP_HALF);
+      const next = ground > level - 0.5 ? NO_WATER : level;
+      this.wDesired.set(i, next);
+      if (w.water[i] === next) continue;
+      w.water[i] = next;
+      const tile = i >> (2 * Math.log2(WATER_TILE_RES));
+      w.waterDirty.add(tile);
+      if (next !== NO_WATER) w.tileWater[tile] = 1;
+    }
   }
 
   /** Closes the stroke: freezes the before/after values into typed arrays. */
@@ -155,28 +187,44 @@ export class BrushStroke implements Command {
       this.idx[j] = i; this.old[j] = v; this.after[j] = this.world.heights[i]; j++;
     }
     this.before.clear();
+    // keep only the water samples this stroke actually changed
+    const wi: number[] = [], wo: number[] = [], wn: number[] = [];
+    for (const [i, old] of this.wBefore) {
+      const next = this.wDesired.get(i) ?? old;
+      if (next === old) continue;
+      wi.push(i); wo.push(old); wn.push(next);
+    }
+    this.wIdx = new Int32Array(wi); this.wOld = new Float32Array(wo); this.wNew = new Float32Array(wn);
+    this.wBefore.clear(); this.wDesired.clear();
     return true;
   }
 
-  private write(values: Float32Array): void {
-    const h = this.world.heights;
+  private write(values: Float32Array, water: Float32Array): void {
+    const w = this.world, h = w.heights;
     for (let j = 0; j < this.idx.length; j++) {
       h[this.idx[j]] = values[j];
-      extendBounds(this.world, this.idx[j], values[j]);
-      this.world.layerDirty.add(this.idx[j] >> (2 * Math.log2(HEIGHT_TILE_RES)));
+      extendBounds(w, this.idx[j], values[j]);
+      w.layerDirty.add(this.idx[j] >> (2 * Math.log2(HEIGHT_TILE_RES)));
+    }
+    for (let j = 0; j < this.wIdx.length; j++) {
+      const i = this.wIdx[j], v = water[j];
+      w.water[i] = v;
+      const tile = i >> (2 * Math.log2(WATER_TILE_RES));
+      w.waterDirty.add(tile);
+      if (v !== NO_WATER) w.tileWater[tile] = 1;
     }
     // only the cells of the samples the stroke touched (a long stroke's box would cover many more)
     this.cells ??= cellsOfSamples(this.idx);
     this.near ??= cellsOfSamples(this.idx, 40);
-    for (const c of this.cells) this.world.touchCell(c, Dirty.Terrain | TERRAIN_FOLLOWERS);
-    for (const c of this.near) this.world.touchCell(c, Dirty.Buildings);
+    for (const c of this.cells) w.touchCell(c, Dirty.Terrain | TERRAIN_FOLLOWERS);
+    for (const c of this.near) w.touchCell(c, Dirty.Buildings);
   }
   private cells: number[] | null = null;
   /** Cells whose buildings may stand on the samples (a building reaches up to ~40 m from its centre's cell). */
   private near: number[] | null = null;
 
-  get bytes(): number { return this.idx.byteLength + this.old.byteLength + this.after.byteLength; }
+  get bytes(): number { return this.idx.byteLength + this.old.byteLength + this.after.byteLength + this.wIdx.byteLength + this.wOld.byteLength + this.wNew.byteLength; }
 
-  apply(): void { if (this.finished) this.write(this.after); }
-  invert(): void { this.write(this.old); }
+  apply(): void { if (this.finished) this.write(this.after, this.wNew); }
+  invert(): void { this.write(this.old, this.wOld); }
 }

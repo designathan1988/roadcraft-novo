@@ -1,8 +1,10 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TILE_COUNT } from '../src/core/grid.ts';
-import { HEIGHT_TILE_RES } from '../src/config.ts';
+import { TILE_COUNT, tileId, tileX } from '../src/core/grid.ts';
+import { HEIGHT_TILE_RES, MAP_HALF } from '../src/config.ts';
+import { NO_WATER, WATER_SPACING, waterCoord, waterIndex } from '../src/world/ground.ts';
+import { waterLevelAt } from '../src/jobs/terrainGen.ts';
 import { World } from '../src/world/world.ts';
 import { BrushStroke } from '../src/world/brush.ts';
 import { CommandStack } from '../src/core/commands.ts';
@@ -51,6 +53,29 @@ test('traço de pincel desfaz e refaz exatamente', () => {
   assert.deepEqual(w.heights, before);
   cmds.redo();
   assert.deepEqual(w.heights, after);
+});
+
+test('pincel de terreno seca a água quando levanta o leito e o desfazer a devolve', () => {
+  const w = new World();
+  const gx = Math.round(waterCoord(0)), gz = Math.round(waterCoord(0));
+  const wx = gx * WATER_SPACING - MAP_HALF, wz = gz * WATER_SPACING - MAP_HALF;
+  const t = tileId(tileX(wx), tileX(wz));
+  generateTerrainTile(w.heights, t, 1, w.water);
+  const level = waterLevelAt(wx, wz, 1);
+  assert.notEqual(level, NO_WATER, 'the test point is on the generated river');
+  const wi = waterIndex(gx, gz);
+  assert.equal(w.water[wi], level);
+  const heights = w.heights.slice(), water = w.water.slice();
+  const cmds = new CommandStack(), s = new BrushStroke(w);
+  for (let i = 0; i < 6; i++) s.dab(wx, wz, { mode: 'raise', radius: 30, strength: 30 }, 0.2);
+  assert.ok(s.finish());
+  cmds.push(s);
+  assert.equal(w.water[wi], NO_WATER, 'raised ground dries the water sample');
+  cmds.undo();
+  assert.deepEqual(w.heights, heights);
+  assert.deepEqual(w.water, water);
+  cmds.redo();
+  assert.equal(w.water[wi], NO_WATER);
 });
 
 test('malha de caixas: contagens e faixa compacta', () => {
