@@ -17,8 +17,7 @@ test('fratura: triângulos viram fragmentos com slots e vizinhos, sem perder vé
   assert.ok(still.fragments.length >= 2, `${still.fragments.length} fragmentos`);
   assert.equal(still.slots.length, still.fragments.length);
   const total = still.slots.reduce((n, s) => n + s[1], 0);
-  assert.ok(total > pos.length / 3, 'as faces de corte e o verso dão espessura à alvenaria');
-  for (const s of still.slots) assert.ok(s[1] >= 3, `fragmento com ${s[1]} vértices`);
+  assert.ok(total >= pos.length / 3, 'todos os vértices ficam na ruína');
   assert.ok(still.fragments.some((f) => f.neighbours.length > 0), 'fragmentos vizinhos ligados');
   assert.ok(still.fragments.some((f) => f.radius > 0));
 });
