@@ -316,7 +316,7 @@ test('trem: anda só no trilho, para nas estações; carro nunca entra no trilho
       if (c.kind[v] === 4 && !rail) trainOffRail++;
       if (c.kind[v] !== 4 && rail) carOnRail++;
     }
-    for (const v of (tr as unknown as { busSets: Array<Set<number>> }).busSets[0]) { if (lastStop >= 0 && c.stopI[v] !== lastStop) served++; lastStop = c.stopI[v]; }
+    for (const v of (tr as unknown as { buses: { sets: Array<Set<number>> } }).buses.sets[0]) { if (lastStop >= 0 && c.stopI[v] !== lastStop) served++; lastStop = c.stopI[v]; }
   }
   assert.equal(carOnRail, 0);
   assert.equal(trainOffRail, 0);

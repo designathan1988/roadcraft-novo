@@ -21,10 +21,11 @@ import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver } from './drive
 import { CAR_STYLE_LEN, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema } from './traffic/state.ts';
 export { CAR_STYLE_LEN, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, INSPECT_STRIDE, ROUTE_CAP, WAGONS, WAGON_LEN } from './traffic/state.ts';
 import { LaneChanges } from './traffic/laneChanges.ts';
-import { resolveLine, type LineSpec, type SimLine } from './traffic/lines.ts';
+import { BUS_CAP, Buses, TERMINAL_DWELL } from './traffic/buses.ts';
+import type { LineSpec, SimLine } from './traffic/lines.ts';
 import { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE, Regions } from './traffic/regions.ts';
 import { Measure } from './traffic/measure.ts';
-import { Stops, WAIT_RATE } from './traffic/stops.ts';
+import { Stops } from './traffic/stops.ts';
 export { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE };
 
 const WINDOW = 1500;
@@ -94,9 +95,6 @@ const BODY_HALF_W = [0.9, 1.27, 1.25, 0.4, 1.5];
 const SPAN_REACH = 2.55 / 2 + 0.9 + 0.6;
 
 const DWELL = 14;
-/** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
-const TERMINAL_DWELL = 75;
-const BUS_CAP = 70;
 
 /** Parking (roadcraft kerbStops/parking): deceleration, time to pull into the bay (s), and how long it stays before disappearing. */
 const PARK_DECEL = 2.6, PARK_SIDE_S = 2.4, PARK_STAY = 3;
@@ -224,8 +222,7 @@ export class Traffic {
     if (this.signals) for (const n of this.windowSignals) if (n < this.signals.length) this.signals[n] = 0;
     for (const n of this.windowSignals) this.sig.setActive(n, false);
     this.windowSignals.clear();
-    for (const set of this.busSets) set.clear();
-    this.riders.clear(); this.realRiders.clear();
+    this.buses.clear();
     this.wagonPrev.clear();
     if (this.occupancy) this.occupancy.fill(0);
     this.segWear.fill(0);
@@ -237,7 +234,7 @@ export class Traffic {
     this.measure.reset(); this.laneVel.fill(0); this.laneVelT.fill(0);
     this.crossingClosed.clear();
     this.docks = new Float32Array(0);
-    this.lines = []; this.busSets = []; this.stops.index(this.lines);
+    this.stops.index(this.lines);
     this.spawnCredit = 0; this.fleetFloor = 0;
   }
 
@@ -247,16 +244,12 @@ export class Traffic {
     if (this.occupancy && seg * 4 + 2 < this.occupancy.length) this.occupancy[seg * 4 + 2] = 0;
   }
 
-  /** Bus lines (index = position; the vehicle stores the index). */
-  lines: SimLine[] = [];
-  /** Buses of each line (so the fleet is not scanned). */
-  private busSets: Array<Set<number>> = [];
-  /** Passengers of each bus by destination stop, and of them those who came on foot. */
-  private riders = new Map<number, Float64Array>();
-  private realRiders = new Map<number, Float64Array>();
+  /** Bus/train line runtime: lines, their vehicles, riders and stop service (traffic/buses.ts). */
+  readonly buses: Buses;
+  /** The lines, by position (the vehicle stores the index). */
+  get lines(): SimLine[] { return this.buses.lines; }
   /** People get off the bus at node `node` (the pedestrians carry on on foot). */
   onAlight: (node: number, count: number, x: number, z: number) => void = () => {};
-  private lineCheck = 0;
 
   /** Is someone walking on the node's crosswalk? (from the pedestrians) */
   pedCrossing: (n: number) => boolean = () => false;
@@ -304,7 +297,7 @@ export class Traffic {
   /** Radius of the micro window (m). Diagnostics put the whole map in micro to measure meso. */
   window = WINDOW;
   time = 0;
-  private rng = new Rng(12345);
+  readonly rng = new Rng(12345);
   private tmp = new Float64Array(4);
   private tmp2 = new Float64Array(4);
   /** Meso pace factor (MESO_ALPHA; a field so measurements can try others). */
@@ -356,6 +349,22 @@ export class Traffic {
       this.jamAt = grow(this.jamAt, cap, 0);
     });
     const g = this;
+    this.buses = new Buses({
+      sim,
+      veh: this.veh,
+      get routes() { return g.routes; },
+      router: this.router,
+      stops: this.stops,
+      get time() { return g.time; },
+      get rng() { return g.rng; },
+      get sample() { return g.sample; },
+      get onAlight() { return g.onAlight; },
+      initVehicle: (v) => g.initVehicle(v),
+      enterLane: (v, s) => g.enterLane(v, s),
+      setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      mesoEnter: (v, lane, spawned) => g.mesoEnter(v, lane, spawned),
+      despawn: (v) => g.despawn(v),
+    });
     this.laneChanges = new LaneChanges({
       sim,
       get cols() { return g.veh.cols; },
@@ -421,7 +430,7 @@ export class Traffic {
     }
     // level crossings with the barrier down, and the trains in the window (x, z) for inspection
     const crossings = [...this.crossingClosed.keys()].filter((n) => this.crossingDown(n)), trains: number[] = [];
-    this.lines.forEach((ln, li) => { if (ln.mode) for (const v of this.busSets[li]) if (this.veh.alive[v] && c.micro[v] && c.lane[v] >= 0) { this.sim.lanePoint(c.lane[v], c.s[v], p); trains.push(p[0], p[2]); } });
+    this.lines.forEach((ln, li) => { if (ln.mode) for (const v of this.buses.sets[li]) if (this.veh.alive[v] && c.micro[v] && c.lane[v] >= 0) { this.sim.lanePoint(c.lane[v], c.s[v], p); trains.push(p[0], p[2]); } });
     return { list, planned: this.mvs.planned, kerbStops: this.kerbStops, docked: this.docked, crossings, trains };
   }
 
@@ -839,7 +848,7 @@ export class Traffic {
   /** Replans with the current lane leading to `node` (rIdx = 0 points at it). */
   private replanFrom(v: number, node: number): void {
     const c = this.veh.cols;
-    if (c.line[v] >= 0) { this.busPlan(v, node); return; }
+    if (c.line[v] >= 0) { this.buses.busPlan(v, node); return; }
     if (node === c.dest[v]) { this.routes[v * ROUTE_CAP] = node; c.rLen[v] = 1; c.rIdx[v] = 0; return; }
     if (!this.plan(v, node, c.dest[v])) { this.lose(v); return; }
     c.rIdx[v] = 0;
@@ -1071,7 +1080,7 @@ export class Traffic {
     const c = this.veh.cols;
     this.mesoUnlink(v);
     if (c.spot[v] !== 0) this.releaseSpot(v);
-    if (c.line[v] >= 0) { this.busSets[c.line[v]]?.delete(v); this.riders.delete(v); this.realRiders.delete(v); }
+    if (c.line[v] >= 0) this.buses.forget(v);
     this.wagonPrev.delete(v);
     if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
     const parked = c.dying[v] === 2;
@@ -1105,7 +1114,7 @@ export class Traffic {
     // bus on the lane of its stop: stops, serves it and already knows the next one
     if (c.line[v] >= 0) {
       const ln = this.lines[c.line[v]];
-      if (ln && ln.stopLane[c.stopI[v]] === lane) { extra = ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL; this.serve(v); }
+      if (ln && ln.stopLane[c.stopI[v]] === lane) { extra = ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL; this.buses.serve(v); }
     }
     // the junction at the end of the lane: the same wait the router estimates (signal, stop, turn) and the
     // arm's throughput, as in micro
@@ -1145,7 +1154,7 @@ export class Traffic {
       // a drop-off: the trip ends there and the car goes on to another after a moment at the kerb
       if (this.dropsOff(v) && this.dropOffTrip(v, sim.laneTo(lane))) { this.schedule(v, this.time + 6); return; }
       if (c.line[v] < 0) { this.finish(v); return; }
-      this.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
+      this.buses.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
       if (c.dying[v]) { this.finish(v); return; }
     }
     let ns = this.nextSeg(v);
@@ -1465,7 +1474,7 @@ export class Traffic {
     const c = this.veh.cols, sim = this.sim, sc = sim.net.segs.cols;
     this.lines.forEach((ln, li) => {
       if (!ln.mode) return;
-      for (const v of this.busSets[li]) {
+      for (const v of this.buses.sets[li]) {
         if (!this.veh.alive[v]) continue;
         if (c.conn[v] >= 0) { const n = sim.conns.cols.node[c.conn[v]]; if (sim.nodeCtl[n] === Ctl.Crossing) this.crossingClosed.set(n, this.time + 1); }
         if (c.lane[v] < 0) continue;
@@ -1717,7 +1726,7 @@ export class Traffic {
   // ------------------------------------------------------------ micro
 
   /** Uniform in [0, 1) from the simulation's generator (for drawing drivers). */
-  private readonly sample = () => this.rng.next();
+  readonly sample = () => this.rng.next();
 
   /** IDM acceleration of driver `u` at speed `v` (its own comfort figures) with a leader `gap` metres ahead at `vl`. */
   private idm(u: number, v: number, v0: number, gap: number, vl: number): number {
@@ -1827,7 +1836,7 @@ export class Traffic {
         if (sg > -2) {
           if (sg < 1.2 && c.v[v] < 0.4) {
             c.dwell[v] += dt;
-            if (c.dwell[v] >= (ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL)) { c.dwell[v] = 0; this.serve(v); }
+            if (c.dwell[v] >= (ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL)) { c.dwell[v] = 0; this.buses.serve(v); }
             else atStop = true;
           }
           if (lead < 0 || sg + c.ds0[v] < gap) { gap = Math.min(gap, Math.max(0, sg) + c.ds0[v]); vl = 0; } // (its own standstill gap: it halts at the stop)
@@ -2153,219 +2162,22 @@ export class Traffic {
   // ------------------------------------------------------------ buses
 
   /**
-   * Replaces the set of lines (the page sends them again after every road edit, so the stops follow the roads). A line
-   * that is still there keeps its buses, their riders and the people waiting, stop by stop (matched by position): only
-   * a removed stop loses those waiting for it, and riders bound for it get off at the bus's next stop. Buses of removed
-   * lines (or a line that changed mode) leave; missing buses spawn at the stops; extra ones leave.
+   * Replaces the set of lines (the page sends them again after every road edit, so the stops follow the roads).
+   * What each line keeps (buses, riders, those waiting) lives in traffic/buses.ts.
    */
-  setLines(specs: LineSpec[]): void {
-    const old = this.lines, oldSets = this.busSets;
-    const byId = new Map<number, number>();
-    old.forEach((ln, i) => byId.set(ln.id, i));
-    const keptOld = new Set<number>();
-    const lines: SimLine[] = [], sets: Array<Set<number>> = [];
-    for (const sp of specs) {
-      const ln = resolveLine(sp, this.sim, this.time), li = lines.length, set = new Set<number>();
-      const oi = byId.get(sp.id);
-      if (oi !== undefined && !keptOld.has(oi) && old[oi].mode === ln.mode) {
-        keptOld.add(oi);
-        this.carryLine(old[oi], oldSets[oi], ln, li, set);
-      }
-      lines.push(ln); sets.push(set);
-    }
-    // buses of lines that are gone leave (only those in the lines' lists)
-    oldSets.forEach((set, oi) => { if (!keptOld.has(oi)) for (const v of set) this.retireBus(v); });
-    this.lines = lines;
-    this.busSets = sets;
-    // a line with fewer buses now: the extra ones leave
-    sets.forEach((set, li) => {
-      let extra = set.size - lines[li].buses;
-      for (const v of [...set]) { if (extra <= 0) break; set.delete(v); this.retireBus(v); extra--; }
-    });
-    this.keepBuses();
-    this.stops.index(this.lines);
-  }
-
-
-
-  /** A bus leaves its line: fades out where it is (near the camera) or goes at once (far). Not a trip. */
-  private retireBus(v: number): void {
-    const c = this.veh.cols;
-    if (!this.veh.alive[v] || c.line[v] < 0) return;
-    this.riders.delete(v); this.realRiders.delete(v);
-    c.why[v] = End.NoTrip;
-    if (c.micro[v]) { c.dying[v] = 1; c.line[v] = -1; } else { c.line[v] = -1; this.despawn(v); }
-  }
-
-  /** The new version `ln` (index `li`) of line `prev`: its buses, riders and those waiting, stop by stop. */
-  private carryLine(prev: SimLine, prevSet: Set<number>, ln: SimLine, li: number, set: Set<number>): void {
-    const c = this.veh.cols, n = ln.stopLane.length, m = prev.stopLane.length;
-    // the same stop: the same place on the sidewalk (the return trip's stops are mirrored, so they differ)
-    const toNew = new Int32Array(m).fill(-1);
-    for (let j = 0; j < m; j++) {
-      for (let i = 0; i < n; i++) if (Math.abs(ln.stopX[i] - prev.stopX[j]) < 1 && Math.abs(ln.stopZ[i] - prev.stopZ[j]) < 1) { toNew[j] = i; break; }
-    }
-    for (let j = 0; j < m; j++) {
-      const i = toNew[j];
-      if (i < 0) continue;
-      ln.lastT[i] = prev.lastT[j];
-      let w = 0;
-      for (let k = 0; k < m; k++) if (toNew[k] >= 0) { ln.waitTo[i][toNew[k]] += prev.waitTo[j][k]; ln.realTo[i][toNew[k]] += prev.realTo[j][k]; w += prev.waitTo[j][k]; }
-      ln.waiting[i] = w;
-    }
-    ln.boardings = prev.boardings; ln.perHour = prev.perHour;
-    /** The first stop from old index `j` on (in the line's order) that is still there. */
-    const nextKept = (j: number): number => { for (let k = 0; k < m; k++) { const i = toNew[(j + k) % m]; if (i >= 0) return i; } return 0; };
-    for (const v of prevSet) {
-      if (!this.veh.alive[v] || c.dying[v] || c.line[v] < 0) continue;
-      set.add(v);
-      c.line[v] = li;
-      const next = nextKept(c.stopI[v]);
-      for (const map of [this.riders, this.realRiders]) {
-        const r = map.get(v);
-        if (!r) continue;
-        const nr = new Float64Array(n);
-        for (let k = 0; k < r.length && k < m; k++) nr[toNew[k] >= 0 ? toNew[k] : next] += r[k];
-        map.set(v, nr);
-      }
-      c.stopI[v] = next;
-    }
-  }
-
-  /** Keeps the number of buses on each line (those that vanished respawn at a stop). */
-  private keepBuses(): void {
-    if (this.lines.length === 0) return;
-    const c = this.veh.cols;
-    this.lines.forEach((ln, i) => {
-      const n = ln.stopLane.length;
-      if (n < 2) return;
-      let have = 0;
-      for (const v of this.busSets[i]) if (!c.dying[v]) have++;
-      for (let k = have; k < ln.buses; k++) this.spawnBus(i, Math.floor((k * n) / Math.max(1, ln.buses)) % n);
-    });
-  }
-
-  private spawnBus(li: number, stop: number): void {
-    const ln = this.lines[li], sim = this.sim;
-    const lane = ln.stopLane[stop];
-    if (!sim.net.segs.alive[laneSeg(lane)]) return;
-    const v = this.veh.alloc();
-    this.initVehicle(v);
-    const c = this.veh.cols;
-    const train = ln.mode > 0;
-    c.kind[v] = train ? 4 : 1; c.len[v] = KIND_LEN[train ? 4 : 1];
-    c.vf[v] = train ? 1 : drawDriver(c, v, archOf(1, 0), this.sample);
-    if (train) drawDriver(c, v, archOf(4, 0), this.sample);
-    c.color[v] = ln.color & 15;
-    c.line[v] = li; c.stopI[v] = stop; c.served[v] = 0;
-    this.busSets[li].add(v);
-    const o = v * ROUTE_CAP;
-    this.routes[o] = sim.laneFrom(lane); this.routes[o + 1] = sim.laneTo(lane);
-    c.rLen[v] = 2; c.rIdx[v] = 1; c.dest[v] = sim.laneTo(lane);
-    c.lane[v] = lane; c.conn[v] = -1;
-    c.s[v] = this.rng.next() * Math.max(0, ln.stopV[stop] - 6);
-    this.enterLane(v, c.s[v]);
-    this.setLaneCount(lane, 1);
-    this.mesoEnter(v, lane, true);
-  }
-
-  /** Serves the stop: people get off and on; the next leg goes to the following stop. */
-  /** Background demand that arrived since last time, spread over the destinations. */
-  private accrue(ln: SimLine, i: number): void {
-    const n = ln.stopLane.length;
-    const room = Math.max(0, 120 - ln.waiting[i]);
-    const add = Math.min(room, (this.time - ln.lastT[i]) * WAIT_RATE);
-    ln.lastT[i] = this.time;
-    if (add <= 0 || n < 2) return;
-    for (let j = 0; j < n; j++) if (j !== i) ln.waitTo[i][j] += add / (n - 1);
-    ln.waiting[i] += add;
-  }
+  setLines(specs: LineSpec[]): void { this.buses.setLines(specs); }
 
   /** A pedestrian arrived at stop `from` wanting to go to `to`. */
-  pedAtStop(li: number, from: number, to: number): void {
-    const ln = this.lines[li];
-    if (!ln || from >= ln.waitTo.length || to >= ln.waitTo.length) return;
-    this.accrue(ln, from);
-    ln.waitTo[from][to] += 1;
-    ln.realTo[from][to] += 1;
-    ln.waiting[from] += 1;
-  }
+  pedAtStop(li: number, from: number, to: number): void { this.buses.pedAtStop(li, from, to); }
 
   /** For pedestrians: a random bus trip (line, boarding stop, alighting stop, boarding node, the stop on the sidewalk). */
-  pickTrip(): [number, number, number, number, number, number] | null {
-    if (this.lines.length === 0) return null;
-    const li = this.rng.int(0, this.lines.length);
-    const ln = this.lines[li];
-    const n = ln.stopLane.length;
-    if (n < 2 || this.busSets[li].size === 0 || ln.mode) return null;
-    const a = this.rng.int(0, n);
-    let b = this.rng.int(0, n - 1);
-    if (b >= a) b++;
-    return [li, a, b, this.sim.laneFrom(ln.stopLane[a]), ln.stopX[a], ln.stopZ[a]];
-  }
+  pickTrip(): [number, number, number, number, number, number] | null { return this.buses.pickTrip(); }
 
-  private serve(v: number): void {
-    const c = this.veh.cols, ln = this.lines[c.line[v]];
-    const i = c.stopI[v];
-    const n = ln.stopLane.length;
-    this.accrue(ln, i);
-    let r = this.riders.get(v), rr = this.realRiders.get(v);
-    if (!r || r.length !== n) { r = new Float64Array(n); this.riders.set(v, r); }
-    if (!rr || rr.length !== n) { rr = new Float64Array(n); this.realRiders.set(v, rr); }
-    // those bound for this stop get off; the people who came on foot step off at the stop and walk on (the background
-    // demand only rides: it never becomes extra pedestrians). From a train people leave through the station.
-    const realOff = rr[i];
-    r[i] = 0; rr[i] = 0;
-    if (realOff >= 0.5 && !ln.mode) this.onAlight(this.sim.laneTo(c.lane[v]), Math.round(realOff), ln.stopX[i], ln.stopZ[i]);
-    let load = 0;
-    for (let j = 0; j < n; j++) load += r[j];
-    // those waiting get on, until full: the people who walked there first (whole persons), then the background
-    const room = Math.max(0, (ln.mode ? 600 : BUS_CAP) - load);
-    const take = Math.min(Math.floor(ln.waiting[i]), room);
-    if (take > 0 && ln.waiting[i] > 0) {
-      let real = 0, total = 0;
-      for (let j = 0; j < n; j++) { real += ln.realTo[i][j]; total += ln.waitTo[i][j]; }
-      const realTake = Math.min(real, take), fr = real > 0 ? realTake / real : 0;
-      for (let j = 0; j < n; j++) { const m = ln.realTo[i][j] * fr; rr[j] += m; r[j] += m; ln.realTo[i][j] -= m; ln.waitTo[i][j] -= m; }
-      const bg = total - real, fb = bg > 0 ? Math.min(1, (take - realTake) / bg) : 0;
-      for (let j = 0; j < n; j++) { const m = (ln.waitTo[i][j] - ln.realTo[i][j]) * fb; r[j] += m; ln.waitTo[i][j] -= m; }
-      ln.waiting[i] -= take;
-    }
-    c.load[v] = Math.min(255, Math.round(load + take));
-    const on = take;
-    ln.boardings += on;
-    c.stopI[v] = (i + 1) % ln.stopLane.length;
-    this.busPlan(v, this.sim.laneTo(c.lane[v]));
-  }
-
-  /** Route from node `from` to the current stop: arrives via the stop's lane (in the right direction). */
-  private busPlan(v: number, from: number): void {
-    const c = this.veh.cols, sim = this.sim, ln = this.lines[c.line[v]];
-    if (!ln) { c.line[v] = -1; c.dying[v] = 1; return; }  // (line gone: the set has already been replaced)
-    const target = ln.stopLane[c.stopI[v]];
-    if (!sim.net.segs.alive[laneSeg(target)]) { c.dying[v] = 1; return; }
-    const b = sim.laneTo(target);
-    const o = v * ROUTE_CAP;
-    // already on the stop's lane (not served yet): it stays on it; the stop comes before the lane's end
-    if (c.lane[v] === target && c.conn[v] < 0) { this.routes[o] = b; c.rLen[v] = 1; c.rIdx[v] = 0; c.dest[v] = b; return; }
-    // to the end of the stop's lane, driving that lane: the last movement into it must be one the junction makes
-    // (planning only to its start node could leave the bus unable to turn into it, circling for ever)
-    const inSeg = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
-    const n = this.router.route(from, b, this.routes, o, ROUTE_CAP, false, inSeg, ln.mode > 0, -1, true, laneSeg(target));
-    if (n < 2) { c.dying[v] = 1; return; }
-    // (a truncated route goes on and is planned again at its end)
-    c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = this.routes[o + n - 1];
-  }
-
-  /** Those waiting at stops near the camera (standing people, up to 14 per stop). */
   /** Those waiting at stops near the camera (standing people, up to 14 per stop). */
   writeStopPeople(data: Float32Array, stride: number, start: number, max: number): number { return this.stops.write(this.lines, this.camX, this.camZ, this.time, data, stride, start, max); }
 
-
-
   /** Line figures for the interface (passengers per hour). */
-  /** Line figures for the interface (passengers per hour). */
-  lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> { return this.stops.stats(this.lines, this.busSets, this.time, dtReport); }
+  lineStats(dtReport: number): Array<{ id: number; buses: number; perHour: number; waiting: number }> { return this.stops.stats(this.lines, this.buses.sets, this.time, dtReport); }
 
   // ------------------------------------------------------------ window
 
@@ -2461,8 +2273,7 @@ export class Traffic {
       else if (this.veh.size > this.fleetFloor) this.spawnCredit--;
     }
     this.fleetFloor = Math.min(this.veh.size, target);
-    this.lineCheck -= dt;
-    if (this.lineCheck <= 0) { this.lineCheck = 2; this.keepBuses(); }
+    this.buses.tick(dt);
     this.updateSignals(dt);
     this.updateCrossings();
     this.processMeso();

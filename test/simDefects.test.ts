@@ -117,8 +117,8 @@ test('C9: the page sending the same bus lines again (after any road edit or zone
   tr.setLines(spec);
   for (let i = 0; i < 20 * 240; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
   const T = inner(tr), c = tr.veh.cols;
-  const buses = [...T.busSets[0] as Set<number>].filter((v) => !c.dying[v]);
-  const riders = buses.map((v) => [...(T.riders.get(v) ?? [])].reduce((a: number, b: number) => a + b, 0));
+  const buses = [...T.buses.sets[0] as Set<number>].filter((v) => !c.dying[v]);
+  const riders = buses.map((v) => [...(T.buses.riders.get(v) ?? [])].reduce((a: number, b: number) => a + b, 0));
   // background demand accrues lazily (at each visit): waiting now = waiting + arrivals since the last visit
   const waitingNow = () => tr.lines[0].waiting.map((w, i) => Math.min(120, w + (tr.time - tr.lines[0].lastT[i]) / 9));
   const waiting = waitingNow();
@@ -126,16 +126,16 @@ test('C9: the page sending the same bus lines again (after any road edit or zone
   assert.ok(waiting.some((w) => w > 1), 'people waiting at the stops');
   tr.setLines(spec.map((l) => ({ ...l, stops: [...l.stops] })));
   for (const v of buses) {
-    assert.ok(tr.veh.alive[v] && !c.dying[v] && c.line[v] === 0 && T.busSets[0].has(v), `bus ${v} was removed by the resend`);
+    assert.ok(tr.veh.alive[v] && !c.dying[v] && c.line[v] === 0 && T.buses.sets[0].has(v), `bus ${v} was removed by the resend`);
   }
-  const after = buses.map((v) => [...(T.riders.get(v) ?? [])].reduce((a: number, b: number) => a + b, 0));
+  const after = buses.map((v) => [...(T.buses.riders.get(v) ?? [])].reduce((a: number, b: number) => a + b, 0));
   assert.deepEqual(after.map(Math.round), riders.map(Math.round), 'riders kept');
   waitingNow().forEach((w, i) => assert.ok(w >= waiting[i] - 1e-6, `stop ${i}: ${waiting[i].toFixed(1)} waiting before, ${w.toFixed(1)} after`));
   // the player removes the middle stop: the same buses go on, with every rider, on the shorter line
-  const total = buses.reduce((a, v) => a + [...(T.riders.get(v) ?? [])].reduce((x: number, y: number) => x + y, 0), 0);
+  const total = buses.reduce((a, v) => a + [...(T.buses.riders.get(v) ?? [])].reduce((x: number, y: number) => x + y, 0), 0);
   tr.setLines([{ ...spec[0], stops: [-120, -189, 0, 189] }]);
-  for (const v of buses) assert.ok(tr.veh.alive[v] && !c.dying[v] && T.busSets[0].has(v) && c.stopI[v] < tr.lines[0].stopLane.length, `bus ${v} after removing a stop`);
-  const total2 = buses.reduce((a, v) => a + [...(T.riders.get(v) ?? [])].reduce((x: number, y: number) => x + y, 0), 0);
+  for (const v of buses) assert.ok(tr.veh.alive[v] && !c.dying[v] && T.buses.sets[0].has(v) && c.stopI[v] < tr.lines[0].stopLane.length, `bus ${v} after removing a stop`);
+  const total2 = buses.reduce((a, v) => a + [...(T.buses.riders.get(v) ?? [])].reduce((x: number, y: number) => x + y, 0), 0);
   assert.ok(Math.abs(total2 - total) < 1e-6, `riders ${total} before, ${total2} after`);
 });
 
@@ -971,7 +971,7 @@ test('buses reach every stop of their line (the last turn into a stop\'s lane is
   const T = inner(tr), c = tr.veh.cols, served = new Map<number, number>(), last = new Map<number, number>();
   for (let i = 0; i < 20 * 900; i++) {
     tr.step(0.05); if (i % 20 === 0) tr.checkWindow();
-    for (const v of T.busSets[0] as Set<number>) {
+    for (const v of T.buses.sets[0] as Set<number>) {
       const was = last.get(v);
       if (was !== undefined && was !== c.stopI[v]) served.set(was, (served.get(was) ?? 0) + 1);
       last.set(v, c.stopI[v]);
