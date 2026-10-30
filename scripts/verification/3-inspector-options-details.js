@@ -48,7 +48,7 @@
   await check('furniture from the menu (full/basic/none)', async () => { const seen = []; for (const f of [1, 2, 0]) { await R.options.apply({ furniture: f }); seen.push(R.tools.options().road.furniture); } return seen.join() === '1,2,0' || `the road tool's furniture ${seen.join()}`; });
   await check('demand and traffic and people share', async () => {
     // the demand goes to the simulation every 2 s (game.ts demandSent): a message with the new values must go out
-    const t0 = R.sim.demandSentAt(); await R.options.apply({ demand: 'pico', traffic: 0.5, people: 0.5 }); const st = R.options.get(); const taken = st.demand === 'pico' && st.traffic === 0.5 && st.people === 0.5;
+    const t0 = R.sim.demandSentAt(); await R.options.apply({ demand: 'peak', traffic: 0.5, people: 0.5 }); const st = R.options.get(); const taken = st.demand === 'peak' && st.traffic === 0.5 && st.people === 0.5;
     await wait(2500); const sent = R.sim.demandSentAt() > t0;
     await R.options.apply({ demand: 'normal', traffic: 1, people: 1 }); return (taken && sent) || `option taken ${taken}, sent ${sent}`;
   });

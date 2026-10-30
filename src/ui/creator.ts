@@ -2,6 +2,7 @@
 // telhado, andares recuados), modelos prontos e modelos do jogador (guardados no navegador).
 
 import { DEFAULT_DESIGN, FINISHES, GEAR, GEAR_NAMES, PALETTE, ROOFS, SHAPES, WINDOWS, WINGS, type Design } from '../world/design.ts';
+import { readStored, writeStored } from '../shared/storage.ts';
 
 export interface CreatorActions {
   /** Aplica um projeto (null = tirar o projeto: volta ao prédio automático) e, opcionalmente, os andares. */
@@ -23,10 +24,9 @@ export const PRESETS: Array<[string, Design, number]> = [
   ['Igreja de torre', { shape: 6, roof: 3, finish: 6, gear: GEAR.Spire, setback: 0, wall: 0xe8e2d4 }, 3],
 ];
 
-const KEY = 'cidade.modelos-predio';
 
 function loadMine(): Array<[string, Design, number]> {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? '[]') as Array<[string, Design, number]>; } catch { return []; }
+  try { return JSON.parse(readStored('buildingDesigns') ?? '[]') as Array<[string, Design, number]>; } catch { return []; }
 }
 
 export class Creator {
@@ -108,7 +108,7 @@ export class Creator {
       if (!name) return;
       const list = loadMine();
       list.push([name.slice(0, 40), { ...this.d }, this.floors]);
-      try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { window.alert('Não salvo: o armazenamento do navegador está cheio ou bloqueado.'); }
+      if (!writeStored('buildingDesigns', JSON.stringify(list))) { window.alert('Não salvo: o armazenamento do navegador está cheio ou bloqueado.'); }
       this.fillPresets();
     });
     const auto = document.createElement('button');

@@ -1,14 +1,14 @@
 // The weather as the player sets it (the Sky panel; the value is the map's, World.look), and the option's preset when
-// nothing is set by hand. One place for the presets: the option, the address (?chuva, ?tempestade, ?limpo) and the
+// nothing is set by hand. One place for the presets: the option, the address (?rain, ?storm, ?clear) and the
 // panel's "automatic" all read `weatherPreset`.
 
 import type { Weather } from '../../render/weather.ts';
 import { windDirU } from '../../render/weather.ts';
 import type { MapLook, WeatherCtl } from '../../world/mapLook.ts';
 
-/** The weather a preset name holds (the option's and the address's values; persisted names, so kept as they are). */
+/** The weather an option value holds (the options' and the address's ?rain, ?storm, ?clear). */
 export function weatherPreset(name: string | undefined): Weather['fixed'] {
-  return name === 'chuva' ? { clouds: 0.95, rain: 0.85 } : name === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : name === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
+  return name === 'rain' ? { clouds: 0.95, rain: 0.85 } : name === 'storm' ? { clouds: 1, rain: 1, storm: 1 } : name === 'clear' ? { clouds: 0.15, rain: 0 } : null;
 }
 
 export interface WeatherHost {

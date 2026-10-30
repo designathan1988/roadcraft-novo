@@ -13,5 +13,5 @@ export function centreText(x: number, z: number, fmt: (v: number) => string): st
 
 /** The simulation's demand as a factor, as Roadcraft 4.0 (v2/shell.ts:741): low 0.55, normal 1, peak 1.55. */
 export function demandFactor(demand: string | undefined): number {
-  return demand === 'baixa' ? 0.55 : demand === 'pico' ? 1.55 : 1;
+  return demand === 'low' ? 0.55 : demand === 'peak' ? 1.55 : 1;
 }

@@ -49,7 +49,7 @@ const SETUP = {
   district: viewScript(view.district, { after: 'await R.frames.settle(20);' }),
   city: viewScript(view.city, { after: 'await R.frames.settle(20);' }),
   night: viewScript(view.night, { after: 'await R.frames.settle(20);' }),
-  maxTraffic: viewScript({ ...view.district, dist: 250, pitch: 30 }, { before: "R.ui.simulation({ traffic: 2, people: 2, demand: 'pico' });", after: 'await new Promise((r) => setTimeout(r, 20000));' }),
+  maxTraffic: viewScript({ ...view.district, dist: 250, pitch: 30 }, { before: "R.ui.simulation({ traffic: 2, people: 2, demand: 'peak' });", after: 'await new Promise((r) => setTimeout(r, 20000));' }),
   bomb: viewScript({ ...view.district, dist: 250, pitch: 30 }, { after: 'await R.frames.settle(10); R.ui.bombForce(20); R.actions.bomb(0, 0);' }),
   editing: viewScript({ ...view.district, pitch: 40, dist: 400 }, { after: "await R.frames.settle(10); window.__ed = 0; const ed = () => { if (window.__ed++ < 400) { R.actions.terrain('raise', (window.__ed % 20) * 8 - 80, 120, 40, 0.4); requestAnimationFrame(ed); } }; requestAnimationFrame(ed);" }),
 };

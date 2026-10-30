@@ -1,94 +1,27 @@
-// The game's options (quality, resolution, weather, simulation, road markings, sound, language) with presets,
-// in Roadcraft's dialog look. Kept in the browser/Electron (localStorage when it works); without it, the defaults.
+// The game's options dialog (quality, resolution, weather, simulation, sound, language) with presets, in Roadcraft's
+// dialog look. The preferences are platform/settings.ts's: the dialog edits a copy and hands it back on Apply.
 
 import { LANGUAGES, lang, loose, onLanguageChange, setLang, t, type Lang } from '../shared/i18n/index.ts';
-import type { SkyMode } from './hudActions.ts';
+import { PRESETS, type Preset, type Settings } from '../platform/settings.ts';
 import { keyName, reservedKeys } from './keys.ts';
-
-export type Preset = 'baixo' | 'medio' | 'alto' | 'ultra';
-
-export interface Settings {
-  preset: Preset | 'personalizado';
-  /** Fraction of the screen resolution (0.5 to 1). */
-  resolution: number;
-  shadows: boolean;
-  ao: boolean;
-  bloom: boolean;
-  /** Multiplies the detail distances (0.6 to 1.6). */
-  detail: number;
-  weather: 'auto' | 'limpo' | 'chuva' | 'tempestade';
-  /** Ambient sound volume (0..1). */
-  volume?: number;
-  /** Simulation: demand (low, normal, peak), traffic and people (fraction). */
-  demand?: 'baixa' | 'normal' | 'pico';
-  traffic?: number;
-  people?: number;
-  /** Furniture of new roads: 0 complete, 1 basic, 2 none. */
-  furniture?: number;
-  /** Always day, always night or the clock's light (Roadcraft 4.0 keeps it with the player, not with the map). */
-  sky?: SkyMode;
-  /** Road tool keys (key codes): raise and lower the road. */
-  roadUp?: string;
-  roadDown?: string;
-  /** Road tool key that cycles the alignment: straight, curve, free (Roadcraft 4.0; default V). */
-  roadAlign?: string;
-}
 
 /** Keys the game already uses (they cannot be picked for the road): read from the key table (keys.ts). */
 const RESERVED = reservedKeys();
 /** The road keys' defaults: Page Up, Page Down, V. */
 const ROAD_DEFAULTS = ['PageUp', 'PageDown', 'KeyV'];
 
-export const PRESETS: Record<Preset, Omit<Settings, 'preset' | 'weather'>> = {
-  baixo: { resolution: 0.75, shadows: false, ao: false, bloom: false, detail: 0.7 },
-  medio: { resolution: 1, shadows: true, ao: false, bloom: true, detail: 0.9 },
-  alto: { resolution: 1, shadows: true, ao: true, bloom: true, detail: 1 },
-  ultra: { resolution: 1, shadows: true, ao: true, bloom: true, detail: 1.4 },
-};
-
-const KEY = 'cidade.opcoes';
-
-export function defaultSettings(webgpu: boolean): Settings {
-  return { preset: webgpu ? 'alto' : 'baixo', ...PRESETS[webgpu ? 'alto' : 'baixo'], weather: 'limpo' };
-}
-
-export function loadSettings(webgpu: boolean): Settings {
-  const base = defaultSettings(webgpu);
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) Object.assign(base, JSON.parse(raw));
-  } catch { /* no storage: defaults */ }
-  if (!webgpu) Object.assign(base, PRESETS.baixo, { preset: 'baixo' }); // compatibility mode: always Low
-  // clear weather by default (the player, 2026-10-19): 'auto' brought rain; rain only when the player picks it
-  if (base.weather === 'auto') base.weather = 'limpo';
-  return base;
-}
-
-/** The player's own values of the options a photo parameter in the address replaced (they are what is kept). */
-let fromAddress: Partial<Settings> = {};
-
-/** After the address changed some options for this run (?simples, ?semsombra…): those are never stored. */
-export function keepOverAddress(before: Settings, after: Settings): void {
-  fromAddress = {};
-  for (const k of Object.keys(after) as Array<keyof Settings>) if (after[k] !== before[k]) (fromAddress as Record<string, unknown>)[k] = before[k];
-}
-
-export function saveSettings(s: Settings): void {
-  try { localStorage.setItem(KEY, JSON.stringify({ ...s, ...fromAddress })); } catch { /* ignored */ }
-}
-
-/** The options dialog. `apply` receives the new options; `current` gives the game's options as they are now. */
+/** The options dialog. `apply` receives what the player changed; `current` gives the options in force now. */
 export class OptionsPanel {
   readonly root: HTMLElement;
-  private current: () => Settings;
-  private apply: (s: Settings) => void;
+  private current: () => Readonly<Settings>;
+  private apply: (changed: Partial<Settings>) => void;
   private webgpu: boolean;
   private extra: Array<[string, string, () => void]>;
 
   /** The graphics card's name as the driver gives it (the dialog shows it, as Roadcraft 4.0). */
   private gpu: () => string;
 
-  constructor(parent: HTMLElement, current: () => Settings, webgpu: boolean, apply: (s: Settings) => void, extra: Array<[string, string, () => void]> = [], gpu: () => string = () => '') {
+  constructor(parent: HTMLElement, current: () => Readonly<Settings>, webgpu: boolean, apply: (changed: Partial<Settings>) => void, extra: Array<[string, string, () => void]> = [], gpu: () => string = () => '') {
     this.gpu = gpu;
     this.current = current;
     this.extra = extra;
@@ -149,9 +82,9 @@ export class OptionsPanel {
       return wrap;
     };
     const pct = (v: number): string => `${Math.round(v * 100)}%`;
-    const custom = (): void => { s.preset = 'personalizado'; presetSel.value = 'personalizado'; };
-    const presetSel = select(s.preset, [['baixo', t('quality.low')], ['medio', t('quality.medium')], ['alto', t('quality.high')], ['ultra', t('quality.ultra')], ['personalizado', t('ui.options.custom')]], (v) => {
-      if (v !== 'personalizado') Object.assign(s, PRESETS[v as Preset]);
+    const custom = (): void => { s.preset = 'custom'; presetSel.value = 'custom'; };
+    const presetSel = select(s.preset, [['low', t('quality.low')], ['medium', t('quality.medium')], ['high', t('quality.high')], ['ultra', t('quality.ultra')], ['custom', t('ui.options.custom')]], (v) => {
+      if (v !== 'custom') Object.assign(s, PRESETS[v as Preset]);
       s.preset = v; this.render(s);
     }, !this.webgpu);
     row(t('gfx.preset'), presetSel);
@@ -160,7 +93,7 @@ export class OptionsPanel {
     row(t('gfx.shadows'), check(s.shadows, (v) => { s.shadows = v; custom(); }));
     row(t('gfx.ao'), check(s.ao, (v) => { s.ao = v; custom(); }));
     row(t('ui.options.bloom'), check(s.bloom, (v) => { s.bloom = v; custom(); }));
-    row(t('sim.demand'), select(s.demand ?? 'normal', [['baixa', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['pico', t('sim.demand.peak')]], (v) => { s.demand = v; }));
+    row(t('sim.demand'), select(s.demand ?? 'normal', [['low', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['peak', t('sim.demand.peak')]], (v) => { s.demand = v; }));
     row(t('sim.traffic'), range(s.traffic ?? 1, 0.1, 2, 0.1, pct, (v) => { s.traffic = v; }));
     row(t('sim.people'), range(s.people ?? 1, 0.1, 2, 0.1, pct, (v) => { s.people = v; }));
     row(t('roadFurniture.row'), select(String(s.furniture ?? 0), [['0', t('roadFurniture.complete')], ['1', t('roadFurniture.basic')], ['2', t('roadFurniture.none')]], (v) => { s.furniture = Number(v); }));
@@ -196,7 +129,7 @@ export class OptionsPanel {
         la, keyBtn(() => s.roadAlign ?? 'KeyV', (c) => { s.roadAlign = c; }), reset);
       row(t('roadKeys.title'), wrap);
     }
-    row(t('ui.options.weather'), select(s.weather, [['auto', t('ui.weather.auto')], ['limpo', t('ui.options.clear')], ['chuva', t('weather.rain').replace(/\s*\(.*$/, '')], ['tempestade', t('weather.storm')]], (v) => { s.weather = v; }));
+    row(t('ui.options.weather'), select(s.weather, [['auto', t('ui.weather.auto')], ['clear', t('ui.options.clear')], ['rain', t('weather.rain').replace(/\s*\(.*$/, '')], ['storm', t('weather.storm')]], (v) => { s.weather = v; }));
     row(t('menu.language'), select<Lang>(lang(), LANGUAGES.map(([c, name]) => [c, name] as [Lang, string]), (v) => setLang(v)));
     row(t('ui.options.volume'), range(s.volume ?? 0.6, 0, 1, 0.05, pct, (v) => { s.volume = v; }));
     {
@@ -219,11 +152,12 @@ export class OptionsPanel {
     if (name) { const g = document.createElement('p'); g.className = 'opt-note opt-gpu'; g.textContent = `${t('gfx.gpu')}: ${name}`; box.append(g); }
     const buttons = document.createElement('div'); buttons.className = 'opt-buttons';
     const ok = document.createElement('button'); ok.className = 'v2-btn primary'; ok.textContent = t('ui.options.apply');
-    // what other panels changed while the dialog was open (simulation and furniture) is kept
+    // only what the player changed in the dialog: what other panels changed while it was open, and this run's
+    // address overrides (?noshadows…), stay as they are
     ok.addEventListener('click', () => {
-      const now = this.current(), opened = this.opened;
-      for (const k of Object.keys(s) as Array<keyof Settings>) if (s[k] === opened[k] && now[k] !== opened[k]) (s as unknown as Record<string, unknown>)[k] = now[k];
-      saveSettings(s); this.apply({ ...s }); this.close();
+      const patch: Partial<Settings> = {}, opened = this.opened;
+      for (const k of Object.keys(s) as Array<keyof Settings>) if (s[k] !== opened[k]) (patch as Record<string, unknown>)[k] = s[k];
+      this.apply(patch); this.close();
     });
     const cancel = document.createElement('button'); cancel.className = 'v2-btn'; cancel.textContent = t('gfx.close');
     cancel.addEventListener('click', () => this.close());

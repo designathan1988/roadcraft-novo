@@ -498,7 +498,7 @@ export class Hud {
         this.row(t('ui.menu.start'), () => a.startScreen(), 'roads'),
         el('hr'),
         // the four quality presets in the menu, as in Roadcraft 4.0 (Graphics options has the rest)
-        this.seg(t('menu.quality'), (['baixo', 'medio', 'alto', 'ultra'] as const).map((q) => [q, t(`quality.${q === 'baixo' ? 'low' : q === 'medio' ? 'medium' : q === 'alto' ? 'high' : 'ultra'}`)] as const), st.preset, (v) => a.quality(v)),
+        this.seg(t('menu.quality'), (['low', 'medium', 'high', 'ultra'] as const).map((q) => [q, t(`quality.${q}`)] as const), st.preset, (v) => a.quality(v)),
         this.row(t('menu.graphicsOptions'), () => a.options(), 'm_quality'),
         this.seg(t('menu.language'), LANGUAGES, lang(), (v) => setLang(v as 'pt-BR' | 'en')),
         this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => a.paint(v)),
@@ -525,7 +525,7 @@ export class Hud {
       body.append(
         range(t('sim.traffic'), 0, 300, 10, Math.round(st.traffic * 100), (v) => `${v}%`, (v) => a.simulation({ traffic: v / 100 })),
         range(t('sim.people'), 0, 300, 10, Math.round(st.people * 100), (v) => `${v}%`, (v) => a.simulation({ people: v / 100 })),
-        this.seg(t('sim.demand'), [['baixa', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['pico', t('sim.demand.peak')]], st.demand, (v) => a.simulation({ demand: v as SimSettings['demand'] })),
+        this.seg(t('sim.demand'), [['low', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['peak', t('sim.demand.peak')]], st.demand, (v) => a.simulation({ demand: v as SimSettings['demand'] })),
       );
       this.metrics = el('dl', 'v2-metrics');
       body.append(this.metrics);

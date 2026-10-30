@@ -13,7 +13,6 @@ import { addressAt } from '../roads/streetNames.ts';
 import { RoadPreview } from '../render/preview.ts';
 import { CameraRig } from '../render/cameraRig.ts';
 import { InsideView, insideTarget } from '../render/inside.ts';
-import type { Settings } from '../ui/options.ts';
 import type { Hud, LotMode, Tool } from '../ui/hud.ts';
 import type { LotFeatureActions } from './featureActions.ts';
 import type { World } from '../world/world.ts';
@@ -32,7 +31,6 @@ export interface LotEditHost {
   readonly inside: InsideView;
   insideId: number;
   insideFloor: number;
-  readonly settings: Settings;
   readonly transit: Transit;
   unsaved: boolean;
   select(id: number): void;

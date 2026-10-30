@@ -7,7 +7,7 @@ import type * as THREE from 'three/webgpu';
 import type { LifeState, Lifecycle } from './lifecycle.ts';
 import type { ScriptApi } from './scriptApi.ts';
 import type { HudActions, LotToolView, SkyMode, Tool } from '../ui/hudActions.ts';
-import type { Settings } from '../ui/options.ts';
+import type { Settings } from '../platform/settings.ts';
 import type { World } from '../world/world.ts';
 import type { GpuTiming } from '../render/gpuTiming.ts';
 import type { FrameProfile } from './frameProfile.ts';

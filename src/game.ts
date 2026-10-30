@@ -26,7 +26,9 @@ import { PropRenderer } from './render/props.ts';
 import { TransitRenderer } from './render/transit.ts';
 import { Post } from './render/post.ts';
 import { achieve } from './platform/steam.ts';
-import { OptionsPanel, PRESETS, keepOverAddress, loadSettings, saveSettings, type Preset, type Settings } from './ui/options.ts';
+import { OptionsPanel } from './ui/options.ts';
+import { PRESETS, Preferences, type Preset, type Settings } from './platform/settings.ts';
+import { readStored } from './shared/storage.ts';
 import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windU } from './render/weather.ts';
 import { Ambient } from './platform/audio.ts';
@@ -55,7 +57,7 @@ import type { MapExtra } from './platform/mapExtra.ts';
 import { SaveFlow } from './app/saveFlow.ts';
 import { CityFlows } from './app/cityFlows.ts';
 import { insertBoxes } from './app/insertBoxes.ts';
-import { WeatherControl, weatherPreset } from './features/sky/weatherControl.ts';
+import { WeatherControl } from './features/sky/weatherControl.ts';
 import { WaterControl } from './features/water/waterControl.ts';
 import { chooseRoadPaint, showRoadPaint } from './features/roads/roadPaint.ts';
 import { InsideView } from './render/inside.ts';
@@ -134,7 +136,9 @@ export class Game {
   private weather = new Weather();
   private ambient = new Ambient();
   private particles!: Particles;
-  private settings!: Settings;
+  /** The player's preferences (platform/settings.ts): read through `settings`, changed only through `prefs.update`. */
+  private prefs: Preferences | null = null;
+  private get settings(): Readonly<Settings> { return this.prefs!.now; }
   private optionsPanel!: OptionsPanel;
   /** Simulation speed (1, 2, 4), the zone colours shown with any tool, stops clicked as terminals. */
   private zoneLayer = false;
@@ -145,7 +149,7 @@ export class Game {
   /** The developer panels (F8, F9, the worst case test): ?dev, roadcraft.dev = 1 in the browser's storage, or the dev server. */
   private readonly developer = ((): boolean => {
     let stored = false;
-    try { stored = localStorage.getItem('roadcraft.dev') === '1'; } catch { /* no storage */ }
+    stored = readStored('developer') === '1';
     return stored || new URLSearchParams(location.search).has('dev') || !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
   })();
   /** The latest edits (the health panel's World tab): when, what. */
@@ -207,7 +211,7 @@ export class Game {
   /** ?hour (photos at a set hour) follows the clock for this run without changing the player's choice. */
   private skyForRun: SkyMode | null = null;
   /** The sky mode: the player's choice, always day unless chosen otherwise (Roadcraft 4.0 main.ts:2292-2303). */
-  private get skyMode(): SkyMode { return this.skyForRun ?? this.settings?.sky ?? 'day'; }
+  private get skyMode(): SkyMode { return this.skyForRun ?? this.prefs?.now.sky ?? 'day'; }
   /** Clouds placed by the player and the state of the Sky tool. */
   /** Inside view: the building and the floor shown. */
   private inside = new InsideView();
@@ -247,7 +251,6 @@ export class Game {
     this.saving = new SaveFlow({
       world: this.world, pool: this.pool, rig: this.rig, transit: this.transit,
       get hud() { return gs.hud; },
-      get settings() { return gs.settings; },
       life,
       get hour() { return gs.hour; },
       clearForOpen: () => gs.clearPage(),
@@ -271,7 +274,7 @@ export class Game {
       endRebuild: (err, what) => gs.endRebuild(err, what),
     });
     this.water = new WaterControl(this.world.look, () => { this.unsaved = true; });
-    this.sky = new WeatherControl({ weather: this.weather, look: this.world.look, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.settings?.weather, changed: () => { this.unsaved = true; } });
+    this.sky = new WeatherControl({ weather: this.weather, look: this.world.look, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.prefs?.now.weather, changed: () => { this.unsaved = true; } });
     this.lines = new TransitTool({
       transit: this.transit, roads: this.world.roads, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
       lineMade: () => achieve('PRIMEIRA_LINHA'), sendLines: (lines) => this.sim.postMessage({ type: 'lines', lines } satisfies ToSim),
@@ -350,7 +353,6 @@ export class Game {
       rig: this.rig, inside: this.inside,
       get insideId() { return ge.insideId; }, set insideId(v) { ge.insideId = v; },
       get insideFloor() { return ge.insideFloor; }, set insideFloor(v) { ge.insideFloor = v; },
-      get settings() { return ge.settings; },
       get transit() { return ge.transit; },
       set unsaved(v: boolean) { ge.unsaved = v; },
       select: (id) => ge.select(id),
@@ -378,12 +380,12 @@ export class Game {
         this.hud.toast(t('game.toast.flattened'));
       },
       weather: (w) => this.sky.set(w),
-      sky: (m) => { this.skyForRun = null; this.settings.sky = m; saveSettings(this.settings); },
+      sky: (m) => { this.skyForRun = null; this.prefs!.update({ sky: m }); },
       personSpec: (p) => { this.personSpec = p; },
       personOptions: (o) => { this.personOptions = o; },
       peopleCatalog: () => this.vehicles.people.catalog(),
       bombForce: (f) => { this.bombForce = f; },
-      roadKeys: (patch) => { Object.assign(this.settings, patch); saveSettings(this.settings); },
+      roadKeys: (patch) => { this.prefs!.update(patch); },
       water: (w) => this.water.set(w),
       skyTool: (s) => { this.clouds.tool = s; this.skyHint(); },
       scatterClouds: (n, v) => this.clouds.scatter(n, v),
@@ -452,13 +454,13 @@ export class Game {
       turn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 4), // left (−1) turns as Q does
       tilt: (d) => this.rig.rotate(0, d * 60),
       zoneLayer: (on) => { this.zoneLayer = on; zoneOverlayU.value = on || this.tool === 'zone' ? 1 : 0; },
-      simulation: (sim) => { Object.assign(this.settings, sim); saveSettings(this.settings); this.demandSent = 0; },
+      simulation: (sim) => { this.prefs!.update(sim); this.demandSent = 0; },
       settings: () => {
-        const st = this.settings;
-        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: this.world.look.paint, furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', roadAlign: st?.roadAlign ?? 'KeyV', preset: st?.preset ?? 'alto', webgpu: !!this.parts?.isWebGPU };
+        const st = this.prefs?.now;
+        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: this.world.look.paint, furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', roadAlign: st?.roadAlign ?? 'KeyV', preset: st?.preset ?? 'high', webgpu: !!this.parts?.isWebGPU };
       },
       paint: (style) => chooseRoadPaint({ look: this.world.look, run: (cmd) => this.commands.run(cmd), changed: () => { this.unsaved = true; } }, style),
-      furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
+      furniture: (n) => { this.prefs!.update({ furniture: n }); this.roadTool.furniture = n; },
       ring: (f) => { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); },
       terminal: (on) => { this.transitTerminal = on; },
       itemRemove: (on) => { this.itemRemove = on; },
@@ -468,9 +470,8 @@ export class Game {
       healthLevel: () => this.health?.level() ?? 'ok',
       quality: (p) => {
         if (!this.parts.isWebGPU || !(p in PRESETS)) return;
-        const s = { ...this.settings, ...PRESETS[p as Preset], preset: p as Preset };
-        saveSettings(s);
-        void this.applySettings(s);
+        this.prefs!.update({ ...PRESETS[p as Preset], preset: p as Preset });
+        void this.applySettings();
       },
       resetView: () => { if (this.homeView) this.rig.restore(this.homeView); },
       environment: () => ({ water: { ...this.water.ctl }, weather: this.sky.ctl ? { ...this.sky.ctl } : null, fog: this.world.look.fog }),
@@ -539,8 +540,6 @@ export class Game {
     if (params.has('hour')) { this.world.setHour(Number(params.get('hour')) % 24); this.clock.holdHour(); this.skyForRun = 'cycle'; }
     this.hud.setSky(this.skyMode);
     this.weather.onStrike = (d) => this.ambient.thunder(d);
-    const preset = ['tempestade', 'chuva', 'limpo'].find((k) => params.has(k));
-    if (preset) this.weather.fixed = weatherPreset(preset);
 
     this.hud.showLoading(t('game.loading.video'));
     this.parts = await createScene(this.canvas);
@@ -610,30 +609,25 @@ export class Game {
     this.props.bake(renderer);
     if (this.props.enabled) this.props.update(renderer, this.rig.persp, this.rig.eye, performance.now());
     // options (quality): from last time, or by the GPU; ?simples etc. override them for photos
-    this.settings = loadSettings(this.parts.isWebGPU);
-    const asStored = { ...this.settings };
-    if (params.has('simple')) Object.assign(this.settings, { shadows: false, ao: false, bloom: false });
-    if (params.has('noshadows')) this.settings.shadows = false;
+    const prefs = this.prefs = new Preferences(this.parts.isWebGPU);
+    if (params.has('simple')) prefs.forRun({ shadows: false, ao: false, bloom: false });
+    if (params.has('noshadows')) prefs.forRun({ shadows: false });
     // measurements: turn parts of the rendering on and off
     if (params.has('nodetail')) this.cityDetail.group.visible = false;
     if (params.has('perf')) { this.perfLog = []; this.profile = new FrameProfile(); if (this.parts.isWebGPU) this.gpuTiming = new GpuTiming(this.parts.renderer); }
     if (params.has('nopedestrians')) this.vehicles.hidePeople = true;
-    if (params.has('noao')) this.settings.ao = false;
-    if (params.has('nobloom')) this.settings.bloom = false;
-    if (params.has('rain')) this.settings.weather = 'chuva';
-    if (params.has('clear')) this.settings.weather = 'limpo';
-    if (params.has('storm')) this.settings.weather = 'tempestade';
-    // the address's photo parameters hold for this run only: the player's options keep their own values
-    keepOverAddress(asStored, this.settings);
+    if (params.has('noao')) prefs.forRun({ ao: false });
+    if (params.has('nobloom')) prefs.forRun({ bloom: false });
+    for (const w of ['rain', 'clear', 'storm'] as const) if (params.has(w)) prefs.forRun({ weather: w });
     this.health = new HealthPanel(document.getElementById('hud')!, { world: () => this.healthWorld(), state: () => this.healthState() });
     this.creator = new Creator({ apply: (d, fl) => this.applyDesign(d, fl) });
     this.hud.buildingSlot.append(this.creator.el);
     followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
-    this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
+    this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => { this.prefs!.update(s); void this.applySettings(); },
       !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.cities.testCity(); }],
         [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]], () => this.gpuName());
-    await this.applySettings(this.settings, false);
+    await this.applySettings(false);
     this.showLook();
     await renderer.compileAsync(scene, this.rig.persp);
     await renderer.compileAsync(scene, this.rig.ortho);
@@ -982,7 +976,7 @@ export class Game {
     if (now - this.occSent > 500) { this.occSent = now; this.trafficLook.occupancy.needsUpdate = true; }
     if (now - this.demandSent > 2000) {
       this.demandSent = now;
-      const st = this.settings;
+      const st = this.prefs?.now;
       const demand = demandFactor(st?.demand);
       this.sim.postMessage({ type: 'demand', hour: this.hour, demand, traffic: st?.traffic ?? 1, people: st?.people ?? 1 } satisfies ToSim);
     }
@@ -1168,8 +1162,8 @@ export class Game {
   }
 
   /** Applies the options: resolution, detail, final image (rebuilt and compiled here, never mid-game) and weather. */
-  private async applySettings(s: Settings, compile = true): Promise<void> {
-    this.settings = s;
+  private async applySettings(compile = true): Promise<void> {
+    const s = this.settings;
     const { renderer, scene } = this.parts;
     renderer.setPixelRatio(window.devicePixelRatio * s.resolution);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -1249,7 +1243,7 @@ export class Game {
 
   /** Detail distances by screen-space error: more pixels, detail reaches farther. */
   private updatePixelScale(): void {
-    const res = (this.settings ? this.settings.resolution * this.settings.detail : 1) * this.detailAuto;
+    const res = (this.prefs ? this.settings.resolution * this.settings.detail : 1) * this.detailAuto;
     const k = Math.min(3, Math.max(0.3, window.innerHeight * window.devicePixelRatio * res / 1080));
     // (the seams keep their reach: the terrain cuts within a fixed distance, render/terrain.ts SEAM_REACH)
     for (const l of this.layers) if (l !== this.seams) l.pixelScale = k;
@@ -1357,7 +1351,7 @@ export class Game {
           lots: { lotMode: g.editing.lotMode, lotExtra: g.editing.lotExtra, splitKind: g.editing.splitKind, splitParts: g.editing.splitParts, lotUse: g.editing.lotUse, newArch: g.editing.newArch, newFn: g.editing.newFn },
         };
       },
-      options: () => ({ ...g.settings }), applyOptions: (p) => g.applySettings({ ...g.settings, ...p }),
+      options: () => ({ ...g.settings }), applyOptions: (p) => { g.prefs!.update(p); return g.applySettings(); },
       hour: () => g.hour, skyMode: () => g.skyMode,
       simStats: () => (g.simStats ? { ...g.simStats } : null),
       simInspect: (x, z, r) => new Promise((resolve) => {

@@ -17,11 +17,13 @@ import type { JobPool } from '../jobs/pool.ts';
 import type { World } from '../world/world.ts';
 import type { Transit } from '../world/transit.ts';
 import type { CameraRig } from '../render/cameraRig.ts';
+import { writeStored } from '../shared/storage.ts';
 
 
 /** Changes the map size: the world arrays are sized to the map, so the page reloads. */
 export function reloadWithMap(tiles: number, then: string): void {
-  try { localStorage.setItem('cidade.mapa', String(tiles)); } catch { /* no storage: it goes through the URL */ }
+  // without storage it goes through the URL
+  writeStored('mapTiles', String(tiles));
   location.href = `${location.pathname}?map=${tiles}&${then}`;
 }
 

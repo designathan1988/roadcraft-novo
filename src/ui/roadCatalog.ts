@@ -11,6 +11,7 @@ import { STEP_LIMITS, fromWork, insertionIndex, movedStrip, newStrip, toWork, wi
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, lang, loose, money, plural, t } from '../shared/i18n/index.ts';
+import { readStored, writeStored } from '../shared/storage.ts';
 
 const CATS: Array<[Category, string]> = [['ruas', 'catalog.cat.streets'], ['avenidas', 'catalog.cat.avenues'], ['rodovias', 'catalog.cat.highways'],
   ['especiais', 'catalog.cat.special'], ['trilhos', 'catalog.cat.rails'], ['meus', 'catalog.cat.mine']];
@@ -25,7 +26,6 @@ const TURNS: Array<[number, string]> = [
   [0, 'ui.turn.auto'], [TurnBit.Left | TurnBit.Straight | TurnBit.Right, 'road.turn.all'], [TurnBit.Left, 'road.turn.left'], [TurnBit.Straight, 'road.turn.through'],
   [TurnBit.Right, 'road.turn.right'], [TurnBit.Left | TurnBit.Straight, 'road.turn.leftThrough'], [TurnBit.Straight | TurnBit.Right, 'road.turn.throughRight'],
 ];
-const STORE = 'cidade.modelosDeVia';
 
 export interface CatalogActions {
   use(id: number): void;
@@ -35,13 +35,13 @@ export interface CatalogActions {
 /** The player's templates, kept in the browser (they serve every map). */
 function readTemplates(): Array<Omit<Profile, 'id'>> {
   try {
-    const raw = localStorage.getItem(STORE);
+    const raw = readStored('roadTemplates');
     const list = raw ? JSON.parse(raw) as Array<Omit<Profile, 'id'>> : [];
     return Array.isArray(list) ? list.filter((p) => p && Array.isArray(p.strips) && p.strips.length > 0) : [];
   } catch { return []; }
 }
 function writeTemplates(list: Array<Omit<Profile, 'id'>>): boolean {
-  try { localStorage.setItem(STORE, JSON.stringify(list)); return true; } catch { return false; }
+  return writeStored('roadTemplates', JSON.stringify(list));
 }
 
 /** A road's name in the player's language (the engine names its profiles in Portuguese). */

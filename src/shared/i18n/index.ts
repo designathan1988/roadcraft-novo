@@ -9,12 +9,11 @@ import { EN as RC_EN } from '../../../data/textos-roadcraft/en.ts';
 import { ENGINE_PT } from './lang/engine.pt-BR.ts';
 import { ENGINE_EN } from './lang/engine.en.ts';
 import { translate as legacyTranslate } from './lang/legacy.ts';
+import { readStored, writeStored } from '../storage.ts';
 
 export type Lang = 'pt-BR' | 'en';
 export const LANGUAGES: ReadonlyArray<readonly [Lang, string]> = [['pt-BR', 'Português'], ['en', 'English']]; // not for the player: each language in its own words
 
-const KEY = 'roadcraft.language';
-const OLD_KEY = 'cidade.idioma';
 
 const TABLES: Record<Lang, Record<string, string>> = {
   'pt-BR': { ...RC_PT, ...ENGINE_PT },
@@ -26,10 +25,10 @@ let current: Lang = 'pt-BR';
 /** The language stored by the player (Portuguese when none). */
 export function storedLang(): Lang {
   try {
-    const v = localStorage.getItem(KEY);
+    const v = readStored('language');
     if (v === 'pt-BR' || v === 'en') return v;
-    const old = localStorage.getItem(OLD_KEY);
-    if (old === 'en') return 'en';
+    // the older key held 'pt' or 'en'
+    if (v === 'pt') return 'pt-BR';
   } catch { /* no storage */ }
   return 'pt-BR';
 }
@@ -48,7 +47,7 @@ export function onLanguageChange(fn: () => void): void { listeners.push(fn); }
 
 /** Keeps the choice and switches at once: every panel listening writes its text in the new language. */
 export function setLang(l: Lang): void {
-  try { localStorage.setItem(KEY, l); localStorage.setItem(OLD_KEY, l === 'en' ? 'en' : 'pt'); } catch { /* no storage */ }
+  writeStored('language', l);
   if (l === current) return;
   initLang(l);
   for (const fn of listeners) fn();

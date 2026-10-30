@@ -448,7 +448,7 @@ export const SCENARIOS = {
     check('the photo parameter applies', R.options.get().shadows === false, 'shadows ' + R.options.get().shadows);
     click('[data-cat=roads]'); await frames(2);
     click(byText('[data-furniture]', 'Básico|Basic')); await frames(2);
-    const kept = JSON.parse(localStorage.getItem('cidade.opcoes') || '{}');
+    const kept = JSON.parse(localStorage.getItem('roadcraft.settings') || '{}');
     check('the furniture choice is kept', kept.furniture === 1, 'stored ' + JSON.stringify(kept));
     check('the shadows of the address are not kept', kept.shadows !== false, 'stored shadows ' + kept.shadows);
   ` },
@@ -601,7 +601,7 @@ export const SCENARIOS = {
     const q = QA('.v2-pop .v2-orow').find((r) => /Gráficos|Graphics/.test(r.getAttribute('aria-label')));
     check('the menu has the quality row', !!q && q.querySelectorAll('button').length === 4, 'rows: ' + QA('.v2-pop .v2-orow').map((r) => r.getAttribute('aria-label')).join(', '));
     if (q) { click([...q.querySelectorAll('button')].find((b) => /Baixa|Low/.test(b.textContent))); await wait(2500); }
-    check('a quality click applies the preset', R.options.get().preset === 'baixo' && R.options.get().shadows === false, 'preset ' + R.options.get().preset + ', shadows ' + R.options.get().shadows);
+    check('a quality click applies the preset', R.options.get().preset === 'low' && R.options.get().shadows === false, 'preset ' + R.options.get().preset + ', shadows ' + R.options.get().shadows);
     if (!Q('.v2-pop:not([hidden])')) { click('[data-pop=menu]'); await frames(2); }
     const row = byText('.v2-pop .v2-row', 'Sobre|About');
     row.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); await frames(1);

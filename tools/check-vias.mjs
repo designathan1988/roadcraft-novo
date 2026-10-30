@@ -212,7 +212,7 @@ const SCENARIOS = {
   `,
   // B49: deleting a road model the player used in this session takes its card out of "Mine"
   'catalog-delete-template': `
-    localStorage.removeItem('cidade.modelosDeVia');
+    localStorage.removeItem('roadcraft.roadTemplates');
     R.tools.set('road');
     await wait(300);
     // as the player: Customise a card, name it, Enter saves it as a model of their own, then the Mine tab
@@ -233,7 +233,7 @@ const SCENARIOS = {
     const del = card && [...card.querySelectorAll('button.rc-custom')].find((b) => b.style.color.includes('danger'));
     check('its card has a delete button', !!del, 'no button');
     if (del) del.click();
-    check('the model is gone from the browser', !(JSON.parse(localStorage.getItem('cidade.modelosDeVia') || '[]')).some((p) => p.name === 'Modelo Teste'), 'still stored');
+    check('the model is gone from the browser', !(JSON.parse(localStorage.getItem('roadcraft.roadTemplates') || '[]')).some((p) => p.name === 'Modelo Teste'), 'still stored');
     check('the deleted model leaves the catalogue', !names().includes('Modelo Teste'), 'cards: ' + names());
     const tab = cat.tabs.querySelector('[data-category=meus] em');
     check('the Mine tab counts the cards it shows', tab && tab.textContent === String(names().length), 'tab ' + (tab && tab.textContent) + ', cards ' + names().length);

@@ -1,5 +1,7 @@
 // World constants. The map size lives here and nowhere else.
 
+import { readStored } from './shared/storage.ts';
+
 /** Tile side in meters (unit of saving, terrain and the L2 level). */
 export const TILE_SIZE = 1024;
 /** Offered map sizes (tiles per side). 4 km is test-only and hidden from the start menu. */
@@ -11,14 +13,14 @@ export const MAP_SIZES = [4, 10, 16, 20, 24];
  * Changing the size reloads the page.
  */
 function readMapTiles(): number {
-  const g = globalThis as { name?: unknown; location?: { search?: string }; localStorage?: Storage; document?: unknown };
+  const g = globalThis as { name?: unknown; location?: { search?: string }; document?: unknown };
   let v = NaN;
   try {
     if (!g.document && typeof g.name === 'string') { const m = /map=(\d+)/.exec(g.name); if (m) v = Number(m[1]); }
     else {
       const m = /[?&]map=(\d+)/.exec(g.location?.search ?? '');
       if (m) v = Number(m[1]);
-      else v = Number(g.localStorage?.getItem('cidade.mapa') ?? NaN);
+      else v = Number(readStored('mapTiles') ?? NaN);
     }
   } catch { /* no access: default size */ }
   return MAP_SIZES.includes(v) ? v : 10;

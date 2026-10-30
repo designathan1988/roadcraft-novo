@@ -4,6 +4,8 @@ import type { LaneChoice, ParkingPreset } from '../roads/roadVariant.ts';
 import type { PersonOptions } from '../shared/contracts/people.ts';
 import type { creatorCatalog } from '../render/people/creator.ts';
 import type { WeatherCtl } from '../world/mapLook.ts';
+import type { Demand, SkyMode } from '../platform/settings.ts';
+export type { SkyMode };
 export interface RoadKeys { roadUp: string; roadDown: string; roadAlign: string }
 
 export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
@@ -13,13 +15,11 @@ export const TERRAIN_TOOLS: Tool[] = ['raise', 'lower', 'smooth', 'flatten', 'la
 /** Ground brushes (they share the radius). */
 export const GROUND_TOOLS: Tool[] = ['paint', 'forest', 'elements'];
 export const ROAD_TOOLS: Tool[] = ['road', 'curve', 'free', 'roundabout', 'upgrade', 'blocks', 'move', 'split', 'bulldoze'];
-/** Always day, always night, or the light following the clock (the player's choice, kept between games). */
-export type SkyMode = 'day' | 'night' | 'cycle';
 export interface SkyToolState { cloud: 'none' | 'add' | 'move' | 'edit' | 'remove'; fog: 'none' | 'lay' | 'erase'; size: number; base: number; density: number; fogHeight: number }
 export type { WeatherCtl };
 export type LotMode = 'edit' | 'rect' | 'poly' | 'split' | 'join' | 'delete' | 'front' | 'corner';
 /** The simulation's settings the Simulation panel changes. */
-export interface SimSettings { traffic: number; people: number; demand: 'baixa' | 'normal' | 'pico' }
+export interface SimSettings { traffic: number; people: number; demand: Demand }
 /** The city's numbers for the top bar and the Simulation panel (counters the engine already keeps). */
 export interface CityStatus {
   cars: number; peds: number; residents: number; jobs: number; buildings: number;

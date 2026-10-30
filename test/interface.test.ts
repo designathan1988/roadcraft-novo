@@ -168,5 +168,5 @@ test('transit lines are named as Roadcraft 4.0', async () => {
 // Roadcraft 4.0 v2/shell.ts:741: the simulation's demand is 0.55 (low), 1 (normal) or 1.55 (peak).
 test('simulation demand factors as Roadcraft 4.0', async () => {
   const { demandFactor } = await import('../src/ui/readouts.ts');
-  assert.deepEqual(['baixa', 'normal', 'pico', undefined].map((d) => demandFactor(d)), [0.55, 1, 1.55, 1]);
+  assert.deepEqual(['low', 'normal', 'peak', undefined].map((d) => demandFactor(d)), [0.55, 1, 1.55, 1]);
 });

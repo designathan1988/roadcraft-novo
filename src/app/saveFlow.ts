@@ -19,7 +19,6 @@ import type { Transit } from '../world/transit.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import type { CameraRig } from '../render/cameraRig.ts';
 import type { Hud } from '../ui/hud.ts';
-import type { Settings } from '../ui/options.ts';
 import { errorText } from '../shared/errors.ts';
 import { t } from '../shared/i18n/index.ts';
 import { loadSession, newMapSession, saveSession, type LoadHost, type NewMapHost, type SaveHost } from './session.ts';
@@ -33,7 +32,6 @@ export interface SaveFlowHost {
   readonly hud: Hud;
   readonly rig: CameraRig;
   readonly transit: Transit;
-  readonly settings: Settings;
   /** The game's lifecycle (app/lifecycle.ts): the flows start and end their operation there. */
   readonly life: Lifecycle;
   /** The time of day the save writes. */
