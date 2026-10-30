@@ -81,6 +81,7 @@ import { repairDanglingEnds } from './roads/repair.ts';
 import { photoView, settlePool } from './app/photoHooks.ts';
 import { loadSession, newMapSession, reloadWithMap, saveSession, type LoadHost, type NewMapHost, type SaveHost } from './app/session.ts';
 import { setTool as setGameTool, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
+import { clickTool, type ClickHost } from './app/clicks.ts';
 import { errorText } from './shared/errors.ts';
 
 const SLOT = 'cidade-1';
@@ -1076,24 +1077,7 @@ export class Game {
       else if (this.drag === 'node' && this.cornerDrag) this.dropCorner(this.rig.pick(this.ndcX(), this.ndcY()));
       else if (this.drag === 'node') this.roadTool.drop(this.rig.pick(this.ndcX(), this.ndcY()));
       if (this.drag === 'click' && still && e.type === 'pointerup') {
-        const hit = this.rig.pick(this.ndcX(), this.ndcY());
-        if (this.tool === 'inspect') { if (hit) this.inspector.pick(hit.x, hit.z); }
-        else if (this.tool === 'river') { if (hit) this.riverPts.push([hit.x, hit.z]); }
-        else if (this.tool === 'barrier' && this.itemRemove) this.removePole(hit);
-        else if (this.tool === 'streetscape' || this.tool === 'barrier') { this.itemTool.click(hit, e.shiftKey); if (this.tool === 'barrier' && !e.shiftKey && hit) this.wallOpen = true; }
-        else if (this.tool === 'building') this.clickBuilding(hit, e.shiftKey);
-        else if (this.tool === 'transit') this.clickTransit(hit, e.shiftKey || this.transitTerminal);
-        else if (this.tool === 'forest' && this.forestOne) { if (hit) this.plantTree(hit.x, hit.z); }
-        else if (this.tool === 'sky') { if (hit) this.clickSky(hit.x, hit.z); }
-        else if (this.tool === 'person') { if (hit) this.placePerson(hit.x, hit.z); }
-        else if (this.tool === 'pistol') { if (hit) this.shoot(hit.x, hit.z); }
-        else if (this.tool === 'bomb') { if (hit) this.bomb(hit.x, hit.z); }
-        else if (this.tool === 'weather') { if (hit) this.weather.strikeAt(this.rig.eye, hit.x, hit.z, heightAt(this.world.heights, hit.x, hit.z)); }
-        else if (this.tool === 'zone' && this.zoneBlock) { if (hit) { const r = this.zoneTool.fillBlock(hit.x, hit.z); if (r !== 'ok') this.hud.toast(r); } }
-        else if (e.altKey && ROAD_TOOLS.includes(this.tool)) {
-          const p = this.roadTool.pick(hit);
-          if (p >= 0) { this.hud.setProfile(p); this.hud.toast(t('game.toast.profileCopied', { name: loose(PROFILE_INFO[p].name) })); }
-        } else this.roadTool.click(hit, e.shiftKey);
+        clickTool(this.clickHost(), this.rig.pick(this.ndcX(), this.ndcY()), e.shiftKey, e.altKey);
       }
       if (this.drag === 'rotate' && still && ROAD_TOOLS.includes(this.tool)) this.roadTool.cancel();
       if (this.drag === 'pan') this.rig.endPan();
@@ -1317,6 +1301,25 @@ export class Game {
       get insideId() { return g.insideId; }, set insideId(v) { g.insideId = v; },
       hud: g.hud, health: g.health, canvas: g.canvas, ambient: g.ambient,
       select: (id) => g.select(id), setLotMode: (mode) => g.setLotMode(mode),
+    };
+  }
+
+  /** The click dispatch as the clicks module sees it: tools and actions, never a copy of the world. */
+  private clickHost(): ClickHost {
+    const g = this;
+    return {
+      tool: g.tool, itemRemove: g.itemRemove, forestOne: g.forestOne, zoneBlock: g.zoneBlock, transitTerminal: g.transitTerminal,
+      get wallOpen() { return g.wallOpen; }, set wallOpen(v) { g.wallOpen = v; },
+      inspector: g.inspector, riverPts: g.riverPts, itemTool: g.itemTool, roadTool: g.roadTool, zoneTool: g.zoneTool, hud: g.hud,
+      removePole: (hit) => g.removePole(hit),
+      clickBuilding: (hit, shift) => g.clickBuilding(hit, shift),
+      clickTransit: (hit, terminal) => g.clickTransit(hit, terminal),
+      clickSky: (x, z) => g.clickSky(x, z),
+      plantTree: (x, z) => g.plantTree(x, z),
+      placePerson: (x, z) => g.placePerson(x, z),
+      shoot: (x, z) => g.shoot(x, z),
+      bomb: (x, z) => g.bomb(x, z),
+      weatherStrike: (hit) => g.weather.strikeAt(g.rig.eye, hit.x, hit.z, heightAt(g.world.heights, hit.x, hit.z)),
     };
   }
 
