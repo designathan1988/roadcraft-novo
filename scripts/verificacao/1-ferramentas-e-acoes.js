@@ -19,6 +19,8 @@
   };
   const segs = () => w.roads.segs.size, blds = () => w.buildings.size, items = () => w.items.size;
   const X = 1500, Z = 1500;
+  const fp = (...arrays) => { let h = 0; for (const a of arrays) for (let i = 0; i < a.length; i++) h = (Math.imul(h, 31) + Math.round(a[i] * 1000)) | 0; return h; };
+  const fpTable = (t) => fp(...Object.values(t.cols));
   // as ferramentas são verificadas em modo livre (o caixa dos preços do Roadcraft acaba no meio do roteiro); a economia
   // tem a verificação própria, com o caixa ligado só nela
   w.unlimited = true;
@@ -79,17 +81,18 @@
   // ---------------- rua e natureza
   await check('item de rua (banco)', () => { const n = items(); a.item(X + 40, Z + 15, 6); return items() > n || 'item não entrou'; });
   await check('elementos do chão', () => { const n = items(); a.elements(31, X - 300, Z - 300); return items() > n || 'sem elementos'; });
-  await check('pintar chão', () => { a.paint(X - 300, Z + 300, 30, 2); return true; });
-  await check('floresta', () => { a.paint(X + 300, Z - 300, 40, 0, 'forest', 1); return true; });
+  await check('pintar chão', () => { const f0 = fp(w.ground32); a.paint(X - 300, Z + 300, 30, 2); return fp(w.ground32) !== f0 || 'o chão não mudou'; });
+  await check('floresta', () => { const f0 = fp(w.ground32); a.paint(X + 300, Z - 300, 40, 0, 'forest', 1); return fp(w.ground32) !== f0 || 'a floresta não entrou no chão'; });
   for (const m of ['raise', 'lower', 'smooth', 'flatten', 'mesa', 'canyon', 'escarpment', 'sugarloaf', 'gully'])
-    await check(`terreno: ${m}`, () => { a.terrain(m, X - 600, Z - 600, 60, 0.4); return true; });
-  await check('rio', () => { a.river([[X - 700, Z + 700], [X - 400, Z + 760], [X - 100, Z + 820]], 14); return true; });
-  await check('bioma', () => { a.biome(2); a.biome(0); return true; });
+    // the first mode raises a bump, so smoothing and flattening after it have relief to work on
+    await check(`terreno: ${m}`, () => { const f0 = fp(w.heights); a.terrain(m, X - 600, Z - 600, 60, 0.4); return fp(w.heights) !== f0 || 'as alturas não mudaram'; });
+  await check('rio', () => { const f0 = fp(w.water); a.river([[X - 700, Z + 700], [X - 400, Z + 760], [X - 100, Z + 820]], 14); return fp(w.water) !== f0 || 'nenhuma água nova'; });
+  await check('bioma', () => { a.biome(2); const b2 = w.biome; a.biome(0); return (b2 === 2 && w.biome === 0) || `bioma ${b2} e depois ${w.biome}`; });
 
   // ---------------- clima, céu, câmera
-  await check('raio', () => { a.strike(); return true; });
-  await check('seguir veículo', async () => { await wait(2000); a.follow(); a.follow(); return true; });
-  await check('noite e dia', async () => { await g.view(X, Z, 30, 40, 300, 22); await wait(500); await g.view(X, Z, 30, 40, 300, 11); return true; });
+  await check('raio', () => { g.weather.bolt.visible = false; a.strike(); return g.weather.bolt.visible || 'o raio não apareceu'; });
+  await check('seguir veículo', async () => { await wait(2000); const on = a.follow(); const off = a.follow(); return (on === true && off === false) || `seguir ${on}, depois ${off}`; });
+  await check('noite e dia', async () => { await g.view(X, Z, 30, 40, 300, 22); await wait(500); const h1 = g.hour; await g.view(X, Z, 30, 40, 300, 11); return (Math.round(h1) === 22 && Math.round(g.hour) === 11) || `horas ${h1} e ${g.hour}`; });
 
   // ---------------- pessoas e ações
   await check('pessoa parada (criador de pessoas)', () => {
@@ -100,8 +103,18 @@
     if (cr) { if (cr.size !== k + 1) return 'grupo não entrou'; g.commands.undo(); return cr.size === k || 'desfazer não tirou o grupo'; }
     return items() >= n + 2 || 'pessoa não entrou';
   });
-  await check('pessoas andando', () => { g.personSpec = { color: 5, height: 7, walk: true, count: 5 }; g.placePerson(X + 20, Z + 30); return true; });
-  await check('pistola', () => { g.shoot(X + 20, Z + 30); return true; });
+  await check('pessoas andando', () => {
+    // the walking group goes through the people creator (one group, one undo step), as the standing one above
+    const cr = g.vehicles.people.creator; if (!cr) return 'sem o criador de pessoas';
+    const k = cr.size; g.personSpec = { color: 5, height: 7, walk: true, count: 5 }; g.personOptions = { count: 5, mode: 'walk' };
+    g.placePerson(X + 20, Z + 30); return cr.size === k + 1 || 'grupo andando não entrou';
+  });
+  await check('pistola', async () => {
+    // the shot goes to the simulation and its answer comes back (onHit clears hitKind)
+    g.shoot(X + 20, Z + 30); if (g.hitKind !== 'pistol') return 'o tiro não saiu';
+    for (let k = 0; k < 40 && g.hitKind !== null; k++) await wait(50);
+    return g.hitKind === null || 'a simulação não respondeu ao tiro';
+  });
   await check('bomba abre o prédio e depois o derruba', async () => {
     // as Roadcraft 4.0 (bomb/ANALISE.md): a weak bomb breaks the building into its ruin and leaves it standing; a strong
     // one on the ruin brings it down
@@ -133,7 +146,8 @@
   await check('exportar e abrir arquivo', async () => { const blob = await a.packMap(); if (!blob || !blob.size) return 'pacote vazio'; await a.openMap(blob); await wait(1500); return segs() > 0 || 'abriu vazio'; });
 
   // ---------------- desfazer tudo
-  await check('desfazer tudo sem erro', () => { let n = 0; while (g.commands.undo() && n < 500) n++; return true; });
+  // opening the map above cleared the history: two edits to undo, then everything undone
+  await check('desfazer tudo sem erro', () => { road(X - 200, Z + 1400, X + 200, Z + 1400, 'Rua local'); a.item(X - 60, Z + 1412, 6); let n = 0; while (g.commands.undo() && n < 500) n++; return (n > 0 && !g.commands.canUndo) || `desfez ${n}, sobra desfazer: ${g.commands.canUndo}`; });
 
   console.log('VERIFICAÇÃO ' + JSON.stringify({ ok: res.filter((r) => r.startsWith('OK')).length, falhas: res.filter((r) => r.startsWith('FALHOU')).length }));
 })()

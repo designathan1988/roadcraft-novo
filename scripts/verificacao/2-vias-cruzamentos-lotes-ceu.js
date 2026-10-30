@@ -22,6 +22,8 @@
   const P = (x, z) => ({ x, y: 0, z });
   const rt = g.roadTool;
   const X = 1500, Z = 1500;
+  const fp = (...arrays) => { let h = 0; for (const a of arrays) for (let i = 0; i < a.length; i++) h = (Math.imul(h, 31) + Math.round(a[i] * 1000)) | 0; return h; };
+  const fpTable = (t) => fp(...Object.values(t.cols));
   // as ferramentas são verificadas em modo livre (o caixa dos preços do Roadcraft acaba no meio do roteiro); a economia
   // tem a verificação própria, com o caixa ligado só nela
   w.unlimited = true;
@@ -75,9 +77,9 @@
 
   // ---------------- simulação
   await check('pausar e voltar', () => { const p0 = g.paused; g.togglePause(); const p1 = g.paused; g.togglePause(); return p0 !== p1 || 'não pausou'; });
-  await check('mapa de congestionamento', () => { H.trafficView(); H.trafficView(); return true; });
+  await check('mapa de congestionamento', () => { const t0 = g.hud.layers.traffic; H.trafficView(); const t1 = g.hud.layers.traffic; H.trafficView(); return (t1 !== t0 && g.hud.layers.traffic === t0) || `camada ${t0} → ${t1} → ${g.hud.layers.traffic}`; });
   await check('métricas e pedestres da simulação', async () => { await wait(3000); const s = g.stats(); return s.cars > 0 && s.peds >= 0 || `stats ${JSON.stringify(s)}`; });
-  await check('terminal de ônibus', () => { const n = g.transit.terminals.length; a.line(0, [X - 250, Z + 1000 + 8, X + 250, Z + 1000 + 8], 2); g.clickTransit(P(X + 250, Z + 1008)); return true; });
+  await check('terminal de ônibus', () => { const n = g.transit.terminals.length; a.line(0, [X - 250, Z + 1000 + 8, X + 250, Z + 1000 + 8], 2); g.setTool('transit'); H.terminal(true); g.lines.click(P(X + 250, Z + 1008), true); H.terminal(false); g.setTool('camera'); return g.transit.terminals.length > n || 'terminal não marcado'; });
   await check('trem: trilho e linha', () => { const n = g.transit.lines.length; road(X - 600, Z + 1300, X + 600, Z + 1300, 'Ferrovia dupla'); a.line(1, [X - 500, Z + 1300, X + 500, Z + 1300], 1); return g.transit.lines.length > n || 'linha de trem não criada'; });
 
   // ---------------- zonas, lotes, prédios
@@ -86,7 +88,7 @@
   const lot = a.lot(X + 1200, Z + 20, X + 1240, Z + 20, X + 1240, Z + 60, 1, 3);
   await check('dividir lote', () => { const b = blds(); g.setTool('building'); H.lotMode('split'); H.lotSplit('side', 2); g.clickLotTool(P(X + 1220, Z + 40)); return blds() > b || 'não dividiu'; });
   await check('juntar lotes', () => { const b = blds(); H.lotMode('join'); g.clickLotTool(P(X + 1210, Z + 40)); g.clickLotTool(P(X + 1230, Z + 40)); return blds() < b || 'não juntou'; });
-  await check('definir frente do lote', () => { H.lotMode('front'); g.clickLotTool(P(X + 1220, Z + 60)); return true; });
+  await check('definir frente do lote', () => { const f0 = fpTable(w.buildings); H.lotMode('front'); g.clickLotTool(P(X + 1220, Z + 60)); return fpTable(w.buildings) !== f0 || 'a frente não mudou'; });
   await check('apagar construção e depois o lote', () => { const b = blds(); H.lotMode('delete'); g.clickLotTool(P(X + 1220, Z + 40)); g.clickLotTool(P(X + 1220, Z + 40)); return blds() < b || 'não apagou'; });
   await check('editar andares, estilo e função cívica', () => { let id = -1; w.buildingIndex.query(X - 200, Z - 200, X + 200, Z + 200, (b) => { if (id < 0 && w.buildings.cols.floors[b] > 0) id = b; }); if (id < 0) id = a.lot(X + 1300, Z + 20, X + 1340, Z + 20, X + 1340, Z + 60, 1, 3); g.select(id); const f = w.buildings.cols.floors[id]; g.editSelected(2); g.editSelected(0, 3); g.editSelected(0, undefined, 14); return w.buildings.cols.fn[id] === 14 && w.buildings.cols.floors[id] === f + 2 || `fn ${w.buildings.cols.fn[id]} andares ${f}->${w.buildings.cols.floors[id]}`; });
   await check('ver por dentro, andar por andar', () => { g.insideCmd('toggle'); const on = g.inside.on; g.insideCmd('up'); g.insideCmd('toggle'); return on || 'não abriu'; });
@@ -95,20 +97,26 @@
   for (const [k, nome] of [[13, 'fumaça'], [14, 'fogo'], [15, 'vapor'], [16, 'chafariz'], [26, 'poeira'], [27, 'fuligem'], [28, 'faíscas'], [29, 'borrifo'], [41, 'palmeira'], [42, 'névoa']])
     await check(`efeito/item: ${nome}`, () => { const n = items(); a.item(X - 900 + k * 9, Z - 900, k); return items() > n || 'não entrou'; });
   await check('muros e cercas (linha)', () => { const n = items(); g.setTool('barrier'); g.itemTool.setMode('barrier'); g.itemTool.row(X - 900, Z - 800, X - 800, Z - 800); return items() > n || 'sem muro'; });
-  await check('árvore uma por clique', () => { const n = items(); g.plantTree(X - 950, Z - 700); return items() >= n || 'sem árvore'; });
-  await check('aplainar o mapa', () => { const c0 = window.confirm; window.confirm = () => true; H.flattenMap(); window.confirm = c0; return true; });
+  await check('árvore uma por clique', () => { const n = items(); g.plantTree(X - 950, Z - 700); return items() === n + 1 || `árvores ${items() - n}`; });
+  await check('aplainar o mapa', () => { const f0 = fp(w.heights); const c0 = window.confirm; window.confirm = () => true; H.flattenMap(); window.confirm = c0; return fp(w.heights) !== f0 || 'as alturas não mudaram'; });
 
   // ---------------- céu e clima
   for (const m of ['dia', 'noite', 'ciclo']) await check(`céu: ${m}`, () => { H.sky(m); return g.skyMode === m || `ficou ${g.skyMode}`; });
-  await check('clima ajustável', () => { H.weather({ rain: 0.6, wind: 0.5, dir: 90, lightning: 4, thunder: 1 }); H.weather(null); return true; });
-  await check('nuvens: espalhar e apagar', () => { H.scatterClouds(6, 0.5); const n = g.clouds.length; H.clearClouds(); return n > 0 && g.clouds.length === 0 || `nuvens ${n}`; });
-  await check('neblina geral', () => { H.fogLevel(2); H.fogLevel(1); return true; });
+  await check('clima ajustável', () => { H.weather({ rain: 0.6, wind: 0.5, dir: 90, lightning: 4, thunder: 1 }); const set = H.environment().weather; H.weather(null); const back = H.environment().weather; return (set && set.rain === 0.6 && set.lightning === 4 && back === null) || `clima ${JSON.stringify(set)} → ${JSON.stringify(back)}`; });
+  await check('nuvens: espalhar e apagar', () => { H.scatterClouds(6, 0.5); const n = g.clouds.list.length; H.clearClouds(); return n > 0 && g.clouds.list.length === 0 || `nuvens ${n} → ${g.clouds.list.length}`; });
+  await check('neblina geral', () => { H.fogLevel(2); const f2 = H.environment().fog; H.fogLevel(1); return (f2 === 2 && H.environment().fog === 1) || `neblina ${f2} → ${H.environment().fog}`; });
 
   // ---------------- painéis
   const visible = (sel) => [...document.querySelectorAll(sel)].some((e) => e.offsetParent !== null);
   await check('opções abrem', async () => { H.options(); await wait(200); const ok = [...document.querySelectorAll('div,section')].some((e) => e.offsetParent !== null && /Gráficos|Qualidade|Opções/.test(e.textContent || '') && e.children.length > 3); document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true })); return ok || 'painel não apareceu'; });
   await check('ajuda e sobre', async () => { H.help(); await wait(200); const ok = /Sobre|versão|Ajuda/i.test(document.body.innerText); H.help(); return ok || 'ajuda não apareceu'; });
-  await check('grade, norte e vistas da câmera', () => { H.grid(); H.grid(); H.north(); H.view('top'); H.view('iso'); H.view('persp'); return true; });
+  await check('grade, norte e vistas da câmera', () => {
+    const g0 = g.hud.layers.grid; H.grid(); const g1 = g.hud.layers.grid; H.grid(); if (g1 === g0 || g.hud.layers.grid !== g0) return `grade ${g0} → ${g1} → ${g.hud.layers.grid}`;
+    H.north(); const yaw = g.rig.yaw + g.rig.pendingTurn, tau = Math.PI * 2; if (Math.abs(((yaw % tau) + tau) % tau) > 1e-6 && Math.abs(((yaw % tau) + tau) % tau - tau) > 1e-6) return `norte: rumo final ${yaw}`;
+    // 'top' is the perspective camera tilted to its maximum (cameraRig.topDown), the others are modes
+    H.view('top'); const top = g.rig.mode === 'persp' && g.rig.pitch > 1.4; const modes = []; for (const v of ['iso', 'persp']) { H.view(v); modes.push(g.rig.mode); }
+    return (top && modes.join() === 'iso,persp') || `de cima ${top} (inclinação ${g.rig.pitch}), vistas ${modes.join()}`;
+  });
   // the health panel is a developer's tool (?dev): for the player F9 opens nothing (tools/check-interface.mjs B30 checks it with ?dev)
   await check('saúde do jogo (F9) fora da interface do jogador', async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', bubbles: true })); await wait(300); const p = document.querySelector('.health'); const ok = !p || p.classList.contains('hidden'); if (!ok) p.classList.add('hidden'); return ok || 'o painel de saúde abriu para o jogador'; });
   await check('salvamento automático', async () => { g.unsaved = true; g.autosaveAt = 0; await wait(2500); return g.unsaved === false || 'não salvou sozinho'; });
