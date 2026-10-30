@@ -13,6 +13,7 @@ import { armOf } from '../roads/junction.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { baseZone } from '../roads/zones.ts';
 import { MAX_DEG } from '../roads/network.ts';
+import { SegFlag } from '../roads/flags.ts';
 import type { SimNet } from './lanes.ts';
 import { Router } from './routing.ts';
 import { stripAt } from './probe.ts';
@@ -777,10 +778,26 @@ export class Peds {
     const armLeftIn = endIn === 0 ? c.side[p] > 0 : c.side[p] < 0;
     const ci = armLeftIn ? ai : (ai - 1 + deg) % deg;
     // target corner: left (aj) or right (aj − 1) of the exit arm; fewest crossings
-    const opts = [aj, (aj - 1 + deg) % deg].map((cj) => {
+    const all = [aj, (aj - 1 + deg) % deg].map((cj) => {
       const ccw = (cj - ci + deg) % deg, cw = (ci - cj + deg) % deg;
-      return { cj, steps: Math.min(ccw, cw), dir: ccw <= cw ? 1 : -1 };
+      return { cj, steps: Math.min(ccw, cw), dir: ccw <= cw ? 1 : -1, other: { cj, steps: Math.max(ccw, cw), dir: ccw <= cw ? -1 : 1 } };
     });
+    // only round arms that can be crossed and to a side of the exit with a sidewalk: a roundabout's ring has no zebra
+    // (nobody gives way there, traffic.ts stopBack) and a sidewalk on its outside only; planned without it, people
+    // crossed the ring, or came out on its island side and walked across its lanes to the sidewalk
+    const endOut0 = sc.a[sOut] === n ? 0 : 1, outInfo = PROFILE_INFO[sc.profile[sOut]];
+    const fine = (o: { cj: number; steps: number; dir: number }): boolean => {
+      const left = o.cj === aj, side = endOut0 === 0 ? (left ? 1 : -1) : (left ? -1 : 1);
+      if (Number.isNaN(side > 0 ? outInfo.walkLeft : outInfo.walkRight)) return false;
+      for (let k = 0, cur = ci; k < o.steps; k++) {
+        const arm = o.dir > 0 ? (cur + 1) % deg : cur;
+        if ((sc.flags[segs[order[arm]]] & SegFlag.Ring) !== 0) return false;
+        cur = o.dir > 0 ? (cur + 1) % deg : (cur - 1 + deg) % deg;
+      }
+      return true;
+    };
+    const ok = [...all, ...all.map((o) => o.other)].filter(fine).sort((x, y) => x.steps - y.steps);
+    const opts = ok.length >= 2 ? ok : ok.length === 1 ? [ok[0], ok[0]] : all;
     // tie: fixed per-person draw (half cross before, half after); at a mid-block crosswalk, half cross
     const mid = deg === 2 && (sim.nodeCtl[n] === 9 || sim.nodeCtl[n] === 10);
     const want = mid && ((p + n) & 1) === 0;
