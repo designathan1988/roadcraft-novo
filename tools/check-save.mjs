@@ -183,6 +183,26 @@ const SCENARIOS = {
     const r = await within(g.load(), 30000);
     check('the road built before closing is there', r === 'returned' && w.roads.segs.size > 0, 'load() ' + r + ', segments ' + w.roads.segs.size);
   `],
+  // A generated 10 km city saved, the app closed, and the city reopened in a new process: the same counts
+  'generated-close-reopens': [`
+    const r = await within(g.generatedCity(), 240000);
+    check('the city is generated', r === 'returned' && !g.busy, 'generatedCity() ' + r);
+    g.growth.rate = 0;
+    const segs = w.roads.segs.size, nodes = w.roads.nodes.size, builds = w.buildings.size;
+    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    const tiles = w.tileInSave.reduce((s, v) => s + v, 0);
+    check('the save lists its tiles', tiles > 0, 'tiles: ' + tiles);
+    localStorage.setItem('qa-city-counts', JSON.stringify([segs, nodes, builds, tiles]));
+    console.log('CHECK END');
+    window.roadcraftApp.quit();
+    await wait(30000);
+  `, `
+    const r = await within(g.load(), 60000);
+    const c = JSON.parse(localStorage.getItem('qa-city-counts') || '[]');
+    const now = [w.roads.segs.size, w.roads.nodes.size, w.buildings.size, w.tileInSave.reduce((s, v) => s + v, 0)];
+    check('the 10 km city opens', r === 'returned' && !g.busy, 'load() ' + r);
+    check('the same city comes back', c.length === 4 && now.every((v, i) => v === c[i]), 'counts ' + c + ' → ' + now);
+  `],
   // A9: a save interrupted between the tile files and its commit (the map description fails to be written, then the
   // game is closed while the close save fails the same way) leaves the save before it intact, and that save opens
   'interrupted-save': [`
