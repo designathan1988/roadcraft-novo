@@ -270,6 +270,8 @@ const tmpLow = new THREE.Color();
 const SUN_DAY = new THREE.Color(0xfff0d2), SUN_LOW = new THREE.Color(0xffa860), MOON = new THREE.Color(0x9fb4d8);
 // a near-neutral sky fill (Roadcraft: a saturated blue tinted every shadow blue at close zoom)
 const HEMI_DAY = new THREE.Color(0xe6e4da), HEMI_NIGHT = new THREE.Color(0x34456a);
+/** The sky's light during a lightning flash. */
+const FLASH_COLOR = new THREE.Color(0xdde6ff);
 /** Light bounced off the ground and the façades (by day warm and clear; at night almost nothing). */
 const BOUNCE_DAY = new THREE.Color(0x6a6b4c), BOUNCE_NIGHT = new THREE.Color(0x56483a);
 const tmpC = new THREE.Color();
@@ -278,7 +280,8 @@ const _envDir = new THREE.Vector3();
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /** Hour of the day (0–24): sun, moon, sky, environment, fog and the night uniform. */
-export function setTimeOfDay(p: SceneParts, hour: number, clouds = 0.25, rain = 0, eyeHeight = 0): void {
+/** The scene's light at `hour`; `flash` (0..1, render/weather.ts flashU) brightens and cools the sky's light. */
+export function setTimeOfDay(p: SceneParts, hour: number, clouds = 0.25, rain = 0, eyeHeight = 0, flash = 0): void {
   const k = (hour - 5.75) / 13; // 0 sunrise (5:45), 1 sunset (18:45)
   const elev = 62 * Math.sin(Math.PI * k);
   const az = 90 + 180 * k;
@@ -302,6 +305,7 @@ export function setTimeOfDay(p: SceneParts, hour: number, clouds = 0.25, rain = 
   // overcast: no sun, the sky lights everything evenly (stronger). By day the environment (PMREM of the sky) carries
   // part of the sky light, so the fill is lower than before it (0.72 → 0.5)
   p.hemi.intensity = (0.25 + 0.3 * day + 1.25 * night) * (1 + 1.1 * overcast) * (1 - 0.3 * rain);
+  if (flash > 0) { p.hemi.intensity += flash * 4; p.hemi.color.lerp(FLASH_COLOR, flash * 0.6); }
   // the gradient sky's colours by the hour (Roadcraft 4.0 environment.ts: zenith, horizon, dusk, night, overcast)
   const height = Math.sin(THREE.MathUtils.degToRad(elev));
   const light = Math.min(1, Math.max(0, (height + 0.1) / 0.25)), dark = 1 - light;

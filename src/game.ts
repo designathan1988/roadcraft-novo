@@ -5,7 +5,6 @@ import { createTerrainSeams } from './render/terrainSeams.ts';
 import * as THREE from 'three/webgpu';
 import { MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
 
-const FLASH_COLOR = new THREE.Color(0xdde6ff);
 import { CommandStack } from './core/commands.ts';
 import { CELL_COUNT, Dirty, TILE_COUNT, tileOfCell, tileOriginX } from './core/grid.ts';
 import { JobPool } from './jobs/pool.ts';
@@ -37,7 +36,7 @@ import { fmtInt, followLanguage, loose, onLanguageChange, plural, t } from './sh
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import type { Design } from './world/design.ts';
-import { fogLevel, nightU } from './render/scene.ts';
+import { nightU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
 import { PROFILES, customProfiles, onProfileAdded } from './roads/profiles.ts';
 import { arrowCode } from './roads/laneLinks.ts';
@@ -59,6 +58,7 @@ import { CityFlows } from './app/cityFlows.ts';
 import { insertBoxes } from './app/insertBoxes.ts';
 import { WeatherControl } from './features/sky/weatherControl.ts';
 import { WaterControl } from './features/water/waterControl.ts';
+import { FogControl } from './features/sky/fogControl.ts';
 import { ViewState } from './app/viewState.ts';
 import { chooseRoadPaint, showRoadPaint } from './features/roads/roadPaint.ts';
 import { InsideView } from './render/inside.ts';
@@ -225,6 +225,7 @@ export class Game {
   private lines!: TransitTool;
   private sky!: WeatherControl;
   private water!: WaterControl;
+  private fog!: FogControl;
   private shakeOffset = new THREE.Vector3();
   /** People from the creator and the bomb strength. */
   private personSpec = { color: 3, height: 7, walk: false, count: 1 };
@@ -275,6 +276,7 @@ export class Game {
       endRebuild: (err, what) => gs.endRebuild(err, what),
     });
     this.water = new WaterControl(this.world.look, () => { this.unsaved = true; });
+    this.fog = new FogControl(this.world.look, () => { this.unsaved = true; });
     this.sky = new WeatherControl({ weather: this.weather, look: this.world.look, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.prefs?.now.weather, changed: () => { this.unsaved = true; } });
     this.lines = new TransitTool({
       transit: this.transit, roads: this.world.roads, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
@@ -391,7 +393,7 @@ export class Game {
       skyTool: (s) => { this.clouds.tool = s; this.skyHint(); },
       scatterClouds: (n, v) => this.clouds.scatter(n, v),
       clearClouds: () => this.clouds.clear(),
-      fogLevel: (v) => { this.world.look.fog = v; fogLevel.value = v; this.unsaved = true; },
+      fogLevel: (v) => this.fog.set(v),
       radius: (r) => { this.brush.radius = r; },
       strength: (s) => { this.brush.strength = s; },
       undo: () => this.history(false),
@@ -761,13 +763,12 @@ export class Game {
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
     // the rain box round the eye; isometric: round what is looked at (round the perspective eye it was a block of rain)
     this.weather.update(dt, dt * this.clock.daySpeed * 60, this.rig.mode === 'iso' ? this.rig.target : this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
-    setTimeOfDay(this.parts, light, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
+    setTimeOfDay(this.parts, light, cloudsU.value, rainU.value, this.rig.eye.y - groundY, flashU.value);
     pr?.lap(PART.weather, performance.now());
     this.particles.update(dt, this.rig.eye);
     this.textSigns.update(this.rig.eye);
     this.demolition.update(dt);
     pr?.lap(PART.effects, performance.now());
-    if (flashU.value > 0) { this.parts.hemi.intensity += flashU.value * 4; this.parts.hemi.color.lerp(FLASH_COLOR, flashU.value * 0.6); }
     {
       const st = this.simStats?.type === 'stats' ? this.simStats : null;
       this.ambient.update(dt, {
@@ -784,9 +785,9 @@ export class Game {
     let hit: THREE.Vector3 | null = null;
     if (this.tool !== 'camera' && this.pointer.inside && this.gesture.drag !== 'pan' && this.gesture.drag !== 'rotate') hit = this.rig.pick(this.ndcX(), this.ndcY());
     const terrainTool = TERRAIN_TOOLS.includes(this.tool) || GROUND_TOOLS.includes(this.tool) || (this.tool === 'sky' && this.clouds.tool.fog !== 'none');
-    if (terrainTool && hit) this.terrain.brush.value.set(hit.x, hit.z, this.brush.radius, 1);
-    else if (this.tool === 'zone' && hit) this.terrain.brush.value.set(hit.x, hit.z, this.zoneTool.radius, 1);
-    else this.terrain.brush.value.w = 0;
+    if (terrainTool && hit) this.terrain.showBrush(hit.x, hit.z, this.brush.radius);
+    else if (this.tool === 'zone' && hit) this.terrain.showBrush(hit.x, hit.z, this.zoneTool.radius);
+    else this.terrain.hideBrush();
     if (this.gesture.drag === 'zone' && hit) this.zoneTool.dab(hit.x, hit.z);
     if (this.tool === 'building') this.hoverLotTool(hit);
     if (this.gesture.drag === 'brush' && this.elemStroke && hit) {
@@ -1620,8 +1621,7 @@ export class Game {
 
   /** Shows the map's look (World.look): water, weather, clouds, fog and road paint. */
   private showLook(): void {
-    this.water.show(); this.sky.show(); this.clouds.show();
-    fogLevel.value = this.world.look.fog;
+    this.water.show(); this.fog.show(); this.sky.show(); this.clouds.show();
     showRoadPaint(this.world.look);
   }
 

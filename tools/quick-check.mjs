@@ -10,6 +10,8 @@ const FAST = ['lotsShortSide', 'blockLots', 'roadGround', 'citySpurs', 'gradeLin
 const steps = [
   ['types', 'npx tsc --noEmit'],
   ['architecture', 'node tools/arch-audit.mjs --check tools/arch-baseline.json'],
+  // no new write of World/network/items state outside its owner, no new module `let`, no uniform read as a source
+  ['state owners', 'node tools/state-check.mjs --fail'],
   ['fast tests', `node --test ${FAST.map((t) => `test/${t}.test.ts`).join(' ')}`],
 ];
 let failed = false;

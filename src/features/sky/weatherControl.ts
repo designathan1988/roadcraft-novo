@@ -3,7 +3,6 @@
 // panel's "automatic" all read `weatherPreset`.
 
 import type { Weather } from '../../render/weather.ts';
-import { windDirU } from '../../render/weather.ts';
 import type { MapLook, WeatherCtl } from '../../world/mapLook.ts';
 
 /** The weather an option value holds (the options' and the address's ?rain, ?storm, ?clear). */
@@ -48,8 +47,7 @@ export class WeatherControl {
     wt.fixed = { clouds: w.rain > 0 ? 0.6 + 0.4 * w.rain : w.lightning > 0 ? 0.85 : 0.25, rain: w.rain, storm: w.lightning > 0 ? 1 : 0 };
     wt.windFixed = Math.min(1, w.wind / 20);
     wt.lightningRate = w.lightning;
-    const r = (w.dir * Math.PI) / 180;
-    windDirU.value.set(Math.sin(r), Math.cos(r));
+    wt.windDirection = w.dir;
     this.host.setThunder(w.thunder);
   }
 }

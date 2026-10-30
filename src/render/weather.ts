@@ -88,6 +88,8 @@ export class Weather {
   lightningRate = 0;
   /** Wind chosen by the player (0..1), or null for the weather's. */
   windFixed: number | null = null;
+  /** Where the player's wind blows to (degrees). */
+  set windDirection(deg: number) { const r = (deg * Math.PI) / 180; (windDirU.value as THREE.Vector2).set(Math.sin(r), Math.cos(r)); }
   /** Fixed by the option (null = changes on its own). */
   fixed: { clouds: number; rain: number; storm?: number } | null = null;
 

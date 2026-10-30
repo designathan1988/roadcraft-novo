@@ -135,7 +135,12 @@ export class TerrainRenderer {
   private camPos = new THREE.Vector3();
 
   /** Brush position (x, z, radius, visible). */
-  readonly brush: Node = uniform(new THREE.Vector4(0, 0, 50, 0));
+  /** The brush ring under the cursor: centre x, z, radius, shown (1) or not (0). */
+  private readonly brush: Node = uniform(new THREE.Vector4(0, 0, 50, 0));
+
+  /** Shows the brush ring at (x, z), `radius` metres. */
+  showBrush(x: number, z: number, radius: number): void { (this.brush.value as THREE.Vector4).set(x, z, radius, 1); }
+  hideBrush(): void { (this.brush.value as THREE.Vector4).w = 0; }
   readonly camUniform: Node = uniform(new THREE.Vector3());
   /** Centre of the grass field: on the ground ahead of the eye, where the view looks. */
   private grassCentre: Node = uniform(new THREE.Vector2());
