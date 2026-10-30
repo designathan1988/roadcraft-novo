@@ -33,7 +33,7 @@ import { Particles } from './render/particles.ts';
 import { fmtInt, followLanguage, loose, money, onLanguageChange, plural, setLang, t } from './shared/i18n/index.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
-import { decodeDesign, encodeDesign, hasDesign, type Design } from './world/design.ts';
+import { encodeDesign, type Design } from './world/design.ts';
 import { currentU, fogLevel, foamU, nightU, waveU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
 import type { JunctionSpec } from './roads/control.ts';
@@ -82,6 +82,7 @@ import { photoView, settlePool } from './app/photoHooks.ts';
 import { loadSession, newMapSession, reloadWithMap, saveSession, type LoadHost, type NewMapHost, type SaveHost } from './app/session.ts';
 import { setTool as setGameTool, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
 import { clickTool, type ClickHost } from './app/clicks.ts';
+import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
 import { errorText } from './shared/errors.ts';
 
 const SLOT = 'cidade-1';
@@ -1650,22 +1651,18 @@ export class Game {
 
   // ----------------------------------------------------------- buildings
 
-  private select(id: number): void {
-    this.selected = id;
-    const col = this.world.buildings.cols;
-    if (id < 0 || !this.world.buildings.alive[id]) { this.selected = -1; this.hud.setBuilding(null); this.preview.circle.visible = false; if (this.creator) this.creator.el.style.display = 'none'; return; }
-    const z = col.zone[id];
-    this.creator?.show(hasDesign(col.color[id]) ? decodeDesign(col.color[id], col.h[id]) : null, col.floors[id]);
-    if (this.creator) this.creator.el.style.display = this.tool === 'building' && col.floors[id] > 0 ? '' : 'none';
-    this.hud.setBuilding({ fn: col.fn[id], zone: z, floors: col.floors[id], arch: col.style[id] >= 128 ? col.style[id] - 128 : -1, address: this.hudActions.addressOf(), decay: col.decay[id] });
-  }
+  private select(id: number): void { selectBuilding(this.selectionHost(), id); }
 
-  private showSelection(): void {
-    const id = this.selected;
-    if (id < 0 || !this.world.buildings.alive[id]) { this.preview.circle.visible = false; return; }
-    const col = this.world.buildings.cols;
-    const y = heightAt(this.world.heights, col.x[id], col.z[id]);
-    this.preview.showCircle(col.x[id], y, col.z[id], Math.hypot(col.w[id], col.d[id]) / 2 + 2, true);
+  private showSelection(): void { showSelectionOf(this.selectionHost()); }
+
+  /** The selection as the buildings module sees it: the Game keeps the selected id and the world. */
+  private selectionHost(): SelectionHost {
+    const g = this;
+    return {
+      get selected() { return g.selected; }, set selected(v) { g.selected = v; },
+      world: g.world, hud: g.hud, preview: g.preview, tool: g.tool, creator: g.creator,
+      addressOf: () => g.hudActions.addressOf(),
+    };
   }
 
   /**
