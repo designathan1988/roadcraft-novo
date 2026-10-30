@@ -16,7 +16,7 @@ import { MAX_DEG } from '../roads/network.ts';
 import { SegFlag } from '../roads/flags.ts';
 import type { SimNet } from './lanes.ts';
 import { Router } from './routing.ts';
-import { stripAt } from './probe.ts';
+import { STRIP_KINDS, stripAt } from './probe.ts';
 import { PED_BODY, PED_MIN_PACE, PED_REACH_TIME } from './traffic/state.ts';
 
 /**
@@ -74,6 +74,17 @@ const TURN_RATE = 3.5, TURN_STANDING = 6;
 const AHEAD = 0.45;
 /** A point further than this beside a walker's line is not on it (m). */
 const ON_LINE = 3;
+/**
+ * Places to wait at a kerb (roadcraft walk.ts:74-83: a queue back from the kerb, people side by side): either side of
+ * where it arrived as far as WAIT_HALF (m), SPOT_STEP apart, and in rows back from it SPOT_STEP apart; another waiter
+ * nearer than SPOT_CLEAR holds a place. A waiter moves up to a place better by SPOT_GAIN (score: across + 1.5 × back).
+ * Not as wide as 4.0's 2.2 m: its walkers steer back onto their stripe on the zebra; these cross on a straight line
+ * from where they waited, and from 2 m along the kerb that line ran on the carriageway beside the zebra.
+ */
+/** Most people waiting in buses to step off at once (the busiest stops' riders, a few buses). */
+const OUT_OF_BUS = 256;
+const WAIT_HALF = 0.7, SPOT_STEP = 0.7, SPOT_ROWS = 5, SPOT_CLEAR = 0.6, SPOT_GAIN = 0.6;
+const SIDEWALK_STRIP = STRIP_KINDS.indexOf('sidewalk');
 /** Furthest the body is drawn off its way (m): a corner rounded, a step aside followed. */
 const OFF_WAY = 0.25;
 /** Drawn this much further than AHEAD from its way's point (it was put elsewhere: a door, a bus), it is drawn there at once. */
@@ -113,6 +124,8 @@ const schema = {
   seg: Int32Array, side: Int8Array, da: Float32Array, db: Float32Array,
   // current step: 0 sidewalk, 1 straight line between points, 2 waiting
   mode: Uint8Array, wIdx: Uint8Array, wLen: Uint8Array,
+  // its place to wait at a kerb (`waitSpot`): 0 none, 1 walking to it, 2 standing there; where it is
+  spotSt: Uint8Array, sx: Float32Array, sz: Float32Array,
   t0: Float64Array, dur: Float32Array, at: Float64Array,
   // node it is walking to (window list)
   node: Int32Array, next: Int32Array, prev: Int32Array,
@@ -224,6 +237,7 @@ export class Peds {
     this.router = new Router(sim);
     this.t.onGrow((cap) => {
       const r = new Int32Array(cap * ROUTE); r.set(this.routes); this.routes = r;
+      const wf = new Float32Array(cap * 2); wf.set(this.waitFrom); this.waitFrom = wf;
       const w = new Float32Array(cap * WAYS * 4); w.set(this.ways); this.ways = w;
       const n = new Int32Array(cap); n.set(this.wayNode); this.wayNode = n;
       const f = new Float32Array(cap * 3); f.set(this.lineFrom); this.lineFrom = f;
@@ -283,7 +297,7 @@ export class Peds {
   crossingReach(n: number, mask: number, x: number, z: number, reach: number, front: number): boolean {
     const c = this.t.cols;
     for (let p = this.head[n]; p >= 0; p = c.next[p]) {
-      if (c.mode[p] !== 1) continue;
+      if (c.mode[p] !== 1 || c.spotSt[p] === 1) continue;
       const w = c.wIdx[p] - 1;
       const cross = w >= 0 ? this.ways[p * WAYS * 4 + w * 4 + 3] : 0;
       if (cross <= 0 || (mask & (1 << (cross - 1))) === 0) continue;
@@ -306,7 +320,7 @@ export class Peds {
     const c = this.t.cols;
     for (let p = this.head[n]; p >= 0; p = c.next[p]) {
       // walking the crossing line (standing, it is at a kerb: waiting to start one, or done with the last)
-      if (c.mode[p] !== 1) continue;
+      if (c.mode[p] !== 1 || c.spotSt[p] === 1) continue;
       const w = c.wIdx[p] - 1;
       const cross = w >= 0 ? this.ways[p * WAYS * 4 + w * 4 + 3] : 0;
       if (cross > 0 && (mask & (1 << (cross - 1))) !== 0) return true;
@@ -357,8 +371,26 @@ export class Peds {
   /** People stepping off a bus at the stop (x, z): each walks from there to the sidewalk and on. */
   spawnFromStop(x: number, z: number, count: number): void {
     // out of five places along the kerb 0.8 m apart (the bus's doors), not all out of one point; those after the first
-    // five step off behind them (`spaced`: the same stretch from the same spot waits for a gap)
-    for (let k = 0; k < count; k++) this.spawnFromPoint(x, z, ((k % 5) - 2) * 0.8);
+    // five stay in the bus until the one before them at their door has stepped off (roadcraft walk.ts:306 "not out yet:
+    // waiting inside the door"): they step out START_GAP after it. Out at once, they stood waiting on the same spot
+    // outside the door, inside each other (the bus stop was where people overlapped most in the game's check).
+    for (let k = 0; k < count; k++) {
+      const along = ((k % 5) - 2) * 0.8, turn = Math.floor(k / 5);
+      if (turn === 0) { this.spawnFromPoint(x, z, along); continue; }
+      if (this.outOfBus.length >= OUT_OF_BUS * 4) break;
+      this.outOfBus.push(x, z, along, this.time + turn * START_GAP);
+    }
+  }
+  /** People still in a bus, stepping off later: x, z, along the kerb, when (4 numbers each; at most OUT_OF_BUS). */
+  private outOfBus: number[] = [];
+  private stepOutOfBus(): void {
+    const q = this.outOfBus;
+    for (let i = 0; i < q.length;) {
+      if (q[i + 3] > this.time) { i += 4; continue; }
+      this.spawnFromPoint(q[i], q[i + 1], q[i + 2]);
+      q[i] = q[q.length - 4]; q[i + 1] = q[q.length - 3]; q[i + 2] = q[q.length - 2]; q[i + 3] = q[q.length - 1];
+      q.length -= 4;
+    }
   }
   /** Share of walkers who take the bus (when there are lines). */
   transitShare = 0.3;
@@ -457,7 +489,7 @@ export class Peds {
     this.routes[r] = from;
     const len = this.router.route(to, b, this.routes, r + 1, ROUTE - 1, true);
     if (len < 1 || this.routes[r + len] !== b) { this.t.release(p); return false; }
-    c.rLen[p] = len + 1; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.repoch[p] = this.sim.epoch;
+    c.rLen[p] = len + 1; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.spotSt[p] = 0; c.repoch[p] = this.sim.epoch;
     c.speed[p] = PACE[this.rng.int(0, 2)];
     c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = side;
@@ -511,7 +543,7 @@ export class Peds {
       at = next; s = best;
     }
     if (len < 2 || !nc.deg[a]) { this.t.release(p); return false; }
-    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.repoch[p] = this.sim.epoch;
+    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.spotSt[p] = 0; c.repoch[p] = this.sim.epoch;
     c.speed[p] = 4 + this.rng.next() * 1.6;
     c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = 1;
@@ -561,7 +593,7 @@ export class Peds {
       if (len >= ROUTE) { this.t.release(p); return -1; }
       this.routes[p * ROUTE + len++] = far;
     }
-    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.repoch[p] = this.sim.epoch;
+    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.spotSt[p] = 0; c.repoch[p] = this.sim.epoch;
     c.speed[p] = PACE[this.rng.int(0, 2)];
     c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = this.rng.next() < 0.5 ? 1 : -1;
@@ -855,7 +887,7 @@ export class Peds {
   private aheadPoint(p: number, x: number, z: number, yaw: number): void {
     const c = this.t.cols, sim = this.sim, net = sim.net, sc = net.segs.cols, out = this.ahead;
     out[0] = x + Math.sin(yaw) * AHEAD; out[1] = z + Math.cos(yaw) * AHEAD;
-    if (c.bike[p]) return;
+    if (c.bike[p] || c.spotSt[p] === 1) return;
     let left: number, nx: number, nz: number;
     if (c.mode[p] === 1) {
       const o = p * WAYS * 4 + (c.wIdx[p] - 1) * 4;
@@ -944,6 +976,15 @@ export class Peds {
   /** Next waypoint (or the sidewalk, when they run out). */
   private nextWay(p: number): boolean {
     const c = this.t.cols;
+    // a line to its place to wait ended: it stands there, facing the crossing (its position is the line's start while
+    // it waits: read as the line's end before anything else asks where it is, or it was put back where it came from)
+    if (c.spotSt[p] === 1) {
+      // where it is seen (a step aside on the way kept): that is its place now
+      const q = this.posShown(p);
+      this.lineFrom[p * 3] = c.sx[p] = q[0]; this.lineFrom[p * 3 + 1] = q[1]; this.lineFrom[p * 3 + 2] = c.sz[p] = q[2];
+      c.mode[p] = 2; c.spotSt[p] = 2; c.lat[p] = c.latT[p] = 0;
+      if (c.wIdx[p] < c.wLen[p]) { const o = p * WAYS * 4 + c.wIdx[p] * 4; c.pyaw[p] = Math.atan2(this.ways[o] - c.sx[p], this.ways[o + 2] - c.sz[p]); }
+    }
     if (c.wIdx[p] >= c.wLen[p]) {
       // at the end of the route a bus rider has reached the stop: waits for the bus (tracked by traffic)
       if (c.rIdx[p] + 1 >= c.rLen[p] && c.tLine[p] >= 0) { const q = this.posNow(p); this.onStop(c.tLine[p], c.tFrom[p], c.tTo[p], q[0], q[2]); return false; }
@@ -954,6 +995,7 @@ export class Peds {
     // signalled crossing: waits for the light to let them walk (and calls it), one behind the other at the kerb
     if (cross > 0 && !this.walkOk(this.wayNode[p], cross - 1)) {
       this.onWait(this.wayNode[p], cross - 1);
+      if (this.toWaitSpot(p, o)) return true;
       if (c.mode[p] !== 2) this.standToCross(p, o);
       c.mode[p] = 2;
       c.t0[p] = this.time; c.dur[p] = 1;
@@ -962,6 +1004,7 @@ export class Peds {
     }
     // a vehicle on the crosswalk or about to drive over it: waits for it to pass (looked at again in half a second)
     if (cross > 0 && this.carsOn(this.wayNode[p], cross - 1)) {
+      if (this.toWaitSpot(p, o)) return true;
       if (c.mode[p] !== 2) this.standToCross(p, o);
       c.mode[p] = 2;
       c.t0[p] = this.time; c.dur[p] = 0.5;
@@ -975,6 +1018,7 @@ export class Peds {
     c.pyaw[p] = yaw0;
     const len = Math.hypot(this.ways[o] - x0, this.ways[o + 2] - z0);
     c.mode[p] = 1;
+    c.spotSt[p] = 0;
     c.lat[p] = c.latT[p] = 0;
     c.t0[p] = this.time;
     c.dur[p] = Math.max(0.05, len / c.speed[p]);
@@ -1015,6 +1059,62 @@ export class Peds {
    * Waiting to cross at the kerb: it stands where it is seen (its step aside, if any, kept), facing the crossing.
    * Near the camera those arriving behind it wait behind it (`seeEachOther`), so the people waiting form a queue.
    */
+  /**
+   * `p` has to wait at the kerb before crossing to waypoint `o`: it takes the free place to wait nearest the front and
+   * the middle (`WAIT_HALF`, `SPOT_ROWS`; on the sidewalk only) and walks there (true: a line is under way), or, already
+   * there, moves up when a place better by SPOT_GAIN is free (the one in front crossed). Without places, all who came
+   * stood on the same point (26 pairs of people inside each other at a time in the test city, as many as a quarter of
+   * the waiters). The people at this node's list are the ones looked at.
+   */
+  private toWaitSpot(p: number, o: number): boolean {
+    const c = this.t.cols, n = this.wayNode[p];
+    const here = this.posShown(p), hx = here[0], hy = here[1], hz = here[2];
+    // the kerb's frame: towards the far side, and along the kerb
+    let dx = this.ways[o] - hx, dz = this.ways[o + 2] - hz;
+    const dl = Math.hypot(dx, dz);
+    if (dl < 0.5) return false;
+    dx /= dl; dz /= dl;
+    // the place it stands to wait was chosen from where it arrived (the start of the crossing, on its track)
+    const ox = c.spotSt[p] === 2 ? this.waitFrom[p * 2] : hx, oz = c.spotSt[p] === 2 ? this.waitFrom[p * 2 + 1] : hz;
+    const free = (x: number, z: number): boolean => {
+      for (let q = this.head[n]; q >= 0; q = c.next[q]) {
+        if (q === p || c.spotSt[q] === 0) continue;
+        if (Math.abs(c.sx[q] - x) < SPOT_CLEAR && Math.abs(c.sz[q] - z) < SPOT_CLEAR && Math.hypot(c.sx[q] - x, c.sz[q] - z) < SPOT_CLEAR) return false;
+      }
+      return true;
+    };
+    let best = Infinity, bx = 0, bz = 0;
+    const steps = Math.round(WAIT_HALF / SPOT_STEP);
+    for (let row = 0; row < SPOT_ROWS; row++) for (let k = -steps; k <= steps; k++) {
+      const score = Math.abs(k) * SPOT_STEP + 1.5 * row * SPOT_STEP;
+      if (score >= best) continue;
+      const x = ox - dz * k * SPOT_STEP - dx * row * SPOT_STEP, z = oz + dx * k * SPOT_STEP - dz * row * SPOT_STEP;
+      if (!free(x, z) || stripAt(this.sim, x, z)[0] !== SIDEWALK_STRIP) continue;
+      best = score; bx = x; bz = z;
+    }
+    if (best === Infinity) return false;
+    if (c.spotSt[p] === 2) {
+      // standing already: up to a better place only
+      const mine = Math.hypot((c.sx[p] - ox) * dz - (c.sz[p] - oz) * dx, 0) + 1.5 * Math.max(0, -((c.sx[p] - ox) * dx + (c.sz[p] - oz) * dz));
+      if (best > mine - SPOT_GAIN) return false;
+    } else { this.waitFrom[p * 2] = hx; this.waitFrom[p * 2 + 1] = hz; }
+    c.sx[p] = bx; c.sz[p] = bz;
+    const len = Math.hypot(bx - hx, bz - hz);
+    if (len < 0.15) { c.spotSt[p] = 2; return false; }
+    // a short line to it (the waypoint stays the far side of the crossing)
+    c.spotSt[p] = 1;
+    c.mode[p] = 1;
+    c.lat[p] = c.latT[p] = 0;
+    c.pyaw[p] = Math.atan2(bx - hx, bz - hz);
+    this.lineFrom[p * 3] = hx; this.lineFrom[p * 3 + 1] = hy; this.lineFrom[p * 3 + 2] = hz;
+    c.t0[p] = this.time;
+    c.dur[p] = Math.max(0.05, len / c.speed[p]);
+    this.schedule(p, this.time + c.dur[p]);
+    return true;
+  }
+  /** Where each waiter arrived at its kerb (x, z): its places to wait are laid out from there. */
+  private waitFrom = new Float32Array(4096 * 2);
+
   private standToCross(p: number, o: number): void {
     const c = this.t.cols, q = this.posShown(p), vx = this.ways[o] - q[0], vz = this.ways[o + 2] - q[2];
     this.lineFrom[p * 3] = q[0]; this.lineFrom[p * 3 + 1] = q[1]; this.lineFrom[p * 3 + 2] = q[2];
@@ -1053,10 +1153,11 @@ export class Peds {
       out[3] = Math.atan2(dx * dir, dz * dir);
       return out;
     }
-    // straight line
+    // straight line (to its waypoint, or to its place to wait at the kerb)
     const o = p * WAYS * 4 + Math.max(0, c.wIdx[p] - 1) * 4;
     const ax = this.lineFrom[p * 3], ay = this.lineFrom[p * 3 + 1], az = this.lineFrom[p * 3 + 2];
-    const bx = this.ways[o], by = this.ways[o + 1], bz = this.ways[o + 2];
+    const toSpot = c.spotSt[p] === 1;
+    const bx = toSpot ? c.sx[p] : this.ways[o], by = toSpot ? ay : this.ways[o + 1], bz = toSpot ? c.sz[p] : this.ways[o + 2];
     out[0] = ax + (bx - ax) * f; out[1] = ay + (by - ay) * f; out[2] = az + (bz - az) * f;
     if (Math.abs(bx - ax) + Math.abs(bz - az) > 1e-3) out[3] = Math.atan2(bx - ax, bz - az);
     return out;
@@ -1096,6 +1197,7 @@ export class Peds {
 
   step(dt: number): void {
     this.time += dt;
+    if (this.outOfBus.length) this.stepOutOfBus();
     const target = this.demand;
     const rate = this.t.size < target / 2 ? SPAWN_FILL : SPAWN_STEADY;
     for (let k = 0; k < rate && this.t.size < target; k++) this.spawn();
