@@ -31,6 +31,8 @@ export interface BombContext {
   hud: { toast(text: string): void };
   ambient: { sfx(kind: 'boom'): void };
   flash: { value: number };
+  /** Camera shake (metres at the eye). */
+  shake(metres: number): void;
   force: number;
   /** The game's hitKind; the victims' toast is handled by the page on the simulation's answer. */
   setHitKind(kind: 'bomb'): void;
@@ -43,8 +45,12 @@ export function dropBomb(ctx: BombContext, x: number, z: number): void {
   const y = heightAt(w.heights, x, z);
   ctx.blast.boom(x, y, z, r);
   ctx.ambient.sfx('boom');
+  ctx.shake(Math.min(4, r * 0.09));
   ctx.particles.burst(x, y + 1, z, 2, 8, 12);
+  // the crater keeps burning and smoking after the flash
+  ctx.particles.burst(x, y + 0.7, z, 2, 7, 22);
   ctx.particles.burst(x, y + 2, z, 0, 10, 40);
+  ctx.particles.burst(x, y + 1.2, z, 5, 8, 26);
   ctx.particles.burst(x, y + 0.5, z, 6, 10, 3);
   ctx.particles.burst(x, y + 0.5, z, 4, 12, 15);
   ctx.flash.value = 1;
