@@ -7,10 +7,10 @@ import { MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts'
 
 const FLASH_COLOR = new THREE.Color(0xdde6ff);
 import { CommandStack } from './core/commands.ts';
-import { CELL_COUNT, Dirty, TILE_COUNT, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
+import { CELL_COUNT, Dirty, TILE_COUNT, tileOfCell, tileOriginX } from './core/grid.ts';
 import { JobPool } from './jobs/pool.ts';
 import { wallsHeightOf } from './jobs/buildingGen.ts';
-import { SHAPE_SCALE, SHAPE_STRIDE, roadGraphTransfer, type BoxColumns } from './shared/contracts/worker.ts';
+import { roadGraphTransfer } from './shared/contracts/worker.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
 import { createRoads, createTrafficLook, setPaintStyle, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
@@ -36,8 +36,7 @@ import { Creator } from './ui/creator.ts';
 import type { Design } from './world/design.ts';
 import { fogLevel, nightU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
-import { PROFILES, PROFILE_INFO, customProfiles, onProfileAdded } from './roads/profiles.ts';
-import { FOOTWAY_RISE, edgeRise } from './roads/kerb.ts';
+import { PROFILES, customProfiles, onProfileAdded } from './roads/profiles.ts';
 import { arrowCode } from './roads/laneLinks.ts';
 import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
@@ -52,6 +51,8 @@ import { RiverTool } from './features/terrain/riverTool.ts';
 import { TransitTool } from './features/transit/transitTool.ts';
 import type { MapExtra } from './platform/mapExtra.ts';
 import { SaveFlow } from './app/saveFlow.ts';
+import { CityFlows } from './app/cityFlows.ts';
+import { insertBoxes } from './app/insertBoxes.ts';
 import { WeatherControl, weatherPreset } from './features/sky/weatherControl.ts';
 import { DEFAULT_WATER, WaterControl } from './features/water/waterControl.ts';
 import { InsideView } from './render/inside.ts';
@@ -66,15 +67,12 @@ import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './features/roads/roadTool.ts';
 import { ZoneTool } from './features/zones/zoneTool.ts';
 import { Growth } from './world/growth.ts';
-import { addCrossing, addUTurn, buildRoad, streetChain, demolishSeg, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, segPreview, snap, splitAt, bulbAt } from './roads/build.ts';
-import { BULB_R, BULB_WALK } from './roads/junction.ts';
+import { addCrossing, addUTurn, buildRoad, streetChain, demolishSeg, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, segPreview, snap, splitAt } from './roads/build.ts';
 import { Zone } from './roads/zones.ts';
 import { RoadPreview } from './render/preview.ts';
 import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParams } from './world/brush.ts';
-import { START_MONEY, World } from './world/world.ts';
+import { World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
-import { lineProfile } from './jobs/debugCity.ts';
-import { FLAT_BIT } from './jobs/terrainGen.ts';
 import { type SaveActions } from './platform/mapFile.ts';
 import { photoView, settlePool } from './app/photoHooks.ts';
 import { reloadWithMap } from './app/session.ts';
@@ -219,6 +217,7 @@ export class Game {
   private demolition!: Demolition;
   private clouds!: Clouds;
   private saving!: SaveFlow;
+  private cities!: CityFlows;
   private river!: RiverTool;
   private lines!: TransitTool;
   private sky!: WeatherControl;
@@ -254,23 +253,26 @@ export class Game {
       get unsaved() { return gs.unsaved; }, set unsaved(v) { gs.unsaved = v; },
       get unsavedSerial() { return gs.unsavedSerial; },
       extras: () => ({ skyMode: gs.skyMode, weather: gs.sky.ctl, water: gs.water.ctl, clouds: gs.clouds.list, hour: gs.hour }),
-      clearForOpen: () => {
-        gs.growth.clear();
-        // lots still being made for the city that was on screen are not taken in by this one
-        gs.pool.cancel('lots:');
-        for (const l of gs.layers) l.reset();
-        gs.props.clear();
-        gs.transit.clear();
-        gs.commands.clear();
-      },
+      clearForOpen: () => gs.clearPage(),
       applyExtra: (ex) => gs.applyExtra(ex),
       setHour: (h) => { gs.hour = h; },
       setBiome: (b) => gs.setBiome(b),
-      insertBoxes: (b) => gs.insertBoxes(b),
-      resetCity: () => gs.resetCity(),
+      insertBoxes: (b) => insertBoxes(gs.world, b),
+      resetCity: () => gs.cities.reset(),
       generateTerrain: () => gs.generateTerrain(),
       endRebuild: (err, what) => gs.endRebuild(err, what),
       discardOk: () => gs.discardOk(),
+    });
+    this.cities = new CityFlows({
+      world: this.world, pool: this.pool,
+      get hud() { return gs.hud; },
+      get busy() { return gs.busy; }, set busy(v) { gs.busy = v; },
+      get generating() { return gs.generating; }, set generating(v) { gs.generating = v; },
+      clearPage: () => gs.clearPage(),
+      forgetSlot: () => { gs.saving.slotBase = null; },
+      generateTerrain: () => gs.generateTerrain(),
+      grow: async () => { gs.growth.processDirty(); await gs.pool.whenIdle(); return gs.growth.fillAll(); },
+      endRebuild: (err, what) => gs.endRebuild(err, what),
     });
     this.water = new WaterControl(() => { this.unsaved = true; });
     this.sky = new WeatherControl({ weather: this.weather, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.settings?.weather, changed: () => { this.unsaved = true; } });
@@ -412,7 +414,7 @@ export class Game {
       exportMap: () => void this.saving.exportMap(),
       importMap: (f) => { if (this.discardOk()) void this.saving.importMap(f); },
       newMap: () => { if (this.discardOk()) void this.saving.newMap(); },
-      testCity: () => { if (this.discardOk()) void this.testCity(); },
+      testCity: () => { if (this.discardOk()) void this.cities.testCity(); },
       // another city: a seed of its own (the title screen takes a chosen seed)
       // Roadcraft 4.0's New world (main.ts:2123-2128): always asked, then a city over the whole map with a seed of its own
       generate: () => {
@@ -644,7 +646,7 @@ export class Game {
     followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
     this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => void this.applySettings(s),
-      !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.testCity(); }],
+      !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.cities.testCity(); }],
         [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]], () => this.gpuName());
     await this.applySettings(this.settings, false);
     await renderer.compileAsync(scene, this.rig.persp);
@@ -671,7 +673,7 @@ export class Game {
     this.last = performance.now();
     this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
-    if (params.has('teste')) await this.testCity();
+    if (params.has('teste')) await this.cities.testCity();
     else if (params.has('cidade')) await this.generatedCity(params.has('media'));
     else if (params.has('carregar')) await this.saving.load();
     else if (params.has('inicio')) this.showStart();
@@ -1627,14 +1629,12 @@ export class Game {
 
   // ------------------------------------------------------ generated city
 
-  /** Forgets the current city (roads, buildings, lines, history). */
-  private resetCity(): void {
-    const w = this.world;
-    w.clearBuildings();
-    w.items.clear();
-    w.clearGround();
-    w.roads.clear();
+
+
+  /** Lets go of everything the page holds of the city on screen, before another one opens or is made. */
+  private clearPage(): void {
     this.growth.clear();
+    // lots still being made for the city that was on screen are not taken in by the next one
     this.pool.cancel('lots:');
     for (const l of this.layers) l.reset();
     this.props.clear();
@@ -1643,14 +1643,8 @@ export class Game {
     this.transit.clear();
     this.commands.clear();
     this.clouds.load([]);
-    w.signTexts.clear(); w.streetNames.clear(); this.textSigns.version++;
-    w.money = START_MONEY;
-    // another city: nothing of it is in the save yet, and it is not the city the slot holds
-    w.tileInSave.fill(0);
-    this.saving.slotBase = null;
-    w.gameId = (Math.random() * 2 ** 32) >>> 0;
+    this.textSigns.version++;
   }
-
 
   /**
    * Before an action that replaces the city on screen: when it has work not yet saved (edits, growth, ageing), the
@@ -1689,129 +1683,11 @@ export class Game {
     this.hud.toast(t('game.toast.flowFailed', { what, message: (err as Error)?.message ?? String(err) }));
   }
 
-  /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
 
-  async generatedCity(medium = false): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
-    // the medium town is laid on a level plain (Roadcraft 2.0's flat map); the whole map keeps its relief
-    this.world.seed = (medium ? this.world.seed | FLAT_BIT : this.world.seed & ~FLAT_BIT) >>> 0;
-    const t0 = performance.now();
-    const phase = (name: string) => console.log(`fase: ${name} ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-    this.hud.showLoading(t('game.loading.city'));
-    const w = this.world;
-    try {
-      this.resetCity();
-      this.generating = true;
-      await this.generateTerrain();
-      phase('relevo');
-      const city = await this.pool.run('cityGen', { seed: w.seed, medium }, { priority: 0 });
-      phase('malha viária');
-      this.hud.showLoading(t('game.loading.roads'));
-      const ids: number[] = [];
-      for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
-      const nc = w.roads.nodes.cols;
-      const perTile: number[][] = Array.from({ length: TILE_COUNT }, () => []);
-      for (let k = 0; k < city.segs.length; k += 5) {
-        const a = ids[city.segs[k]], b = ids[city.segs[k + 1]], profile = city.segs[k + 2];
-        const mx = (nc.x[a] + nc.x[b]) / 2, mz = (nc.z[a] + nc.z[b]) / 2;
-        try {
-          w.roads.addSeg({ a, b, cx: mx, cz: mz, profile, flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
-        } catch { continue; }
-        // straight segment to conform the terrain to, in every tile it touches
-        const half = PROFILE_INFO[profile].right;
-        const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half, edgeRise(profile, true), edgeRise(profile, false)];
-        const r = half + 8;
-        const tx0 = tileX(Math.min(nc.x[a], nc.x[b]) - r), tx1 = tileX(Math.max(nc.x[a], nc.x[b]) + r);
-        const tz0 = tileX(Math.min(nc.z[a], nc.z[b]) - r), tz1 = tileX(Math.max(nc.z[a], nc.z[b]) + r);
-        for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) perTile[tileId(tx, tz)].push(...rec);
-      }
-      // dead ends with a turning bulb: a disc when conforming the terrain
-      for (const n of ids) {
-        if (!bulbAt(w.roads, n)) continue;
-        // (the bulb's footway ring ends at BULB_R + BULB_WALK: beside it, the ground at its top)
-        const half = BULB_R + BULB_WALK, r = half + 8;
-        const rec = [nc.x[n], nc.z[n], nc.y[n], nc.x[n], nc.z[n], nc.y[n], half, FOOTWAY_RISE, FOOTWAY_RISE];
-        for (let tz = tileX(nc.z[n] - r); tz <= tileX(nc.z[n] + r); tz++) for (let tx = tileX(nc.x[n] - r); tx <= tileX(nc.x[n] + r); tx++) perTile[tileId(tx, tz)].push(...rec);
-      }
-      phase('vias inseridas');
-      await Promise.all(perTile.map(async (list, t) => {
-        if (!list.length) return;
-        const segs = new Float32Array(list);
-        const r = await this.pool.run('conform', { tile: t, segs }, { priority: 0, transfer: [segs.buffer] });
-        w.tileMin[r.tile] = r.min; w.tileMax[r.tile] = r.max;
-        w.layerDirty.add(r.tile);
-        const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
-        w.touchRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Terrain);
-      }));
-      this.generating = false;
-      phase('relevo assentado');
-      this.hud.showLoading(t('game.loading.lots'));
-      this.growth.processDirty();
-      await this.pool.whenIdle();
-      phase('lotes');
-      const n = this.growth.fillAll();
-      phase('prédios');
-      this.endRebuild(null, '');
-      achieve('CIDADE_GERADA');
-      const secs = ((performance.now() - t0) / 1000).toFixed(0);
-      this.hud.toast(t('game.toast.generated', { secs, buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
-    } catch (err) {
-      this.endRebuild(err, t('game.flow.generate'));
-    }
-  }
 
-  // ------------------------------------------------------------- test city
 
-  /** Worst case: fills the map with zoned streets and lets buildings grow on every lot. */
-  private async testCity(): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
-    this.hud.toast(t('game.toast.testCity'));
-    const w = this.world;
-    try {
-      this.resetCity();
-      const nodes: Float32Array[] = [], segs: Int32Array[] = [];
-      await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
-        const r = await this.pool.run('debugTile', { seed: w.seed, tile: t }, { priority: 1 });
-        // the tile's terrain is made again here: its range is its own (never widened by the previous map's)
-        w.tileMin[r.tile] = r.min;
-        w.tileMax[r.tile] = r.max;
-        w.layerDirty.add(r.tile);
-        nodes.push(r.roadNodes); segs.push(r.roadSegs);
-      }));
-      // streets: all the nodes first, then the segments (which may link tiles)
-      const key = new Map<number, number>();
-      for (const a of nodes) for (let k = 0; k < a.length; k += 5) {
-        key.set(a[k] * 1000 + a[k + 1], w.roads.addNode({ x: a[k + 2], z: a[k + 3], y: a[k + 4] }));
-      }
-      const nc = w.roads.nodes.cols;
-      for (const a of segs) for (let k = 0; k < a.length; k += 4) {
-        const na = key.get(a[k] * 1000 + a[k + 1]), nb = key.get(a[k + 2] * 1000 + a[k + 3]);
-        if (na === undefined || nb === undefined) continue;
-        const mx = (nc.x[na] + nc.x[nb]) / 2, mz = (nc.z[na] + nc.z[nb]) / 2;
-        const r = Math.hypot(mx, mz);
-        const zone = r < 1300 ? Zone.Commercial : r < 2600 ? Zone.Mixed : mx > 2800 ? Zone.Industrial : Zone.Residential;
-        // a horizontal segment (same j) follows line j; a vertical one, line i
-        const profile = a[k + 1] === a[k + 3] ? lineProfile(a[k + 1]) : lineProfile(a[k]);
-        w.roads.addSeg({ a: na, b: nb, cx: mx, cz: mz, profile, flags: 0, zl: zone, zr: zone });
-      }
-      // lots in the workers, then a building on every free lot
-      this.growth.processDirty();
-      await this.pool.whenIdle();
-      const n = this.growth.fillAll();
-      this.endRebuild(null, '');
-      this.hud.toast(t('game.toast.testCityDone', { buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
-    } catch (err) {
-      this.endRebuild(err, t('game.flow.testCity'));
-    }
-  }
-
-  private insertBoxes(b: BoxColumns): void {
-    for (let i = 0; i < b.count; i++) {
-      this.world.addBuilding({ x: b.x[i], z: b.z[i], w: b.w[i], d: b.d[i], h: b.h[i], rot: b.rot[i], color: b.color[i], seed: b.seed[i], zone: b.zone[i], floors: b.floors[i], style: b.style[i], fn: b.fn[i], built: b.built[i], shape: b.shapeN[i] ? Array.from(b.shape.subarray(i * SHAPE_STRIDE, i * SHAPE_STRIDE + b.shapeN[i] * 2), (v) => v / SHAPE_SCALE) : undefined });
-    }
-  }
+  /** The whole city from the seed (app/cityFlows.ts); public for the checks (tools/check-save.mjs). */
+  generatedCity(medium = false): Promise<void> { return this.cities.generated(medium); }
 
   // -------------------------------------------------- saving and loading
 
