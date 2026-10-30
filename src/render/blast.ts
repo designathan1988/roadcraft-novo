@@ -3,8 +3,6 @@
 // when its pieces settle, the burst is disposed and the scene goes back to having no blast state.
 
 import * as THREE from 'three/webgpu';
-import { Destruction } from './destruction.ts';
-import type { FractureInput } from './fracture.ts';
 
 const FRAGMENTS = 1024;
 const GRAVITY = 9.8;
@@ -32,7 +30,6 @@ export class Blast {
   private box = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   private wallMat = new THREE.MeshStandardNodeMaterial({ color: 0xb8b0a2, roughness: 0.9 });
   private flashMat = new THREE.MeshBasicNodeMaterial({ color: 0xffd28a, transparent: true, depthWrite: false });
-  private readonly destruction = new Destruction();
   private scratch = new THREE.Matrix4();
   private quat = new THREE.Quaternion();
   private euler = new THREE.Euler();
@@ -43,12 +40,6 @@ export class Blast {
     this.flash = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), this.flashMat);
     this.flash.visible = false;
     this.group.add(this.flash);
-    this.group.add(this.destruction.group);
-  }
-
-  /** Starts the real ruin of one building; its pieces fall under the same update as the flash. */
-  wreck(input: FractureInput, floor: number, x: number, y: number, z: number, force: number): void {
-    this.destruction.spawn(input, floor, x, y, z, force);
   }
 
   /** A flash at (x, y, z) with the explosion's radius; the next collapse pieces belong to this burst. */
@@ -147,7 +138,6 @@ export class Blast {
         if (this.current === b) this.current = null;
       }
     }
-    this.destruction.update(dt);
   }
 
   /** Sample meshes (they compile at load). */

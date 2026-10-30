@@ -701,10 +701,6 @@ export function buildBuildingsLegacy(heights: Float32Array, b: BoxColumns, origi
 }
 
 /** The lot as the 4.0 path takes it (jobs/building40.ts): one description, the same building at every level. */
-export function lot40OfBox(heights: Float32Array, b: BoxColumns, i: number): Lot40 {
-  return lot40Of(b, i, lotFit(b, i), b.zone[i], b.floors[i], heights);
-}
-
 function lot40Of(b: BoxColumns, i: number, fit: { cx: number; cz: number; W: number; D: number }, zone: number, floors: number, heights: Float32Array): Lot40 {
   const dens = zoneDensity(zone);
   const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
