@@ -395,9 +395,9 @@ test('faixa no meio da quadra: zebra para carros com pedestre na faixa; semáfor
   assert.ok(conn >= 0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const T = tr as any;
-  assert.equal(T.gateRules(conn, 0, 10), false);
+  assert.equal(T.junctions.gateRules(conn, 0, 10), false);
   crossing = false;
-  assert.equal(T.gateRules(conn, 0, 10), true);
+  assert.equal(T.junctions.gateRules(conn, 0, 10), true);
   void k;
   // semáforo de pedestres: duas fases, a segunda sem braços (pedestres)
   w.roads.setJunction(n, { ctl: Ctl.PedSignal });
