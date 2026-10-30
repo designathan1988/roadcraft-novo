@@ -64,6 +64,18 @@ const STRIPE = 0.65, BODY_R = 0.27, SHOULDERS = 0.5, LOOK = 8, MOVING = 0.1, KEE
 const PED_ACCEL = 1.2, PED_BRAKE = 2.5, SWITCH_GAIN = 1.2, AIM_HOLD = 0.6, HELD_SWITCH = 0.5;
 /** Fastest a body turns walking and standing, rad/s (roadcraft walk.ts TURN_RATE, TURN_STANDING). */
 const TURN_RATE = 3.5, TURN_STANDING = 6;
+/**
+ * How far ahead on its way the body is drawn pulled (`writePoses`): it rounds a corner as a person does. Roadcraft
+ * (walk.ts) seeks a point 0.9 m ahead turning at most 3.5 rad/s, so at 1.3 m/s it rounds a corner on a 0.37 m radius;
+ * a rope of 0.45 m rounds it alike (0.9 m cut corners by up to 1.2 m, off the sidewalk).
+ */
+const AHEAD = 0.45;
+/** Furthest the body is drawn off its way (m): a corner rounded, a step aside followed. */
+const OFF_WAY = 0.25;
+/** Drawn this much further than AHEAD from its way's point (it was put elsewhere: a door, a bus), it is drawn there at once. */
+const ROPE_SLACK = 1.5;
+/** How fast a stopped body drawn off its spot (it stopped while cutting a corner) steps back onto it, m/s. */
+const WALK_BACK = 1.2;
 const LATERAL_PENALTY = 1 / STRIPE, LATERAL_SHARE = 0.4, SIDESTEP_RATE = 0.45;
 const JAM_AFTER = 20, JAM_AFTER_CROSSING = 10, JAM_SHARE = 0.25, ONCOMING_CONFLICT = 50;
 /** Closer than this (m, centre to centre) two walkers are one inside the other: they move apart across their ways. */
@@ -116,6 +128,8 @@ const schema = {
   vNow: Float32Array, aimAt: Float64Array,
   // and the share of its pace it walked in the last step (1 = free)
   pace: Float32Array,
+  // the first point of the corner after this sidewalk stretch (`aheadPoint`): 0 not worked out yet, 1 known, 2 none
+  ax: Float32Array, az: Float32Array, aOk: Uint8Array,
 };
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
@@ -638,6 +652,7 @@ export class Peds {
     if (spacedStart && !c.bike[p] && frac === 0 && !this.spaced(p, this.stretchKey(p, s, c.side[p], fromA ? 1 : -1, n1))) return true;
     this.seenNow(p);
     c.enter[p] = 0;
+    c.aOk[p] = 0;
     c.seg[p] = s;
     c.da[p] = fromA ? r0 : r1;
     c.db[p] = toStop ? Math.max(r0, Math.min(r1, toStop[0])) : fromA ? r1 : r0;
@@ -719,6 +734,25 @@ export class Peds {
     c.pyaw[p] = here[3];
     c.lat[p] = c.latT[p] = 0;
     c.mode[p] = 3;
+    const w = this.planCorner(p, n, sIn, sOut, this.ways, p * WAYS * 4, here[0], here[2]);
+    c.side[p] = this.cornerSide;
+    this.wayNode[p] = n;
+    c.wIdx[p] = 0; c.wLen[p] = w;
+    c.seg[p] = sOut;
+    this.unlink(p);
+    this.link(p, n);
+    return this.nextWay(p);
+  }
+
+  /**
+   * The ways round node `n` from segment `sIn` to `sOut` for person `p` standing at (fromX, fromZ): the crosswalks'
+   * ends and the exit sidewalk's start, kept to the right (`keepRight`), written from `base` in `buf` (x, y, z, arm
+   * crossed + 1). Returns how many; the side of the exit sidewalk it ends on in `cornerSide`. Changes nothing of the
+   * person: `atNode` walks them, `aheadPoint` reads the first one before the corner.
+   */
+  private planCorner(p: number, n: number, sIn: number, sOut: number, buf: Float32Array, base: number, fromX: number, fromZ: number): number {
+    const c = this.t.cols, sim = this.sim, net = sim.net, sc = net.segs.cols;
+    const i = c.rIdx[p];
     // node arms in counter-clockwise order (the same as traffic and the traffic lights)
     const segs = net.segsOf(n, []);
     const deg = segs.length;
@@ -746,11 +780,10 @@ export class Peds {
       pick = opts.find((o) => o.cj === (leftOut ? aj : (aj - 1 + deg) % deg)) ?? pick;
     }
     let w = 0;
-    const base = p * WAYS * 4;
     const put = (x: number, y: number, z: number, cross: number) => {
       if (w >= WAYS) return;
       const o = base + w * 4;
-      this.ways[o] = x; this.ways[o + 1] = y; this.ways[o + 2] = z; this.ways[o + 3] = cross;
+      buf[o] = x; buf[o + 1] = y; buf[o + 2] = z; buf[o + 3] = cross;
       w++;
     };
     const tmp = new Float64Array(3);
@@ -773,15 +806,61 @@ export class Peds {
     // on the exit sidewalk's track (walking away from the node), where the sidewalk walk starts
     this.armPoint(sOut, endOut, dOut, armLeftOut, tmp, true, p, endOut === 0 ? 1 : -1);
     put(tmp[0], tmp[1], tmp[2], 0);
-    c.side[p] = endOut === 0 ? (armLeftOut ? 1 : -1) : (armLeftOut ? -1 : 1);
-    this.keepRight(p, w);
-    this.wayNode[p] = n;
-    c.wIdx[p] = 0; c.wLen[p] = w;
-    c.seg[p] = sOut;
-    this.unlink(p);
-    this.link(p, n);
-    return this.nextWay(p);
+    this.cornerSide = endOut === 0 ? (armLeftOut ? 1 : -1) : (armLeftOut ? -1 : 1);
+    this.keepRight(p, w, buf, base, fromX, fromZ);
+    return w;
   }
+  /** The exit sidewalk's side `planCorner` ended on. */
+  private cornerSide = 1;
+  /** Scratch of `aheadPoint`'s corner. */
+  private aheadWays = new Float32Array(WAYS * 4);
+
+  /**
+   * The point AHEAD on the way of a walker at (x, z) heading `yaw`, into `ahead`: straight on, or, within AHEAD of the
+   * end of its leg, on along the next leg (towards the next waypoint, along the exit sidewalk, or towards the first
+   * point of the corner after this sidewalk stretch: planned once a stretch, `ax`/`az`). Drawing only.
+   */
+  private aheadPoint(p: number, x: number, z: number, yaw: number): void {
+    const c = this.t.cols, sim = this.sim, net = sim.net, sc = net.segs.cols, out = this.ahead;
+    out[0] = x + Math.sin(yaw) * AHEAD; out[1] = z + Math.cos(yaw) * AHEAD;
+    if (c.bike[p]) return;
+    let left: number, nx: number, nz: number;
+    if (c.mode[p] === 1) {
+      const o = p * WAYS * 4 + (c.wIdx[p] - 1) * 4;
+      left = Math.hypot(this.ways[o] - x, this.ways[o + 2] - z);
+      if (left >= AHEAD) return;
+      if (c.wIdx[p] < c.wLen[p]) { nx = this.ways[o + 4]; nz = this.ways[o + 6]; }
+      else {
+        // the last waypoint starts the exit sidewalk: on along the segment, away from the node
+        const s = c.seg[p];
+        if (s < 0 || !net.segs.alive[s]) return;
+        const fromA = sc.a[s] === this.wayNode[p], t = sim.tAt(s, fromA ? sim.segS0(s) : sim.segS1(s));
+        bezD(net.quad(s), t, d2);
+        const l = Math.hypot(d2[0], d2[1]) || 1, k = fromA ? 1 : -1;
+        nx = this.ways[o] + d2[0] / l * k * AHEAD; nz = this.ways[o + 2] + d2[1] / l * k * AHEAD;
+      }
+    } else if (c.mode[p] === 0) {
+      const f = Math.max(0, Math.min(1, (this.time - c.t0[p]) / c.dur[p]));
+      left = Math.abs(c.db[p] - c.da[p]) * (1 - f);
+      if (left >= AHEAD || c.rIdx[p] + 2 >= c.rLen[p]) return;
+      if (c.aOk[p] === 0) {
+        c.aOk[p] = 2;
+        const r = p * ROUTE + c.rIdx[p], n = this.routes[r + 1], sOut = this.segBetween(n, this.routes[r + 2]), sIn = c.seg[p];
+        if (sOut >= 0 && net.segs.alive[sOut] && PROFILE_INFO[sc.profile[sOut]].walk) {
+          const ex = x + Math.sin(yaw) * left, ez = z + Math.cos(yaw) * left;
+          if (this.planCorner(p, n, sIn, sOut, this.aheadWays, 0, ex, ez) > 0) { c.ax[p] = this.aheadWays[0]; c.az[p] = this.aheadWays[2]; c.aOk[p] = 1; }
+        }
+      }
+      if (c.aOk[p] !== 1) return;
+      nx = c.ax[p]; nz = c.az[p];
+    } else return;
+    // the leg's end along its heading, then on towards the next point by what is left of AHEAD
+    const ex = x + Math.sin(yaw) * left, ez = z + Math.cos(yaw) * left;
+    const dx = nx - ex, dz = nz - ez, dl = Math.hypot(dx, dz);
+    if (dl < 1e-3) return;
+    out[0] = ex + dx / dl * (AHEAD - left); out[1] = ez + dz / dl * (AHEAD - left);
+  }
+  private ahead = new Float64Array(2);
 
   /** Cyclist at a node: a straight line from the end of the incoming bike lane to the start of the outgoing one (through the junction, like a car). */
   private bikeThrough(p: number, n: number, sIn: number, sOut: number): boolean {
@@ -881,9 +960,8 @@ export class Peds {
    * turn), so people going the other way, or at the other pace, walk beside it and not through it. The start (on its
    * sidewalk track) and the last waypoint (on the exit sidewalk's track) stay.
    */
-  private keepRight(p: number, w: number): void {
-    const k = CROSS_TRACK[this.t.cols.speed[p] > 1.35 ? 0 : 1], o = p * WAYS * 4, W = this.ways;
-    let px = this.lineFrom[p * 3], pz = this.lineFrom[p * 3 + 2];
+  private keepRight(p: number, w: number, W: Float32Array = this.ways, o = p * WAYS * 4, px = this.lineFrom[p * 3], pz = this.lineFrom[p * 3 + 2]): void {
+    const k = CROSS_TRACK[this.t.cols.speed[p] > 1.35 ? 0 : 1];
     for (let i = 0; i + 1 < w; i++) {
       const x = W[o + i * 4], z = W[o + i * 4 + 2], nx = W[o + i * 4 + 4], nz = W[o + i * 4 + 6];
       // right of a heading (vx, vz) is (−vz, vx)
@@ -1319,21 +1397,44 @@ export class Peds {
         if (start + n >= max) return n;
         if (c.mode[p] === 0 && !this.sim.net.segs.alive[c.seg[p]]) continue;
         const q = this.posShown(p);
+        const qx = q[0], qy = q[1], qz = q[2], qyaw = q[3];
         const o = (start + n) * stride;
-        if (!c.has[p] || c.wf[p] !== frame - 1) { c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.syaw[p] = q[3]; c.has[p] = 1; }
+        if (!c.has[p] || c.wf[p] !== frame - 1) { c.px[p] = qx; c.py[p] = qy; c.pz[p] = qz; c.syaw[p] = qyaw; c.has[p] = 1; }
         c.wf[p] = frame;
-        // the body turns towards the way it goes at a person's rate (the way bends at once at a corner or a waypoint:
-        // drawn as it is, the body snapped round, 60-180 degrees in one publication)
-        const walking = (c.mode[p] === 0 || c.mode[p] === 1) && c.pace[p] > 0.2;
-        let turn = q[3] - c.syaw[p];
+        data[o] = c.px[p]; data[o + 1] = c.py[p]; data[o + 2] = c.pz[p]; data[o + 3] = c.syaw[p];
+        // walking, the body is drawn pulled along its way by a rope AHEAD long towards the point AHEAD on it (roadcraft
+        // walk.ts:1780-1795 seeks that point): on a straight it stands on its way; round a corner it cuts it as a
+        // person does, facing where it moves. Drawn on the way itself, the way bent at once at each corner and the body
+        // either snapped round or walked sideways while it turned.
+        const going = c.mode[p] === 0 || c.mode[p] === 1, walking = going && c.pace[p] > 0.2;
+        let x = c.px[p], z = c.pz[p], want = qyaw;
+        // (held back by someone ahead it steps aside: pulled the same way, it turns into its step)
+        if (going) {
+          this.aheadPoint(p, qx, qz, qyaw);
+          const dx = this.ahead[0] - x, dz = this.ahead[1] - z, d = Math.hypot(dx, dz);
+          if (d > AHEAD + ROPE_SLACK) { x = qx; z = qz; }
+          else {
+            if (d > AHEAD) { x = this.ahead[0] - dx / d * AHEAD; z = this.ahead[1] - dz / d * AHEAD; }
+            if (d > 1e-3) want = Math.atan2(dx, dz);
+            // never further than OFF_WAY from where it is (a rope barely pulls sideways: a step aside, made to keep
+            // clear of someone, would be left undone)
+            const ox = x - qx, oz = z - qz, off = Math.hypot(ox, oz);
+            if (off > OFF_WAY) { x = qx + ox / off * OFF_WAY; z = qz + oz / off * OFF_WAY; }
+          }
+        } else {
+          // stopped: back onto its spot at a walking pace (it was cutting a corner) and its own heading
+          const dx = qx - x, dz = qz - z, d = Math.hypot(dx, dz), most = WALK_BACK * dt;
+          if (d <= most || d > AHEAD + ROPE_SLACK) { x = qx; z = qz; } else { x += dx / d * most; z += dz / d * most; }
+        }
+        // and turns at a person's rate (roadcraft walk.ts TURN_RATE / TURN_STANDING)
+        let turn = want - c.syaw[p];
         turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
         const most = (walking ? TURN_RATE : TURN_STANDING) * dt, yaw = c.syaw[p] + Math.max(-most, Math.min(most, turn));
-        data[o] = c.px[p]; data[o + 1] = c.py[p]; data[o + 2] = c.pz[p]; data[o + 3] = c.syaw[p];
-        data[o + 4] = q[0]; data[o + 5] = q[1]; data[o + 6] = q[2]; data[o + 7] = yaw;
+        data[o + 4] = x; data[o + 5] = qy; data[o + 6] = z; data[o + 7] = yaw;
         data[o + 8] = (c.bike[p] ? 5 : 3) * 256 + c.color[p];
         data[o + 9] = c.mode[p] === 4 ? Math.max(0, 1 - (this.time - c.t0[p]) / c.dur[p]) : 1;
         data[o + 10] = c.look[p];
-        c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.syaw[p] = yaw;
+        c.px[p] = x; c.py[p] = qy; c.pz[p] = z; c.syaw[p] = yaw;
         n++;
       }
     }
