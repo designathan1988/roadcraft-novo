@@ -7,17 +7,16 @@ import { MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts'
 
 const FLASH_COLOR = new THREE.Color(0xdde6ff);
 import { CommandStack } from './core/commands.ts';
-import { CELL_COUNT, Dirty, TILE_COUNT, cellsOfTile, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
+import { CELL_COUNT, Dirty, TILE_COUNT, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
 import { JobPool } from './jobs/pool.ts';
 import { wallsHeightOf } from './jobs/buildingGen.ts';
-import { SEG_REC, SHAPE_SCALE, SHAPE_STRIDE, roadGraphTransfer, type BoxColumns, type JobResults, type RoadSave } from './shared/contracts/worker.ts';
+import { SHAPE_SCALE, SHAPE_STRIDE, roadGraphTransfer, type BoxColumns } from './shared/contracts/worker.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
 import { createRoads, createTrafficLook, setPaintStyle, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
 import type { CellLayer } from './render/cellLayer.ts';
 import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
 import { TerrainRenderer, gridU } from './render/terrain.ts';
-import { MapSizeError, decodeMeta } from './platform/save.ts';
 import { createPoseBuffers, PoseReader, viewPoseBuffers } from './shared/contracts/poses.ts';
 import { encodeOps } from './sim/lanes.ts';
 import { VehicleRenderer } from './render/vehicles.ts';
@@ -37,8 +36,7 @@ import { Creator } from './ui/creator.ts';
 import type { Design } from './world/design.ts';
 import { fogLevel, nightU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
-import type { JunctionSpec } from './roads/control.ts';
-import { PROFILES, PROFILE_INFO, customProfiles, onProfileAdded, setCustomProfiles, type Profile } from './roads/profiles.ts';
+import { PROFILES, PROFILE_INFO, customProfiles, onProfileAdded } from './roads/profiles.ts';
 import { FOOTWAY_RISE, edgeRise } from './roads/kerb.ts';
 import { arrowCode } from './roads/laneLinks.ts';
 import type { NetOp } from './roads/network.ts';
@@ -52,7 +50,8 @@ import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type Lot
 import { Clouds } from './features/sky/clouds.ts';
 import { RiverTool } from './features/terrain/riverTool.ts';
 import { TransitTool } from './features/transit/transitTool.ts';
-import { decodeExtra } from './platform/mapExtra.ts';
+import type { MapExtra } from './platform/mapExtra.ts';
+import { SaveFlow } from './app/saveFlow.ts';
 import { WeatherControl, weatherPreset } from './features/sky/weatherControl.ts';
 import { DEFAULT_WATER, WaterControl } from './features/water/waterControl.ts';
 import { InsideView } from './render/inside.ts';
@@ -76,19 +75,15 @@ import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
 import { FLAT_BIT } from './jobs/terrainGen.ts';
-import { MapFileError, keepPreviousCity, packSlot, previousCities, readPackage, restorePrevious, savedIn, type SaveActions } from './platform/mapFile.ts';
-import { SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation } from './platform/saveFiles.ts';
-import { repairDanglingEnds } from './roads/repair.ts';
+import { type SaveActions } from './platform/mapFile.ts';
 import { photoView, settlePool } from './app/photoHooks.ts';
-import { loadSession, newMapSession, reloadWithMap, saveSession, type LoadHost, type NewMapHost, type SaveHost } from './app/session.ts';
+import { reloadWithMap } from './app/session.ts';
 import { setTool as setGameTool, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
 import type { ClickHost } from './app/clicks.ts';
 import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
 import { LotEditing } from './app/lotEditing.ts';
 import { bindInput } from './app/input.ts';
-import { errorText } from './shared/errors.ts';
 
-const SLOT = 'cidade-1';
 /** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
 const STILL_FRAMES = 40;
 /** Segments that fit in the occupancy map (2 directions per segment). */
@@ -223,6 +218,7 @@ export class Game {
   /** The bomb: explosion, breaking buildings and what it throws (features/demolition). */
   private demolition!: Demolition;
   private clouds!: Clouds;
+  private saving!: SaveFlow;
   private river!: RiverTool;
   private lines!: TransitTool;
   private sky!: WeatherControl;
@@ -249,6 +245,33 @@ export class Game {
     this.pool = new JobPool({ heights: this.world.heightsSab, ground: this.world.groundSab, water: this.world.waterSab });
     this.rig = new CameraRig(this.world.heights);
     // the features the page wires: each owns its state (sky, water, river tool)
+    const gs = this;
+    this.saving = new SaveFlow({
+      world: this.world, pool: this.pool, rig: this.rig, transit: this.transit,
+      get hud() { return gs.hud; },
+      get settings() { return gs.settings; },
+      get busy() { return gs.busy; }, set busy(v) { gs.busy = v; },
+      get unsaved() { return gs.unsaved; }, set unsaved(v) { gs.unsaved = v; },
+      get unsavedSerial() { return gs.unsavedSerial; },
+      extras: () => ({ skyMode: gs.skyMode, weather: gs.sky.ctl, water: gs.water.ctl, clouds: gs.clouds.list, hour: gs.hour }),
+      clearForOpen: () => {
+        gs.growth.clear();
+        // lots still being made for the city that was on screen are not taken in by this one
+        gs.pool.cancel('lots:');
+        for (const l of gs.layers) l.reset();
+        gs.props.clear();
+        gs.transit.clear();
+        gs.commands.clear();
+      },
+      applyExtra: (ex) => gs.applyExtra(ex),
+      setHour: (h) => { gs.hour = h; },
+      setBiome: (b) => gs.setBiome(b),
+      insertBoxes: (b) => gs.insertBoxes(b),
+      resetCity: () => gs.resetCity(),
+      generateTerrain: () => gs.generateTerrain(),
+      endRebuild: (err, what) => gs.endRebuild(err, what),
+      discardOk: () => gs.discardOk(),
+    });
     this.water = new WaterControl(() => { this.unsaved = true; });
     this.sky = new WeatherControl({ weather: this.weather, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.settings?.weather, changed: () => { this.unsaved = true; } });
     this.lines = new TransitTool({
@@ -347,7 +370,7 @@ export class Game {
       setTool: (t) => ge.setTool(t),
       showSelection: () => ge.showSelection(),
     });
-    this.hud = new Hud(this.hudActions = Object.assign(this.featureActions(), this.saveActions(), {
+    this.hud = new Hud(this.hudActions = Object.assign(this.featureActions(), this.saving.actions(), {
       tool: (t) => this.setTool(t),
       item: (k) => { this.itemTool.item = k; },
       signType: (k) => { this.itemTool.sign = k; },
@@ -384,11 +407,11 @@ export class Game {
       undo: () => this.history(false),
       redo: () => this.history(true),
       view: (v) => this.setView(v),
-      save: () => void this.save(),
-      load: () => { if (this.discardOk()) void this.load(); },
-      exportMap: () => void this.exportMap(),
-      importMap: (f) => { if (this.discardOk()) void this.importMap(f); },
-      newMap: () => { if (this.discardOk()) void this.newMap(); },
+      save: () => void this.saving.save(),
+      load: () => { if (this.discardOk()) void this.saving.load(); },
+      exportMap: () => void this.saving.exportMap(),
+      importMap: (f) => { if (this.discardOk()) void this.saving.importMap(f); },
+      newMap: () => { if (this.discardOk()) void this.saving.newMap(); },
       testCity: () => { if (this.discardOk()) void this.testCity(); },
       // another city: a seed of its own (the title screen takes a chosen seed)
       // Roadcraft 4.0's New world (main.ts:2123-2128): always asked, then a city over the whole map with a seed of its own
@@ -515,7 +538,7 @@ export class Game {
     onLanguageChange(() => { this.inspector.refresh(); if (this.selected >= 0) this.select(this.selected); });
     // closing: in the desktop game the window waits for the save; in the browser the page asks before leaving
     const app = (window as { roadcraftApp?: { onClosing(fn: () => void): void; canClose(): void } }).roadcraftApp;
-    if (app) app.onClosing(() => void this.saveBeforeClose().finally(() => app.canClose()));
+    if (app) app.onClosing(() => void this.saving.saveBeforeClose().finally(() => app.canClose()));
     else window.addEventListener('beforeunload', (e) => { if (this.unsaved || this.world.saveDirty.includes(1)) { e.preventDefault(); e.returnValue = ''; } });
     this.hud.setHistory(false, false);
     this.setTool('camera');
@@ -650,7 +673,7 @@ export class Game {
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
     else if (params.has('cidade')) await this.generatedCity(params.has('media'));
-    else if (params.has('carregar')) await this.load();
+    else if (params.has('carregar')) await this.saving.load();
     else if (params.has('inicio')) this.showStart();
     // straight into a medium town of straight streets, blocks and lots (Roadcraft 2.0's start): the start screen stays
     // on the menu (and ?inicio)
@@ -736,7 +759,7 @@ export class Game {
     const light = this.skyMode === 'dia' ? 12 : this.skyMode === 'noite' ? 22 : this.hour;
     // city clock in minutes (building decay); the sky mode only fixes the light
     if (!this.paused) this.world.advanceClock(dt * this.clockSpeed);
-    if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.busy && !this.saveBlocked) void this.save(true); }
+    if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.busy && !this.saving.blocked) void this.saving.save(true); }
     const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
     // the rain box round the eye; isometric: round what is looked at (round the perspective eye it was a block of rain)
@@ -1083,7 +1106,7 @@ export class Game {
       toggleFollow: () => g.toggleFollow(),
       toolKey: (e) => g.toolKey(e),
       history: (r) => g.history(r),
-      save: () => g.save(),
+      save: () => g.saving.save(),
     });
   }
 
@@ -1342,8 +1365,8 @@ export class Game {
       return 'ok';
     },
     /** The save package (what Export downloads) and opening a package (what Open file does). */
-    packMap: async () => packSlot(await this.slot()),
-    openMap: (b: Blob) => this.importMap(b),
+    packMap: () => this.saving.pack(),
+    openMap: (b: Blob) => this.saving.importMap(b),
     /** One terrain brush stroke (landforms included) at (x, z). */
     terrain: (mode: BrushMode, x: number, z: number, radius = 80, strength = 0.4) => {
       const st = new BrushStroke(this.world), rk = LANDFORM_ROCK[mode];
@@ -1519,11 +1542,11 @@ export class Game {
       empty: (tiles) => {
         if (!this.discardOk()) { this.startMenu?.show(); return; }
         if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio');
-        else if (this.world.roads.segs.size || this.world.buildings.size) void this.newMap();
+        else if (this.world.roads.segs.size || this.world.buildings.size) void this.saving.newMap();
       },
       load: () => {
         if (!this.discardOk()) { this.startMenu?.show(); return; }
-        void this.load().then((ok) => { if (!ok) this.startMenu?.show(); });
+        void this.saving.load().then((ok) => { if (!ok) this.startMenu?.show(); });
       },
       options: () => this.optionsPanel.open(),
     });
@@ -1560,7 +1583,7 @@ export class Game {
       ['tool', this.tool], ['lot mode', this.lotMode], ['selected building', String(this.selected)], ['inspector', this.inspector.isOpen ? `segment ${this.inspector.seg}` : 'closed'],
       ['paused', String(this.paused)], ['speed', String(this.simSpeed)], ['clock', `${this.hour.toFixed(2)} h ×${this.clockSpeed}`], ['sky', this.skyMode],
       ['camera', `${r.mode} ${r.target.x.toFixed(0)}, ${r.target.z.toFixed(0)} · ${r.dist.toFixed(0)} m · yaw ${(r.yaw * 180 / Math.PI).toFixed(0)}°`],
-      ['undo / redo', `${this.commands.canUndo} / ${this.commands.canRedo}`], ['unsaved', String(this.unsaved)], ['save blocked', String(this.saveBlocked)],
+      ['undo / redo', `${this.commands.canUndo} / ${this.commands.canRedo}`], ['unsaved', String(this.unsaved)], ['save blocked', String(this.saving.blocked)],
       ['money', this.world.unlimited ? '∞' : String(Math.round(this.world.money))],
       ['simulation', st ? `${st.cars} cars · ${st.micro} near · ${st.peds} pedestrians` : '—'],
     ];
@@ -1624,21 +1647,10 @@ export class Game {
     w.money = START_MONEY;
     // another city: nothing of it is in the save yet, and it is not the city the slot holds
     w.tileInSave.fill(0);
-    this.slotBase = null;
+    this.saving.slotBase = null;
     w.gameId = (Math.random() * 2 ** 32) >>> 0;
   }
 
-  /**
-   * After a flow that rebuilds the world failed half way: the world on screen is incomplete, so saving is refused until
-   * another city is opened or made (an autosave would write the half-built world over the player's save).
-   */
-  private saveBlocked = false;
-
-  /** The window is closing: a save under way is waited for, then what is still unsaved is written. */
-  private async saveBeforeClose(): Promise<void> {
-    for (let k = 0; this.busy && k < 100; k++) await new Promise((r) => setTimeout(r, 200));
-    if ((this.unsaved || this.world.saveDirty.includes(1)) && !this.saveBlocked) await this.save(true);
-  }
 
   /**
    * Before an action that replaces the city on screen: when it has work not yet saved (edits, growth, ageing), the
@@ -1649,14 +1661,31 @@ export class Game {
     return window.confirm(t('save.discardConfirm'));
   }
 
+  /** An opened map's extra (platform/mapExtra.ts) into the page's state: water, clock, money mode, paint, signs, names, terminals, clouds, fog, sky, weather. */
+  private applyExtra(ex: MapExtra): void {
+    const w = this.world;
+    this.water.set(ex.water ?? DEFAULT_WATER, false);
+    w.clock = ex.clock;
+    if (ex.unlimited !== null) w.unlimited = ex.unlimited;
+    // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
+    if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
+    w.signTexts.clear(); for (const [k, v] of ex.signs) w.signTexts.set(k, v);
+    w.streetNames.clear(); for (const [k, v] of ex.streets) w.streetNames.set(k, v);
+    this.textSigns.version++;
+    this.transit.terminals = ex.terminals; this.transit.version++;
+    this.clouds.load(ex.clouds); fogLevel.value = ex.fog;
+    this.skyMode = ex.sky === 'dia' || ex.sky === 'noite' ? ex.sky : 'ciclo'; this.hud.setSky(this.skyMode);
+    this.sky.set(ex.weather, false);
+  }
+
   /** Ends a flow that rebuilds the world: the loading screen goes, the game is free; on failure, says why. */
   private endRebuild(err: unknown, what: string): void {
     this.generating = false;
     this.hud.hideLoading();
     this.busy = false;
-    if (err === null) { this.saveBlocked = false; this.homeView = this.rig.state(); return; }
+    if (err === null) { this.saving.blocked = false; this.homeView = this.rig.state(); return; }
     console.error(`${what} failed:`, err);
-    this.saveBlocked = true;
+    this.saving.blocked = true;
     this.hud.toast(t('game.toast.flowFailed', { what, message: (err as Error)?.message ?? String(err) }));
   }
 
@@ -1786,304 +1815,9 @@ export class Game {
 
   // -------------------------------------------------- saving and loading
 
-  /** The save files (saveFiles.ts): the browser's storage, or real files in the desktop game. */
-  readonly saveStore: Promise<FileStore> = openSaveStore();
-  /**
-   * The committed generation of this city a save builds on (the one opened or saved last): a save writes only the
-   * tiles that changed since and keeps the others' files. null: none (a new city): every tile in the save is written.
-   */
-  private slotBase: Generation | null = null;
 
-  private async slot(): Promise<SaveSlot> { return new SaveSlot(await this.saveStore, SLOT); }
 
-  /** In the browser, only the tab holding the slot's lock writes it (another tab of the game only reads). */
-  private readonly slotLock = new SlotLock(SLOT, () => this.hud.toast(t('save.nowWriter')));
 
-  /** Whether this tab writes the save (says why not when it does not). */
-  private async mayWrite(): Promise<boolean> {
-    await this.slotLock.ready;
-    if (!this.slotLock.writer) this.hud.toast(t('save.otherTab'));
-    return this.slotLock.writer;
-  }
 
-  /**
-   * Writes a new generation of the save: the changed tiles, the map's description and the manifest, then the commit
-   * (saveFiles.ts); until the commit the save before stays the one that opens. Everything is copied at the start, in
-   * one go (tiles, their ground and water, money, clock, junctions…), so the files describe one moment. A tile's mark
-   * and `unsaved` are cleared only once the commit is written, and only if nothing changed after the copy; a failed
-   * save leaves them set and the next save tries again. True when the save completed.
-   */
-  private async save(auto = false): Promise<boolean> {
-    const g = this;
-    const host: SaveHost = {
-      world: g.world, pool: g.pool, hud: g.hud, rig: g.rig, transit: g.transit, settings: g.settings,
-      skyMode: g.skyMode, weatherCtl: g.sky.ctl, waterCtl: g.water.ctl, clouds: g.clouds.list, hour: g.hour,
-      get saveBlocked() { return g.saveBlocked; },
-      get unsavedSerial() { return g.unsavedSerial; },
-      get busy() { return g.busy; }, set busy(v) { g.busy = v; },
-      get unsaved() { return g.unsaved; }, set unsaved(v) { g.unsaved = v; },
-      get slotBase() { return g.slotBase; }, set slotBase(v) { g.slotBase = v; },
-      mayWrite: () => g.mayWrite(), slot: () => g.slot(), keepSlotForThisCity: (slot) => g.keepSlotForThisCity(slot),
-    };
-    return saveSession(host, auto);
-  }
-
-  /**
-   * Opens the saved city: its committed generation, or the one before it when that one cannot be used (a file gone or
-   * damaged); when no generation can be fully read, the newest is opened and its unreadable tiles come back from the
-   * seed. Any failure after the world was cleared ends the flow (no hung loading screen) and blocks saving until
-   * another city is opened or made, so the half-built world never overwrites the save. A storage that fails stops the
-   * opening and touches nothing. True when the city opened.
-   */
-  private async load(): Promise<boolean> {
-    const g = this;
-    const host: LoadHost = {
-      get busy() { return g.busy; }, set busy(v) { g.busy = v; },
-      hud: g.hud,
-      slot: () => g.slot(),
-      openGeneration: (slot, gen, last) => g.openGeneration(slot, gen, last),
-      endRebuild: (err, what) => g.endRebuild(err, what),
-    };
-    return loadSession(host);
-  }
-
-  /**
-   * Rebuilds the world from generation `g`. A tile file that cannot be used (gone, cut, damaged, undecodable): with
-   * `last` false the result is null and the world is left half built (the caller opens another generation); with
-   * `last` its terrain comes back from the seed and it is counted. A storage failure throws.
-   */
-  private async openGeneration(slot: SaveSlot, g: Generation, last: boolean): Promise<{ missing: number; damaged: number; repaired: number; cut: number } | null> {
-    const w = this.world;
-    const meta = decodeMeta(g.metaBytes);
-    w.clearBuildings();
-    w.items.clear();
-    w.clearGround();
-    w.roads.clear();
-    this.growth.clear();
-    // lots still being made for the city that was on screen are not taken in by this one
-    this.pool.cancel('lots:');
-    for (const l of this.layers) l.reset();
-    this.props.clear();
-    this.transit.clear();
-    this.commands.clear();
-    try { setCustomProfiles(meta.profiles ? JSON.parse(meta.profiles) as Profile[] : []); } catch { setCustomProfiles([]); }
-    this.setBiome(meta.biome ?? 0);
-    // the balance is saved even with unlimited money on (older saves wrote NaN then: the starting cash comes back)
-    w.unlimited = meta.money !== undefined && Number.isNaN(meta.money);
-    w.money = meta.money !== undefined && !Number.isNaN(meta.money) ? meta.money : START_MONEY;
-    const roads: RoadSave[] = [];
-    w.seed = meta.seed;
-    w.gameId = meta.gameId;
-    if (meta.hour !== undefined) this.hour = meta.hour;
-    if (meta.transit) this.transit.decode(meta.transit); else this.transit.clear();
-    // the map's extra, field by field (platform/mapExtra.ts): a bad field falls back alone
-    const ex = decodeExtra(meta.extra);
-    this.water.set(ex.water ?? DEFAULT_WATER, false);
-    w.clock = ex.clock;
-    if (ex.unlimited !== null) w.unlimited = ex.unlimited;
-    // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
-    if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
-    w.signTexts.clear(); for (const [k, v] of ex.signs) w.signTexts.set(k, v);
-    w.streetNames.clear(); for (const [k, v] of ex.streets) w.streetNames.set(k, v);
-    this.textSigns.version++;
-    this.transit.terminals = ex.terminals; this.transit.version++;
-    this.clouds.load(ex.clouds); fogLevel.value = ex.fog;
-    this.skyMode = ex.sky === 'dia' || ex.sky === 'noite' ? ex.sky : 'ciclo'; this.hud.setSky(this.skyMode);
-    this.sky.set(ex.weather, false);
-    w.tileInSave.fill(0);
-    for (const t of g.tiles.keys()) w.tileInSave[t] = 1;
-    const unreadable: number[] = [];
-    let missing = 0;
-    const reads = limiter(WRITES_AT_ONCE);
-    // every tile ends before the opening goes on or gives up (a tile still arriving would land in the next opening)
-    const done = await Promise.allSettled(Array.from({ length: TILE_COUNT }, async (_, t) => {
-      const ref = g.tiles.get(t);
-      let r: JobResults['unpackTile'] | null = null;
-      if (ref) {
-        let why = g.missing.get(t) ?? '';
-        let gone = !!why;
-        if (!why) {
-          try {
-            const data = await reads(() => slot.readTile(g, t));
-            r = await this.pool.run('unpackTile', { tile: t, data, hash: ref.hash }, { key: `terrain:${t}`, priority: 0, transfer: [data.buffer as ArrayBuffer] });
-            why = r.ok ? '' : r.reason ?? 'unreadable';
-          } catch (err) {
-            // a storage failure stops the opening; a file that is gone or cut is a tile that cannot be used
-            if (!(err instanceof TileFileError)) throw err;
-            why = err.message; gone = true;
-          }
-        }
-        if (why) { console.warn(`save: tile ${t} of generation ${g.gen} cannot be used: ${why}`); unreadable.push(t); if (gone) missing++; r = null; }
-        else if (r) {
-          if (!ref.hash) ref.hash = r.hash; // a save from before generations: the next one records it
-          w.tileMin[t] = r.min; w.tileMax[t] = r.max;
-          if (r.boxes) this.insertBoxes(r.boxes);
-          if (r.roads) roads.push(r.roads);
-          if (r.roads?.items) w.items.loadTile(r.roads.items);
-          w.groundDirty.add(t); w.waterDirty.add(t);
-          w.tileWater[t] = r.hasWater ? 1 : 0;
-        }
-      }
-      if (!r && (last || !ref)) {
-        // not in the save, or (as a last resort) unusable: the terrain comes back from the seed
-        const gr = await this.pool.run('terrainGen', { seed: w.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
-        w.tileMin[t] = gr.min; w.tileMax[t] = gr.max; w.tileWater[t] = gr.hasWater ? 1 : 0; w.waterDirty.add(t);
-      }
-      w.layerDirty.add(t);
-      for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain | Dirty.Buildings);
-    }));
-    const failed = done.find((r) => r.status === 'rejected');
-    if (failed) throw (failed as PromiseRejectedResult).reason;
-    if (unreadable.length && !last) return null;
-    // roads: all nodes before the segments (segments link tiles). A segment saved with its first end whose other end
-    // was in a tile that could not be read is left out (it would link to a node that is not there); its tile is
-    // written again at the next save
-    for (const r of roads) w.roads.loadNodes(r);
-    const alive = w.roads.nodes.alive, nc = w.roads.nodes.cols, cutTiles = new Set<number>();
-    let cut = 0;
-    for (const r of roads) {
-      const s = r.segs, keep: number[] = [];
-      for (let k = 0; k < s.length; k += SEG_REC) {
-        if (alive[s[k + 1]] && alive[s[k + 2]]) { for (let i = 0; i < SEG_REC; i++) keep.push(s[k + i]); continue; }
-        cut++;
-        const end = alive[s[k + 1]] ? s[k + 1] : s[k + 2];
-        if (alive[end]) cutTiles.add(tileId(tileX(nc.x[end]), tileX(nc.z[end])));
-      }
-      w.roads.loadSegs(keep.length === s.length ? r : { ...r, segs: new Float32Array(keep) });
-    }
-    // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
-    for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
-    try {
-      for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
-    } catch { /* save without chosen junctions */ }
-    // what was read is what the save holds (opening itself marked it unsaved: clearing the history, water, weather);
-    // only the repair below and the tiles that lost a segment or could not be read need writing
-    this.unsaved = false;
-    w.saveDirty.fill(0);
-    // a tile that could not be read now holds the seed's terrain: the next save writes it, so the damaged file stops
-    // coming back at every opening (it was kept in quarantine)
-    for (const t of [...cutTiles, ...unreadable]) { w.saveDirty[t] = 1; w.saveVer[t]++; }
-    if (unreadable.length) this.unsaved = true;
-    if (cut) this.unsaved = true;
-    // old maps: dead ends lying inside another road become junctions (marked to save)
-    const repaired = repairDanglingEnds(w);
-    if (repaired) this.unsaved = true;
-    this.rig.restore(meta.camera);
-    this.hud.setView(this.rig.mode);
-    this.saveBlocked = false;
-    this.slotGame = meta.gameId;
-    this.slotBase = g;
-    return { missing, damaged: unreadable.length - missing, repaired, cut };
-  }
-
-  /** Saves and downloads the whole map as a .cidade file (only a save that completed is exported, nothing else). */
-  private async exportMap(): Promise<void> {
-    if (!await this.save()) { this.hud.toast(t('save.exportNotSaved')); return; }
-    if (this.busy) return;
-    this.busy = true;
-    let blob: Blob | null;
-    try { blob = await packSlot(await this.slot()); } catch (err) {
-      this.hud.toast(t('save.failed', { message: errorText(err) }));
-      return;
-    } finally { this.busy = false; }
-    if (!blob) { this.hud.toast(t('save.exportNothing')); return; }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `cidade-${this.world.seed}.cidade`;
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
-    this.hud.toast(t('save.exported', { mb: (blob.size / 1024 / 1024).toFixed(1) }));
-  }
-
-  /**
-   * Opens a map from a file. The file is read and checked (its map description and every file it lists) before
-   * anything is touched; the city saved before is kept as a previous city; then the file's save is committed as a new
-   * generation of the slot and opened.
-   */
-  private async importMap(file: Blob): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
-    if (!await this.mayWrite()) { this.busy = false; return; }
-    let kept: string | null;
-    try {
-      const saved = await savedIn(await readPackage(file));
-      try { decodeMeta(saved.meta); } catch (err) {
-        if (!(err instanceof MapSizeError && MAP_SIZES.includes(err.tiles))) throw new MapFileError(/newer/.test(errorText(err)) ? 'save.file.newer' : 'save.file.damaged', errorText(err));
-      }
-      const slot = await this.slot();
-      kept = await keepPreviousCity(slot);
-      await slot.adopt(saved.meta, saved.tiles, saved.gameId, saved.seed);
-    } catch (err) {
-      this.hud.toast(t('save.importFailed', { why: err instanceof MapFileError ? t(err.key) : errorText(err) }));
-      return;
-    } finally {
-      this.busy = false;
-    }
-    this.slotGame = null;
-    this.slotBase = null;
-    if (kept) this.hud.toast(t('save.keptPrevious', { folder: kept }));
-    await this.load();
-  }
-
-  /**
-   * The slot holds one city. Before the first save of another city (a new map, a generated one, an imported one), the
-   * city saved there is copied aside as a previous city, never overwritten. Throws when the copy fails (nothing is
-   * written then).
-   */
-  private async keepSlotForThisCity(slot: SaveSlot): Promise<void> {
-    const w = this.world;
-    if (this.slotGame === w.gameId) return;
-    const opened = await slot.open();
-    // a save that cannot be read (damaged) is kept aside too
-    if (opened.found && opened.generations[0]?.game !== w.gameId) {
-      const kept = await keepPreviousCity(slot);
-      if (kept) this.hud.toast(t('save.keptPrevious', { folder: kept }));
-    }
-    this.slotGame = w.gameId;
-  }
-
-  /** The gameId of the city in the save slot (null: not known yet). */
-  private slotGame: number | null = null;
-
-  /** The previous cities kept aside (mapFile.ts), for the interface (hudActions). */
-  private saveActions(): SaveActions {
-    return {
-      previousCities: async () => previousCities(await this.saveStore, SLOT),
-      openPreviousCity: (folder) => { if (this.discardOk()) void this.openPreviousCity(folder); },
-    };
-  }
-
-  /**
-   * Puts a previous city back in the save and opens it: the city in the save goes aside first (a previous city in its
-   * turn), then the previous city's save becomes a new generation of the slot.
-   */
-  private async openPreviousCity(folder: string): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
-    if (!await this.mayWrite()) { this.busy = false; return; }
-    let kept: string | null;
-    try { kept = await restorePrevious(await this.slot(), folder); } catch (err) {
-      this.hud.toast(t('save.previousFailed', { why: errorText(err) }));
-      return;
-    } finally {
-      this.busy = false;
-    }
-    this.slotGame = null;
-    this.slotBase = null;
-    if (kept) this.hud.toast(t('save.keptPrevious', { folder: kept }));
-    await this.load();
-  }
-
-  private async newMap(): Promise<void> {
-    const g = this;
-    const host: NewMapHost = {
-      get busy() { return g.busy; }, set busy(v) { g.busy = v; },
-      world: g.world, hud: g.hud,
-      resetCity: () => g.resetCity(),
-      generateTerrain: () => g.generateTerrain(),
-      endRebuild: (err, what) => g.endRebuild(err, what),
-    };
-    return newMapSession(host);
-  }
 }
 
