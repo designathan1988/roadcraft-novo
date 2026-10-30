@@ -8,6 +8,7 @@ import { World } from '../src/world/world.ts';
 import { CellLayer, type LayerSource } from '../src/render/cellLayer.ts';
 import { Dirty } from '../src/core/grid.ts';
 import type { PackedMesh } from '../src/shared/contracts/worker.ts';
+import { splitGlass } from '../src/render/vehicles.ts';
 
 /** A one-triangle packed mesh. */
 function triangle(): PackedMesh {
@@ -749,4 +750,21 @@ test('the shadows fade out at the far end of their reach (no straight line acros
   const fs = await import('node:fs');
   const src = fs.readFileSync('src/render/post.ts', 'utf8');
   assert.ok(/class FadingCSM extends CSMShadowNode/.test(src) && src.includes('new FadingCSM('), 'the sun uses cascades that fade at their far end');
+});
+
+test('vehicles: the glass is split from the opaque body for the transparent cabin draw', () => {
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(18), nrm = new Float32Array(18), col = new Float32Array(18), paint = new Float32Array(6), limb = new Float32Array(6);
+  for (let i = 0; i < 6; i++) { pos[i * 3] = i; nrm[i * 3 + 1] = 1; col[i * 3] = 1; }
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setAttribute('paint', new THREE.BufferAttribute(paint, 1));
+  g.setAttribute('limb', new THREE.BufferAttribute(limb, 1));
+  g.setAttribute('glow', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 5, 5, 5]), 1));
+  const { solid, glass } = splitGlass(g);
+  assert.equal(solid.getAttribute('position').count, 3, 'the opaque body keeps one triangle');
+  assert.ok(glass && glass.getAttribute('position').count === 3, 'the glass keeps the other triangle');
+  assert.equal(solid.getAttribute('glow').getX(0), 0);
+  assert.equal(glass!.getAttribute('glow').getX(0), 5);
 });

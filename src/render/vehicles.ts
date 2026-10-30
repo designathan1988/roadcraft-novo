@@ -364,7 +364,7 @@ const dimsOf = (kind: number, style: number) => (kind === 0 && style > 0 ? 4 + s
  * Splits a merged vehicle model into its opaque body and its glass, by the `glow` attribute. The glass gets a
  * transparent material (the cabin's people read through it); the body stays a single opaque draw.
  */
-function splitGlass(g: THREE.BufferGeometry): { solid: THREE.BufferGeometry; glass: THREE.BufferGeometry | null } {
+export function splitGlass(g: THREE.BufferGeometry): { solid: THREE.BufferGeometry; glass: THREE.BufferGeometry | null } {
   const glow = g.getAttribute('glow');
   const index = g.index ? Array.from(g.index.array as ArrayLike<number>) : null;
   const count = glow ? glow.count : g.getAttribute('position').count;
