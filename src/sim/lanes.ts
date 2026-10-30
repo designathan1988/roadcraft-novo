@@ -84,8 +84,15 @@ export class SimNet {
   /** The node's control may still be changed by the flow (automatic, an ordinary junction of 3+ arms). */
   nodeAuto = new Uint8Array(1 << 14);
   private dirtyNodes = new Set<number>();
-  /** Segments removed since the last step (the vehicles on them leave). */
+  /** Segments removed since the last step (the vehicles on them leave), and the two nodes of each (a, b). */
   readonly removedSegs: number[] = [];
+  readonly removedSegEnds: number[] = [];
+  /** Nodes removed since the last step (the people at them leave: the id may already be another node's). */
+  readonly removedNodes: number[] = [];
+  /** Network edits applied so far, and the edit each node was (re)created in: a route planned before a node's id was
+   *  given to a new node goes there no more (ids are reused, roads/build.ts). */
+  epoch = 0;
+  nodeBorn = new Uint32Array(1 << 14);
   /** Segments whose profile changed since the last step (the vehicles on lanes that are gone move over). */
   readonly reprofiledSegs: number[] = [];
   /** Total length of lanes (for the demand). */
@@ -108,6 +115,7 @@ export class SimNet {
       this.nodeFlow = grow(this.nodeFlow, cap, 0);
       this.armMain = grow(this.armMain, cap, 0);
       this.nodeAuto = grow(this.nodeAuto, cap, 0);
+      this.nodeBorn = grow(this.nodeBorn, cap, 0);
     });
     this.net.segs.onGrow((cap) => {
       this.arc = grow(this.arc, cap * (ARC_STEPS + 1), 0);
@@ -121,8 +129,8 @@ export class SimNet {
   apply(op: NetOp): void {
     const net = this.net;
     switch (op.t) {
-      case 'addNode': net.addNode(op.rec); this.nodeFlow[op.rec.id] = 0; this.onNodeReset(op.rec.id); this.dirtyNodes.add(op.rec.id); break;
-      case 'remNode': this.clearNode(op.id); net.removeNode(op.id); this.nodeFlow[op.id] = 0; this.nodeAuto[op.id] = 0; this.onNodeReset(op.id); this.dirtyNodes.delete(op.id); break;
+      case 'addNode': net.addNode(op.rec); this.nodeBorn[op.rec.id] = ++this.epoch; this.nodeFlow[op.rec.id] = 0; this.onNodeReset(op.rec.id); this.dirtyNodes.add(op.rec.id); break;
+      case 'remNode': this.clearNode(op.id); net.removeNode(op.id); this.removedNodes.push(op.id); this.epoch++; this.nodeFlow[op.id] = 0; this.nodeAuto[op.id] = 0; this.onNodeReset(op.id); this.dirtyNodes.delete(op.id); break;
       case 'addSeg': {
         net.addSeg(op.rec);
         const q = net.quad(op.rec.id);
@@ -140,8 +148,10 @@ export class SimNet {
         this.laneMeters -= sc.len[op.id] * (laneCount(sc.profile[op.id], 1) + laneCount(sc.profile[op.id], -1));
         this.dirtyNodes.add(sc.a[op.id]); this.dirtyNodes.add(sc.b[op.id]);
         for (let k = 0; k < 16; k++) this.laneConn[op.id * 16 + k] = -1;
+        this.removedSegEnds.push(sc.a[op.id], sc.b[op.id]);
         net.removeSeg(op.id);
         this.removedSegs.push(op.id);
+        this.epoch++;
         break;
       }
       case 'profile': {
@@ -161,7 +171,7 @@ export class SimNet {
         this.nodePhases.fill(0); this.nodeRing.fill(0); this.dirtyNodes.clear(); this.laneMeters = 0;
         this.turnAll.fill(0); this.turnCar.fill(0);
         this.nodeCtl.fill(0); this.conflicts.clear(); this.nodeFlow.fill(0); this.armMain.fill(0); this.nodeAuto.fill(0);
-        this.removedSegs.length = 0; this.reprofiledSegs.length = 0;
+        this.removedSegs.length = 0; this.reprofiledSegs.length = 0; this.removedSegEnds.length = 0; this.removedNodes.length = 0;
         break;
     }
   }
@@ -541,7 +551,7 @@ function tAtArc(arc: Float32Array, o: number, n: number, s: number): number {
   return (lo + f) / n;
 }
 
-function grow<T extends Int32Array | Float32Array | Uint8Array>(a: T, cap: number, fill: number): T {
+function grow<T extends Int32Array | Float32Array | Uint8Array | Uint32Array>(a: T, cap: number, fill: number): T {
   if (cap <= a.length) return a;
   const b = new (a.constructor as new (n: number) => T)(cap);
   b.fill(fill);

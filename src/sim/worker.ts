@@ -130,8 +130,9 @@ function stepInner(): void {
   if (!writer) return;
   const dt = dtMs / 1000;
   // network changed: rebuild only the touched nodes
-  const removed = sim.removedSegs.splice(0);
+  const removed = sim.removedSegs.splice(0), removedEnds = sim.removedSegEnds.splice(0), removedNodes = sim.removedNodes.splice(0);
   if (removed.length) traffic.segsRemoved(removed);
+  if (removed.length || removedNodes.length) peds.netRemoved(removed, removedEnds, removedNodes);
   const reprofiled = sim.reprofiledSegs.splice(0);
   if (reprofiled.length) traffic.segsReprofiled(reprofiled);
   const rebuilt = sim.rebuild();

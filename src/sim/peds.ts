@@ -107,6 +107,8 @@ function bikeU(profile: number, dir: number): number {
 const schema = {
   // route
   rLen: Uint8Array, rIdx: Uint8Array,
+  // the network edit (SimNet.epoch) its route was planned at
+  repoch: Uint32Array,
   // current segment (sidewalk): from da to db metres from node a, on side `side` (+1 = u+)
   seg: Int32Array, side: Int8Array, da: Float32Array, db: Float32Array,
   // current step: 0 sidewalk, 1 straight line between points, 2 waiting
@@ -455,7 +457,7 @@ export class Peds {
     this.routes[r] = from;
     const len = this.router.route(to, b, this.routes, r + 1, ROUTE - 1, true);
     if (len < 1 || this.routes[r + len] !== b) { this.t.release(p); return false; }
-    c.rLen[p] = len + 1; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
+    c.rLen[p] = len + 1; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.repoch[p] = this.sim.epoch;
     c.speed[p] = PACE[this.rng.int(0, 2)];
     c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = side;
@@ -509,7 +511,7 @@ export class Peds {
       at = next; s = best;
     }
     if (len < 2 || !nc.deg[a]) { this.t.release(p); return false; }
-    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
+    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.repoch[p] = this.sim.epoch;
     c.speed[p] = 4 + this.rng.next() * 1.6;
     c.color[p] = this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = 1;
@@ -559,7 +561,7 @@ export class Peds {
       if (len >= ROUTE) { this.t.release(p); return -1; }
       this.routes[p * ROUTE + len++] = far;
     }
-    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
+    c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0; c.repoch[p] = this.sim.epoch;
     c.speed[p] = PACE[this.rng.int(0, 2)];
     c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = this.rng.next() < 0.5 ? 1 : -1;
@@ -732,7 +734,8 @@ export class Peds {
     let sOut = this.segBetween(n, nNext);
     if (c.bike[p]) return this.bikeThrough(p, n, sIn, sOut);
     const usable = (s: number) => s >= 0 && net.segs.alive[s] && PROFILE_INFO[sc.profile[s]].walk;
-    if (!usable(sOut) || !net.segs.alive[sIn]) {
+    // (a node of the route whose id went to a new node since it was planned: the way there is gone)
+    if (!usable(sOut) || !net.segs.alive[sIn] || sim.nodeBorn[nNext] > c.repoch[p]) {
       // the way ahead (or the sidewalk just walked) was demolished: a new route from this corner to where they were
       // going; with none, they leave (fading out)
       if (!this.reroute(p, n)) return this.fadeOut(p);
@@ -1069,10 +1072,10 @@ export class Peds {
   /** A new walking route from node `n` to the end of the current one (on foot, turning back allowed). */
   private reroute(p: number, n: number): boolean {
     const c = this.t.cols, r = p * ROUTE, dest = this.routes[r + c.rLen[p] - 1];
-    if (dest === n || !this.sim.net.nodes.alive[dest]) return false;
+    if (dest === n || !this.sim.net.nodes.alive[dest] || this.sim.nodeBorn[dest] > c.repoch[p]) return false;
     const len = this.router.route(n, dest, this.routes, r, ROUTE, true);
     if (len < 2 || this.routes[r + len - 1] !== dest) return false;
-    c.rLen[p] = len; c.rIdx[p] = 0;
+    c.rLen[p] = len; c.rIdx[p] = 0; c.repoch[p] = this.sim.epoch;
     return true;
   }
 
@@ -1406,7 +1409,25 @@ export class Peds {
     this.sim.net.nodeIndex.query(this.camX - WINDOW, this.camZ - WINDOW, this.camX + WINDOW, this.camZ + WINDOW, (n) => this.windowNodes.push(n));
   }
 
-  /** Removed segments: whoever was on them disappears at their next event (checked in step). */
+  /**
+   * The network lost segments (`segs`, with their nodes in `ends`, a and b each) and nodes: whoever walks one of those
+   * segments or stands at one of those nodes leaves now (the ground went from under them: a roundabout built over a
+   * junction). Only the lists of the nodes involved are visited. Without it the ids, given to the new pieces of the
+   * same edit, kept them walking the old junction's lines across the new roundabout's island.
+   */
+  netRemoved(segs: readonly number[], ends: readonly number[], nodes: readonly number[]): void {
+    const c = this.t.cols, dead = new Set(segs);
+    const sweep = (n: number, all: boolean) => {
+      if (n < 0 || n >= this.head.length) return;
+      for (let p = this.head[n]; p >= 0;) {
+        const next = c.next[p];
+        if (all || dead.has(c.seg[p])) this.kill(p);
+        p = next;
+      }
+    };
+    for (const n of nodes) sweep(n, true);
+    for (const n of ends) sweep(n, false);
+  }
 
   /** Writes the poses of the people nearby, starting at `start`. Returns how many it wrote. */
   /** Publications so far (a person not in the previous one starts from where it is now, not where it was last seen). */
