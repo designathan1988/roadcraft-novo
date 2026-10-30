@@ -402,12 +402,92 @@ export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, off
     }
   }
   const d = len / (n - 1);
-  const g = maxGrade * d;
-  for (let pass = 0; pass < 3; pass++) {
-    for (let i = 1; i < n; i++) if (!isFixed[i]) y[i] = Math.max(floor[i], Math.min(y[i - 1] + g, Math.max(y[i - 1] - g, y[i])));
-    for (let i = n - 2; i >= 0; i--) if (!isFixed[i]) y[i] = Math.max(floor[i], Math.min(y[i + 1] + g, Math.max(y[i + 1] - g, y[i])));
-  }
+  gradeLine(y, maxGrade * d, isFixed, floor);
   return { at, y };
+}
+
+/**
+ * The grade line that moves the least earth: the heights y minimising the sum of |y − wanted| (cut plus fill) with
+ * |y[i+1] − y[i]| ≤ g, the fixed stations held and never under `floor` (the road's vertical alignment as an earthwork
+ * minimisation, Easa 1988 / Moreb: https://unistroy.spbstu.ru/article/2019.82.1). Solved exactly by dynamic programming
+ * over convex piecewise-linear costs (Rote, "Isotonic regression by dynamic programming"), its breakpoints in two heaps:
+ * the grade limit is a minimum over a window of ±g, which moves the left breakpoints down by g and the right ones up by
+ * g. Clamping each station to its neighbour's ±g in forward and backward sweeps (as this did, and 4.0's slopeLimit
+ * does) depends on the sweeps' order: over a hill the road climbed late in a cut and came down late on fill, its crest
+ * ~40 m downhill and the far side marked a bridge. `wanted` is replaced by the line in place.
+ */
+export function gradeLine(wanted: Float64Array, g: number, fixed: Uint8Array, floor: Float64Array): void {
+  const n = wanted.length;
+  const HARD = 1e6;
+  // breakpoints with multiplicities: L a max-heap (left of the minimum), R a min-heap, each with its pending shift
+  const L = new BreakHeap(true), R = new BreakHeap(false);
+  let shiftL = 0, shiftR = 0;
+  const lo = new Float64Array(n), hi = new Float64Array(n);
+  // f += w·max(0, y − c): c joins the left, then w units of the left's top move right
+  const addRight = (c: number, w: number) => { L.push(c - shiftL, w); moveTop(L, shiftL, R, shiftR, w); };
+  // f += w·max(0, c − y)
+  const addLeft = (c: number, w: number) => { R.push(c - shiftR, w); moveTop(R, shiftR, L, shiftL, w); };
+  for (let i = 0; i < n; i++) {
+    if (i > 0) { shiftL -= g; shiftR += g; }
+    const w = fixed[i] ? HARD : 1;
+    addRight(wanted[i], w); addLeft(wanted[i], w);
+    if (floor[i] > -Infinity) addLeft(floor[i], HARD);
+    lo[i] = L.size ? L.top() + shiftL : -Infinity;
+    hi[i] = R.size ? R.top() + shiftR : Infinity;
+  }
+  // back from the end: the last station anywhere in its best interval (nearest its wanted height), each one before it
+  // the best within its interval and the window of the one after
+  const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+  wanted[n - 1] = clamp(wanted[n - 1], lo[n - 1], hi[n - 1]);
+  for (let i = n - 2; i >= 0; i--) {
+    const next = wanted[i + 1];
+    wanted[i] = clamp(clamp(next, lo[i], hi[i]), next - g, next + g);
+  }
+}
+
+/** w units moved from the top of `from` (stored minus fromShift) to `to` (stored minus toShift). */
+function moveTop(from: BreakHeap, fromShift: number, to: BreakHeap, toShift: number, w: number): void {
+  while (w > 0 && from.size) {
+    const [pos, count] = from.peek();
+    const k = Math.min(w, count);
+    from.take(k);
+    to.push(pos + fromShift - toShift, k);
+    w -= k;
+  }
+}
+
+/** A binary heap of (position, count), a max-heap or a min-heap by position. */
+class BreakHeap {
+  private pos: number[] = [];
+  private cnt: number[] = [];
+  private max: boolean;
+  constructor(max: boolean) { this.max = max; }
+  get size(): number { return this.pos.length; }
+  top(): number { return this.pos[0]; }
+  peek(): [number, number] { return [this.pos[0], this.cnt[0]]; }
+  private before(a: number, b: number): boolean { return this.max ? this.pos[a] > this.pos[b] : this.pos[a] < this.pos[b]; }
+  private swap(a: number, b: number): void {
+    const p = this.pos[a]; this.pos[a] = this.pos[b]; this.pos[b] = p;
+    const c = this.cnt[a]; this.cnt[a] = this.cnt[b]; this.cnt[b] = c;
+  }
+  push(p: number, c: number): void {
+    this.pos.push(p); this.cnt.push(c);
+    for (let i = this.pos.length - 1; i > 0;) { const up = (i - 1) >> 1; if (!this.before(i, up)) break; this.swap(i, up); i = up; }
+  }
+  /** k units off the top (all of it: the next breakpoint comes up). */
+  take(k: number): void {
+    if (this.cnt[0] > k) { this.cnt[0] -= k; return; }
+    const last = this.pos.length - 1;
+    this.swap(0, last); this.pos.pop(); this.cnt.pop();
+    for (let i = 0; ;) {
+      const a = 2 * i + 1, b = a + 1;
+      let m = i;
+      if (a < this.pos.length && this.before(a, m)) m = a;
+      if (b < this.pos.length && this.before(b, m)) m = b;
+      if (m === i) break;
+      this.swap(i, m); i = m;
+    }
+  }
 }
 
 function profileY(pr: { at: Float64Array; y: Float64Array }, s: number): number {
