@@ -16,7 +16,7 @@ import { CameraRig } from '../render/cameraRig.ts';
 import { InsideView, insideTarget } from '../render/inside.ts';
 import type { Settings } from '../ui/options.ts';
 import type { Hud, LotMode, Tool } from '../ui/hud.ts';
-import type { FeatureActions } from './featureActions.ts';
+import type { LotFeatureActions } from './featureActions.ts';
 import type { World } from '../world/world.ts';
 import type { Transit } from '../world/transit.ts';
 import { encodeDesign, type Design } from '../world/design.ts';
@@ -35,7 +35,6 @@ export interface LotEditHost {
   insideFloor: number;
   readonly settings: Settings;
   readonly transit: Transit;
-  lineSel: number;
   lotPts: Array<[number, number]> | null;
   lotMode: LotMode;
   /** Split by line or curve side: the active extra mode and the points clicked so far. */
@@ -233,7 +232,7 @@ export class LotEditing {
     this.h.commands.push(r);
   }
 
-  featureActions(): FeatureActions {
+  featureActions(): LotFeatureActions {
     const hints = { line: t('game.hint.lot.line'), curve: t('game.hint.lot.curve') };
     const enter = (m: 'line' | 'curve') => { this.h.setTool('building'); this.h.lotExtra = m; this.h.lotExtraPts = []; this.h.hud.setHint(hints[m]); };
     return {
@@ -252,8 +251,6 @@ export class LotEditing {
       },
       streetNameAt: (x, z) => { const a = addressAt(this.h.world, x, z, 30); return a ? a.name : ''; },
       mapPaint: (style) => { this.h.settings.paint = style; setPaintStyle(style); this.h.unsaved = true; },
-      lineColor: (color) => { const c = this.h.transit.setColor(this.h.lineSel, color); if (c) this.h.commands.run(c); },
-      lineLoop: (loop) => { const c = this.h.transit.setLoop(this.h.lineSel, loop); if (c) this.h.commands.run(c); },
       impossibleNodes: () => this.h.world.impossible.count,
       impossibleAngle: (n) => this.h.world.impossible.angleAt(n),
       impossibleList: () => { const nc = this.h.world.roads.nodes.cols, out: number[] = []; for (const [n, a] of this.h.world.impossible.nodes) out.push(n, nc.x[n], nc.z[n], a); return out; },

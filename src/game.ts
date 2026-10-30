@@ -40,7 +40,6 @@ import { Transit } from './world/transit.ts';
 import type { JunctionSpec } from './roads/control.ts';
 import { PROFILES, PROFILE_INFO, customProfiles, onProfileAdded, setCustomProfiles, type Profile } from './roads/profiles.ts';
 import { FOOTWAY_RISE, edgeRise } from './roads/kerb.ts';
-import { bez, bezD } from './roads/geometry.ts';
 import { arrowCode } from './roads/laneLinks.ts';
 import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
@@ -53,13 +52,14 @@ import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type Lot
 import type { Cloud } from './render/cloudPuffs.ts';
 import { Clouds } from './features/sky/clouds.ts';
 import { RiverTool } from './features/terrain/riverTool.ts';
+import { TransitTool } from './features/transit/transitTool.ts';
 import { WeatherControl, weatherPreset } from './features/sky/weatherControl.ts';
 import { DEFAULT_WATER, WaterControl } from './features/water/waterControl.ts';
 import { InsideView } from './render/inside.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './features/demolition/demolish.ts';
 import { lotAt, lotToWorld, polygonLot } from './world/lotEdit.ts';
-import type { FeatureActions } from './app/featureActions.ts';
+import type { FeatureActions, LotFeatureActions } from './app/featureActions.ts';
 import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
 import { Ground, GroundStroke, WATER_MAP_RES, waterAt, waterCoord, waterIndex } from './world/ground.ts';
@@ -151,8 +151,6 @@ export class Game {
   /** The view the city opened with (Home goes back to it). */
   private homeView: Float64Array | null = null;
   private creator!: Creator;
-  private lineSel = 0;
-  private linesSent = -1;
   private roadsVersion = 0;
   private occupancySab: SharedArrayBuffer;
   private trafficLook: TrafficLook;
@@ -226,6 +224,7 @@ export class Game {
   private demolition!: Demolition;
   private clouds!: Clouds;
   private river!: RiverTool;
+  private lines!: TransitTool;
   private sky!: WeatherControl;
   private water!: WaterControl;
   private shakeOffset = new THREE.Vector3();
@@ -252,6 +251,11 @@ export class Game {
     // the features the page wires: each owns its state (sky, water, river tool)
     this.water = new WaterControl(() => { this.unsaved = true; });
     this.sky = new WeatherControl({ weather: this.weather, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.settings?.weather, changed: () => { this.unsaved = true; } });
+    this.lines = new TransitTool({
+      transit: this.transit, roads: this.world.roads, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
+      lineMade: () => achieve('PRIMEIRA_LINHA'), sendLines: (lines) => this.sim.postMessage({ type: 'lines', lines } satisfies ToSim),
+      showLines: (rows, current) => this.hud.setLines(rows, current),
+    });
     this.river = new RiverTool({ world: this.world, preview: this.preview, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text) });
     this.clouds = new Clouds({
       heights: this.world.heights, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
@@ -326,7 +330,6 @@ export class Game {
       get insideFloor() { return ge.insideFloor; }, set insideFloor(v) { ge.insideFloor = v; },
       get settings() { return ge.settings; },
       get transit() { return ge.transit; },
-      get lineSel() { return ge.lineSel; }, set lineSel(v) { ge.lineSel = v; },
       get lotPts() { return ge.lotPts; }, set lotPts(v) { ge.lotPts = v; },
       get lotMode() { return ge.lotMode; }, set lotMode(v) { ge.lotMode = v; },
       get lotExtra() { return ge.lotExtra; }, set lotExtra(v) { ge.lotExtra = v; },
@@ -401,15 +404,14 @@ export class Game {
       follow: () => this.toggleFollow(),
       grid: () => { gridU.value = gridU.value > 0.5 ? 0 : 1; this.hud.setGrid(gridU.value > 0.5); },
       north: () => this.rig.turnTo(0),
-      line: (id) => { this.lineSel = id; },
-      newLine: () => this.newLine(),
+      line: (id) => { this.lines.selected = id; },
+      newLine: () => this.lines.newLine(),
       // a station tab works on a line of its mode: the last one of that mode, or a new one at the first click
-      lineMode: (m) => {
-        this.lineMode = m;
-        if ((this.transit.line(this.lineSel)?.mode ?? 0) !== m) this.lineSel = [...this.transit.lines].reverse().find((l) => (l.mode ?? 0) === m)?.id ?? 0;
-      },
-      buses: (d) => { const l = this.transit.line(this.lineSel); const c = l && this.transit.setBuses(l.id, l.buses + d); if (c) this.commands.run(c); },
-      deleteLine: () => { const c = this.transit.removeLine(this.lineSel); if (c) { this.commands.run(c); this.lineSel = this.transit.lines[0]?.id ?? 0; } },
+      lineMode: (m) => this.lines.setMode(m),
+      lineColor: (color: number) => this.lines.setColor(color),
+      lineLoop: (loop: boolean) => this.lines.setLoop(loop),
+      buses: (d) => this.lines.buses(d),
+      deleteLine: () => this.lines.deleteLine(),
       profile: (p) => { this.roadTool.setProfile(p); },
       roadOptions: () => {
         const rt = this.roadTool, p = PROFILES[rt.base];
@@ -811,7 +813,7 @@ export class Game {
     for (const l of this.layers) l.update(cam, this.rig.eye);
     const T3 = pf ? performance.now() : 0;
     this.syncSim(now);
-    this.syncTransit();
+    this.lines.sync(this.roadsVersion, this.tool === 'transit', this.simStats?.type === 'stats' ? this.simStats.lines : null);
     this.updateInfo(now);
     this.vehicles.update(cam, this.rig.eye, now);
     if (this.vehicles.follow) { const p = this.vehicles.followPose; this.rig.followPose(p[0], p[1], p[2], p[3], dt); }
@@ -1257,7 +1259,7 @@ export class Game {
       inspector: g.inspector, riverPts: g.river.points, itemTool: g.itemTool, roadTool: g.roadTool, zoneTool: g.zoneTool, hud: g.hud,
       removePole: (hit) => g.removePole(hit),
       clickBuilding: (hit, shift) => g.clickBuilding(hit, shift),
-      clickTransit: (hit, terminal) => g.clickTransit(hit, terminal),
+      clickTransit: (hit, terminal) => g.lines.click(hit, terminal),
       clickSky: (x, z) => g.clouds.click(x, z),
       plantTree: (x, z) => g.plantTree(x, z),
       placePerson: (x, z) => g.placePerson(x, z),
@@ -1317,9 +1319,9 @@ export class Game {
     },
     zone: (x: number, z: number, r: number, zone: number) => { this.zoneTool.zone = zone; this.zoneTool.radius = r; this.zoneTool.begin(); this.zoneTool.dab(x, z); this.zoneTool.end(); },
     line: (mode: number, stops: number[], vehicles = 2) => {
-      this.lineMode = mode; this.newLine();
-      for (let i = 0; i + 1 < stops.length; i += 2) this.clickTransit({ x: stops[i], z: stops[i + 1] } as THREE.Vector3);
-      const l = this.transit.line(this.lineSel);
+      this.lines.mode = mode; this.lines.newLine();
+      for (let i = 0; i + 1 < stops.length; i += 2) this.lines.click({ x: stops[i], z: stops[i + 1] });
+      const l = this.transit.line(this.lines.selected);
       const c = l && this.transit.setBuses(l.id, vehicles);
       if (c) this.commands.run(c);
     },
@@ -1573,88 +1575,10 @@ export class Game {
     this.hud.toast(t('game.toast.following'));
   }
 
-  private lineMode = 0;
   /** The start screen (shown at start, and again from the menu). */
   private startMenu: StartMenu | null = null;
   /** The impossible junction the top bar's warning showed last. */
   private impossibleVisit = -1;
-
-  private newLine(): void {
-    achieve('PRIMEIRA_LINHA');
-    const { cmd, id } = this.transit.addLine(this.lineMode);
-    this.commands.run(cmd);
-    this.lineSel = id;
-  }
-
-  /** Stop: removes the one nearby, or puts a new one on the nearest sidewalk. */
-  private clickTransit(hit: THREE.Vector3 | null, shift = false): void {
-    if (!hit) return;
-    // Shift+click on a stop: turns the terminal on or off
-    if (shift) {
-      const s = this.transit.stopNear(hit.x, hit.z, 9);
-      if (!s) { this.hud.toast(t('game.toast.terminalHow')); return; }
-      const l = this.transit.line(s[0])!;
-      const x = l.stops[s[1] * 2], z = l.stops[s[1] * 2 + 1];
-      const was = this.transit.terminalNear(x, z, 9) >= 0;
-      this.commands.run(this.transit.toggleTerminal(x, z));
-      this.hud.toast(was ? t('game.toast.terminalOff') : t('game.toast.terminalOn'));
-      return;
-    }
-    const near = this.transit.stopNear(hit.x, hit.z, 9);
-    if (near) {
-      const c = this.transit.removeStop(near[0], near[1]);
-      if (c) this.commands.run(c);
-      this.lineSel = near[0];
-      return;
-    }
-    const net = this.world.roads, sc = net.segs.cols;
-    if (!this.transit.line(this.lineSel)) this.newLine();
-    const line = this.transit.line(this.lineSel)!;
-    const rail = (line.mode ?? 0) > 0;
-    const seg = net.nearestSeg(hit.x, hit.z, 30, (s) => PROFILE_INFO[sc.profile[s]].rail === rail);
-    if (!seg) { this.hud.toast(rail ? t('game.toast.stationOnTrack') : t('game.toast.stopNearRoad')); return; }
-    const q = net.quad(seg[0]);
-    const p2 = new Float64Array(2), d2 = new Float64Array(2);
-    bez(q, seg[1], p2); bezD(q, seg[1], d2);
-    if (rail) {
-      // station: on the track centreline
-      const c = this.transit.addStop(this.lineSel, p2[0], p2[1]);
-      if (c) this.commands.run(c);
-      return;
-    }
-    const info = PROFILE_INFO[sc.profile[seg[0]]];
-    if (!info.strips.some((s) => s.kind === 'sidewalk')) { this.hud.toast(t('game.toast.noSidewalk')); return; }
-    const l = Math.hypot(d2[0], d2[1]) || 1;
-    const lx = d2[1] / l, lz = -d2[0] / l;
-    const side = (hit.x - p2[0]) * lx + (hit.z - p2[1]) * lz > 0 ? 1 : -1;
-    const e = side > 0 ? info.edges[info.edges.length - 1] : info.edges[0];
-    const other = side > 0 ? info.edges[0] : info.edges[info.edges.length - 1];
-    const sw = e.strip.kind === 'sidewalk' ? e : other;
-    const u = (sw.u0 + sw.u1) / 2;
-    const c = this.transit.addStop(this.lineSel, p2[0] + lx * u, p2[1] + lz * u);
-    if (c) this.commands.run(c);
-  }
-
-  /** Lines for the simulation and for rendering, when they change (or when the roads change). */
-  private syncTransit(): void {
-    const v = this.transit.version * 100000 + this.roadsVersion;
-    // the stops: rebuilt when the lines change or a road is edited near a stop (not on every road edit)
-    this.transitView.update(this.transit, this.world.roads, this.world.heights, this.transit.version, this.world.dirty);
-    if (v !== this.linesSent) {
-      this.linesSent = v;
-      this.sim.postMessage({ type: 'lines', lines: this.transit.lines.map((l) => ({ id: l.id, color: l.color, buses: l.buses, stops: [...l.stops], mode: l.mode ?? 0, term: this.transit.terminalStops(l), loop: !!l.loop })) } satisfies ToSim);
-    }
-    if (this.tool === 'transit') {
-      // no line chosen: the first of the tab's mode (none: the first click makes one)
-      const ids = this.transit.lines.filter((l) => (l.mode ?? 0) === this.lineMode).map((l) => l.id);
-      if (!this.transit.line(this.lineSel) && ids.length) this.lineSel = ids[0];
-      const stats = this.simStats?.type === 'stats' ? this.simStats.lines : [];
-      this.hud.setLines(this.transit.lines.map((l) => {
-        const q = stats.find((x) => x.id === l.id);
-        return { id: l.id, mode: l.mode ?? 0, color: l.color, loop: !!l.loop, buses: l.buses, stops: l.stops.length / 2, perHour: q ? q.perHour : 0, waiting: q ? q.waiting : 0 };
-      }), this.lineSel);
-    }
-  }
 
   private clickLot(hit: THREE.Vector3 | null): void { this.editing.clickLot(hit); }
   private setLotMode(m: LotMode): void { this.editing.setLotMode(m); }
@@ -1664,7 +1588,7 @@ export class Game {
   private finishPoly(): void { this.editing.finishPoly(); }
   private grabCorner(hit: THREE.Vector3 | null): boolean { return this.editing.grabCorner(hit); }
   private dropCorner(hit: THREE.Vector3 | null): void { this.editing.dropCorner(hit); }
-  private featureActions(): FeatureActions { return this.editing.featureActions(); }
+  private featureActions(): LotFeatureActions { return this.editing.featureActions(); }
   private clickLotExtra(hit: THREE.Vector3): void { this.editing.clickLotExtra(hit); }
   private renovate(id: number): void { this.editing.renovate(id); }
   private clickBuilding(hit: THREE.Vector3 | null, shift = false): void { this.editing.clickBuilding(hit, shift); }

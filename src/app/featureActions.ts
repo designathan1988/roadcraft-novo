@@ -30,3 +30,6 @@ export interface FeatureActions {
   /** The impossible nodes as [node, x, z, angle, …], to point the camera at them from the warning. */
   impossibleList(): number[];
 }
+
+/** The actions the lot editing module answers (the line's colour and loop belong to the transit tool). */
+export type LotFeatureActions = Omit<FeatureActions, 'lineColor' | 'lineLoop'>;
