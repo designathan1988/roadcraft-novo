@@ -22,6 +22,8 @@ import { CAR_STYLE_LEN, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPEC
 export { CAR_STYLE_LEN, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, INSPECT_STRIDE, ROUTE_CAP, WAGONS, WAGON_LEN } from './traffic/state.ts';
 import { LaneChanges } from './traffic/laneChanges.ts';
 import { STOP_CELL, STOP_CELLS, indexStops as buildStopIndex, resolveLine, type LineSpec, type SimLine } from './traffic/lines.ts';
+import { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE, Regions } from './traffic/regions.ts';
+export { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE };
 
 const WINDOW = 1500;
 // meso (far from the camera) at the pace of micro: the fleet is a single one, so if meso runs faster the cars
@@ -61,17 +63,6 @@ const CROWD_OCC = 0.15, CROWD_SLOPE = 5;
  * somewhere else, like people avoiding downtown at rush hour. Without it the (fixed) fleet drained into the centre
  * until it jammed: at peak, 845 → 1,423 cars within 700 m of the centre in 20 min and 17.8 → 9.9 km/h.
  */
-export const REGION = 400, REGION_OCC = 0.1, REGION_SLOPE = 7, REGION_EVERY = 4;
-const REGION_N = Math.ceil(MAP_SIZE / REGION);
-/**
- * Fleet governor (roadcraft `populationGovernor`, here driven by traffic rather than step cost): the share of the
- * whole city's fleet on jammed streets (a direction of a segment 80% full or more, near the camera or not) above
- * GOV_FREE cuts the fleet target in proportion, down to GOV_MIN at GOV_JAM (approached gradually, without the jumps of
- * an on/off rule at a threshold). It never reads the camera: looking at a jam
- * must not change the city's traffic. Measured: the generated city's network cannot carry the peak fleet; with the
- * governor the peak has fewer cars and keeps moving.
- */
-const GOV_JAM = 0.5, GOV_FREE = 0.15, GOV_MIN = 0.75, JAMMED = 0.8;
 /** A reconsidering driver's detour rejoins the route up to this many nodes ahead. */
 const REJOIN = 6;
 
@@ -127,6 +118,8 @@ const CAR_STYLE_SHARE = [0.3, 0.3, 0.17, 0.08, 0.07, 0.08];
 export class Traffic {
   readonly sim: SimNet;
   readonly router: Router;
+  /** Region occupancy and the fleet governor (traffic/regions.ts). */
+  readonly regions = new Regions();
   readonly veh = new Table(vehSchema, 1 << 12);
   routes = new Int32Array((1 << 12) * ROUTE_CAP);
   /** Ordered list of micro vehicles per lane and per connection (head = the frontmost). */
@@ -187,7 +180,7 @@ export class Traffic {
     // stopped: everyone on a jammed street (whole city, from the last region pass), and near the camera those stopped
     // on a street that is not jammed
     const c = this.veh.cols, sc = this.sim.net.segs.cols;
-    let stopped = this.jammedNow;
+    let stopped = this.regions.jammedNow;
     for (let i = 0; i < this.microN; i++) {
       const v = this.micro[i];
       if (c.v[v] >= 0.5 || c.conn[v] >= 0 || c.lane[v] < 0 || c.dying[v] === 2) continue;
@@ -202,8 +195,6 @@ export class Traffic {
   stopped = 0;
   /** Lane length driven and time taken since the last `avgSpeed`, and the smoothed city speed. */
   private distSum = 0; private timeSum = 0; private cityV = 0;
-  /** Vehicles on jammed streets at the last region pass. */
-  private jammedNow = 0;
   /** Speed actually driven on each lane by the last vehicles that finished it (m/s, smoothed), and when. */
   laneVel = new Float32Array((1 << 14) * 16);
   private laneVelT = new Float64Array((1 << 14) * 16);
@@ -283,7 +274,7 @@ export class Traffic {
     this.mvs.clear();
     this.spots.clear();
     // nothing of the old city: its jams, crossings, docks and bus lines (the page sends the new map's lines and docks)
-    this.gov = 1; this.jamShare = 0; this.jammedNow = 0; this.regionOcc.fill(0); this.regionT = -Infinity;
+    this.regions.reset();
     this.cityV = 0; this.distSum = 0; this.timeSum = 0; this.laneVel.fill(0);
     this.crossingClosed.clear();
     this.docks = new Float32Array(0);
@@ -948,54 +939,21 @@ export class Traffic {
     return 0.3 + 0.55 * peak(8, 1.3) + 0.6 * peak(18, 1.5) + 0.35 * peak(13, 2.5) - 0.2 * (h < 5 || h > 23 ? 1 : 0);
   }
 
-  /** Occupancy of each region (cars / lane slots) and when it was measured. */
-  regionOcc = new Float32Array(REGION_N * REGION_N);
-  private regionLoad = new Float32Array(REGION_N * REGION_N);
-  private regionCap = new Float32Array(REGION_N * REGION_N);
-  private regionT = -Infinity;
+  /** Occupancy per region from the regions' last measurement (read-only view). */
+  get regionOcc(): Float32Array { return this.regions.occ; }
+  regionOf(x: number, z: number): number { return this.regions.of(x, z); }
   /** Turns off region avoidance (A/B measurement). */
-  regionAvoid = true;
-
-  regionOf(x: number, z: number): number {
-    const i = Math.min(REGION_N - 1, Math.max(0, Math.floor((x + MAP_HALF) / REGION)));
-    const j = Math.min(REGION_N - 1, Math.max(0, Math.floor((z + MAP_HALF) / REGION)));
-    return j * REGION_N + i;
-  }
-
-  /** Measures region occupancy (every REGION_EVERY s: one pass over the segments, not per step). */
-  private measureRegions(): void {
-    if (this.time - this.regionT < REGION_EVERY) return;
-    this.regionT = this.time;
-    const net = this.sim.net, sc = net.segs.cols, L = this.regionLoad, C = this.regionCap;
-    L.fill(0); C.fill(0);
-    let fleet = 0, jammed = 0;
-    for (let s = 0; s < net.segs.end; s++) {
-      if (!net.segs.alive[s]) continue;
-      const info = PROFILE_INFO[sc.profile[s]];
-      if (info.rail) continue;
-      const r = this.regionOf(sc.mx[s], sc.mz[s]);
-      const fwd = this.segLoad[s * 2], back = this.segLoad[s * 2 + 1], slots = sc.len[s] / 7.5;
-      L[r] += fwd + back;
-      C[r] += slots * (info.lanesFwd + info.lanesBack);
-      fleet += fwd + back;
-      if (info.lanesFwd && fwd >= JAMMED * slots * info.lanesFwd) jammed += fwd;
-      if (info.lanesBack && back >= JAMMED * slots * info.lanesBack) jammed += back;
-    }
-    for (let r = 0; r < L.length; r++) this.regionOcc[r] = C[r] > 0 ? L[r] / C[r] : 0;
-    // governor: the share of the whole city's fleet on jammed streets
-    this.jamShare = fleet > 0 ? jammed / fleet : 0;
-    this.jammedNow = jammed;
-    if (this.governed && fleet >= 200) {
-      const over = Math.min(1, Math.max(0, (this.jamShare - GOV_FREE) / (GOV_JAM - GOV_FREE)));
-      this.gov += (1 - over * (1 - GOV_MIN) - this.gov) * 0.1;
-    }
-  }
-
-  /** Fraction of the fleet the network carries now (governor) and the share of the fleet on jammed streets. */
-  gov = 1;
-  jamShare = 0;
+  get regionAvoid(): boolean { return this.regions.avoid; }
+  set regionAvoid(v: boolean) { this.regions.avoid = v; }
+  /** Fraction of the fleet the network carries now (governor) and the share on jammed streets. */
+  get gov(): number { return this.regions.gov; }
+  set gov(v: number) { this.regions.gov = v; }
+  get jamShare(): number { return this.regions.jamShare; }
+  set jamShare(v: number) { this.regions.jamShare = v; }
+  get jammedNow(): number { return this.regions.jammedNow; }
   /** Turns off the governor (A/B measurement). */
-  governed = true;
+  get governed(): boolean { return this.regions.governed; }
+  set governed(v: boolean) { this.regions.governed = v; }
 
   /** Node picked by the zone of the surrounding roads (rejection sampling: O(1) expected). */
   private zonedNode(weights: number[]): number {
@@ -2587,7 +2545,7 @@ export class Traffic {
 
   step(dt: number): void {
     this.time += dt;
-    this.measureRegions();
+    this.regions.measure(this.time, this.sim.net, this.segLoad);
     this.routeBudget = ROUTE_BUDGET;
     this.advisor.step(this.time);
     const target = Math.min(MAX_VEHICLES, Math.floor(this.sim.laneMeters * this.density * this.dayFactor() * this.demand * this.trafficShare * this.gov));
