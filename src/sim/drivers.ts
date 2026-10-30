@@ -51,6 +51,8 @@ export const driverSchema = {
 } as const;
 type Cols = { [K in keyof typeof driverSchema]: InstanceType<(typeof driverSchema)[K]> };
 export type VehicleColumns = Cols;
+/** The driver's figures, read only (the driving rules read them; only `drawDriver` writes them). */
+export type DriverRead = { readonly [K in keyof Cols]: { readonly [i: number]: number } };
 
 /** Spread of the comfort figures between the timid and the pushy (roadcraft 4.0). */
 const ACCEL_SPREAD = 0.3, BRAKE_SPREAD = 0.22, HEADWAY_SPREAD = 0.32, GAP_SPREAD = 0.28, EMERGENCY_SPREAD = 0.025;
@@ -101,7 +103,7 @@ const CRAWL = 1;
  * engine stays (a queue moves off together, without an accordion). `stopRoom`: where it must have stopped by (a bus
  * or train stop), checked like the obstacle.
  */
-export function driveAccel(c: Cols, u: number, v: number, v0: number, gap: number, vl: number, al: number, dt: number, stopRoom = 1e9): number {
+export function driveAccel(c: DriverRead, u: number, v: number, v0: number, gap: number, vl: number, al: number, dt: number, stopRoom = 1e9): number {
   const a = c.da[u], b = c.db[u], bE = c.dbe[u];
   const v0s = Math.max(v0, 0.01);
   const free = v <= v0s ? a * (1 - (v / v0s) ** 4) : -b * (1 - Math.pow(v0s / v, (a * 4) / b));
@@ -140,7 +142,7 @@ const MAX_LATERAL = 4.0, LATERAL_FALL = 0.09, MIN_LATERAL = 1.8, HEAVY_SHARE = 0
  * Fastest speed (m/s) driver `u` takes a bend of curvature `k` (1/m) at (roadcraft 4.0 `vehicles/curvature.ts`):
  * the lateral acceleration v²k within the comfort that falls with speed (a0 − c·v), or the floor's.
  */
-export function bendSpeed(c: Cols, u: number, k: number, heavy: boolean): number {
+export function bendSpeed(c: DriverRead, u: number, k: number, heavy: boolean): number {
   if (k < 1e-4) return Infinity;
   const share = (1 + AGGRESSION_SHARE * c.aggr[u]) * (heavy ? HEAVY_SHARE : 1);
   const a0 = share * MAX_LATERAL, fall = share * LATERAL_FALL;
@@ -149,6 +151,6 @@ export function bendSpeed(c: Cols, u: number, k: number, heavy: boolean): number
 }
 
 /** The speed driver `v` aims for now, around `v0`. */
-export function desiredSpeed(c: Cols, v: number, v0: number, time: number): number {
+export function desiredSpeed(c: DriverRead, v: number, v0: number, time: number): number {
   return v0 * (1 + c.driftA[v] * Math.sin(c.driftP[v] + time * c.driftR[v]));
 }

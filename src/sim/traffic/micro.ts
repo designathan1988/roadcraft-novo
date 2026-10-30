@@ -2,7 +2,6 @@
 // the bend's speed, the jammed-junction release, the detour of a blocked exit and the route reconsideration. The
 // vehicle table, the lane lists and the world stay with Traffic (the owner), read through MicroHost.
 
-import type { Columns } from '../../core/table.ts';
 import { Turn, laneCount, laneDir, laneId, laneIdx, laneSeg, laneSpeed, type SimNet } from '../lanes.ts';
 import { Ctl } from '../../roads/control.ts';
 import { bendSpeed, desiredSpeed, driveAccel } from '../drivers.ts';
@@ -13,12 +12,16 @@ import type { Meso } from './meso.ts';
 import type { Buses } from './buses.ts';
 import type { Junctions } from './junctions.ts';
 import type { SimLine } from './lines.ts';
-import { CROSSWALK, DWELL, JAM_SECONDS, PED_BODY, PARK_SIDE_S, RELEASE_EVERY, REJOIN, ROUTE_CAP, STARVE_SECONDS, type vehSchema, VehPhase } from './state.ts';
+import { CROSSWALK, DWELL, JAM_SECONDS, PED_BODY, PARK_SIDE_S, RELEASE_EVERY, REJOIN, ROUTE_CAP, STARVE_SECONDS, VehPhase, type VehAccess } from './state.ts';
 import { TERMINAL_DWELL } from './buses.ts';
+
+/** The vehicle columns the near model writes (every other column it only reads). */
+export type MicroWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'v' | 'brk' | 'held' | 'wait' | 'dwell' | 'phase' | 'fade' | 'pk' | 'pass'
+  | 'exitC' | 'rIdx' | 'rLen' | 'lcFrom' | 'lcT' | 'lcCool' | 'acc' | 'moved';
 
 export interface MicroHost {
   readonly sim: SimNet;
-  readonly veh: { readonly cols: Columns<typeof vehSchema>; readonly alive: Uint8Array };
+  readonly veh: { readonly cols: VehAccess<MicroWrites>; readonly alive: Uint8Array };
   readonly time: number;
   readonly laneHead: Int32Array;
   readonly laneTail: Int32Array;

@@ -5,14 +5,13 @@
 
 import { Ctl } from '../../roads/control.ts';
 import { PROFILE_INFO } from '../../roads/profiles.ts';
-import type { Columns } from '../../core/table.ts';
 import { laneCount, laneDir, laneIdx, laneSeg, laneSpeed, type SimNet } from '../lanes.ts';
 import type { Router } from '../routing.ts';
 import type { Signals } from '../signals.ts';
 import { TERMINAL_DWELL } from './buses.ts';
 import { growArray } from './grow.ts';
 import type { SimLine } from './lines.ts';
-import { End, JAM_SECONDS, RELEASE_EVERY, type vehSchema } from './state.ts';
+import { End, JAM_SECONDS, RELEASE_EVERY, type VehAccess } from './state.ts';
 
 // Meso at the pace of micro: the fleet is a single one, so if meso runs faster the cars pile up in the window until
 // it jams, and if it runs slower the window empties; and the camera must not change how fast the city drives. Measured
@@ -25,7 +24,10 @@ const MESO_ALPHA = 0.95, MESO_CROWD = 12;
 const S0 = 2.2, T_HEAD = 0.9;
 const DWELL = 14;
 
-export type MesoColumns = Columns<typeof vehSchema>;
+/** The vehicle columns the far model writes (every other column it only reads). */
+export type MesoWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'v' | 'wait' | 'held' | 'fade' | 'rIdx' | 'tExit' | 'why'
+  | 'ml' | 'mnext' | 'mprev';
+export type MesoColumns = VehAccess<MesoWrites>;
 
 /** What the far model needs from Traffic; every field is the owner's state, not a copy. */
 export interface MesoHost {

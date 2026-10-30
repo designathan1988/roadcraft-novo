@@ -1,6 +1,7 @@
 // The traffic's data vocabulary: the vehicle table's columns, the trip end reasons and the constants every vehicle
 // system shares. Pure data; no Traffic instance, no state of its own.
 import { driverSchema } from '../drivers.ts';
+import type { Columns } from '../../core/table.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
@@ -85,6 +86,18 @@ export const vehSchema = {
   // the driver (sim/drivers.ts): aggression, comfort figures, gap acceptance, politeness, patience
   ...driverSchema,
 };
+
+/** The vehicle table's columns (Traffic, sim/traffic.ts, owns the table). */
+export type VehCols = Columns<typeof vehSchema>;
+/** A column a module may read but not write: writing an element does not compile. */
+export interface ReadColumn { readonly [i: number]: number; readonly length: number }
+/**
+ * The vehicle table as one traffic module sees it: every column readable, only the columns `W` writable. Each
+ * module's host declares its `W`, so who writes which column is visible in one place and checked by the compiler;
+ * moving a vehicle between lanes, connections and lists is done by Traffic's methods (it keeps the lists and the
+ * counts consistent with the columns).
+ */
+export type VehAccess<W extends keyof VehCols> = { readonly [K in keyof VehCols]: K extends W ? VehCols[K] : ReadColumn };
 
 /** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
 export const End = { Arrived: 0, Lost: 1, NoTrip: 2 } as const;

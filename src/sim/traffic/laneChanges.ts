@@ -1,16 +1,13 @@
 // Lane changes of the micro vehicles: the MOBIL safety test, the mandatory move to a lane that reaches the next
 // turn, the escape from a lane with no exit at all, and the discretionary keep-right move.
 import { laneCount, laneDir, laneId, laneIdx, laneSeg, laneSpeed, type SimNet } from '../lanes.ts';
-import { desiredSpeed, type VehicleColumns } from '../drivers.ts';
+import { desiredSpeed } from '../drivers.ts';
+import type { VehAccess } from './state.ts';
 import type { Rng } from '../../core/rng.ts';
 
-/** The vehicle columns the lane-change rules read, on top of the driver's comfort figures. */
-export type LaneColumns = VehicleColumns & {
-  next: Int32Array; prev: Int32Array;
-  s: Float32Array; v: Float32Array; len: Float32Array; vf: Float32Array;
-  lane: Int32Array; lcFrom: Int32Array; lcT: Float32Array; lcCool: Float32Array;
-  line: Int16Array; wait: Float32Array;
-};
+/** The vehicle columns the lane-change rules write (every other column they only read). */
+export type LaneChangeWrites = 'lane' | 'lcFrom' | 'lcT' | 'lcCool';
+export type LaneColumns = VehAccess<LaneChangeWrites>;
 
 /** What the lane-change rules need from Traffic; every field is the owner's state, not a copy. */
 export interface LaneHost {

@@ -3,16 +3,20 @@
 // columns, routes and the lane lists stay with Traffic (the single owner), read here through BusHost.
 
 import type { Rng } from '../../core/rng.ts';
-import type { Columns } from '../../core/table.ts';
 import type { SimNet } from '../lanes.ts';
-import { End, KIND_LEN, ROUTE_CAP, type vehSchema, VehPhase } from './state.ts';
-import { drawDriver, archOf } from '../drivers.ts';
+import { End, KIND_LEN, ROUTE_CAP, VehPhase, type VehAccess } from './state.ts';
+import { drawDriver, archOf, type driverSchema } from '../drivers.ts';
 import type { Router } from '../routing.ts';
 import { resolveLine, type LineSpec, type SimLine } from './lines.ts';
 import { WAIT_RATE, type Stops } from './stops.ts';
 import { laneSeg } from '../lanes.ts';
 
-export type BusColumns = Columns<typeof vehSchema>;
+/** The vehicle columns the line runtime writes (every other column it only reads). */
+export type BusWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'kind' | 'len' | 'vf' | 'color' | 'line' | 'stopI' | 'load' | 'served'
+  | 'dest' | 'rIdx' | 'rLen' | 'phase' | 'why'
+  // a bus's driver is drawn when the bus is made (drivers.ts drawDriver)
+  | keyof typeof driverSchema;
+export type BusColumns = VehAccess<BusWrites>;
 
 /** What the line runtime needs from Traffic; every field is the owner's state, not a copy. */
 export interface BusHost {

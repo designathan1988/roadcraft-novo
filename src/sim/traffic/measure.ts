@@ -4,13 +4,12 @@
 import { laneCount, laneDir, laneId, laneSeg, laneSpeed, type SimNet } from '../lanes.ts';
 import { JAMMED } from './regions.ts';
 import { VehPhase } from './state.ts';
+import type { VehAccess } from './state.ts';
 
 /** The columns and arrays the measurement reads (all owned by Traffic). */
 export interface MeasureHost {
-  readonly cols: {
-    v: Float32Array; conn: Int32Array; lane: Int32Array; phase: Uint8Array; next: Int32Array;
-    mnext: Int32Array; wait: Float32Array; tExit: Float64Array;
-  };
+  /** Read only: the measurement writes no vehicle column. */
+  readonly cols: VehAccess<never>;
   readonly micro: Int32Array;
   readonly microN: number;
   readonly sim: SimNet;

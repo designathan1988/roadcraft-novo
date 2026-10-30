@@ -5,17 +5,19 @@
 import { Ctl, Rule } from '../../roads/control.ts';
 import { SegFlag } from '../../roads/flags.ts';
 import { PROFILE_INFO } from '../../roads/profiles.ts';
-import type { Columns } from '../../core/table.ts';
 import { Turn, laneCount, laneDir, laneId, laneSeg, laneSpeed, type SimNet } from '../lanes.ts';
 import type { Signals } from '../signals.ts';
 import type { SimLine } from './lines.ts';
-import { End, CLEAR_MARGIN, CROSSING_REACH, CROSSWALK, PED_COURTESY, PED_CRITICAL_GAP, SPAN_REACH, type vehSchema } from './state.ts';
+import { End, CLEAR_MARGIN, CROSSING_REACH, CROSSWALK, PED_COURTESY, PED_CRITICAL_GAP, SPAN_REACH, type VehAccess } from './state.ts';
 import { bendSpeed } from '../drivers.ts';
 import { asNode } from '../../core/ids.ts';
 
+/** The vehicle columns the junction rules write (every other column they only read). */
+export type JunctionWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'rIdx' | 'exitC' | 'why';
+
 export interface JunctionHost {
   readonly sim: SimNet;
-  readonly veh: { readonly cols: Columns<typeof vehSchema>; readonly alive: Uint8Array };
+  readonly veh: { readonly cols: VehAccess<JunctionWrites>; readonly alive: Uint8Array };
   readonly time: number;
   readonly laneHead: Int32Array;
   readonly laneTail: Int32Array;
