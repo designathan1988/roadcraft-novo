@@ -43,7 +43,7 @@ test('B62: every action the interface declares is used by a button, a key, a pan
   const hud = fs.readFileSync(path.join(root, 'src/ui/hud.ts'), 'utf8');
   const decl = hud.slice(hud.indexOf('export interface OptionalActions'), hud.indexOf('type PopId'));
   const names = [...decl.matchAll(/^\s+([a-zA-Z]+)\??\(/gm)].map((m) => m[1]);
-  const users = ['src/ui', 'scripts/verificacao', 'tools'].flatMap((d) => fs.readdirSync(path.join(root, d)).filter((f) => /\.(ts|js|mjs)$/.test(f)).map((f) => fs.readFileSync(path.join(root, d, f), 'utf8'))).join('\n')
+  const users = ['src/ui', 'src/app', 'scripts/verificacao', 'tools'].flatMap((d) => fs.readdirSync(path.join(root, d)).filter((f) => /\.(ts|js|mjs)$/.test(f)).map((f) => fs.readFileSync(path.join(root, d, f), 'utf8'))).join('\n')
     + fs.readFileSync(path.join(root, 'src/game.ts'), 'utf8').replace(/this\.hud = new Hud\([\s\S]*?satisfies HudActions\)\);/, '');
   const unused = names.filter((n) => !new RegExp(`\\b(a|h\\.a|this\\.a|A|H|hudActions)\\.${n}\\b|\\b${n}\\?\\.\\(`).test(users));
   assert.deepEqual(unused, [], `actions nobody calls: ${unused.join(', ')}`);
