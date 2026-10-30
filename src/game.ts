@@ -669,6 +669,16 @@ export class Game {
     };
   }
 
+  /**
+   * stats() plus the triangles the GPU really drew (D81): three counts an indirect draw as one instance, so the props
+   * (GPU-culled, drawn indirect) are missing from `tris`; `trisDrawn` replaces their count with the GPU-written one.
+   */
+  async drawnStats(): Promise<Record<string, number>> {
+    const s = this.stats();
+    const p = await this.props.drawnTriangles(this.parts.renderer);
+    return { ...s, trisDrawn: s.tris - p.counted + p.drawn };
+  }
+
   /** Camera and hour for automated photos; waits for the meshes to be ready. */
   async view(x: number, z: number, yaw: number, pitch: number, dist: number, hour?: number): Promise<void> {
     await photoView(this.rig, (frames) => this.settle(frames), (h) => { this.hour = h; this.clock.holdHour(); }, x, z, yaw, pitch, dist, hour);
@@ -831,7 +841,7 @@ export class Game {
     else renderer.render(scene, cam);
     this.gpuTiming?.frameEnd();
     // measurement (?perf): frames over 30 ms say where the time went
-    if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`camadas ${(T1 - T0).toFixed(0)} cresc ${(T2 - T1).toFixed(0)} terreno+lod ${(T3 - T2).toFixed(0)} sim+veic ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} desenho ${(T6 - T5).toFixed(0)}`); } // not for the player: ?perf measurement log
+    if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`layers ${(T1 - T0).toFixed(0)} growth ${(T2 - T1).toFixed(0)} terrain+lod ${(T3 - T2).toFixed(0)} sim+vehicles ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} draw ${(T6 - T5).toFixed(0)}`); } // not for the player: ?perf measurement log
   }
 
   private toggleTrafficView(): void {

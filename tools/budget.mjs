@@ -31,7 +31,7 @@ const MEMORY_FACTOR = 1.5; // cityMB + roadsMB
 // the detail held at full while counting (game.fixDetail): the counts do not depend on how busy the machine was
 const script = (v) => viewScript(v, {
   before: 'g.fixDetail(true);g.hudActions.speed(1);',
-  after: `await g.settle(20);g.hudActions.speed(0);const s=g.stats();` +
+  after: `await g.settle(20);g.hudActions.speed(0);const s=await g.drawnStats();` +
     `if(!s.draws||!s.tris){console.log('error: empty budget view ${v.name}');return;}` +
     `console.log('BUDGET '+JSON.stringify({view:'${v.name}',...s}));`,
 });
@@ -77,7 +77,9 @@ p.on('exit', (code) => {
 function print(now, base) {
   const failures = [];
   const row = (...c) => console.log(c.map((x, i) => String(x).padStart(i ? 12 : 9)).join(''));
-  row('view', 'draws', 'limit', 'tris', 'limit', 'MB', 'limit', 'cars', 'peds', 'detail');
+  // tris: three's count, the quantity of the owner's baseline; drawn: the triangles the GPU drew (D81: three counts an
+  // indirect props draw as one instance). The gate compares tris, as the baseline does, until the owner reviews it.
+  row('view', 'draws', 'limit', 'tris', 'limit', 'drawn', 'MB', 'limit', 'cars', 'peds', 'detail');
   for (const v of VIEWS) {
     const n = now[v.name], b = base?.[v.name];
     const lim = LIMITS[v.name];
@@ -85,7 +87,7 @@ function print(now, base) {
     const triLimit = b ? Math.round(lim.tris(b.tris)) : '';
     const mb = (n.cityMB ?? 0) + (n.roadsMB ?? 0);
     const mbLimit = b ? Math.round(((b.cityMB ?? 0) + (b.roadsMB ?? 0)) * MEMORY_FACTOR) : '';
-    row(v.name, n.draws, drawLimit, n.tris, triLimit, mb, mbLimit, n.cars ?? '', n.peds ?? '', n.detail ?? '');
+    row(v.name, n.draws, drawLimit, n.tris, triLimit, n.trisDrawn ?? '', mb, mbLimit, n.cars ?? '', n.peds ?? '', n.detail ?? '');
     if (b) {
       if (!n.draws || !n.tris) failures.push(`${v.name} has an empty frame (${n.draws} draws, ${n.tris} tris)`);
       if (n.draws > drawLimit) failures.push(`${v.name} draws ${n.draws} > ${drawLimit}`);

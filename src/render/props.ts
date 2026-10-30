@@ -90,6 +90,8 @@ export class PropRenderer {
   private planes: THREE.Vector4[] = Array.from({ length: 6 }, () => new THREE.Vector4());
   private planesU: Node;
   private distArr: number[] = new Array(DRAWS).fill(0);
+  /** Draws of each level in the frame (the view and each shadow cascade), counted as three draws them (D81). */
+  private readonly drawsThisFrame = new Uint32Array(DRAWS);
   private distU: Node;
   private radiusU: Node;
   private stretchU: Node;
@@ -262,6 +264,8 @@ export class PropRenderer {
       const mesh = new THREE.Mesh(g, material);
       mesh.frustumCulled = false;
       mesh.userData.slot = t * LODS + l;
+      const slot = t * LODS + l;
+      mesh.onBeforeRender = () => { this.drawsThisFrame[slot]++; };
       // only the near level casts shadows (propCastsShadow); of the 4.0 building parts only the boxes (sills, fins) and the
       // lot pieces: thin frames, railings and small props none (each cascade would draw them again)
       mesh.castShadow = propCastsShadow(d, l) && (!PART_TYPES.includes(t) || t === PROP.BBox || t === PROP.BLot);
@@ -747,8 +751,28 @@ export class PropRenderer {
     }
   }
 
+  /**
+   * The triangles the props drew in the last frame (D81). three counts an indirect draw as one instance (r186
+   * WebGPUBackend.js:2171, renderer.info): `counted` is that number, `drawn` the real one, each level's draws times the
+   * instance count the GPU cull wrote (the indirect arguments read back: vertices, instances).
+   */
+  async drawnTriangles(renderer: THREE.WebGPURenderer): Promise<{ counted: number; drawn: number }> {
+    const draws = this.drawsThisFrame.slice();
+    if (!this.enabled) return { counted: 0, drawn: 0 };
+    const args = new Uint32Array(await renderer.getArrayBufferAsync(this.drawAttr));
+    let counted = 0, drawn = 0;
+    for (let k = 0; k < DRAWS; k++) {
+      if (!draws[k]) continue;
+      const tris = args[k * 5] / 3;
+      counted += draws[k] * tris;
+      drawn += draws[k] * tris * args[k * 5 + 1];
+    }
+    return { counted, drawn };
+  }
+
   /** Before drawing: culling on the GPU (or choosing the cells, on WebGL 2). */
   update(renderer: THREE.WebGPURenderer, camera: THREE.Camera, camPos: THREE.Vector3, now: number): void {
+    this.drawsThisFrame.fill(0);
     if (now - this.signalSent > 250) { this.signalSent = now; this.signalTex.needsUpdate = true; }
     if (!this.enabled) { this.updateResidency(camPos); this.updateFallback(camera, camPos); return; }
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
