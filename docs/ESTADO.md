@@ -39,25 +39,25 @@ Atualizado: 2026-10-29, 23h54.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `232bd84` (gerador dividido), com `deb4e81` (docs do lote),
-  `f12ac53` (lot), `75cca5f` (docs), `3dabd4a` (relevo/context), `9516d06` (portas/grades/sacadas),
-  `16e99c4` (shell base), `ac7e4a4` (janelas), `fabd483` (alturas), `0fa5281`/`784ca8c` (inspetor),
-  `6482ca0` (finishes), `f195c9b`/`b13594d` (curva do ônibus), `8defbcf`/`61800d7` (10 km), `126b262`/
-  `2cbc606` (GenOutputs), `81655fa`/`c522b73` (ônibus), `80bfefc`/`917e88f` (pessoas), `e89f6ed` (vidro,
-  ocupantes e entre-eixos) e os anteriores. Sem push e sem merge em main; nenhum agente ativo.
+- Branch `port/roadcraft-features`; HEAD `cf188a7` (medição do trânsito), com `232bd84` (gerador dividido),
+  `deb4e81`/`f12ac53` (lot), `75cca5f`/`3dabd4a` (relevo/context), `9516d06` (portas/grades), `16e99c4`
+  (base), `ac7e4a4` (janelas), `fabd483` (alturas), `0fa5281`/`784ca8c` (inspetor), `6482ca0` (finishes),
+  `f195c9b`/`b13594d` (curva do ônibus), `8defbcf`/`61800d7` (10 km), `126b262`/`2cbc606` (GenOutputs),
+  `81655fa`/`c522b73` (ônibus), `80bfefc`/`917e88f` (pessoas), `e89f6ed` (vidro, ocupantes e entre-eixos)
+  e os anteriores. Sem push e sem merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
-  `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
-  `polygon.ts`, `geometry.ts`, `materials.ts`, `outputs.ts`, `finishes.ts`, `heights.ts`, `windows.ts`,
-  `shell.ts`, `context.ts`, `lot.ts`, `plans.ts`, `plans2.ts`, `civic.ts` e `catalog.ts`, `src/r40/api.ts`
-  e `src/roads/dash.ts`. `game.ts` 2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 250;
-  `arch:check` 258 arquivos/67.049 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos. O gerador agora é
-  só orquestração/lotes/partes; planos, cívico e catálogo estão em módulos.
+  `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts`, `regions.ts` e `measure.ts`,
+  `src/jobs/buildingGen/plan.ts`, `polygon.ts`, `geometry.ts`, `materials.ts`, `outputs.ts`, `finishes.ts`,
+  `heights.ts`, `windows.ts`, `shell.ts`, `context.ts`, `lot.ts`, `plans.ts`, `plans2.ts`, `civic.ts` e
+  `catalog.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts` 2.645, `traffic.ts` 2.809,
+  `vehicles.ts` 790, `buildingGen.ts` 250; `arch:check` 259 arquivos/67.091 linhas, 0 ciclos (inclusive
+  de tipos) e 0 vazamentos. O gerador é só orquestração/lotes/partes; a medição do trânsito saiu.
 - Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
   `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget com o vidro: street 418 draws/
   11.483.609 tris, district 175/7.103.905, city 123/**4.002.312** (limite 4.044.328), map
   178/4.463.246, night 494/14.492.808; MB 611/591/301/261/731, todos dentro.
-- Testes: suíte **371/371 em 64,8 s** depois do gerador dividido; trânsito/defeitos/movimento **61/61 em
-  58,3 s** na extração de regiões; prédios **50/50 em 5,6 s**; tsc/build limpos.
+- Testes: suíte **371/371 em 66,7 s** depois da medição; trânsito/defeitos/movimento **61/61 em 58,4 s**;
+  prédios **50/50 em 5,6 s**; tsc/build limpos.
 - Save/reabertura: `generated-close-reopens` deu **5 ok, 0 falhas**: cidade gerada de 10 km, salva,
   app **encerrado e reaberto em outro processo**, mesmas vias/nós/prédios/ladrilhos. `close-saves`
   deu **2 ok, 0 falhas** (mapa pequeno) e `check-user-data.mjs` manteve a pasta do jogador intacta
@@ -76,9 +76,9 @@ Atualizado: 2026-10-29, 23h54.
   numéricos por passo e passageiros embarcando/descendo; não há rotatória na cena.
 - Verificação interna: `node tools/verificar.mjs` **146/146** (71 + 58 + 17) na rodada após o shell; a
   build com o lote está sendo revalidada. `node tools/textos.mjs` 985 chaves pedidas, 0 problemas.
-- Pendente: `traffic.ts` micro/meso/ônibus, `r40/buildingMesh.ts`, `game.ts` restante,
-  `world/catalogData.ts` como asset, bomba, construtor, multidão, passageiros, yaw/rotatória e 250 mil.
-  A cidade de 10 km fechada/reaberta em outro processo está provada.
+- Pendente: `traffic.ts` micro/meso/ônibus/passageiros, `r40/buildingMesh.ts`, `game.ts` restante,
+  `world/catalogData.ts` como asset, bomba, construtor, multidão, yaw/rotatória e 250 mil. A cidade de
+  10 km fechada/reaberta em outro processo está provada.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades

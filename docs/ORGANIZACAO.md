@@ -20,17 +20,17 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 258 |
-| Bytes / linhas | 3.731.054 / 67.049 |
+| Arquivos TS | 259 |
+| Bytes / linhas | 3.732.740 / 67.091 |
 | Arquivos >= 50 KB | 10 |
 | Arquivos >= 100 KB | 4 |
 | Arquivos >= 150 KB | 3 |
-| Arestas de import | 1099 (196 só de tipo) |
+| Arestas de import | 1102 (196 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
-Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.852),
+Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.809),
 `game.ts` (2.645), `r40/render/buildings/signature.ts` (1.781), `jobs/buildingGen/plans.ts` (422),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
@@ -227,11 +227,12 @@ Ordem por risco e valor (não por tamanho):
 - Feito em 2026-10-30: `plans.ts` (base/casa/quarteirão/árvores/jardins), `plans2.ts` (torre, galpão,
   chaminé, polígonos, telhados, projeto do jogador), `civic.ts` e `catalog.ts`. `buildingGen.ts` caiu de
   1.520 para **250 linhas**, só orquestração, lotes e partes; arquivos >=50 KB caíram para 10.
+- Feito em 2026-10-30: `sim/traffic/measure.ts` (`avgSpeed`, `probe`, `stopped` e acumuladores), com o
+  `traffic.ts` de 2.852 para 2.809 linhas.
 - Em andamento: `sim/traffic.ts` por micro/meso/ônibus; `r40/buildingMesh.ts` continua por último.
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
-  usa saída antecipada (≈13 s reais). A suíte completa fechou **370/370 em 66,0 s** antes da extração de regiões;
-  depois dela, trânsito/defeitos/movimento 61/61 em 58,3 s. Não declarar a suíte completa verde depois de `b6f4857`
-  sem rodá-la de novo.
+  usa saída antecipada (≈13 s reais). A suíte completa fechou **371/371 em 66,7 s** depois da medição; trânsito/
+  defeitos/movimento 61/61 em 58,4 s.
 
 ## 8. Fontes
 
