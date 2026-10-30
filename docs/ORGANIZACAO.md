@@ -197,9 +197,10 @@ Ordem por risco e valor (não por tamanho):
 - Feito em 2026-10-29: `sim/traffic/laneChanges.ts` (MOBIL, obrigatória, escape e discricionária) com `LaneHost`;
   `sim/traffic/lines.ts` (`LineSpec`, `SimLine`, `resolveLine`, `indexStops`) e
   `jobs/buildingGen/polygon.ts` (`lotFit`, `lotPolygon`, `inPolygon`), com `props` importando direto.
-- Em andamento: `app/session.ts` já cobre salvar/abrir/novo mapa; `game.ts` ainda tem entrada/pointer, seleção e
-  cliques de lote/edifício. Depois: `sim/traffic.ts` por micro/meso/sinais/ônibus, `buildingGen` com `GenContext` e
-  `r40/api.ts` (imports externos de r40 estão concentrados em `jobs/building40.ts` e `render/propMeshes.ts`).
+- Feito: `app/clicks.ts` (despacho de clique com `ClickHost`), depois de `app/session.ts` cobrir salvar/abrir/novo
+  mapa; `game.ts` ainda tem entrada/pointer, seleção e edição de lote/edifício.
+- Em andamento: `sim/traffic.ts` por micro/meso/sinais/ônibus, `buildingGen` com `GenContext` e `r40/api.ts`
+  (imports externos de r40 estão concentrados em `jobs/building40.ts` e `render/propMeshes.ts`).
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
   usa saída antecipada (≈13 s reais). A suíte completa deu 363/364 antes do ajuste do telhado 3; o caso foi corrigido
   isoladamente. Não declarar a suíte completa verde sem rodá-la de novo.
