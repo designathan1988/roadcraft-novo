@@ -17,12 +17,12 @@ import { FlowAdvisor } from './advisor.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
 import { stripAt } from './probe.ts';
-import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver, driverSchema } from './drivers.ts';
+import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver } from './drivers.ts';
+import { CAR_STYLE_LEN, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema } from './traffic/state.ts';
+export { CAR_STYLE_LEN, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, INSPECT_STRIDE, ROUTE_CAP, WAGONS, WAGON_LEN } from './traffic/state.ts';
 import { LaneChanges } from './traffic/laneChanges.ts';
 import { STOP_CELL, STOP_CELLS, indexStops as buildStopIndex, resolveLine, type LineSpec, type SimLine } from './traffic/lines.ts';
 
-export const ROUTE_CAP = 96;
-export const MAX_VEHICLES = 1 << 16;
 const WINDOW = 1500;
 // meso (far from the camera) at the pace of micro: the fleet is a single one, so if meso runs faster the cars
 // pile up in the window until it jams, and if it runs slower the window empties; and the camera must not change how
@@ -82,47 +82,6 @@ const REJOIN = 6;
  */
 const S0 = 2.2, T_HEAD = 0.9;
 
-const vehSchema = {
-  lane: Int32Array, conn: Int32Array, s: Float32Array, v: Float32Array,
-  len: Float32Array, vf: Float32Array, micro: Uint8Array, kind: Uint8Array, color: Uint8Array,
-  dest: Int32Array, rIdx: Uint8Array, rLen: Uint8Array,
-  tExit: Float64Array,
-  next: Int32Array, prev: Int32Array, // lane/connection list (micro), front to back
-  px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array,
-  fade: Float32Array, dying: Uint8Array,
-  lcFrom: Int32Array, lcT: Float32Array, lcCool: Float32Array,
-  microIdx: Int32Array,
-  // bus: line (-1 = ordinary car), next stop, dwell time, load, stop already served
-  line: Int16Array, stopI: Uint8Array, dwell: Float32Array, load: Uint8Array, served: Uint8Array,
-  // time stopped at the stop line (stop sign, queue of those yielding)
-  wait: Float32Array,
-  // stopped (anywhere on the lane) since the last time it reconsidered the route
-  held: Float32Array,
-  // lights (roadcraft vehicleSignals): braking/stopped, and the planned exit connection (for the indicator)
-  brk: Uint8Array, exitC: Int32Array,
-  // in the bay beside the lane (0 = in the lane, 1 = in the bay): pulling in on arrival or out at the start
-  pk: Float32Array,
-  // manoeuvre (sim/manoeuvres.ts, −1 = none) and the lane position (front) where it ends
-  mv: Int32Array, ms: Float32Array,
-  // how the trip ends once it leaves (End)
-  why: Uint8Array,
-  // far model: the lane whose list it is in (−1 = none) and its neighbours in that list (in order of entry)
-  ml: Int32Array, mnext: Int32Array, mprev: Int32Array,
-  // when it entered its current lane and where (for the speed actually driven on each lane, near and far)
-  tIn: Float64Array, s0: Float32Array,
-  // the micro step it last moved in (one move per step, even after passing from a connection to a lane)
-  moved: Uint32Array,
-  // over the stop line with the way open: it goes through the junction without asking again (1)
-  pass: Uint8Array,
-  // the dock or bay it has reserved (Traffic.spots key; 0 = none)
-  spot: Float64Array,
-  // the driver (sim/drivers.ts): aggression, comfort figures, gap acceptance, politeness, patience
-  ...driverSchema,
-};
-
-/** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
-const End = { Arrived: 0, Lost: 1, NoTrip: 2 } as const;
-
 /** Where trucks start and end (none, residential, commercial, industrial, mixed): goods between industry and commerce. */
 const TRUCK_ZONES = [0.05, 0.1, 0.6, 1, 0.4];
 
@@ -141,18 +100,12 @@ const BODY_HALF_W = [0.9, 1.27, 1.25, 0.4, 1.5];
 /** How near a walker on a zebra to where a vehicle's lane crosses it holds the vehicle (m): crossingSpans.ts:24, :29. */
 const SPAN_REACH = 2.55 / 2 + 0.9 + 0.6;
 
-/** Numbers per vehicle in `Traffic.inspect`, and why a vehicle there may stand still (bits). */
-export const INSPECT_STRIDE = 18;
-export const INSPECT_RED = 1, INSPECT_BAY = 2, INSPECT_LEAVING = 4, INSPECT_STOP = 8, INSPECT_CHANGING = 16, INSPECT_GATE = 32, INSPECT_PASS = 64;
-
 const DWELL = 14;
 /** Dwell at the terminal (s): the bus rests and adjusts its schedule before heading back. */
 const TERMINAL_DWELL = 75;
 const BUS_CAP = 70;
 const WAIT_RATE = 1 / 9; // people arriving per second at each stop
 
-/** Length per kind: car, bus, truck, (person), train (3 wagons of 20 m). */
-const KIND_LEN = [4.4, 12, 9.5, 0.6, 62];
 /** Parking (roadcraft kerbStops/parking): deceleration, time to pull into the bay (s), and how long it stays before disappearing. */
 const PARK_DECEL = 2.6, PARK_SIDE_S = 2.4, PARK_STAY = 3;
 
@@ -168,16 +121,8 @@ function parkU(profile: number, dir: number): number {
 
 /** Wear per vehicle entering a lane: a road with 1,000 vehicles per hour gets well worn in ~1 h of simulation at 1×. */
 const WEAR_PER_PASS = 0.2;
-/**
- * Passenger cars (roadcraft archetypes): sedan, hatchback, SUV, van, pickup and motorbike, with each one's length
- * and share of the fleet. The style goes in bits 4-6 of the colour (the page picks the model from it).
- */
-export const CAR_STYLE_LEN = [4.4, 3.9, 4.6, 4.9, 5.3, 2.1];
+/** The share of the fleet each passenger car style takes; the lengths are in `traffic/state.ts`. */
 const CAR_STYLE_SHARE = [0.3, 0.3, 0.17, 0.08, 0.07, 0.08];
-/** Light bits in the pose (× 65536 in the kind/colour field): brake, left indicator, right indicator. */
-export const LIGHT_BRAKE = 1, LIGHT_LEFT = 2, LIGHT_RIGHT = 4;
-/** Train wagons and the length of each. */
-export const WAGONS = 3, WAGON_LEN = 20.5;
 
 export class Traffic {
   readonly sim: SimNet;
