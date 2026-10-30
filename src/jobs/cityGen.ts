@@ -132,7 +132,7 @@ export function generateCity(seed: number, style: CityStyle = 'blocks', medium =
       // so its nodes are the crossings (every point would be a node, a block side cut in 30 m pieces)
       for (let k = first; k < polys.length; k++) { const q = polys[k].pts; polys[k].pts = [q[0], q[1], q[q.length - 2], q[q.length - 1]]; }
     }
-    return withoutSpurs(buildGraph(polys, [{ ...centers[0], x: at[0], z: at[1], r: R * 0.85 }], H, seed));
+    return withoutSpurs(dryCrossings(buildGraph(polys, [{ ...centers[0], x: at[0], z: at[1], r: R * 0.85 }], H, seed), land));
   }
   // the medium town (Roadcraft 2.0's): only its straight block grid, no expressway, radials or rings
   if (!medium) {
@@ -272,6 +272,24 @@ export function generateCity(seed: number, style: CityStyle = 'blocks', medium =
     const lines = traceStreets(field, insideP, { x0: c.x - R, z0: c.z - R, x1: c.x + R, z1: c.z + R }, districtLevels(c.r), rng);
     for (const l of lines) lay(l.level, l.points);
   }
+}
+
+/**
+ * No crossing stands in the water: where two bridges of the grid would meet over it, the streets stop at the banks
+ * (their segments into that node go; withoutSpurs then takes the cut ends back). A bridge's middle (two arms) stays.
+ */
+export function dryCrossings(r: CityRoads, land: (x: number, z: number) => boolean): CityRoads {
+  const nn = r.nodes.length / 3, ns = r.segs.length / 5;
+  const deg = new Int32Array(nn);
+  for (let s = 0; s < ns; s++) { deg[r.segs[s * 5]]++; deg[r.segs[s * 5 + 1]]++; }
+  const wet = (n: number) => deg[n] > 2 && !land(r.nodes[n * 3], r.nodes[n * 3 + 1]);
+  const segs: number[] = [];
+  for (let s = 0; s < ns; s++) {
+    const o = s * 5;
+    if (wet(r.segs[o]) || wet(r.segs[o + 1])) continue;
+    for (let k = 0; k < 5; k++) segs.push(r.segs[o + k]);
+  }
+  return { nodes: r.nodes, segs: new Int32Array(segs), centers: r.centers };
 }
 
 /**

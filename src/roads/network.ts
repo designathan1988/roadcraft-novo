@@ -47,7 +47,7 @@ export interface NodeRec { id: number; x: number; z: number; y: number; /** cont
 export interface SegRec { id: number; a: number; b: number; cx: number; cz: number; profile: number; flags: number; zl?: number; zr?: number }
 export { Zone } from './zones.ts';
 import { effectiveControl, type JunctionSpec, isMidNode } from './control.ts';
-import { BULB_R, NODE_BULB, bulbAt } from './junction.ts';
+import { BULB_R, NODE_BULB, armOf, bulbAt } from './junction.ts';
 
 const p2 = new Float64Array(2);
 
@@ -352,9 +352,17 @@ export class RoadNetwork {
       segCount: ns, sa: new Int32Array(ns), sb: new Int32Array(ns), scx: new Float32Array(ns), scz: new Float32Array(ns),
       sprofile: new Uint16Array(ns), sflags: new Uint8Array(ns), segOwn: new Uint8Array(ns), sid: new Int32Array(ns),
       szl: new Uint8Array(ns), szr: new Uint8Array(ns), nid: new Int32Array(nn),
-      nctl: new Uint8Array(nn), srule: new Uint8Array(ns),
+      nctl: new Uint8Array(nn), njoint: new Uint8Array(nn), srule: new Uint8Array(ns),
     };
     nodeList.forEach((n, i) => { g.nx[i] = nc.x[n]; g.nz[i] = nc.z[n]; g.ny[i] = nc.y[n]; g.nid[i] = n; });
+    // straight joints, from the whole network (every cell sees the same): two arms leaving in opposite directions
+    const qa: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 }, qb: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
+    for (const n of nodeList) {
+      if (nc.deg[n] !== 2) continue;
+      const s1 = this.adj[n * MAX_DEG], s2 = this.adj[n * MAX_DEG + 1];
+      const a = armOf(this.quad(s1, qa), sc.profile[s1], sc.a[s1] === n ? 0 : 1), b = armOf(this.quad(s2, qb), sc.profile[s2], sc.a[s2] === n ? 0 : 1);
+      if (a.dx * b.dx + a.dz * b.dz < -0.9986) g.njoint[nodeIdx.get(n)!] = 1;
+    }
     // junction control and the rule at each end (signs, paint)
     for (const n of nodeList) {
       if (nc.deg[n] === 1) { if (bulbAt(this, n)) g.nctl[nodeIdx.get(n)!] = NODE_BULB; continue; }

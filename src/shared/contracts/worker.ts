@@ -210,6 +210,8 @@ export interface RoadGraph {
   nid: Int32Array;
   /** Each node's effective control (Ctl). */
   nctl: Uint8Array;
+  /** 1 = a straight joint: the node has two arms in line (one street cut in two), not a corner. */
+  njoint: Uint8Array;
   /** Each segment end's rule: end a in bits 0-2, end b in bits 3-5 (Rule). */
   srule: Uint8Array;
 }
