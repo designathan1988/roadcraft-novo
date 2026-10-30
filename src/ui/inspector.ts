@@ -618,7 +618,7 @@ export class Inspector {
         j.setJunction(n, next && (next.end || next.ctl !== Ctl.Auto) ? next : null);
         this.commands.push(j);
         this.render();
-      });
+      }, t(key));
       box.append(row(label(t(key)), sel));
     }
     // parking by side, a choice of what the road can carry (4.0 :183-187, :250-251): none or parallel to the kerb
@@ -633,7 +633,7 @@ export class Inspector {
           const to = withParking(sc.profile[s], right, v === 1);
           if (to < 0) { this.a.toast(t('ui.catalog.tooMany')); return; }
           this.edit(changeProfiles(w, roadBetweenJunctions(w, s), to, s), t(v === 1 ? 'ui.insp.parkingOn' : 'ui.insp.parkingOff'));
-        })));
+        }, t(key))));
       }
     }
     // curvature (up to 65 % of the length) and where along the road the curve sits, 15–85 % (4.0 :231-233, :253-254, :325-341)
@@ -785,8 +785,9 @@ function cardOf(name: string, text: string, keep?: (e: HTMLElement) => void): HT
   keep?.(v);
   return c;
 }
-function select(opts: Array<[number, string]>, v: number, fn: (v: number) => void): HTMLSelectElement {
+function select(opts: Array<[number, string]>, v: number, fn: (v: number) => void, name = ''): HTMLSelectElement {
   const s = el('select');
+  if (name) s.setAttribute('aria-label', name);
   for (const [k, text] of opts) { const o = el('option', '', text); o.value = String(k); s.append(o); }
   s.value = String(v);
   s.addEventListener('change', () => { fn(Number(s.value)); s.blur(); });
