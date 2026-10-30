@@ -119,10 +119,13 @@ function createWindow() {
       for (;;) {
         const s = await win.webContents.executeJavaScript('window.__roadcraft?.status ?? "loading"').catch(() => 'error');
         if (s === 'ready' || s === 'failed' || Date.now() - t0 > limit) { console.log(`state: ${s} after ${((Date.now() - t0) / 1000).toFixed(1)} s`); break; }
-        await new Promise((r) => setTimeout(r, 500));
+        // a poll of the page (a few ms each): the run starts as soon as the game is ready
+        await new Promise((r) => setTimeout(r, 50));
       }
       // ROADCRAFT_SEQ: more screenshots in the same session, JSON [[file, script], ...]
-      const seq = [[shot, process.env.ROADCRAFT_SCRIPT], ...JSON.parse(process.env.ROADCRAFT_SEQ || '[]')];
+      // the script comes in a file when it is long (a command line or a variable holds 32 KB on Windows)
+      const first = process.env.ROADCRAFT_SCRIPT_FILE ? fs.readFileSync(process.env.ROADCRAFT_SCRIPT_FILE, 'utf8') : process.env.ROADCRAFT_SCRIPT;
+      const seq = [[shot, first], ...JSON.parse(process.env.ROADCRAFT_SEQ || '[]')];
       for (const [file, script] of seq) {
         if (script) await win.webContents.executeJavaScript(script).catch((e) => console.log('script:', e.message));
         await new Promise((r) => setTimeout(r, Number(process.env.ROADCRAFT_SETTLE ?? 3) * 1000));

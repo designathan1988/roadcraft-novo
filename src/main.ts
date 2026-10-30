@@ -1,6 +1,6 @@
 import { Game } from './game.ts';
 import { Lifecycle } from './app/lifecycle.ts';
-import { initLang, setLang, storedLang, t } from './shared/i18n/index.ts';
+import { initLang, lang, setLang, storedLang, t } from './shared/i18n/index.ts';
 import { createAutomation, type CityAutomation } from './app/automation.ts';
 import { bootGame } from './ui/boot.ts';
 
@@ -17,7 +17,7 @@ async function boot(): Promise<void> {
   // the one automation surface (photo scripts, checks, the probe, the desktop shell): it answers the status before the
   // game exists or when it failed to start, and drives the game once it runs
   let game: Game | null = null;
-  (globalThis as { __roadcraft?: CityAutomation }).__roadcraft = createAutomation({ life, setLang: (l) => setLang(l as Parameters<typeof setLang>[0]), t }, () => game?.automation ?? null);
+  (globalThis as { __roadcraft?: CityAutomation }).__roadcraft = createAutomation({ life, setLang: (l) => setLang(l as Parameters<typeof setLang>[0]), lang, t }, () => game?.automation ?? null);
   await bootGame({
     isolated: crossOriginIsolated,
     create: () => (game = new Game(canvas, life)),

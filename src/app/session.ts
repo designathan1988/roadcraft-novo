@@ -42,13 +42,14 @@ export interface NewMapHost {
 }
 
 /** Starts a new city with a fresh seed and generation id. */
-export async function newMapSession(host: NewMapHost): Promise<void> {
+/** A new empty map: from `seed` when given (the same terrain again), else from a new random one. */
+export async function newMapSession(host: NewMapHost, seed?: number): Promise<void> {
   if (!host.life.begin('generating')) return;
   host.hud.showLoading(t('game.loading.terrain'));
   const w = host.world;
   try {
     host.resetCity();
-    w.seed = (Math.random() * 2 ** 32) >>> 0;
+    w.seed = seed ?? (Math.random() * 2 ** 32) >>> 0;
     w.gameId = (Math.random() * 2 ** 32) >>> 0;
     await host.generateTerrain();
     for (let tile = 0; tile < TILE_COUNT; tile++) for (const c of cellsOfTile(tile)) w.touchCell(c, Dirty.Terrain);

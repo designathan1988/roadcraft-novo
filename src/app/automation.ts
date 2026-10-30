@@ -45,6 +45,7 @@ export interface ToolOptions {
 export interface AutomationPage {
   readonly life: Pick<Lifecycle, 'state' | 'whenIdle' | 'unsaved'>;
   setLang(lang: string): void;
+  lang(): string;
   t(key: string): string;
 }
 
@@ -90,7 +91,7 @@ export interface AutomationHost {
   following(): boolean;
   followAt(x: number, z: number, r: number): boolean;
   peopleReady(): boolean;
-  growthRate(r: number): void;
+  growthRate(r?: number): number;
   signals(): Uint8Array;
   saveStore(): Promise<FileStore>;
   demolitionDrawn(): number;
@@ -126,7 +127,7 @@ export interface AutomationHost {
   save(quiet: boolean): Promise<boolean>;
   load(): Promise<boolean>;
   importMap(file: Blob): Promise<void>;
-  newMap(): void;
+  newMap(seed?: number): Promise<void>;
   generated(medium: boolean): Promise<void>;
   testCity(): Promise<void>;
   paused(): boolean;
@@ -140,6 +141,8 @@ export interface CityAutomation {
   /** The lifecycle's state (the desktop shell and the checks wait for 'ready'). */
   readonly status: LifeState;
   setLang(lang: string): void;
+  /** The interface's language now (pt-BR, en). */
+  lang(): string;
   t(key: string): string;
   readonly lifecycle: { state(): LifeState; whenIdle(ms: number): Promise<boolean>; unsaved(): boolean };
   readonly camera: {
@@ -199,7 +202,9 @@ export interface CityAutomation {
   /** The HUD's actions (what the panels do). */
   readonly ui: HudActions;
   readonly saves: {
-    save(quiet?: boolean): Promise<boolean>; load(): Promise<boolean>; importMap(file: Blob): Promise<void>; newMap(): void;
+    save(quiet?: boolean): Promise<boolean>; load(): Promise<boolean>; importMap(file: Blob): Promise<void>;
+    /** A new empty map: from `seed` when given (the same terrain again), else a random one. */
+    newMap(seed?: number): Promise<void>;
     /** Where saves are written (browser private files or the desktop folders): the storage checks read and fail it. */
     store(): Promise<FileStore>;
     /** The autosave's 2-minute timer runs out now: the next frame saves if anything is unsaved. */
@@ -207,8 +212,8 @@ export interface CityAutomation {
   };
   readonly cities: {
     generated(medium?: boolean): Promise<void>; testCity(): Promise<void>;
-    /** How fast lots fill (0 holds the city as it is: photos and checks of a fixed scene). */
-    growthRate(r: number): void;
+    /** How fast lots fill (0 holds the city as it is: photos and checks of a fixed scene); returns the rate in force. */
+    growthRate(r?: number): number;
     /** The free lots (no building on them) once the lots are made: waits for the lot jobs of the zoned roads. */
     freeLots(): Promise<Array<[number, number]>>;
   };
@@ -249,6 +254,7 @@ export function createAutomation(page: AutomationPage, game: () => AutomationHos
     version: 1,
     get status() { return page.life.state; },
     setLang: (lang) => page.setLang(lang),
+    lang: () => page.lang(),
     t: (key) => page.t(key),
     lifecycle: { state: () => page.life.state, whenIdle: (ms) => page.life.whenIdle(ms), unsaved: () => page.life.unsaved },
     camera: {
@@ -274,7 +280,7 @@ export function createAutomation(page: AutomationPage, game: () => AutomationHos
     audio: { start: () => g().audioStart(), state: () => g().audioState(), green: () => g().green() },
     panels: { registerBuilderTab: (id, render) => g().registerBuilderTab(id, render) },
     get ui() { return g().ui; },
-    saves: { save: (quiet = false) => g().save(quiet), load: () => g().load(), importMap: (f) => g().importMap(f), newMap: () => g().newMap(), store: () => g().saveStore(), autosaveNow: () => g().autosaveNow() },
+    saves: { save: (quiet = false) => g().save(quiet), load: () => g().load(), importMap: (f) => g().importMap(f), newMap: (seed) => g().newMap(seed), store: () => g().saveStore(), autosaveNow: () => g().autosaveNow() },
     cities: { generated: (medium = false) => g().generated(medium), testCity: () => g().testCity(), growthRate: (r) => g().growthRate(r), freeLots: () => g().freeLots() },
     people: { ready: () => g().peopleReady(), groups: () => g().peopleGroups(), last: () => g().lastPeople() },
     demo: { hitKind: () => g().hitKind(), force: () => g().bombForce() },

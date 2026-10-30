@@ -1,7 +1,7 @@
 // Road and lot tools checked in the real game (the machine's GPU), one scenario per Electron session with a user data
 // folder of its own (never the game's). What a Node test cannot reach: the pointer handlers, the hint bar, the
 // inspector's buttons. Usage: npx vite build && node tools/check-vias.mjs [scenario...]   (exit code 1 if anything fails)
-import { checksOf, pick, report, scenarioFolder, session, wrap } from './checks/run.mjs';
+import { checksOf, eachScenario, pick, scenarioFolder, session, wrap } from './checks/run.mjs';
 
 // Page helpers shared by every scenario: results are printed as "CHECK OK|FAILED name" and the run ends with "CHECK END".
 const PRELUDE = `
@@ -195,12 +195,18 @@ const SCENARIOS = {
     const oldEditor = openEditor();
     const strips = (e) => (e ? e.querySelectorAll('.rp-cards > *').length : -1);
     const stripsBefore = strips(oldEditor);
+    // the name field shows once the player chooses to save the edit as a model (the editor's Save button)
+    [...document.querySelectorAll('.section-editor:not(.hidden) button')].find((b) => b.textContent.trim() === R.t('profileEditor.saveShort'))?.click(); await wait(100);
     const field = oldEditor.querySelector('input.rp-field');
     field.value = 'Minha Rua'; field.dispatchEvent(new Event('input', { bubbles: true }));
     R.setLang('en'); await wait(300);
     check('the cards are made again', !card.isConnected && !!document.querySelector('.rc-catalog .rc-card'), 'old card still in place');
     check('the section editor is made again in its place', !oldEditor.isConnected && !!openEditor(), 'editor not replaced');
-    const now = openEditor(), name = now && now.querySelector('input.rp-field').value;
+    const now = openEditor();
+    // the typed name is kept: Save again (now in English) shows the field with it
+    if (now) [...now.querySelectorAll('button')].find((b) => b.textContent.trim() === R.t('profileEditor.saveShort'))?.click();
+    await wait(100);
+    const name = now && now.querySelector('input.rp-field')?.value;
     check('an open edit stays open with its profile and name', name === 'Minha Rua' && strips(now) === stripsBefore, JSON.stringify({ name, strips: strips(now), before: stripsBefore }));
     R.setLang('pt-BR');
   `,
@@ -213,6 +219,8 @@ const SCENARIOS = {
     const pickCard = document.querySelector('.rc-catalog .rc-card');
     pickCard.click(); await wait(100);
     document.querySelector('.rc-catalog .rc-card.on .rc-custom.edit').click(); await wait(200);
+    // the name field shows once the player chooses to save the edit as a model (the editor's Save button)
+    [...document.querySelectorAll('.section-editor:not(.hidden) button')].find((b) => b.textContent.trim() === R.t('profileEditor.saveShort'))?.click(); await wait(100);
     const field = document.querySelector('.section-editor:not(.hidden) input.rp-field');
     field.value = 'Modelo Teste'; field.dispatchEvent(new Event('input', { bubbles: true }));
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
@@ -233,11 +241,12 @@ const SCENARIOS = {
 };
 
 const { names, unknown } = pick(SCENARIOS);
-let failed = unknown;
-for (const name of names) {
+// the scenarios run side by side (tools/checks/run.mjs eachScenario), each in its own folder and game
+const failed = unknown + await eachScenario(names, async (name) => {
   const own = scenarioFolder('roadcraft-vias-', name);
-  failed += report(name, checksOf(await session({ query: '?empty&hour=11&workers=3', script: wrap(PRELUDE, SCENARIOS[name]), own: own.dir })));
+  const checks = checksOf(await session({ query: '?empty&hour=11&workers=3', script: wrap(PRELUDE, SCENARIOS[name]), own: own.dir }));
   own.done();
-}
+  return checks;
+});
 console.log(failed ? `road check: ${failed} FAILED` : 'road check: ok');
 process.exit(failed ? 1 : 0);

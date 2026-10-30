@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createAutomation, type AutomationHost, type AutomationPage } from '../src/app/automation.ts';
 
 const V1: Record<string, string[] | null> = {
-  version: null, status: null, setLang: null, t: null,
+  version: null, status: null, setLang: null, lang: null, t: null,
   lifecycle: ['state', 'whenIdle', 'unsaved'],
   camera: ['view', 'pose', 'place', 'pick', 'toScreen', 'following', 'followAt'],
   view: ['layers', 'inside', 'insideId'],
@@ -28,7 +28,7 @@ const V1: Record<string, string[] | null> = {
   render: ['props', 'sun', 'demolition', 'bolt', 'preview'],
 };
 
-const page = (state: string): AutomationPage => ({ life: { state, whenIdle: async () => true, unsaved: false } as unknown as AutomationPage['life'], setLang: () => {}, t: (k) => k });
+const page = (state: string): AutomationPage => ({ life: { state, whenIdle: async () => true, unsaved: false } as unknown as AutomationPage['life'], setLang: () => {}, lang: () => 'pt-BR', t: (k) => k });
 
 /** A host whose every member records its own name when used. */
 function recordingHost(calls: string[]): AutomationHost {

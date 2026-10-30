@@ -4,7 +4,7 @@
 // Usage: npx vite build && node tools/check-interface.mjs [scenario...]   (exits with code 1 if anything fails)
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checksOf, pick, report, scenarioFolder, session, wrap } from './checks/run.mjs';
+import { FRESH_RESET, FRESH_SNAPSHOT, checksByScenario, checksOf, eachScenario, pick, report, scenarioFolder, session, sharedScript, wrap } from './checks/run.mjs';
 
 // Page helpers shared by every scenario.
 const PRELUDE = `
@@ -18,8 +18,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const frames = (n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); f(); });
 const check = (name, ok, why) => console.log('CHECK ' + (ok ? 'OK ' : 'FAILED ') + name + (ok ? '' : ': ' + why));
 const Q = (s) => document.querySelector(s), QA = (s) => [...document.querySelectorAll(s)];
-// the Options dialog as the player sees it (About shares its backdrop class; Options has its buttons row)
-const optionsRoot = () => QA('.v2-dialog-back').find((e) => e.querySelector('.opt-buttons'));
+// the Options dialog as the player sees it (About shares its backdrop and its buttons row; only Options has option rows)
+const optionsRoot = () => QA('.v2-dialog-back').find((e) => e.querySelector('.opt-row'));
 const optionsOpen = () => { const r = optionsRoot(); return !!r && !r.classList.contains('hidden'); };
 const label = (e) => [e.textContent, e.title, e.dataset.tip, e.getAttribute('aria-label')].filter(Boolean).join(' | ');
 const byText = (sel, re) => QA(sel).find((e) => new RegExp(re).test(label(e)));
@@ -843,10 +843,27 @@ export const SCENARIOS = {
 // run only when called as a program (a test may import the scenarios to check them)
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
 
+// put back before every shared scenario: the fresh-game state (tools/checks/run.mjs) and this check's console errors
+const SNAPSHOT = FRESH_SNAPSHOT;
+const RESET = `${FRESH_RESET}
+  errors.length = 0;
+`;
+
 async function main() {
   const { names, unknown } = pick(SCENARIOS);
+  // one game for every scenario that only needs the empty map; a session of their own for those with their own URL,
+  // window width or a reopening (tools/checks/run.mjs sharedScript)
+  const alone = (n) => typeof SCENARIOS[n] !== 'string' || process.env.CHECK_ALONE === '1';
+  const shared = names.filter((n) => !alone(n));
   let failed = unknown;
-  for (const name of names) {
+  if (shared.length) {
+    const own = scenarioFolder('roadcraft-ui-', 'shared');
+    const lines = await session({ query: '?empty&hour=11&workers=3', script: sharedScript(PRELUDE + SNAPSHOT, RESET, shared.map((n) => [n, SCENARIOS[n]])), own: own.dir, env: { ROADCRAFT_LIMIT: String(60 + shared.length * 60) } });
+    const by = checksByScenario(lines, shared);
+    for (const n of shared) failed += report(n, by.get(n));
+    own.done();
+  }
+  failed += await eachScenario(names.filter(alone), async (name) => {
     const bodies = SCENARIOS[name];
     // a scenario is one session, or several sessions one after the other over the same folder (closing and reopening)
     const own = scenarioFolder('roadcraft-ui-', name);
@@ -857,9 +874,9 @@ async function main() {
       const code = typeof body === 'object' ? body.script : body;
       checks.push(...checksOf(await session({ query, script: wrap(PRELUDE, code), own: own.dir, env: { ROADCRAFT_W: width } })));
     }
-    failed += report(name, checks);
     own.done();
-  }
+    return checks;
+  });
   console.log(failed ? `interface check: ${failed} FAILED` : 'interface check: ok');
   process.exit(failed ? 1 : 0);
 }

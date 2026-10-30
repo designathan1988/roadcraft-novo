@@ -16,14 +16,17 @@ export function wrap(prelude, body) {
 
 /**
  * Runs one session: `script` in the page opened at `query`, user data in `own` (a folder of the scenario). Resolves
- * with every stdout line. `env` adds to the process environment (ROADCRAFT_SETTLE 1 and ROADCRAFT_LIMIT 300 by default);
+ * with every stdout line. `env` adds to the process environment (no settle after the script: each scenario waits for its own conditions; ROADCRAFT_LIMIT 300 by default);
  * `onLine(line, child)` sees each line as it comes (a session that asks the shell for something mid-run).
  */
 export function session({ query, script, own, env = {}, shot = path.join(own, 'shot.png'), onLine }) {
   return new Promise((resolve) => {
     const out = [];
-    const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, query, script],
-      { cwd: root, env: { ...process.env, ROADCRAFT_USER_DATA: own, ROADCRAFT_SETTLE: '1', ROADCRAFT_LIMIT: '300', ...env } });
+    // the script by file: a command line holds 32 KB on Windows
+    const file = path.join(own, `script-${Date.now()}.js`);
+    fs.writeFileSync(file, script);
+    const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, query, '@' + file],
+      { cwd: root, env: { ...process.env, ROADCRAFT_USER_DATA: own, ROADCRAFT_SETTLE: '0', ROADCRAFT_LIMIT: '300', ...env } });
     let buf = '';
     p.stdout.on('data', (d) => {
       buf += d;
@@ -62,6 +65,79 @@ export function report(name, checks) {
   console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
   for (const c of checks) console.log('  ' + c);
   return bad.length;
+}
+
+/**
+ * One game for many scenarios: the page script runs `prelude` once, then for each scenario prints `CHECK SCENARIO name`,
+ * puts the game back as it started (`reset`, page code) and runs the body in a function of its own (its names do not
+ * reach the next one). Starting a game costs more than most scenarios (a 54-scenario check spent 980 of its 1,017 s
+ * starting games); the scenarios that test the start itself, a URL, the window or closing keep a session of their own.
+ */
+export function sharedScript(prelude, reset, scenarios) {
+  const parts = scenarios.map(([name, body]) => `console.log('CHECK SCENARIO ' + ${JSON.stringify(name)});
+try { await __reset(); await (async () => {${body}
+})(); } catch (e) { check('scenario ran to the end', false, e && e.stack || e); }`);
+  return `(async()=>{${prelude}\nconst __reset = async () => {${reset}\n};\n${parts.join('\n')}\nconsole.log('CHECK END');})()`;
+}
+
+/**
+ * The state a fresh ?empty session starts in, taken once in the page (`__start`, needs `R` and `w`), and the reset that
+ * puts it back before each shared scenario: the same empty map from the same seed, the hour, the camera, no tool,
+ * panels or toasts, the options, the language, the browser storage, the clock and the growth as they were.
+ */
+export const FRESH_SNAPSHOT = `
+const __start = { seed: w.seed, lang: R.lang(), options: JSON.stringify(R.options.get()), paused: R.sim.paused(),
+  growth: R.cities.growthRate(), unlimited: w.unlimited, pose: R.camera.pose(), hour: R.sky.hour(),
+  storage: Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)]) };
+`;
+export const FRESH_RESET = `
+  for (let k = 0; k < 4; k++) window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+  R.tools.set('camera');
+  localStorage.clear(); for (const [k, v] of __start.storage) localStorage.setItem(k, v);
+  if (R.lang() !== __start.lang) R.setLang(__start.lang);
+  if (JSON.stringify(R.options.get()) !== __start.options) await R.options.apply(JSON.parse(__start.options));
+  R.sim.speed(__start.paused ? 0 : 1);
+  R.cities.growthRate(__start.growth);
+  w.unlimited = __start.unlimited;
+  await R.saves.newMap(__start.seed);
+  R.sky.setHour(__start.hour);
+  { const p = __start.pose; await R.camera.view(p.x, p.z, p.yaw, p.pitch, p.dist); }
+  for (const e of document.querySelectorAll('.v2-toast')) e.remove();
+`;
+
+/** The checks of a shared session, per scenario (a session cut short fails the scenario it stopped in and every one after). */
+export function checksByScenario(lines, names) {
+  const by = new Map(names.map((n) => [n, []]));
+  let cur = null, ended = false;
+  for (const l of lines) {
+    if (!l.includes('CHECK ')) continue;
+    const c = l.slice(l.indexOf('CHECK ') + 6).trim();
+    if (c.startsWith('SCENARIO ')) { cur = c.slice(9); continue; }
+    if (c === 'END') { ended = true; continue; }
+    if (cur && by.has(cur)) by.get(cur).push(c);
+  }
+  if (!ended) {
+    const at = cur ? names.indexOf(cur) : 0;
+    for (const n of names.slice(Math.max(0, at))) by.get(n).push('FAILED the shared session did not finish (hung or crashed) in ' + (cur ?? 'its start'));
+  }
+  return by;
+}
+
+/** How many scenarios run at once: one (CHECK_JOBS may ask for more; the time goes to starting games, not to testing). */
+export const JOBS = Math.max(1, Number(process.env.CHECK_JOBS ?? 1));
+
+/**
+ * Runs `fn(name)` (a scenario's checks) over `names`, `jobs` at once; the reports are printed in the scenarios' order as
+ * soon as each one and those before it are done. Returns how many checks failed.
+ */
+export async function eachScenario(names, fn, jobs = JOBS) {
+  const results = new Array(names.length);
+  let next = 0, printed = 0, failed = 0;
+  const flush = () => { while (printed < names.length && results[printed] !== undefined) { failed += report(names[printed], results[printed]); printed++; } };
+  await Promise.all(Array.from({ length: Math.min(jobs, names.length) }, async () => {
+    for (let i = next++; i < names.length; i = next++) { results[i] = await fn(names[i]); flush(); }
+  }));
+  return failed;
 }
 
 /** The scenario names asked on the command line (all when none), unknown names reported as failures. */

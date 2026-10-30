@@ -323,7 +323,8 @@ export class SaveFlow {
     await this.load();
   }
 
-  async newMap(): Promise<void> {
+  /** A new empty map (`seed`: the same terrain again; none: a new one). */
+  async newMap(seed?: number): Promise<void> {
     const h = this.h;
     const host: NewMapHost = {
       life: h.life,
@@ -332,7 +333,7 @@ export class SaveFlow {
       generateTerrain: () => h.generateTerrain(),
       endRebuild: (err, what) => h.endRebuild(err, what),
     };
-    return newMapSession(host);
+    return newMapSession(host, seed);
   }
 
   /** The window is closing: a save under way is waited for, then what is still unsaved is written. */

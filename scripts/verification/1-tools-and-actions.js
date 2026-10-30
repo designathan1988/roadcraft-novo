@@ -96,10 +96,10 @@
   // ---------------- people and actions
   await check('standing person (people creator)', () => {
     // with the cooked people loaded the click goes through their creator (a group, one undo step); without them, a street item
-    const n = items(), k = R.people.groups() ?? 0;
+    const n = items(), k = R.people.groups() ?? 0; // null: the creator has not loaded (no cooked people)
     R.ui.personSpec({ color: 3, height: 7, walk: false, count: 2 }); R.ui.personOptions({ count: 2, mode: 'stand' });
     R.tools.set('person'); R.tools.click(X + 20, Z + 30);
-    if (cr) { if (cr.size !== k + 1) return 'group not placed'; R.history.undo(); return cr.size === k || 'undo did not remove the group'; }
+    if (R.people.groups() !== null) { if (R.people.groups() !== k + 1) return 'group not placed'; R.history.undo(); return R.people.groups() === k || 'undo did not remove the group'; }
     return items() >= n + 2 || 'person not placed';
   });
   await check('people walking', () => {

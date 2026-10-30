@@ -1374,7 +1374,7 @@ export class Game {
       following: () => !!g.vehicles.follow,
       followAt: (x, z, r) => g.vehicles.pick(x, z, r),
       peopleReady: () => g.vehicles.people.ready,
-      growthRate: (r) => { g.growth.rate = r; },
+      growthRate: (r) => { if (r !== undefined) g.growth.rate = r; return g.growth.rate; },
       signals: () => new Uint8Array(g.signalsSab),
       saveStore: () => g.saving.saveStore,
       selected: () => g.selected,
@@ -1411,7 +1411,7 @@ export class Game {
       },
       setTool: (t) => g.setTool(t), select: (id) => g.select(id), inspect: (x, z) => g.inspector.pick(x, z),
       undo: () => g.commands.undo(), redo: () => g.commands.redo(), canUndo: () => g.commands.canUndo,
-      save: (quiet) => g.saving.save(quiet), load: () => g.saving.load(), importMap: (f) => g.saving.importMap(f), newMap: () => g.saving.newMap(),
+      save: (quiet) => g.saving.save(quiet), load: () => g.saving.load(), importMap: (f) => g.saving.importMap(f), newMap: (seed) => g.saving.newMap(seed),
       generated: (medium) => g.cities.generated(medium), testCity: () => g.cities.testCity(),
       paused: () => g.clock.paused, togglePause: () => g.togglePause(), speed: (n) => g.setSpeed(n),
     };
