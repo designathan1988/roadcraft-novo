@@ -18,10 +18,12 @@ import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
 import { stripAt } from './probe.ts';
 import { archOf, bendSpeed, desiredSpeed, driveAccel, drawDriver } from './drivers.ts';
-import { CAR_STYLE_LEN, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema } from './traffic/state.ts';
+import { CAR_STYLE_LEN, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, JAM_SECONDS, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, RELEASE_EVERY, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema } from './traffic/state.ts';
 export { CAR_STYLE_LEN, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, INSPECT_STRIDE, ROUTE_CAP, WAGONS, WAGON_LEN } from './traffic/state.ts';
 import { LaneChanges } from './traffic/laneChanges.ts';
 import { BUS_CAP, Buses, TERMINAL_DWELL } from './traffic/buses.ts';
+import { Meso } from './traffic/meso.ts';
+import { growArray as grow } from './traffic/grow.ts';
 import type { LineSpec, SimLine } from './traffic/lines.ts';
 import { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE, Regions } from './traffic/regions.ts';
 import { Measure } from './traffic/measure.ts';
@@ -29,23 +31,11 @@ import { Stops } from './traffic/stops.ts';
 export { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE };
 
 const WINDOW = 1500;
-// meso (far from the camera) at the pace of micro: the fleet is a single one, so if meso runs faster the cars
-// pile up in the window until it jams, and if it runs slower the window empties; and the camera must not change how
-// fast the city drives. Meso takes MESO_ALPHA times the `mesoEnter` estimate: free driving slowed by occupancy
-// (1 + MESO_CROWD × occupancy²) plus the junction's wait (the lights and zebras themselves are simulated at the line).
-// Measured on a 6 × 6 grid at 8:00, the camera on it against 8 km away (test "the camera does not change how fast the
-// city drives"): 21.7 / 20.8, 10.6 / 10.9 and 5.9 / 6.7 km/h at densities 1/100, 1/30 and 1/15 with MESO_ALPHA 0.95
-// (the earlier 0.85 with the same scene gave 5.7 / 7.4 at 1/15, the far model too fast)
-const MESO_ALPHA = 0.95, MESO_CROWD = 12;
 const WINDOW_OUT = 1750;
 /** Stopped for this long (s), the driver reconsiders the route (roadcraft STUCK_SECONDS). */
 export const STUCK_SECONDS = 10;
-/** Jammed junction: someone waiting at the line and nobody has gone through for this long (s). */
-export const JAM_SECONDS = 20;
 /** Waiting for the same full exit for this long (s), the driver claims its turn on it. */
 const STARVE_SECONDS = 30;
-/** Controlled release of a jammed junction: one vehicle every this many seconds. */
-const RELEASE_EVERY = 3;
 /** Route searches per step (detours and reconsiderations): the rest try on the next step. */
 const ROUTE_BUDGET = 6;
 /**
@@ -68,13 +58,6 @@ const CROWD_OCC = 0.15, CROWD_SLOPE = 5;
  */
 /** A reconsidering driver's detour rejoins the route up to this many nodes ahead. */
 const REJOIN = 6;
-
-/**
- * IDM figures for what is not a driver's own (sim/drivers.ts has each driver's): the standstill gap kept from a
- * bus stop or the tail entering a lane, and the headway a vehicle entering the window is given. The fleet's sedan
- * keeps these (2.8 m/s², 2.2 m/s², 2.2 m, 0.9 s; with 2.2 m/s² the centre was ~2 km/h slower, measured).
- */
-const S0 = 2.2, T_HEAD = 0.9;
 
 /** Where trucks start and end (none, residential, commercial, industrial, mixed): goods between industry and commerce. */
 const TRUCK_ZONES = [0.05, 0.1, 0.6, 1, 0.4];
@@ -128,9 +111,11 @@ export class Traffic {
   /** Ordered list of micro vehicles per lane and per connection (head = the frontmost). */
   laneHead = new Int32Array((1 << 14) * 16).fill(-1);
   laneTail = new Int32Array((1 << 14) * 16).fill(-1);
-  /** Far-model vehicles per lane, in order of entry: an edit to a road finds the vehicles on it without a fleet pass. */
-  mesoHead = new Int32Array((1 << 14) * 16).fill(-1);
-  mesoTail = new Int32Array((1 << 14) * 16).fill(-1);
+  /** Far model: lane queues and events (traffic/meso.ts); the lists are the owner's arrays. */
+  readonly meso: Meso;
+  /** Far-model vehicles per lane, in order of entry (view of the owner, `meso`). */
+  get mesoHead(): Int32Array { return this.meso.head; }
+  get mesoTail(): Int32Array { return this.meso.tail; }
   connHead = new Int32Array(1 << 14).fill(-1);
   /** Per connection: the vehicle that claimed it at its stop line (`pass`), and when. */
   private connPass = new Int32Array(1 << 14).fill(-1);
@@ -138,9 +123,8 @@ export class Traffic {
   /** Whoever waits too long at a yield claims the turn (tenths of a second of the simulation clock). */
   private connClaim = new Int32Array(1 << 14).fill(-100);
   connTail = new Int32Array(1 << 14).fill(-1);
-  /** All vehicles (micro and meso) per lane, and the last meso exit (FIFO queue). */
+  /** All vehicles (micro and meso) per lane. */
   laneCount = new Uint16Array((1 << 14) * 16);
-  laneLastExit = new Float64Array((1 << 14) * 16);
   /**
    * Turn on a full exit lane: whoever has waited STARVE_SECONDS for it holds the next free spot (renewed every
    * step); without it an arm saw the exit always filled by those coming from the others and waited for minutes.
@@ -161,10 +145,6 @@ export class Traffic {
   /** Lanes and connections with micro vehicles. */
   private activeLanes = new Set<number>();
   private activeConns = new Set<number>();
-  /** Meso events: heap (time, vehicle). */
-  private evT = new Float64Array(1 << 12);
-  private evV = new Int32Array(1 << 12);
-  private evN = 0;
   /** Traffic lights (plans, timed cycle, actuated near the camera). */
   readonly sig: Signals;
   private readonly laneChanges: LaneChanges;
@@ -213,10 +193,10 @@ export class Traffic {
   clearAll(): void {
     this.veh.clear();
     this.laneHead.fill(-1); this.laneTail.fill(-1); this.connHead.fill(-1); this.connTail.fill(-1); this.connClaim.fill(-100);
-    this.mesoHead.fill(-1); this.mesoTail.fill(-1);
-    this.laneCount.fill(0); this.laneLastExit.fill(0); this.segLoad.fill(0);
+    this.meso.clear();
+    this.laneCount.fill(0); this.segLoad.fill(0);
     this.lastAdmit.fill(this.time); this.releaseAt.fill(0); this.jamAt.fill(0); this.exitClaim.fill(-1);
-    this.microN = 0; this.evN = 0;
+    this.microN = 0;
     this.activeLanes.clear(); this.activeConns.clear();
     this.signalNodes.clear();
     if (this.signals) for (const n of this.windowSignals) if (n < this.signals.length) this.signals[n] = 0;
@@ -273,7 +253,8 @@ export class Traffic {
   /** Vehicles that entered a signalled junction on red (near the camera; should stay 0). */
   ranRed = 0;
   /** Meso: attempts to move on at the end of the lane and how many found the next one full (congestion far from the camera). */
-  mesoTries = 0; mesoFull = 0;
+  get mesoTries(): number { return this.meso.tries; }
+  get mesoFull(): number { return this.meso.full; }
   private routeBudget = 0;
 
   /** Explosion: micro-window vehicles within `r` metres leave the scene (returns how many). */
@@ -301,9 +282,11 @@ export class Traffic {
   private tmp = new Float64Array(4);
   private tmp2 = new Float64Array(4);
   /** Meso pace factor (MESO_ALPHA; a field so measurements can try others). */
-  mesoAlpha = MESO_ALPHA;
+  get mesoAlpha(): number { return this.meso.alpha; }
+  set mesoAlpha(v: number) { this.meso.alpha = v; }
   /** How much a full lane slows the far model (the BPR term: 1 + mesoCrowd × occupancy²). */
-  mesoCrowd = MESO_CROWD;
+  get mesoCrowd(): number { return this.meso.crowd; }
+  set mesoCrowd(v: number) { this.meso.crowd = v; }
   /** Target density (vehicles per metre of lane). */
   density = 1 / 100;
 
@@ -323,12 +306,10 @@ export class Traffic {
     sim.net.segs.onGrow((cap) => {
       this.laneHead = grow(this.laneHead, cap * 16, -1);
       this.laneTail = grow(this.laneTail, cap * 16, -1);
-      this.mesoHead = grow(this.mesoHead, cap * 16, -1);
-      this.mesoTail = grow(this.mesoTail, cap * 16, -1);
+      this.meso.grow(cap * 16);
       this.laneVel = grow(this.laneVel, cap * 16, 0);
       this.laneVelT = grow(this.laneVelT, cap * 16, 0);
       this.laneCount = grow(this.laneCount, cap * 16, 0);
-      this.laneLastExit = grow(this.laneLastExit, cap * 16, 0);
       this.exitClaim = grow(this.exitClaim, cap * 16, -1);
       this.exitClaimT = grow(this.exitClaimT, cap * 16, 0);
       this.segLoad = grow(this.segLoad, cap * 2, 0);
@@ -349,6 +330,48 @@ export class Traffic {
       this.jamAt = grow(this.jamAt, cap, 0);
     });
     const g = this;
+    this.meso = new Meso({
+      sim,
+      cols: this.veh.cols,
+      get alive() { return g.veh.alive; },
+      get time() { return g.time; },
+      get camX() { return g.camX; },
+      get camZ() { return g.camZ; },
+      get window() { return g.window; },
+      get laneHead() { return g.laneHead; },
+      get laneTail() { return g.laneTail; },
+      get laneCount() { return g.laneCount; },
+      get lines() { return g.lines; },
+      router: this.router,
+      sig: this.sig,
+      get routeBudget() { return g.routeBudget; },
+      get lastAdmit() { return g.lastAdmit; },
+      get releaseAt() { return g.releaseAt; },
+      get jamAt() { return g.jamAt; },
+      countRelease: () => { g.released++; },
+      countJam: () => { g.jams++; },
+      nextSeg: (v) => g.nextSeg(v),
+      segAfter: (v, k) => g.segAfter(v, k),
+      pickLane: (seg, dir, after, bus, fallback) => g.pickLane(seg, dir, after, bus, fallback),
+      atDestination: (v) => g.atDestination(v),
+      dropsOff: (v) => g.dropsOff(v),
+      dropOffTrip: (v, node) => g.dropOffTrip(v, node),
+      finish: (v) => g.finish(v),
+      lose: (v) => g.lose(v),
+      replanFrom: (v, node) => g.replanFrom(v, node),
+      materialize: (lane) => g.materialize(lane),
+      serveBus: (v) => g.buses.serve(v),
+      busPlan: (v, node) => g.buses.busPlan(v, node),
+      addMicro: (v) => g.addMicro(v),
+      insert: (v, onConn, lane) => g.insert(v, onConn, lane),
+      leaveLane: (v, lane) => g.leaveLane(v, lane),
+      setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      enterLane: (v, s) => g.enterLane(v, s),
+      admit: (node, arm) => g.admit(node, arm),
+      reconsider: (v, lane, ns) => g.reconsider(v, lane, ns),
+      crossingDown: (n) => g.crossingDown(n),
+      pedCrossing: (n) => g.pedCrossing(n),
+    });
     this.buses = new Buses({
       sim,
       veh: this.veh,
@@ -362,7 +385,7 @@ export class Traffic {
       initVehicle: (v) => g.initVehicle(v),
       enterLane: (v, s) => g.enterLane(v, s),
       setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
-      mesoEnter: (v, lane, spawned) => g.mesoEnter(v, lane, spawned),
+      mesoEnter: (v, lane, spawned) => g.meso.enter(v, lane, spawned),
       despawn: (v) => g.despawn(v),
     });
     this.laneChanges = new LaneChanges({
@@ -754,38 +777,6 @@ export class Traffic {
     c.microIdx[last] = i;
   }
 
-  // ------------------------------------------------------------ meso events
-
-  private schedule(v: number, t: number): void {
-    this.veh.cols.tExit[v] = t;
-    if (this.evN >= this.evT.length) {
-      const a = new Float64Array(this.evT.length * 2); a.set(this.evT); this.evT = a;
-      const b = new Int32Array(this.evV.length * 2); b.set(this.evV); this.evV = b;
-    }
-    let i = this.evN++;
-    while (i > 0) {
-      const p = (i - 1) >> 1;
-      if (this.evT[p] <= t) break;
-      this.evT[i] = this.evT[p]; this.evV[i] = this.evV[p]; i = p;
-    }
-    this.evT[i] = t; this.evV[i] = v;
-  }
-
-  private popEvent(): number {
-    const v = this.evV[0];
-    const lt = this.evT[--this.evN], lv = this.evV[this.evN];
-    let i = 0;
-    for (;;) {
-      let c = i * 2 + 1;
-      if (c >= this.evN) break;
-      if (c + 1 < this.evN && this.evT[c + 1] < this.evT[c]) c++;
-      if (this.evT[c] >= lt) break;
-      this.evT[i] = this.evT[c]; this.evV[i] = this.evV[c]; i = c;
-    }
-    this.evT[i] = lt; this.evV[i] = lv;
-    return v;
-  }
-
   // ------------------------------------------------------------ routes
 
   private routeAt(v: number, k: number): number { return this.routes[v * ROUTE_CAP + k]; }
@@ -987,9 +978,9 @@ export class Traffic {
     this.enterLane(v, c.s[v]);
     this.setLaneCount(lane, 1);
     if (this.leaveBay(v, lane)) return;
-    this.mesoEnter(v, lane, true);
+    this.meso.enter(v, lane, true);
     // born inside the window: drawn from the start
-    if (this.inWindow(lane)) this.materialize(lane);
+    if (this.meso.inWindow(lane)) this.materialize(lane);
   }
 
   /**
@@ -1058,27 +1049,9 @@ export class Traffic {
     this.despawn(v);
   }
 
-  /** Puts a far-model vehicle at the end of its lane's list. */
-  private mesoLink(v: number, lane: number): void {
-    const c = this.veh.cols;
-    if (c.ml[v] === lane) return;
-    this.mesoUnlink(v);
-    c.ml[v] = lane; c.mnext[v] = -1; c.mprev[v] = this.mesoTail[lane];
-    if (this.mesoTail[lane] >= 0) c.mnext[this.mesoTail[lane]] = v; else this.mesoHead[lane] = v;
-    this.mesoTail[lane] = v;
-  }
-
-  private mesoUnlink(v: number): void {
-    const c = this.veh.cols, lane = c.ml[v];
-    if (lane < 0) return;
-    if (c.mprev[v] >= 0) c.mnext[c.mprev[v]] = c.mnext[v]; else this.mesoHead[lane] = c.mnext[v];
-    if (c.mnext[v] >= 0) c.mprev[c.mnext[v]] = c.mprev[v]; else this.mesoTail[lane] = c.mprev[v];
-    c.ml[v] = -1; c.mnext[v] = c.mprev[v] = -1;
-  }
-
   private despawn(v: number): void {
     const c = this.veh.cols;
-    this.mesoUnlink(v);
+    this.meso.unlink(v);
     if (c.spot[v] !== 0) this.releaseSpot(v);
     if (c.line[v] >= 0) this.buses.forget(v);
     this.wagonPrev.delete(v);
@@ -1090,156 +1063,6 @@ export class Traffic {
     c.lane[v] = -1; c.conn[v] = -1;
     c.tExit[v] = -1;
     this.veh.release(v);
-  }
-
-  // ------------------------------------------------------------ meso
-
-  private inWindow(lane: number): boolean {
-    const sc = this.sim.net.segs.cols, s = laneSeg(lane);
-    return Math.hypot(sc.mx[s] - this.camX, sc.mz[s] - this.camZ) < this.window;
-  }
-
-  /** Vehicle switches to meso mode on the lane (schedules its exit). */
-  private mesoEnter(v: number, lane: number, spawned = false): void {
-    const c = this.veh.cols;
-    this.mesoLink(v, lane);
-    const L = this.sim.laneLen(lane);
-    const p = this.sim.net.segs.cols.profile[laneSeg(lane)];
-    const lanes = Math.max(1, laneCount(p, laneDir(lane)));
-    // the queue already drains at the capacity rate (one vehicle every 1.8 s per lane) and a full lane moves slowly:
-    // congestion exists far from the camera too, and the flow reaching the micro window is what traffic at that
-    // occupancy would deliver
-    const rest = spawned ? L - c.s[v] : L;
-    let extra = 0;
-    // bus on the lane of its stop: stops, serves it and already knows the next one
-    if (c.line[v] >= 0) {
-      const ln = this.lines[c.line[v]];
-      if (ln && ln.stopLane[c.stopI[v]] === lane) { extra = ln.mode ? 25 : ln.term.has(c.stopI[v]) ? TERMINAL_DWELL : DWELL; this.buses.serve(v); }
-    }
-    // the junction at the end of the lane: the same wait the router estimates (signal, stop, turn) and the
-    // arm's throughput, as in micro
-    // (at a light the red itself is simulated when the vehicle reaches the line: only the turn's slowdown here, and the
-    // queue leaves at the saturation headway of a green)
-    const ns = this.nextSeg(v);
-    const node = this.sim.laneTo(lane), lit = this.sim.nodePhases[node] > 0;
-    const wait = ns >= 0 ? this.router.nodeCost(node, laneSeg(lane), ns, !lit) : 0;
-    const headway = lit ? 2 : wait >= 6 ? 3.6 : wait >= 4 ? 2.6 : 1.8;
-    // time: free driving, slowed by occupancy (BPR curve), plus the junction wait; all times MESO_ALPHA
-    const occ = Math.min(1, this.laneCount[lane] * 7.5 / (L * lanes));
-    const run = rest / (laneSpeed(p) * c.vf[v]) * (1 + this.mesoCrowd * occ * occ) + wait;
-    const t = Math.max(this.time + run * this.mesoAlpha + extra, this.laneLastExit[lane] + headway / lanes);
-    this.laneLastExit[lane] = t;
-    this.schedule(v, t);
-  }
-
-  private processMeso(): void {
-    while (this.evN > 0 && this.evT[0] <= this.time) {
-      const t = this.evT[0];
-      const v = this.popEvent();
-      const c = this.veh.cols;
-      if (!this.veh.alive[v] || c.micro[v] || c.tExit[v] !== t) continue;
-      this.mesoAdvance(v);
-    }
-  }
-
-  /** End of the lane in meso mode: picks the next one, waits if it is full. */
-  private mesoAdvance(v: number): void {
-    const c = this.veh.cols, sim = this.sim;
-    let lane = c.lane[v];
-    if (!sim.net.segs.alive[laneSeg(lane)]) { c.why[v] = End.Lost; this.finish(v); return; }
-    if (c.dying[v]) { this.finish(v); return; }
-    // on a lane inside the window, behind drawn vehicles: it waits to fit behind them (never passes them unseen)
-    if (this.laneHead[lane] >= 0 && this.inWindow(lane)) { this.materialize(lane); if (!c.micro[v]) this.schedule(v, this.time + 1); return; }
-    if (this.atDestination(v)) {
-      // a drop-off: the trip ends there and the car goes on to another after a moment at the kerb
-      if (this.dropsOff(v) && this.dropOffTrip(v, sim.laneTo(lane))) { this.schedule(v, this.time + 6); return; }
-      if (c.line[v] < 0) { this.finish(v); return; }
-      this.buses.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
-      if (c.dying[v]) { this.finish(v); return; }
-    }
-    let ns = this.nextSeg(v);
-    if (ns < 0) {
-      // route ended before the destination (truncated route): plan again from here
-      this.replanFrom(v, sim.laneTo(lane));
-      if (c.dying[v]) { this.finish(v); return; }
-      ns = this.nextSeg(v);
-      if (ns < 0) { this.lose(v); this.finish(v); return; }
-    }
-    const bus = c.line[v] >= 0, node = sim.laneTo(lane);
-    let conn = sim.connToward(lane, ns, bus);
-    for (let tries = 0; conn < 0 && tries < 2; tries++) {
-      // its lane does not make the route's turn (the turn was banned, the lanes rearranged): another lane of this
-      // segment that makes it (the far model changes lanes at the end of the lane), else a new route from here
-      const alt = sim.laneToward(laneSeg(lane), laneDir(lane), ns, laneIdx(lane), bus);
-      if (alt >= 0 && alt !== lane) {
-        this.setLaneCount(lane, -1); this.setLaneCount(alt, 1);
-        c.lane[v] = lane = alt; this.mesoLink(v, alt);
-      } else {
-        this.replanFrom(v, node);
-        if (c.dying[v]) { this.finish(v); return; }
-        ns = this.nextSeg(v);
-        if (ns < 0) break;
-      }
-      conn = sim.connToward(lane, ns, bus);
-    }
-    if (conn < 0) { this.lose(v); this.finish(v); return; }
-    // a level crossing with the barrier down, or someone on the zebra: wait (the far model obeys them too)
-    const ctl = sim.nodeCtl[node];
-    if ((ctl === Ctl.Crossing && this.crossingDown(node) && !PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(lane)]].rail) || (ctl === Ctl.Zebra && this.pedCrossing(node))) {
-      this.schedule(v, this.time + 1); return;
-    }
-    // the light: red for this arm, wait for its next green (the far model obeys the lights too)
-    if (sim.nodePhases[node] > 0) {
-      const arm = sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)];
-      if (!this.sig.go(node, arm)) { this.schedule(v, Math.max(this.time + 0.2, this.sig.nextGreen(node, arm, this.time))); return; }
-    }
-    const dir = sim.net.segs.cols.a[ns] === node ? 1 : -1;
-    // meso: enters the least full lane among those valid for the next turn (all lanes carry cars,
-    // as in micro; otherwise everyone reaches the window in a single lane)
-    const to = this.pickLane(ns, dir, this.segAfter(v, 1), bus, sim.conns.cols.to[conn]);
-    if (to < 0 || !sim.net.segs.alive[ns]) { this.lose(v); this.finish(v); return; }
-    // queue: a full lane holds the vehicle. As in micro: stopped STUCK_SECONDS, the driver reconsiders the route (a
-    // local detour toward an exit with room); a junction jammed for JAM_SECONDS lets one vehicle in every
-    // RELEASE_EVERY s, but never more than physically fit (bumper to bumper)
-    this.mesoTries++;
-    const L = sim.laneLen(to);
-    const room = Math.max(1, Math.floor(L / 7.5)), fit = Math.max(room, Math.floor(L / 6.6));
-    if (this.laneCount[to] >= room) {
-      c.wait[v] += 2; this.mesoFull++;
-      if (c.wait[v] >= c.patience[v] && !bus && this.routeBudget > 0 && c.held[v] < c.wait[v] - c.patience[v] + 1) {
-        c.held[v] = c.wait[v]; // (reconsiders once every patience)
-        if (this.reconsider(v, lane, ns)) { this.schedule(v, this.time + 0.5); return; }
-      }
-      const jammed = c.wait[v] >= JAM_SECONDS && this.time - this.lastAdmit[node] >= JAM_SECONDS && this.time >= this.releaseAt[node];
-      if (!jammed || this.laneCount[to] >= fit) { this.schedule(v, this.time + 2); return; }
-      this.released++; this.releaseAt[node] = this.time + RELEASE_EVERY;
-      if (this.jamAt[node] < this.lastAdmit[node]) { this.jamAt[node] = this.time; this.jams++; }
-    }
-    c.wait[v] = 0; c.held[v] = 0;
-    const enterMicro = this.inWindow(to);
-    const tail = this.laneTail[to];
-    if (enterMicro && tail >= 0 && c.s[tail] < c.len[tail] + S0 + 4) { this.schedule(v, this.time + 0.6); return; }
-    // counted only once it really goes through (flow inspector, automatic control, jammed-junction detection)
-    this.admit(node, sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)]);
-    this.leaveLane(v, lane);
-    this.setLaneCount(lane, -1);
-    this.setLaneCount(to, 1);
-    c.lane[v] = to;
-    this.enterLane(v, 0);
-    c.rIdx[v]++;
-    if (enterMicro) {
-      // entered the window: becomes micro at the start of the lane
-      this.mesoUnlink(v);
-      c.s[v] = 0;
-      c.held[v] = 0;
-      c.v[v] = Math.min(laneSpeed(sim.net.segs.cols.profile[ns]) * c.vf[v], tail >= 0 ? Math.max(2, (c.s[tail] - c.len[tail]) / T_HEAD) : 99);
-      c.conn[v] = -1;
-      c.fade[v] = 0;
-      this.addMicro(v);
-      this.insert(v, false, to);
-      return;
-    }
-    this.mesoEnter(v, to);
   }
 
   // ------------------------------------------------------------ junctions
@@ -1707,7 +1530,7 @@ export class Traffic {
         for (let v = this.mesoHead[lane]; v >= 0;) {
           const next = c.mnext[v];
           if (to < 0) { c.why[v] = End.Lost; this.finish(v); }
-          else { this.setLaneCount(lane, -1); this.setLaneCount(to, 1); c.lane[v] = to; this.mesoLink(v, to); }
+          else { this.setLaneCount(lane, -1); this.setLaneCount(to, 1); c.lane[v] = to; this.meso.link(v, to); }
           v = next;
         }
         for (let v = this.laneHead[lane]; v >= 0;) {
@@ -2148,7 +1971,7 @@ export class Traffic {
     if (!this.inWindowOut(to)) {
       // left the window: back to meso
       this.removeMicro(v);
-      this.mesoEnter(v, to);
+      this.meso.enter(v, to);
       return;
     }
     this.insert(v, false, to);
@@ -2209,7 +2032,7 @@ export class Traffic {
       c.pk[v] = 0;
       this.unlink(v);
       this.removeMicro(v);
-      this.mesoEnter(v, lane, true);
+      this.meso.enter(v, lane, true);
     }
     // far-model vehicles on lanes now inside the window become drawn ones (the window came to them, or they were born
     // there): nobody inside the window is invisible, holding a queue or an exit's room unseen
@@ -2238,7 +2061,7 @@ export class Traffic {
       // (one that has just come in stands at the start of the lane, whole)
       if (limit < c.len[v]) break;
       const s = Math.max(c.len[v], Math.min(est, limit));
-      this.mesoUnlink(v);
+      this.meso.unlink(v);
       c.s[v] = s; c.conn[v] = -1; c.held[v] = 0; c.wait[v] = 0;
       // in a queue it stands; otherwise it drives at what the lane has been driving at
       c.v[v] = s < est - 1 ? 0 : Math.min(free * c.vf[v], this.laneVel[lane] > 0 ? this.laneVel[lane] : free * 0.7);
@@ -2276,7 +2099,7 @@ export class Traffic {
     this.buses.tick(dt);
     this.updateSignals(dt);
     this.updateCrossings();
-    this.processMeso();
+    this.meso.process();
     this.mvs.beginStep();
     this.stepMicro(dt);
     this.stepManoeuvres(dt);
@@ -2554,10 +2377,3 @@ export function backAlong(sim: SimNet, lane: number, conn: number, s: number, d:
   out[0] += Math.sin(out[3]) * s; out[2] += Math.cos(out[3]) * s;
 }
 
-function grow<T extends Int32Array | Uint32Array | Float32Array | Float64Array | Uint16Array | Uint8Array>(a: T, cap: number, fill: number): T {
-  if (cap <= a.length) return a;
-  const b = new (a.constructor as new (n: number) => T)(cap);
-  b.fill(fill);
-  b.set(a);
-  return b;
-}

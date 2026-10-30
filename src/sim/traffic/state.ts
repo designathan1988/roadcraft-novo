@@ -4,6 +4,10 @@ import { driverSchema } from '../drivers.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
+/** Jammed junction: someone waiting at the line and nobody has gone through for this long (s). */
+export const JAM_SECONDS = 20;
+/** Controlled release of a jammed junction: one vehicle every this many seconds. */
+export const RELEASE_EVERY = 3;
 
 /** Numbers per vehicle in `Traffic.inspect`, and why a vehicle there may stand still (bits). */
 export const INSPECT_STRIDE = 18;

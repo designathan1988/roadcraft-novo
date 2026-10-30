@@ -28,7 +28,7 @@ function place(tr: Traffic, lane: number, s: number, next: number, micro: boolea
   c.rLen[v] = 3; c.rIdx[v] = 1; c.dest[v] = sim.laneTo(next);
   c.lane[v] = lane; c.conn[v] = -1; c.s[v] = s;
   T.setLaneCount(lane, 1);
-  if (micro) { T.addMicro(v); T.insert(v, false, lane); } else T.schedule(v, tr.time);
+  if (micro) { T.addMicro(v); T.insert(v, false, lane); } else T.meso.schedule(v, tr.time);
   return v;
 }
 
@@ -45,7 +45,7 @@ test('C8: a far vehicle that finds no room at the start of the next lane is not 
   // a meso car at the end of its lane, due to move on now
   const v = place(tr, from, tr.sim.laneLen(from), to, false);
   const passed = tr.nodePass[node], arm = k.arm[conn], flow = tr.advisor.pass[node * 8 + arm];
-  inner(tr).mesoAdvance(v);
+  inner(tr).meso.advance(v);
   assert.equal(tr.veh.cols.lane[v], from, 'the car is still on its lane');
   assert.equal(tr.nodePass[node], passed, `node pass count went from ${passed} to ${tr.nodePass[node]} with nobody through`);
   assert.equal(tr.advisor.pass[node * 8 + arm], flow, 'the automatic control saw a vehicle that did not pass');
@@ -191,7 +191,7 @@ test('C6: a traffic light far from the camera is not frozen and open: far vehicl
   while (conn >= 0 && k.turn[conn] === 3) conn = k.nextFromLane[conn];
   assert.ok(conn >= 0, 'a way through the node');
   const v = place(tr, lane, sim.laneLen(lane), k.to[conn], false);
-  inner(tr).mesoAdvance(v);
+  inner(tr).meso.advance(v);
   assert.equal(tr.veh.cols.lane[v], lane, 'a far car went through a red light');
   // a pedestrian at the crossing of an arm whose cars have green waits
   if (green) {
@@ -616,7 +616,7 @@ test('C32: level crossing barriers close for trains far from the camera too, and
         tr.routes[v * 96] = sim.laneFrom(lane); tr.routes[v * 96 + 1] = x; tr.routes[v * 96 + 2] = far;
         c.rLen[v] = 3; c.rIdx[v] = 1; c.dest[v] = far; c.lane[v] = lane; c.s[v] = sim.laneLen(lane);
         T.setLaneCount(lane, 1);
-        T.mesoAdvance(v);
+        T.meso.advance(v);
         carWaited = c.lane[v] === lane;
       }
     }
@@ -957,7 +957,7 @@ test('C33: inside the camera window every vehicle is a drawn one (none stays inv
     // it in its lane wait their turn)
     const tail = tr.laneTail[c.lane[v]];
     const room = tail < 0 || c.s[tail] - c.len[tail] - 2 >= c.len[v];
-    if (!c.micro[v] && T.inWindow(c.lane[v]) && room && c.mprev[v] < 0) hidden++;
+    if (!c.micro[v] && T.meso.inWindow(c.lane[v]) && room && c.mprev[v] < 0) hidden++;
   }
   assert.ok(all > 50, `vehicles ${all}`);
   assert.equal(hidden, 0, `${hidden} of ${all} vehicles inside the window are invisible (far model)`);
