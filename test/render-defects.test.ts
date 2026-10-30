@@ -768,3 +768,41 @@ test('vehicles: the glass is split from the opaque body for the transparent cabi
   assert.equal(solid.getAttribute('glow').getX(0), 0);
   assert.equal(glass!.getAttribute('glow').getX(0), 5);
 });
+
+test('cars: from above, the road never shows through the near car\'s glass (the cabin fills the body)', async () => {
+  const { CAR_SIZES, buildCarBody, buildCarCabin } = await import('../src/render/carBody.ts');
+  // the triangles of a geometry, and the heights where a vertical ray at (x, z) crosses them
+  const tris = (g: THREE.BufferGeometry): number[][] => {
+    const p = g.getAttribute('position').array, idx = g.index?.array, n = idx ? idx.length : p.length / 3, out: number[][] = [];
+    for (let i = 0; i < n; i += 3) {
+      const v = [idx ? idx[i] : i, idx ? idx[i + 1] : i + 1, idx ? idx[i + 2] : i + 2];
+      out.push(v.flatMap((k) => [p[k * 3], p[k * 3 + 1], p[k * 3 + 2]]));
+    }
+    return out;
+  };
+  const top = (T: number[][], x: number, z: number): number => {
+    let y = -Infinity;
+    for (const [ax, ay, az, bx, by, bz, cx, cy, cz] of T) {
+      const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+      if (Math.abs(d) < 1e-12) continue;
+      const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d, l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d;
+      if (l1 >= 0 && l2 >= 0 && l1 + l2 <= 1) y = Math.max(y, l1 * ay + l2 * by + (1 - l1 - l2) * cy);
+    }
+    return y;
+  };
+  for (const style of ['sedan', 'hatch', 'suv', 'van', 'pickup'] as const) {
+    const a = CAR_SIZES[style], b = buildCarBody(a, style, 24, 8, 3);
+    const solid = [...tris(b.shell), ...tris(b.trim), ...tris(buildCarCabin(a, style))], glass = tris(b.glass);
+    let underGlass = 0, road = 0;
+    for (let i = 0; i < 40; i++) for (let j = 0; j < 14; j++) {
+      const x = -a.length / 2 + (i + 0.5) * a.length / 40, z = -a.width / 2 + (j + 0.5) * a.width / 14;
+      const g = top(glass, x, z), s = top(solid, x, z);
+      if (g <= s) continue;
+      underGlass++;
+      // under the glass something stops the eye above the road (the floor is at 0.24-0.4 m)
+      if (top(solid.filter((t) => Math.max(t[1], t[4], t[7]) < g - 0.02), x, z) < 0.18) road++;
+    }
+    assert.ok(underGlass > 20, `${style}: glass seen from above at ${underGlass} points`);
+    assert.equal(road, 0, `${style}: the road shows through the glass at ${road} of ${underGlass} points`);
+  }
+});

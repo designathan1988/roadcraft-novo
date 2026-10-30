@@ -11,7 +11,7 @@ import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
 import { PeopleRenderer } from './people/crowd.ts';
-import { CAR_SIZES, buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
+import { CAR_SIZES, buildCarBody, buildCarCabin, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
 import { buildBusBody, buildTruckBody, type HeavyArchetype, type HeavyBody } from './heavyBody.ts';
 
 const {
@@ -229,6 +229,12 @@ function carModel(i: number): THREE.BufferGeometry {
   for (const ax of body.axles) for (const x of [half, -half]) wheel(parts, x, r, ax, r, 0.22, ax > 0);
   puff(parts, a.width * 0.28, 0.28, -a.length / 2 - 0.2);
   return mergeGeometries(parts)!;
+}
+
+/** The cabin the near car's glass shows into (carBody.ts buildCarCabin): seats, dash, wheel, trims; never painted. */
+function carCabin(i: number): THREE.BufferGeometry {
+  const [style, a] = CAR_BODIES[i];
+  return fromBody(buildCarCabin(a, style as Exclude<CarStyle, 'wagon'>), 0);
 }
 
 /** The same car for the middle distance: the style's silhouette (carBody.ts buildCarSilhouette) and dark wheels. */
@@ -623,7 +629,8 @@ export class VehicleRenderer {
     // an opaque body and a transparent glass; the far ones keep the merged model (glass there is a dark pane).
     const fullCars = [...CAR_BODIES.map((_, i) => carModel(i)), motoModel()];
     const splitCars = fullCars.map(splitGlass);
-    const cars = splitCars.map((s) => s.solid);
+    // the near cars' glass is see-through: their cabin goes in with the body (the farther levels' glass is opaque)
+    const cars = splitCars.map((s, i) => (i < CAR_BODIES.length ? mergeGeometries([s.solid, carCabin(i)])! : s.solid));
     const fullBus = busModel(), fullTruck = truckModel();
     const splitBus = splitGlass(fullBus), splitTruck = splitGlass(fullTruck);
     const bus = splitBus.solid, truck = splitTruck.solid;

@@ -1,9 +1,10 @@
 // Passenger cars built the way a car is designed: roadcraft 4.0's render/carBody.ts (roadcraft-4.0-main/src), the body
 // surface lofted from its side profile, plan and sections, every face classified (paint, glass, frames, pillars, seams,
 // liners, valances), with the trim, mirrors, handles and lamps. Brought over as geometry built once per style and drawn
-// by instances (render/vehicles.ts); the opening doors and the cabin of 4.0 are left out for now. Units are metres.
+// by instances (render/vehicles.ts), with a lean cabin for the near model (`buildCarCabin`); the opening doors of 4.0
+// are left out for now. Units are metres.
 
-import { BoxGeometry, BufferAttribute, BufferGeometry, Color, ExtrudeGeometry, Float32BufferAttribute, Quaternion, Shape, Vector2, Vector3 } from 'three/webgpu';
+import { BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, ExtrudeGeometry, Float32BufferAttribute, Quaternion, Shape, TorusGeometry, Vector2, Vector3 } from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export type CarStyle = 'hatch' | 'sedan' | 'wagon' | 'suv' | 'pickup' | 'van';
@@ -762,6 +763,126 @@ export function buildCarBody(a: CarArchetype, styleName: CarStyle, stations0 = 6
     far: merge(farFaces),
     headlamps, taillamps, indicators, plates, axles,
   };
+}
+
+// ---------------------------------------------------------------- the cabin
+
+const CARPET = 0x26282c, DASH = 0x1e2023, SEAT_FABRIC = 0x4a4f57, SEAT_SIDE = 0x34373d, CARD = 0x3b3e44;
+const HEADREST = 0x42464d, WHEEL_RIM = 0x141517, BULKHEAD = 0x8b9198;
+/** 4.0's seating package (carBody.ts CAR_PACKAGE): seat recline (rad), the cushion's drop under the hip and reach. */
+const RECLINE = 0.42, CUSHION_DROP = 0.1, CUSHION_REACH = 0.42, UPRIGHT_CUSHION_REACH = 0.3;
+/** Where the steering wheel's hub is from the driver's hip, its lean back from vertical and its radius (4.0 riderPoses.ts). */
+const DRIVER_WHEEL = { forward: 0.46, up: 0.36, tilt: 0.45, radius: 0.185 };
+const CAB_WHEEL = { forward: 0.42, up: 0.13, tilt: 1.0, radius: 0.22 };
+
+/**
+ * What the glass shows into (roadcraft 4.0 carBody.ts, "the cabin, from the package"): carpet, dashboard and console,
+ * steering wheel, the seats with their headrests at the hip points the occupants sit at (`carSeatPoints`), the door
+ * trims up to the waist and what is behind the last seats (parcel shelf, load floor, a pick-up's cab wall, a van's
+ * bulkhead). Without it the body is a hollow shell: through the windscreen the road under the car shows from above.
+ * Built for the near model only (the farther ones have opaque dark glass), flat: no bevels, boxes and plain
+ * extrusions, the steering wheel a coarse ring — about 500 triangles a car. 4.0 frame (x forward, y up, z right).
+ */
+export function buildCarCabin(a: CarArchetype, styleName: Exclude<CarStyle, 'wagon'>): BufferGeometry {
+  const st = STYLES[styleName], shape = carShape(a, styleName);
+  const { top, belt, halfWidth, back, floor, screenBase, doorEdges } = shape;
+  const W = a.width, L = a.length, inner = W - M(0.2);
+  const rows = doorEdges.length - 1;
+  const hipY = floor + (st.cab ? CAB_HIP_OVER_FLOOR : CAR_HIP_OVER_FLOOR), seatZ = W / 2 - M(0.46);
+  const seatX = (row: number): number => st.hip * L - row * M(st.couple);
+  const archR = a.wheelRadius + M(0.07);
+  const parts: BufferGeometry[] = [];
+  // the footwell runs forward under the dash to the front wheel houses
+  const bulk = Math.min(axlesOf(a)[0]! - archR - M(0.02), screenBase + M(0.1));
+  const lastX = seatX(rows - 1);
+  // the body's own width over a stretch, less a gap: the floor and the dash reach the sides (no slit to the road)
+  const widthOver = (xa: number, xb: number): number => {
+    let hw = Infinity;
+    for (let i = 0; i <= 8; i++) hw = Math.min(hw, halfWidth(lerp(xa, xb, i / 8)));
+    return 2 * hw - M(0.06);
+  };
+  parts.push(tint(box(bulk - (lastX - M(0.6)), M(0.03), widthOver(lastX - M(0.6), bulk), (bulk + lastX - M(0.6)) / 2, floor - M(0.015), 0), CARPET));
+  // dashboard and console, from the driver's place (the left side: z < 0)
+  const wheelSpec = st.cab ? CAB_WHEEL : DRIVER_WHEEL;
+  const dx = seatX(0), dz = -seatZ;
+  const dashTop = belt(screenBase - M(0.1)) - M(0.01);
+  const dashRear = dx + M(wheelSpec.forward) + M(0.12);
+  parts.push(tint(extrude([
+    [screenBase + M(0.02), dashTop - M(0.03)], [bulk + M(0.05), floor + M(0.14)], [bulk - M(0.06), floor + M(0.14)],
+    [dashRear + M(0.12), dashTop - M(0.3)], [dashRear, dashTop - M(0.18)], [dashRear - M(0.02), dashTop - M(0.05)],
+    [dashRear + M(0.06), dashTop + M(0.01)],
+  ], widthOver(dashRear, screenBase + M(0.02)), 0), DASH));
+  const consoleBack = dx - M(0.12);
+  if (!st.cab) parts.push(tint(box(dashRear - consoleBack, M(0.2), M(0.2), (dashRear + consoleBack) / 2, floor + M(0.1), 0), DASH));
+  // steering wheel: a ring and its boss, its axis towards the driver leaning back by the package's tilt
+  {
+    const rim = new TorusGeometry(M(wheelSpec.radius), M(0.02), 4, 14);
+    rim.rotateY(Math.PI / 2);
+    const boss = new CylinderGeometry(M(0.065), M(0.075), M(0.05), 8).rotateZ(Math.PI / 2);
+    const g = merge([rim, boss]).rotateZ(wheelSpec.tilt).translate(dx + M(wheelSpec.forward), hipY + M(wheelSpec.up), dz);
+    parts.push(tint(g, WHEEL_RIM));
+  }
+  // seats: buckets in front, a bench behind
+  const headrest = (x: number, y: number, z: number, width: number): void => { parts.push(tint(box(M(0.1), M(0.18), width, x, y + M(0.09), z), HEADREST)); };
+  const headrestAt = (x: number, y: number, recline: number): [number, number] => {
+    const up = M(0.62);
+    return [x - M(0.2) - up * Math.sin(recline), y - M(0.1) + up * Math.cos(recline) + M(0.02)];
+  };
+  for (const side of [-1, 1] as const) {
+    seat(parts, seatX(0), hipY, floor, M(0.5), side * seatZ, RECLINE, M(0.6), st.cab ? UPRIGHT_CUSHION_REACH : CUSHION_REACH);
+    const [hx, hy] = headrestAt(seatX(0), hipY, RECLINE);
+    headrest(hx, hy, side * seatZ, M(0.26));
+  }
+  if (rows > 1) {
+    const x = seatX(rows - 1), recline = RECLINE + 0.05;
+    seat(parts, x, hipY, floor, Math.min(inner - M(0.06), 2 * seatZ + M(0.64)), 0, recline, M(0.58), CUSHION_REACH);
+    const [hx, hy] = headrestAt(x, hipY, recline);
+    for (const side of [-1, 1] as const) headrest(hx - M(0.01), hy - M(0.03), side * seatZ, M(0.24));
+    // behind the bench: a parcel shelf (sedan), the cab's back wall (pick-up) or a load floor under a shelf
+    const benchBack = x - M(0.14) - M(0.58) * Math.sin(recline) - M(0.1);
+    const rear = st.rear ? st.rear[1] * L : back + M(0.3);
+    if (styleName === 'sedan') {
+      parts.push(tint(box(Math.max(M(0.1), benchBack - rear), M(0.03), inner, (benchBack + rear) / 2, belt(rear) - M(0.02), 0), CARPET));
+    } else if (styleName === 'pickup' && st.bedFrom !== undefined) {
+      const bx = st.bedFrom * L + M(0.06), h = top(bx + M(0.04)) - floor - M(0.05);
+      parts.push(tint(box(M(0.04), h, inner, bx, floor + h / 2, 0), CARD));
+    } else {
+      const bootFloor = floor + M(0.3), bootEnd = back + M(0.04), from = x - M(0.2);
+      parts.push(tint(box(from - bootEnd, M(0.03), inner, (from + bootEnd) / 2, bootFloor, 0), CARPET));
+      parts.push(tint(box(Math.max(M(0.1), benchBack - bootEnd), M(0.015), inner - M(0.04), (benchBack + bootEnd) / 2, belt(bootEnd) - M(0.02), 0), 0x2c2e33));
+    }
+  } else {
+    // a van: the bulkhead behind the cab
+    const bx = seatX(0) - M(0.55);
+    parts.push(tint(box(M(0.04), top(bx) - floor - M(0.08), inner, bx, (top(bx) + floor) / 2 - M(0.02), 0), BULKHEAD));
+  }
+  // the trim inside the doors, up to the waist, from the footwell to behind the last seat: it hides the inside of the
+  // far side's panels (the shell is one-sided) seen through the near window
+  // (in four lengths, each as wide as the body there, and thick enough that its top closes the door's inside)
+  const x0 = Math.max(back + M(0.25), lastX - M(0.75)), x1 = bulk;
+  for (let k = 0; k < 4; k++) {
+    const xa = lerp(x0, x1, k / 4), xb = lerp(x0, x1, (k + 1) / 4);
+    let hw = Infinity, waist = Infinity;
+    for (let i = 0; i <= 4; i++) { const x = lerp(xa, xb, i / 4); hw = Math.min(hw, halfWidth(x)); waist = Math.min(waist, belt(x)); }
+    for (const side of [-1, 1] as const) parts.push(tint(box(xb - xa, waist - floor, M(0.1), (xa + xb) / 2, (waist + floor) / 2, side * (hw - M(0.08))), CARD));
+  }
+  return merge(parts);
+}
+
+/** A seat (4.0 seatShell): the side profile of cushion and back extruded across, its bolsters and its base. */
+function seat(out: BufferGeometry[], hipX: number, hipY: number, floor: number, width: number, z: number, recline: number, backHeight: number, reach: number): void {
+  const top = hipY - M(CUSHION_DROP), base = Math.max(floor + M(0.1), top - M(0.13)), backX = hipX - M(0.14);
+  const sin = Math.sin(recline), cos = Math.cos(recline), thick = M(0.13);
+  out.push(tint(extrude([
+    [hipX + M(reach) - M(0.04), top - M(0.03)], [hipX + M(reach), top - M(0.08)], [hipX + M(reach) - M(0.04), base],
+    [backX - thick * cos, base], [backX - thick * cos - backHeight * sin, top + backHeight * cos - M(0.02)],
+    [backX - backHeight * sin + M(0.01), top + backHeight * cos], [backX, top + M(0.05)], [backX + M(0.06), top],
+  ], width, 0, z), SEAT_FABRIC));
+  for (const side of [-1, 1] as const) {
+    const zz = z + side * (width / 2 - M(0.04));
+    out.push(tint(bar(new Vector3(backX - M(0.02), top + M(0.08), zz), new Vector3(backX - M(0.02) - backHeight * 0.8 * sin, top + backHeight * 0.8 * cos, zz), M(0.09), M(0.07)), SEAT_SIDE));
+  }
+  out.push(tint(box(M(0.3), Math.max(M(0.02), base - floor), width * 0.6, hipX + M(0.08), (base + floor) / 2, z), DASH));
 }
 
 /**
