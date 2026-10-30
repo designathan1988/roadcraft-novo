@@ -668,8 +668,22 @@ export function buildCarBody(a: CarArchetype, styleName: CarStyle, stations0 = 6
       }
     }
     void probeX;
-    g.computeVertexNormals();
-    return tint(g, DARK_TRIM);
+    // painted above the bumper line, dark below it (a whole end painted dark trim, as 4.0 does, made every car's tail a
+    // black panel from the bumper to the boot lid)
+    const cut = (x: number): number => lerp(bottom(x), top(x), 0.4);
+    const painted: number[] = [], dark: number[] = [];
+    const arr = p2.array as Float32Array;
+    for (let k = 0; k < arr.length; k += 9) {
+      const tri: V3[] = [[arr[k]!, arr[k + 1]!, arr[k + 2]!], [arr[k + 3]!, arr[k + 4]!, arr[k + 5]!], [arr[k + 6]!, arr[k + 7]!, arr[k + 8]!]];
+      splitAtY(tri, cut(tri[0][0]), painted, dark);
+    }
+    const part = (list: number[], hex: number): BufferGeometry => {
+      const pg = new BufferGeometry();
+      pg.setAttribute('position', new Float32BufferAttribute(list, 3));
+      pg.computeVertexNormals();
+      return tint(pg, hex);
+    };
+    return merge([part(painted, WHITE), part(dark, DARK_TRIM)]);
   };
 
   const isGlass = (f: Face): boolean => f.region === 'glass';
@@ -784,6 +798,23 @@ export function buildCarBody(a: CarArchetype, styleName: CarStyle, stations0 = 6
     headlamps: shaped(headlamps, () => true), taillamps: shaped(taillamps, () => false),
     indicators: shaped(indicators, (l) => l.front), plates: shaped(plates, (l) => l.x > 0), axles,
   };
+}
+
+type V3 = [number, number, number];
+/** Splits a triangle at the height `y` into the part above (to `up`) and below (to `down`), winding kept. */
+function splitAtY(t: V3[], y: number, up: number[], down: number[]): void {
+  const above = t.map((p) => p[1] >= y);
+  const n = above.filter(Boolean).length;
+  if (n === 3) { for (const p of t) up.push(...p); return; }
+  if (n === 0) { for (const p of t) down.push(...p); return; }
+  // rotate so the lone vertex (the one on its own side) comes first; the winding is kept
+  const lone = above.findIndex((a) => (n === 1 ? a : !a));
+  const a = t[lone]!, b = t[(lone + 1) % 3]!, c = t[(lone + 2) % 3]!;
+  const at = (p: V3, q: V3): V3 => { const f = (y - p[1]) / (q[1] - p[1]); return [p[0] + (q[0] - p[0]) * f, y, p[2] + (q[2] - p[2]) * f]; };
+  const ab = at(a, b), ac = at(a, c);
+  const single = [a, ab, ac], pair = [ab, b, c, ab, c, ac];
+  for (const p of single) (n === 1 ? up : down).push(...p);
+  for (const p of pair) (n === 1 ? down : up).push(...p);
 }
 
 /** A body's triangles, flat (9 numbers each), for `lampFace`. */
