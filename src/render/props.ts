@@ -770,9 +770,11 @@ export class PropRenderer {
     return { counted, drawn };
   }
 
+  /** A new animation-loop frame: the draws are counted again (three resets its own counts here too, Animation.js:81). */
+  frameStart(): void { this.drawsThisFrame.fill(0); }
+
   /** Before drawing: culling on the GPU (or choosing the cells, on WebGL 2). */
   update(renderer: THREE.WebGPURenderer, camera: THREE.Camera, camPos: THREE.Vector3, now: number): void {
-    this.drawsThisFrame.fill(0);
     if (now - this.signalSent > 250) { this.signalSent = now; this.signalTex.needsUpdate = true; }
     if (!this.enabled) { this.updateResidency(camPos); this.updateFallback(camera, camPos); return; }
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);

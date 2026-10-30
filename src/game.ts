@@ -718,6 +718,8 @@ export class Game {
   }
 
   private frame(now: number): void {
+    // the props count their draws per animation-loop frame, as three counts its own (D81)
+    this.props.frameStart();
     // minimized or hidden: nothing is drawn; the simulation goes on in its worker (the clock does not jump on return)
     if (document.hidden) { this.last = now; return; }
     this.health?.frame(now - this.last);
