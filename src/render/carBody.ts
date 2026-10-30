@@ -13,8 +13,15 @@ type DoorSide = -1 | 1;
 /** What a car class is drawn from (4.0 sim/vehicles/archetypes.ts), metres. */
 export interface CarArchetype { readonly length: number; readonly width: number; readonly height: number; readonly wheelRadius: number }
 
-/** A lamp or a plate as a box in the car's frame (x forward, y up, z right), metres (4.0 vehicleModels.ts Lamp). */
-export interface Lamp { readonly x: number; readonly y: number; readonly z: number; readonly sx: number; readonly sy: number; readonly sz: number }
+/**
+ * A lamp or a plate as a box in the car's frame (x forward, y up, z right), metres (4.0 vehicleModels.ts Lamp).
+ * `face`: the lamp shaped to the body instead (a car's: its nose and tail are rounded in plan, where a box set at one x
+ * stood out of the corner by up to 15 cm), in the same frame; drawn in place of the box when present.
+ */
+export interface Lamp {
+  readonly x: number; readonly y: number; readonly z: number; readonly sx: number; readonly sy: number; readonly sz: number;
+  readonly face?: BufferGeometry;
+}
 
 /** A car's geometry, in the 4.0 frame (x forward, z right): vertex colours white where the paint goes. */
 export interface CarBody {
@@ -755,14 +762,81 @@ export function buildCarBody(a: CarArchetype, styleName: CarStyle, stations0 = 6
     }
   }
 
+  const shell = merge([fromFaces(shellFaces), fromFaces(faces.filter(isRoof)), capGeometry()]);
+  const glass = fromFaces(glassFaces);
+  // the lamps and plates on the surface: each one's face follows the body where it is (built once per style)
+  const skin = surfaceOf([shell, glass]);
+  // (a lamp reaching past the body's outline at the corner moves in, 2 cm at a time, until it lies on the body)
+  const shaped = <T extends Lamp>(list: T[], ahead: (l: T) => boolean): T[] => list.map((l) => {
+    let at: T = l, face = lampFace(skin, at, ahead(l));
+    for (let k = 1; k <= 8 && face.getAttribute('position').count < 48; k++) {
+      at = { ...l, z: l.z - Math.sign(l.z) * M(0.02) * k };
+      face = lampFace(skin, at, ahead(l));
+    }
+    return { ...at, face };
+  });
   return {
     // the roof panel (4.0 keeps it apart for a glass roof, carBody.ts:922): painted with the shell here
-    shell: merge([fromFaces(shellFaces), fromFaces(faces.filter(isRoof)), capGeometry()]),
-    glass: fromFaces(glassFaces),
+    shell,
+    glass,
     trim: merge(trim),
     far: merge(farFaces),
-    headlamps, taillamps, indicators, plates, axles,
+    headlamps: shaped(headlamps, () => true), taillamps: shaped(taillamps, () => false),
+    indicators: shaped(indicators, (l) => l.front), plates: shaped(plates, (l) => l.x > 0), axles,
   };
+}
+
+/** A body's triangles, flat (9 numbers each), for `lampFace`. */
+function surfaceOf(parts: BufferGeometry[]): Float64Array {
+  let n = 0;
+  for (const g of parts) n += g.index ? g.index.count : g.getAttribute('position').count;
+  const out = new Float64Array(n * 3);
+  let o = 0;
+  for (const g of parts) {
+    const p = g.getAttribute('position').array, idx = g.index?.array, m = idx ? idx.length : p.length / 3;
+    for (let i = 0; i < m; i++) { const k = idx ? idx[i]! : i; out[o++] = p[k * 3]!; out[o++] = p[k * 3 + 1]!; out[o++] = p[k * 3 + 2]!; }
+  }
+  return out;
+}
+
+/** Where a ray from far ahead (or behind) along x at (y, z) first meets the body: its x, or NaN. */
+function surfaceX(T: Float64Array, y: number, z: number, ahead: boolean): number {
+  const dx = ahead ? -1 : 1, ox = ahead ? 50 : -50;
+  let best = Infinity;
+  for (let k = 0; k < T.length; k += 9) {
+    // the ray runs along x: the triangle's projection on (y, z) must hold the point
+    const ay = T[k + 1]!, az = T[k + 2]!, by = T[k + 4]!, bz = T[k + 5]!, cy = T[k + 7]!, cz = T[k + 8]!;
+    const d = (by - cy) * (az - cz) + (cz - bz) * (ay - cy);
+    if (Math.abs(d) < 1e-12) continue;
+    const l1 = ((by - cy) * (z - cz) + (cz - bz) * (y - cy)) / d, l2 = ((cy - ay) * (z - cz) + (az - cz) * (y - cy)) / d, l3 = 1 - l1 - l2;
+    if (l1 < 0 || l2 < 0 || l3 < 0) continue;
+    const x = l1 * T[k]! + l2 * T[k + 3]! + l3 * T[k + 6]!, t = (x - ox) * dx;
+    if (t > 0 && t < best) best = t;
+  }
+  return best === Infinity ? NaN : ox + dx * best;
+}
+
+/**
+ * A lamp's (or plate's) face on the body: a grid over its extent across (z) and up (y), each point 6 mm out from the
+ * surface met along the length; cells with a corner off the body are left out. Faces ahead (+x) or behind.
+ */
+function lampFace(T: Float64Array, l: Lamp, ahead: boolean): BufferGeometry {
+  const NZ = 4, NY = 2, out = ahead ? M(0.006) : -M(0.006);
+  const xs: number[] = [];
+  for (let j = 0; j <= NY; j++) for (let i = 0; i <= NZ; i++) xs.push(surfaceX(T, l.y + (j / NY - 0.5) * l.sy, l.z + (i / NZ - 0.5) * l.sz, ahead));
+  const pos: number[] = [];
+  const at = (i: number, j: number): [number, number, number] => [xs[j * (NZ + 1) + i]! + out, l.y + (j / NY - 0.5) * l.sy, l.z + (i / NZ - 0.5) * l.sz];
+  for (let j = 0; j < NY; j++) for (let i = 0; i < NZ; i++) {
+    const q = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
+    if (q.some((p) => Number.isNaN(p[0]))) continue;
+    // counter-clockwise seen from outside: ahead the face looks along +x (z right, y up)
+    const order = ahead ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
+    for (const k of order) pos.push(...q[k]!);
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
 }
 
 // ---------------------------------------------------------------- the cabin

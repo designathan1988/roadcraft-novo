@@ -204,6 +204,8 @@ function fromBody(g: THREE.BufferGeometry, glow: number): THREE.BufferGeometry {
 
 /** A 4.0 lamp box (x forward, z right) in this frame, lit as `col` (headlight, tail light, indicator, plate). */
 function lampBox(parts: THREE.BufferGeometry[], l: Lamp, col: number): void {
+  // a car's lamp shaped to its body (carBody.ts lampFace), turned into this frame as `fromBody` turns the body
+  if (l.face) { parts.push(tagged(l.face.clone().rotateY(-Math.PI / 2), col)); return; }
   const b = new THREE.BoxGeometry(l.sz, l.sy, l.sx);
   b.translate(-l.z, l.y, l.x);
   parts.push(tagged(b, col));

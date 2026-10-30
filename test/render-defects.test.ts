@@ -897,3 +897,38 @@ test('cars: every level of a car is built facing outward (the far silhouette was
     }
   }
 });
+
+test('cars: lamps and plates lie on the body (boxes stood out of the rounded corners by up to 15 cm)', async () => {
+  const { CAR_SIZES, buildCarBody } = await import('../src/render/carBody.ts');
+  for (const style of ['sedan', 'hatch', 'suv', 'van', 'pickup'] as const) {
+    const b = buildCarBody(CAR_SIZES[style], style, 24, 8, 3);
+    // the body's surface: triangles of shell and glass
+    const tris: number[][] = [];
+    for (const g of [b.shell, b.glass]) {
+      const p = g.getAttribute('position').array, idx = g.index?.array, n = idx ? idx.length : p.length / 3;
+      for (let i = 0; i < n; i += 3) tris.push([0, 1, 2].flatMap((k) => { const v = idx ? idx[i + k] : i + k; return [p[v * 3], p[v * 3 + 1], p[v * 3 + 2]]; }));
+    }
+    // the x of the surface at (y, z) nearest to x0 (a ray along the length)
+    const nearestX = (x0: number, y: number, z: number): number => {
+      let best = Infinity;
+      for (const [ax, ay, az, bx, by, bz, cx, cy, cz] of tris) {
+        const d = (by - cy) * (az - cz) + (cz - bz) * (ay - cy);
+        if (Math.abs(d) < 1e-12) continue;
+        const l1 = ((by - cy) * (z - cz) + (cz - bz) * (y - cy)) / d, l2 = ((cy - ay) * (z - cz) + (az - cz) * (y - cy)) / d;
+        if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+        const x = l1 * ax + l2 * bx + (1 - l1 - l2) * cx;
+        if (Math.abs(x - x0) < Math.abs(best - x0)) best = x;
+      }
+      return best;
+    };
+    for (const l of [...b.headlamps, ...b.taillamps, ...b.indicators, ...b.plates]) {
+      assert.ok(l.face, `${style}: a lamp without its face`);
+      const p = l.face.getAttribute('position').array;
+      assert.equal(p.length / 9, 16, `${style}: lamp at ${l.x.toFixed(2)},${l.z.toFixed(2)} lost cells off the body`);
+      for (let i = 0; i < p.length; i += 3) {
+        const off = Math.abs(p[i] - nearestX(p[i], p[i + 1], p[i + 2]));
+        assert.ok(off < 0.01, `${style}: a lamp corner ${(off * 100).toFixed(1)} cm off the body`);
+      }
+    }
+  }
+});

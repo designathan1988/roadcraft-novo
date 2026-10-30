@@ -437,7 +437,8 @@ function parkedCarOf(style: CarStyle, a: CarArchetype): PropDef {
     part(new THREE.CircleGeometry(a.wheelRadius * 0.62, sides).rotateY(x > 0 ? Math.PI / 2 : -Math.PI / 2), RIM, PMAT.Metal, x + Math.sign(x) * 0.112, a.wheelRadius, ax),
   ]));
   const body = buildCarBody(a, style, 12, 4, 2);
-  const lamp = (l: Lamp, c: number) => part(new THREE.BoxGeometry(l.sz, l.sy, l.sx), c, PMAT.Plain, -l.z, l.y, l.x);
+  // (shaped to the body, carBody.ts lampFace: a box at one x stood out of the rounded corners)
+  const lamp = (l: Lamp, c: number) => (l.face ? part(l.face.clone().rotateY(-Math.PI / 2), c, PMAT.Plain, 0, 0, 0) : part(new THREE.BoxGeometry(l.sz, l.sy, l.sx), c, PMAT.Plain, -l.z, l.y, l.x));
   const near = merge([
     carParts(body.shell, PMAT.Paint), carParts(body.glass, PMAT.Glass, 0x1a2430), carParts(body.trim, PMAT.Plain),
     ...body.headlamps.map((l) => lamp(l, 0xe8e2cf)), ...body.taillamps.map((l) => lamp(l, 0x7a1414)),
