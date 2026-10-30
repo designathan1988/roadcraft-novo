@@ -1480,7 +1480,6 @@ export class Game {
       hud: this.hud,
       ambient: this.ambient,
       flash: flashU,
-      shake: (metres) => this.rig.shake(metres),
       force: this.bombForce,
       setHitKind: (kind) => { this.hitKind = kind; },
     }, x, z);

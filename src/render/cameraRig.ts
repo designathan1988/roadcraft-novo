@@ -82,9 +82,6 @@ export class CameraRig {
   solid: ((x: number, z: number) => number) | null = null;
   /** Free distance to the eye (smoothed): less than `dist` when a building is between the target and the eye. */
   private pull = Infinity;
-  /** Explosion shake (metres at the camera): decays; the offset is applied when the camera is rebuilt. */
-  private shakeAmp = 0;
-  private shakePhase = 0;
 
   /** Camera behind the vehicle: target on it, looking where it is heading. Rebuilds the camera right away (no frame of delay). */
   followPose(x: number, y: number, z: number, yaw: number, dt: number): void {
@@ -309,7 +306,6 @@ export class CameraRig {
       if (this.zoomGrab && !this.grab && this.followY === null) { this.updatePull(dt); this.hold(this.zoomGrab, this.zoomNdc.x, this.zoomNdc.y); return; }
     }
     this.updatePull(dt);
-    if (this.shakeAmp > 1e-3) { this.shakePhase += dt * 34; this.shakeAmp *= Math.exp(-dt / 0.35); }
     this.syncCamera();
   }
 
@@ -354,16 +350,9 @@ export class CameraRig {
     this.pull = !Number.isFinite(want) && next > this.dist - 0.05 ? Infinity : next;
   }
 
-  /** An explosion shakes the camera for a moment; `metres` is how far the eye moves at its strongest. */
-  shake(metres: number): void { this.shakeAmp = Math.max(this.shakeAmp, metres); }
-
   private syncCamera(): void {
     const pitch = this.drawPitch, yaw = this.yaw, dist = Math.min(this.dist, this.pull);
-    let tx = this.target.x, ty = this.y, tz = this.target.z;
-    if (this.shakeAmp > 1e-3) {
-      const p = this.shakePhase;
-      tx += Math.sin(p * 1.7) * this.shakeAmp; ty += Math.sin(p * 2.3 + 1.1) * this.shakeAmp * 0.7; tz += Math.cos(p * 1.3 + 0.5) * this.shakeAmp;
-    }
+    const tx = this.target.x, ty = this.y, tz = this.target.z;
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const dir = this.v.set(Math.sin(yaw) * cp, sp, Math.cos(yaw) * cp); // from the target to the eye
     this.eye.set(tx + dir.x * dist, ty + dir.y * dist, tz + dir.z * dist);
