@@ -374,8 +374,6 @@ export class Junctions {
         return false;
       }
     } else if (sim.nodeRing[n]) return this.gateOpen(conn);
-    // zebra: give way to whoever is crossing (the pedestrian only appears near the camera)
-    else if (sim.nodeCtl[n] === Ctl.Zebra) return !this.h.pedCrossing(n);
     // people on the crosswalks it drives over, the arm it comes from and the arm it leaves by, or who will be on them
     // before its front is: it waits for them (roadcraft admission.ts:339 crossingBusy, crossingReachedFirst; at a light,
     // those still crossing as it turns green and those walking beside it when it turns). No exception for a vehicle
@@ -385,7 +383,9 @@ export class Junctions {
     // while it can still stop comfortably at its line (the admission's question); nearer, it is on its way and only
     // those on the stretch or about to step onto it stop it (obstacles.ts pedestrianAhead): asked with the time its
     // front takes, a walker speeding up let it go and stopped it again a moment later, past its line on the zebra.
-    if (sim.net.nodes.cols.deg[n] >= 3) {
+    // (a zebra between two arms too: there, as anywhere, it gives way to those on the stretch it drives over, not to
+    // anyone crossing any arm, which shut it a metre before its line when someone stepped off across another arm)
+    if (sim.net.nodes.cols.deg[n] >= 3 || sim.nodeCtl[n] === Ctl.Zebra) {
       const toZebra = Math.max(0, toEnd + this.h.stopBack(k.from[conn]) - CROSSWALK / 2);
       const canStop = toEnd > (c.v[v] * c.v[v]) / (2 * Math.max(0.5, c.db[v]));
       if (canStop ? this.pedsInWay(conn, this.frontTime(v, conn, toZebra), true, this.frontTime(v, conn, toZebra + CROSSWALK + k.len[conn])) : this.pedsInWay(conn)) return false;

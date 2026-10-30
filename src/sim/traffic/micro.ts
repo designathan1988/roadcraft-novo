@@ -236,17 +236,20 @@ export class Micro {
         if (conn >= 0 && toLine < 6 && c.wait[v] > STARVE_SECONDS) this.h.junctions.claimExit(sim.conns.cols.to[conn], v);
         // jammed junction (nobody through for 20 s and this one waiting 20 s): one at a time, with the box clear
         if (lead < 0 && conn >= 0 && toLine < 6 && c.wait[v] > JAM_SECONDS) release = this.jamRelease(conn, v);
-        // over the stop line with the way open, it goes on through (it is not left standing on the zebra); short of it
-        // it stops at the line (on it already, at the end of the lane)
+        // with the way open where it can no longer stop comfortably at the line, it is committed and goes on through (it
+        // is not left standing on the zebra; roadcraft admission is asked while the vehicle can still stop); short of
+        // that it stops at the line (on it already, at the end of the lane). Committed only at the line, a way that shut
+        // in its last metre (the exit full, someone into the box) stopped it hard past the line on the zebra.
+        const commit = Math.max(0.3, (c.v[v] * c.v[v]) / (2 * Math.max(0.5, c.db[v])));
         let open = c.pass[v] === 1;
         if (!open) {
           open = conn >= 0 && (release || this.h.junctions.gateFor(conn, v, Math.max(0, toLine)));
-          // at the line it goes only into a clear box (nobody crossing its way inside, the barrier up): what it crosses
-          // over after the line, it does not stop on
-          if (open && !release && toLine < 0.3 && !this.h.junctions.boxClear(conn)) open = false;
+          // it commits only into a clear box (nobody crossing its way inside, the barrier up): what it crosses over after
+          // the line, it does not stop on
+          if (open && !release && toLine < commit && !this.h.junctions.boxClear(conn)) open = false;
           // (just over it when the way closed: still at the line, it has stopped there; well over it, at the end)
           if (!open) { gap = Math.min(gap, toLine > -1 ? Math.max(0, toLine - 0.3) : toEnd - 1); vl = 0; }
-          else if (toLine < 0.3) {
+          else if (toLine < commit) {
             c.pass[v] = 1;
             // the connection is its own from here (roadcraft claims.ts grantAll at admission): crossing ones wait for it
             this.h.junctions.pass(conn, v);

@@ -387,9 +387,10 @@ test('faixa no meio da quadra: zebra para carros com pedestre na faixa; semáfor
   for (let i = 0; i < ops.length; i++) sim.apply(decodeOp(enc, i, extra));
   sim.rebuild();
   assert.equal(sim.nodeCtl[n], Ctl.Zebra);
-  // com alguém na faixa a conexão fecha; sem ninguém, abre
+  // with someone on the crosswalk (on the stretch the car drives over) the connection closes; with nobody, it opens
   let crossing = true;
   tr.pedCrossing = () => crossing;
+  tr.pedCrossingReach = () => crossing;
   const k = sim.conns.cols;
   const conn = sim.nodeConn[n];
   assert.ok(conn >= 0);

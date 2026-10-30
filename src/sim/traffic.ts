@@ -68,6 +68,8 @@ const DOCK_CELL = 64, DOCK_CELLS = Math.ceil(MAP_SIZE / DOCK_CELL), YARD_REACH =
 const PARK_DECEL = 2.6, PARK_SIDE_S = 2.4, PARK_STAY = 3;
 /** In a lane change the rear follows the front's sideways move this share of the change later (the body points into it). */
 const LC_REAR_LAG = 0.15;
+/** Half the chord a body's heading is read along, centred on its middle (roadcraft world/heading.ts HEADING_CHORD). */
+const HEADING_CHORD = 1.5;
 
 /** u of the middle of the parking strip on the right of someone driving in direction `dir` of the segment (NaN = no bays). */
 function parkU(profile: number, dir: number): number {
@@ -1616,6 +1618,9 @@ export class Traffic {
   }
   /** The sideways offset `headOf` gave the front for a lane change under way (x, z, its share k; k = 0: none). */
   private lcOff = new Float64Array(3);
+  /** The ends of the chord a body's heading is read along (`centreOf`). */
+  private chAhead = new Float64Array(4);
+  private chBehind = new Float64Array(4);
 
   /**
    * Middle of vehicle `v` as drawn (x, y, z, yaw into `p`): on its lane or connection, in the bay, at the kerb or on a
@@ -1631,21 +1636,30 @@ export class Traffic {
       p[0] = mp[0]; p[2] = mp[1]; p[3] = mp[2];
       return lights | (this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT);
     }
-    // the body goes round a bend on its path, both ends on it (roadcraft sim/pose.ts: the body on the path, its heading
-    // from a chord): middle and heading from the chord between the front and the point a length behind it. Taken from
-    // the front's tangent instead, the body pivoted about its nose and the rear swept across the junction (a car's rear
-    // 1.5 m off its path in a right turn on average, 3.5 m at worst; a lorry's 5-8.6 m)
-    const fx = p[0], fy = p[1], fz = p[2], rear = this.tmp2, off = this.lcOff;
-    const viaOther = backAlong(sim, c.lane[v], c.conn[v], c.s[v], c.len[v], rear, c.cameBy[v]);
-    // a lane change under way: the rear takes the front's sideways offset a moment later (the body points into it);
-    // still on the way into the lane it changes from, it is on that lane's path already
-    if (off[2] > 0 && !viaOther) {
-      const t = Math.max(0, c.lcT[v] - LC_REAR_LAG), kr = 1 - t * t * (3 - 2 * t);
-      rear[0] += off[0] * kr; rear[2] += off[1] * kr;
+    // the body's middle on its path, pointing along a short chord centred on it (roadcraft sim/pose.ts:144-160
+    // axleFrame, world/heading.ts HEADING_CHORD): round a bend its ends swing out over the outside of the curve, as a
+    // body along its path does. Both ends on the path instead (an earlier misreading of pose.ts here) sagged its middle
+    // to the inside by L²k/8: a 12 m bus 4 m over the kerb return of a tight right turn, 64% of its turning steps. From
+    // the front's tangent, the body pivoted about its nose and the rear swept across the junction.
+    const len = c.len[v], half = len / 2, ch = Math.min(HEADING_CHORD, half), off = this.lcOff;
+    const mid = this.tmp2, ahead = this.chAhead, behind = this.chBehind, came = c.cameBy[v];
+    const oMid = backAlong(sim, c.lane[v], c.conn[v], c.s[v], half, mid, came);
+    const oAhead = backAlong(sim, c.lane[v], c.conn[v], c.s[v], half - ch, ahead, came);
+    const oBehind = backAlong(sim, c.lane[v], c.conn[v], c.s[v], half + ch, behind, came);
+    // a lane change under way: the front has its sideways offset (`headOf`), the rear takes it a moment later (the body
+    // points into it), the points between in proportion; one still on the way into the lane it changes from is on that
+    // lane's path: brought over to this lane's first (less the whole offset), so that it does not jump as it comes out
+    if (off[2] > 0) {
+      const t = Math.max(0, c.lcT[v] - LC_REAR_LAG), kr = 1 - t * t * (3 - 2 * t), kf = off[2];
+      const shift = (q: Float64Array, d: number, other: boolean): void => {
+        const w = kf + (kr - kf) * (d / len) - (other ? 1 : 0);
+        q[0] += off[0] * w; q[2] += off[1] * w;
+      };
+      shift(mid, half, oMid); shift(ahead, half - ch, oAhead); shift(behind, half + ch, oBehind);
     }
-    const dx = fx - rear[0], dz = fz - rear[2];
+    const dx = ahead[0] - behind[0], dz = ahead[2] - behind[2];
     if (dx * dx + dz * dz > 1e-6) p[3] = Math.atan2(dx, dz);
-    p[0] = (fx + rear[0]) / 2; p[1] = (fy + rear[1]) / 2; p[2] = (fz + rear[2]) / 2;
+    p[0] = mid[0]; p[1] = mid[1]; p[2] = mid[2];
     if (c.dying[v] === 4 && c.conn[v] < 0) {
       // at the kerb: 0.9 m to the right, hazard lights while stopped
       const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
