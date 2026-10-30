@@ -20,8 +20,8 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 241 |
-| Bytes / linhas | 3.708.648 / 66.570 |
+| Arquivos TS | 243 |
+| Bytes / linhas | 3.719.060 / 66.759 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
@@ -30,8 +30,8 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
-Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.120 linhas), `sim/traffic.ts` (2.940),
-`game.ts` (2.644), `jobs/buildingGen.ts` (2.521), `r40/render/buildings/signature.ts` (1.781),
+Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.949),
+`game.ts` (2.645), `jobs/buildingGen.ts` (2.521), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
@@ -200,8 +200,11 @@ Ordem por risco e valor (não por tamanho):
 - Feito: `app/clicks.ts` (despacho de clique com `ClickHost`) e `app/buildings.ts` (seleção/círculo com
   `SelectionHost`), depois de `app/session.ts` cobrir salvar/abrir/novo mapa; `game.ts` ainda tem entrada/pointer e
   edição de lote/edifício.
-- Em andamento: `sim/traffic.ts` por micro/meso/sinais/ônibus, `buildingGen` com `GenContext` e `r40/api.ts`
-  (imports externos de r40 estão concentrados em `jobs/building40.ts` e `render/propMeshes.ts`).
+- Feito: `r40/api.ts` centraliza a superfície externa do 4.0; `jobs/building40.ts` e `render/propMeshes.ts` importam
+  por ela. Vias: fase das tracejadas em `roads/dash.ts` e máscara de perfil no leque da junção em `render/roads.ts`,
+  com `test/roadContinuity.test.ts`.
+- Em andamento: `sim/traffic.ts` por micro/meso/sinais/ônibus e `buildingGen` com `GenContext`; `r40/buildingMesh.ts`
+  continua por último.
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
   usa saída antecipada (≈13 s reais). A suíte completa deu 363/364 antes do ajuste do telhado 3; o caso foi corrigido
   isoladamente. Não declarar a suíte completa verde sem rodá-la de novo.
