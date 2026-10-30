@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let out = '';
 try { execSync('npx tsc --noEmit', { cwd: root, stdio: 'pipe' }); } catch (e) { out = String(e.stdout ?? ''); }
 const hits = new Map();
-for (const m of out.matchAll(/^(.+?)\((\d+),(\d+)\): error (TS6133|TS6192): (.*)$/gm)) {
+for (const m of out.matchAll(/^(.+?)\((\d+),(\d+)\): error (TS6133|TS6192|TS6196): (.*)$/gm)) {
   const [, file, line, , code, msg] = m;
   const list = hits.get(file) ?? []; hits.set(file, list);
   list.push({ line: Number(line), code, name: /'([^']+)'/.exec(msg)?.[1] });
