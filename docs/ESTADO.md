@@ -39,19 +39,22 @@ Atualizado: 2026-10-29, 23h54.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `8288e24` (r40 dividido), com `ca4269e` (meso), `631d597`
-  (ônibus), `63380a6`/`f601b1f` (catálogo JSON), `9d45060` (paradas), `cf188a7` (medição), `232bd84`
-  (gerador dividido) e os anteriores. Sem push e sem merge em main; nenhum agente ativo.
-- Extraídos: `src/app/session.ts`, `tools.ts`, `clicks.ts`, `buildings.ts`; `sim/traffic/` com
-  `laneChanges`, `lines`, `state`, `regions`, `measure`, `stops`, `grow`, `buses` (270) e `meso` (291);
-  `jobs/buildingGen/` com 15 módulos (gerador 250); `r40/render/buildings/buildingMesh.ts` 4.119 → 772,
-  dividido em `meshCore` 885, `facadeEmit` 520, `roofMesh` 680, `lotMesh` 266, `elementMesh` 821 e
-  `interiorMesh` 140, com a API pública reexportada pelo entry. `game.ts` 2.645 continua o ponto de
-  composição (sessão, ferramentas, cliques, seleção, prédios e photoHooks já saíram); não foi fatiado
-  mais porque o restante é a ligação de UI/save, não um subsistema escondido. `traffic.ts` 2.401: o
-  miolo micro (IDM, faixas, junções) é o motor; meso/ônibus/medição/regiões/sinais/manobras saíram.
-  `arch:check` 268 arquivos/67.297 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos; 8 arquivos
-  >=50 KB (antes 9), nenhum novo acima do limite; o catálogo dos 38 projetos é JSON, não código.
+- Branch `port/roadcraft-features`; HEAD `7213b6f` (game.ts: entrada e edição), com `b17ad8e` (junções),
+  `952db54` (docs), `8288e24` (r40 dividido), `ca4269e` (meso), `631d597` (ônibus), `63380a6`/`f601b1f`
+  (catálogo JSON), `9d45060` (paradas), `cf188a7` (medição), `232bd84` (gerador dividido) e os anteriores.
+  Sem push e sem merge em main; nenhum agente ativo.
+- Extraídos: `src/app/session.ts`, `tools.ts`, `clicks.ts`, `buildings.ts`, `input.ts` (297),
+  `lotEditing.ts` (392); `sim/traffic/` com `laneChanges`, `lines`, `state`, `regions`, `measure`,
+  `stops`, `grow`, `buses` (270), `meso` (291) e `junctions` (429); `jobs/buildingGen/` com 15 módulos
+  (gerador 250); `r40/render/buildings/buildingMesh.ts` 4.119 → 772, dividido em `meshCore` 885,
+  `facadeEmit` 520, `roofMesh` 680, `lotMesh` 266, `elementMesh` 821 e `interiorMesh` 140, com a API
+  pública reexportada pelo entry. `game.ts` 2.645 → 2.223: o que restou é a composição (construtor,
+  laço, sim, save, painéis, ferramentas de céu) e os métodos agora delegam a `app/input.ts` e
+  `app/lotEditing.ts`. `traffic.ts` 2.752 → 2.043: o que restou é o motor micro (IDM, movimento em
+  faixa/conexão, filas, spawn, publicação) e a orquestração; meso/ônibus/junções/medição/regiões/
+  sinais/manobras/paradas têm módulos próprios.
+  `arch:check` 271 arquivos/67.674 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos; 8 arquivos
+  >=50 KB (antes 9), **nenhum >=150 KB** (o maior é 67 KB); o catálogo dos 38 projetos é JSON.
 - Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
   `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget com o vidro: street 418 draws/
   11.483.609 tris, district 175/7.103.905, city 123/**4.002.312** (limite 4.044.328), map
