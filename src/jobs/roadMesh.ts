@@ -9,6 +9,7 @@
 import { SEA_LEVEL } from '../config.ts';
 import { arcTable, bez, bezD, tAtLength, type Arm, type Quad } from '../roads/geometry.ts';
 import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, cornerFillet, junctionRetreats } from '../roads/junction.ts';
+import { DASH_PERIOD, DASH_STEPS, dashPhases } from '../roads/dash.ts';
 import { PROFILE_INFO, Paving, Surface, packRoadTag, type ProfileInfo, type Strip } from '../roads/profiles.ts';
 import { SegFlag } from '../roads/flags.ts';
 import { heightAt } from '../world/heights.ts';
@@ -62,7 +63,7 @@ const COLOR = {
   sidewalk: 0xb3b0aa, curb: 0xd3cec4, grass: 0x5a7a3e, concrete: 0xa9a59d,
 };
 
-/** Flags in the vertex code (code = segment * 16 + flags). */
+/** Flags in the vertex code (code = segment * (16 * DASH_STEPS) + phase * 16 + flags). */
 export const RoadCode = { CrossA: 1, CrossB: 2, OneWay: 4, Ring: 8 } as const;
 
 interface ArmRef { seg: number; end: 0 | 1; arm: Arm }
@@ -122,6 +123,7 @@ export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: numb
   }
   const tables = quads.map((q) => arcTable(q, 48));
   const lens = tables.map((t) => t[t.length - 1]);
+  const phases = dashPhases(g, lens);
 
   // arms of each node, sorted, and the setback of each segment end
   const armsOf: ArmRef[][] = Array.from({ length: g.nodeCount }, () => []);
@@ -146,7 +148,7 @@ export function buildRoadMesh(heights: Float32Array, g: RoadGraph, originX: numb
 
   for (let s = 0; s < g.segCount; s++) {
     if (!g.segOwn[s]) continue;
-    buildSegment(mb, heights, g, s, quads[s], tables[s], lens[s], retreat[s * 2], retreat[s * 2 + 1], deg(g.sa[s]), deg(g.sb[s]), lod);
+    buildSegment(mb, heights, g, s, quads[s], tables[s], lens[s], retreat[s * 2], retreat[s * 2 + 1], deg(g.sa[s]), deg(g.sb[s]), lod, phases[s]);
   }
   for (let n = 0; n < g.nodeCount; n++) {
     if (!g.nodeOwn[n]) continue;
@@ -176,15 +178,16 @@ function frameAt(g: RoadGraph, s: number, q: Quad, table: Float64Array, len: num
 }
 
 function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: number, q: Quad, table: Float64Array, len: number,
-  rA: number, rB: number, degA: number, degB: number, lod: number): void {
+  rA: number, rB: number, degA: number, degB: number, lod: number, dashPhase: number): void {
   const info = PROFILE_INFO[g.sprofile[s]];
   const s0 = rA, s1 = len - rB;
   if (s1 - s0 < 0.2) return;
   const ring = (g.sflags[s] & SegFlag.Ring) !== 0;
   const crossA = degA >= 3 && !ring, crossB = degB >= 3 && !ring;
-  // code: segment id * 16 + bits (exact in float32 up to 1 million segments); the profile goes in position.w
+  // code: segment id * 16 * DASH_STEPS + phase * 16 + bits; the profile goes in position.w
   mb.curTag = packRoadTag(info.id, g.srule[s] & 7, (g.srule[s] >> 3) & 7);
-  const code = g.sid[s] * 16 + (crossA ? RoadCode.CrossA : 0) + (crossB ? RoadCode.CrossB : 0) + (info.oneWay ? RoadCode.OneWay : 0) + (ring ? RoadCode.Ring : 0);
+  const phase = Math.round((((dashPhase + s0) % DASH_PERIOD) / DASH_PERIOD) * DASH_STEPS) % DASH_STEPS;
+  const code = g.sid[s] * 16 * DASH_STEPS + phase * 16 + (crossA ? RoadCode.CrossA : 0) + (crossB ? RoadCode.CrossB : 0) + (info.oneWay ? RoadCode.OneWay : 0) + (ring ? RoadCode.Ring : 0);
 
   // sample positions: a regular step + the dropped kerb's points
   const step = lod === 0 ? 3 : 10;

@@ -9,6 +9,7 @@ import { Dirty, cellId, cellOriginX, tileOriginX, type DirtyCells } from '../cor
 import type { JobPool } from '../jobs/pool.ts';
 import { roadGraphTransfer } from '../shared/contracts/worker.ts';
 import { RMAT, RoadCode } from '../jobs/roadMesh.ts';
+import { DASH_PERIOD, DASH_STEPS } from '../roads/dash.ts';
 import type { RoadNetwork } from '../roads/network.ts';
 import { heightAt } from '../world/heights.ts';
 import { MAX_LINES, MAX_PROFILES, TABLE_W, TAG_RULE, onProfileAdded, profileCount, writeProfileRow } from '../roads/profiles.ts';
@@ -163,7 +164,8 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   const road = attribute('road', 'vec4');
   const u = road.x, v = road.y, toEnd = road.z;
   const code = floor(road.w.add(0.5));
-  const segId = int(floor(code.div(16)));
+  const segId = int(floor(code.div(16 * DASH_STEPS)));
+  const dashPhase = mod(floor(code.div(16)), float(DASH_STEPS)).mul(DASH_PERIOD / DASH_STEPS);
   const tag = floor(attribute('position', 'vec4').w.mul(32767).add(0.5));
   const profile = mod(tag, TAG_RULE);
   // rule of each end (Rule): 2 yield, 3 stop, 4 signal (the tag as roads/profiles.ts packRoadTag packs it)
@@ -193,7 +195,7 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   // profile lines
   const inZone = max(crossA.mul(windowAt(v, -10, 4.6, fv)), crossB.mul(windowAt(toEnd, -10, 4.6, fv)));
   let white: Node = float(0), yellow: Node = float(0);
-  const dash = square(v.div(9), 0.38, fv.div(9));
+  const dash = square(v.add(dashPhase).div(DASH_PERIOD), 0.38, fv.div(DASH_PERIOD));
   for (let k = 0; k < MAX_LINES; k++) {
     const e = textureLoad(table, ivec2(int(k), int(profile)));
     const lu = e.x, lw = e.y, kind = e.z, color = e.w;
