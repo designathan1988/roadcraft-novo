@@ -640,6 +640,8 @@ export class VehicleRenderer {
   private tileBox = new THREE.Box3();
   /** Cooked pedestrians and cyclists (src/render/people); until they load, the simple figures. */
   readonly people = new PeopleRenderer();
+  /** The whole bodies (glass merged) by model (`modelOf`: car styles 0-4, motorbike, bus, lorry): the blast's wrecks. */
+  readonly wreckModels: THREE.BufferGeometry[];
 
   constructor(reader: PoseReader) {
     this.reader = reader;
@@ -650,6 +652,7 @@ export class VehicleRenderer {
     // the near cars' glass is see-through: their cabin goes in with the body (the farther levels' glass is opaque)
     const cars = splitCars.map((s, i) => (i < CAR_BODIES.length ? mergeGeometries([s.solid, carCabin(i)])! : s.solid));
     const fullBus = busModel(), fullTruck = truckModel();
+    this.wreckModels = [...fullCars, fullBus, fullTruck];
     const splitBus = splitGlass(fullBus), splitTruck = splitGlass(fullTruck);
     const bus = splitBus.solid, truck = splitTruck.solid;
     const carCap = (i: number) => (i < 2 ? CAP_NEAR : CAP_NEAR / 2);
@@ -696,6 +699,39 @@ export class VehicleRenderer {
     if (best < 0) return false;
     this.follow = { x: d[best + 4], z: d[best + 6], info: d[best + 8] % 65536, id: d[best + 10], lost: 0 };
     return true;
+  }
+
+  /**
+   * The cars, buses and lorries within `r` of (x, z) in the last poses read (only the tiles the circle touches): per
+   * vehicle x, y, z, yaw, model (`wreckModels`) and paint (0xRRGGBB) pushed on `out`. Returns how many.
+   */
+  vehiclesNear(x: number, z: number, r: number, out: number[]): number {
+    const rd = this.reader, d = rd.data, n0 = out.length;
+    const scan = (i0: number, i1: number) => {
+      for (let i = i0; i < i1; i++) {
+        const o = i * POSE_STRIDE;
+        const vx = d[o + 4], vz = d[o + 6];
+        if ((vx - x) ** 2 + (vz - z) ** 2 > r * r) continue;
+        const info = d[o + 8], lights = Math.floor(info / 65536), base = info - lights * 65536;
+        const kind = Math.floor(base / 256), low = base - kind * 256;
+        if (kind > 2) continue;
+        const style = kind === 0 ? (low >> 4) & 7 : 0;
+        const model = modelOf(kind, style);
+        if (model >= this.wreckModels.length) continue;
+        out.push(vx, d[o + 5], vz, d[o + 7], model, PAINTS[(kind === 0 ? low & 15 : low & 127) % PAINTS.length]);
+      }
+    };
+    if (!rd.tiled) scan(0, rd.count);
+    else {
+      const t0x = Math.max(0, Math.floor((x - r - rd.originX) / TILE)), t1x = Math.min(TILE_GRID - 1, Math.floor((x + r - rd.originX) / TILE));
+      const t0z = Math.max(0, Math.floor((z - r - rd.originZ) / TILE)), t1z = Math.min(TILE_GRID - 1, Math.floor((z + r - rd.originZ) / TILE));
+      // (the grid's edge tiles also hold what lies beyond it: a circle past the edge reads them)
+      for (let tz = t0z; tz <= t1z; tz++) for (let tx = t0x; tx <= t1x; tx++) {
+        const tile = tz * TILE_GRID + tx;
+        scan(rd.tiles[tile], rd.tiles[tile + 1]);
+      }
+    }
+    return (out.length - n0) / 6;
   }
 
   /** Reads the newest poses, interpolates and fills the visible batches. */
