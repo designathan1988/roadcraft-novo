@@ -6,7 +6,7 @@
 // converted as orthographic (~0.006 instead of ~0.9994), TRAA saw "disocclusion" on EVERY pixel and threw away the
 // history: each frame came out raw, with the ±½ pixel jitter, and the whole image shook while still (the "camera
 // shake"). Here the reprojection is done outside the Fn, with the camera type in a uniform (perspective/isometric switch).
-import { HalfFloatType, Vector2, RenderTarget, RendererUtils, QuadMesh, NodeMaterial, TempNode, NodeUpdateType, Matrix4, DepthTexture, FloatType } from 'three/webgpu';
+import { HalfFloatType, NoBlending, Vector2, RenderTarget, RendererUtils, QuadMesh, NodeMaterial, TempNode, NodeUpdateType, Matrix4, DepthTexture, FloatType } from 'three/webgpu';
 import { float, Fn, max, texture, uniform, uv, vec2, vec4, convertToTexture, passTexture, velocity, ivec2, mix, context, getViewPosition, viewZToPerspectiveDepth, viewZToOrthographicDepth, OnBeforeRenderPipeline, OnAfterRenderPipeline } from 'three/tsl';
 import { clipAABB, computeHaltonOffsets, flickerReduction, sampleCurrentDepth } from 'three/addons/tsl/utils/TAAUtils.js';
 
@@ -180,6 +180,9 @@ class TRAANode extends TempNode {
 		 */
 		this._resolveMaterial = new NodeMaterial();
 		this._resolveMaterial.name = 'TRAA.resolve';
+		// written as it is, alpha included (the history's motion memory): with NormalBlending an opaque node material's
+		// alpha is forced to 1 (three r186 NodeBuilder.isOpaque, NodeMaterial setupOutput)
+		this._resolveMaterial.blending = NoBlending;
 
 		/**
 		 * The result of the effect is represented as a separate texture node.
@@ -540,6 +543,23 @@ class TRAANode extends TempNode {
 
 		} );
 
+		// The 3x3 neighbourhood's luma range in the current frame: a high-contrast thin line (a window's mullion, a
+		// railing) lies across it.
+		const lumaRange = Fn( ( [ positionTexel ] ) => {
+
+			const lo = float( 1e9 ).toVar(), hi = float( 0 ).toVar();
+			for ( let y = - 1; y <= 1; y ++ ) for ( let x = - 1; x <= 1; x ++ ) {
+
+				const c = this.beautyNode.offset( ivec2( x, y ) ).load( positionTexel ).max( 0 );
+				const l = c.r.mul( 0.2126 ).add( c.g.mul( 0.7152 ) ).add( c.b.mul( 0.0722 ) );
+				lo.assign( lo.min( l ) ); hi.assign( hi.max( l ) );
+
+			}
+
+			return hi.sub( lo ).div( hi.add( 1e-4 ) );
+
+		} );
+
 		// Returns the amount of subpixel (expressed within [0, 1]) in the velocity.
 		const subpixelCorrection = Fn( ( [ velocityUV, textureSize ] ) => {
 
@@ -615,11 +635,26 @@ class TRAANode extends TempNode {
 			// Perform neighborhood clipping/clamping. We use variance clipping here.
 
 			const varianceGamma = mix( 0.5, 1, motionFactor.oneMinus().pow2() ); // Reasonable gamma range is [0.75, 2]
-			const clippedHistoryColor = varianceClipping( positionTexel, currentColor, historyColor, varianceGamma );
+			// Thin geometry (Unreal's TSR "thin geometry detection": a pixel partly covered by a line thinner than a pixel
+			// oscillates between the line and what is behind it as the jitter moves, the neighbourhood's box moves with it
+			// and the history never converges: still buildings flickered at every window frame, 8.9 % of their pixels
+			// changing between two frames of a still camera). Where nothing moved, nothing was uncovered and a high-contrast
+			// line crosses the neighbourhood (luma range over 0.3, TSR's MinKeepLineContrast), the history is kept whole
+			// and gathers longer (2 % of the new frame: the coverage converges); everywhere else, as before. Something that
+			// moved over a still pixel (a walker crossing the pavement) leaves it uncertain for a while: the history's alpha
+			// (unused past this pass: the grade writes 1) remembers motion, 1 when the pixel or its neighbourhood moved,
+			// fading 15 % a frame; the history is trusted whole only once that memory is gone (else the walker left a trail).
+			// (only motion: at a thin line the depth flips between the line and what is behind it with the jitter, so the
+			// depth test alone, which still applies to this frame, would never let the memory clear)
+			const movedNow = motionFactor.greaterThanEqual( 0.002 ).or( hasValidHistory.not() );
+			const motionMemory = movedNow.select( float( 1 ), historyColor.a.mul( 0.85 ) );
+			const thinStill = movedNow.not().and( isDisocclusion.not() ).and( historyColor.a.lessThan( 0.02 ) ).and( lumaRange( positionTexel ).greaterThan( 0.3 ) );
+			currentWeight.assign( thinStill.select( currentWeight.min( 0.02 ), currentWeight ) );
+			const clippedHistoryColor = thinStill.select( historyColor, varianceClipping( positionTexel, currentColor, historyColor, varianceGamma ) );
 
 			// flicker reduction based on luminance weighing
 
-			const output = flickerReduction( currentColor, clippedHistoryColor, currentWeight );
+			const output = vec4( flickerReduction( currentColor, clippedHistoryColor, currentWeight ).rgb, motionMemory );
 
 			// debug (traaDebug = 1): red = history rejected, green = current frame weight, blue = disocclusion
 			const dbgValid = vec4( hasValidHistory.select( float( 0 ), float( 1 ) ), currentWeight, isDisocclusion.select( float( 1 ), float( 0 ) ), 1 );
