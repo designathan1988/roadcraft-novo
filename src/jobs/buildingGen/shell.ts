@@ -1,10 +1,11 @@
 // Shell drawing: slim prisms, frames and parapets, plus the repeated-part sink and the output captures. The caller's
 // mesh, frame and GenOutputs are the whole context; no generator state lives here.
 
+import { hash2 } from '../../core/rng.ts';
 import type { MeshBuilder } from '../meshBuilder.ts';
 import { BMAT, Facade } from './materials.ts';
 import { FR_BOTTOM, FR_INNER, FR_TOP, blank, nx, nz, shadeHex, wx, wz, type Frame } from './geometry.ts';
-import { CURTAIN_MULLIONS, curtainFins, windowDetail } from './windows.ts';
+import { CURTAIN_MULLIONS, LEDGE_JAMB, curtainFins, ledge, windowDetail } from './windows.ts';
 import type { GenOutputs } from './outputs.ts';
 
 /** Variantes de peça de fachada (mobiliário 8..15 no pool de props). */
@@ -145,5 +146,52 @@ export function piers(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: num
     const x = x0 + c * cw;
     prism(mb, f, x - 0.22, x + 0.22, z1 - 0.05, z1 + 0.32, y0, y1, col, BMAT.Plain, 50, col, BMAT.Plain);
     prism(mb, f, x - 0.22, x + 0.22, z0 - 0.32, z0 + 0.05, y0, y1, col, BMAT.Plain, 50, col, BMAT.Plain);
+  }
+}
+
+/** Vida na sacada (peças do pool): vaso no canto, cadeira, varal; pelo hash da sacada (não usa o sorteio do prédio). */
+export function balconyLife(f: Frame, seed: number, c: number, fl: number, x0: number, x1: number, z1: number, depth: number, y: number): void {
+  if (!f.out?.part) return;
+  const h = hash2(seed ^ 0x5ac, c * 131 + fl, 0x77);
+  const k = h % 100;
+  if (k < 28) part(f, PART.Vase, x1 - 0.35, y, z1 + depth - 0.35, 0, 1, 0.85 + ((h >>> 8) & 7) * 0.05);
+  if (k >= 18 && k < 40) part(f, PART.Chair, x0 + 0.5 + ((h >>> 12) & 3) * 0.15, y, z1 + depth * 0.5, (h >>> 14) & 1 ? 1 : -1, 0.3);
+  if (k >= 70 && k < 82 && x1 - x0 > 2) part(f, PART.Clothesline, (x0 + x1) / 2, y, z1 + depth * 0.45, 0, 1, Math.min(1.6, (x1 - x0 - 0.6) / 1.8));
+}
+
+/** Porta de entrada na parede z = z1 (local), centrada em x: marco, folha de madeira e, nos prédios, marquise. */
+export function door(mb: MeshBuilder, f: Frame, x: number, z1: number, y: number, trim: number, canopy: boolean): void {
+  blank(mb);
+  const w = canopy ? 1.8 : 1.0, hgt = canopy ? 2.6 : 2.2;
+
+  prism(mb, f, x - w / 2, x + w / 2, z1, z1 + 0.11, y, y + hgt, canopy ? 0x2f3438 : 0x5a3c26, canopy ? BMAT.Metal : BMAT.Plain, 50, -1, 0);
+  if (canopy) prism(mb, f, x - w / 2 - 0.6, x + w / 2 + 0.6, z1, z1 + 1.3, y + hgt + 0.25, y + hgt + 0.45, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true);
+  // the frame and the step in the detail layer (near)
+  const dm = f.out?.detail;
+  if (!dm) return;
+  blank(dm);
+  prism(dm, f, x - w / 2 - 0.12, x + w / 2 + 0.12, z1 - 0.02, z1 + 0.08, y - 0.05, y + hgt + 0.12, trim, BMAT.Plain, 50, trim, BMAT.Plain);
+  prism(dm, f, x - w / 2 - 0.15, x + w / 2 + 0.15, z1, z1 + 0.45, y - 0.15, y + 0.04, 0xbdb7ab, BMAT.Paving, 50, 0xbdb7ab, BMAT.Paving);
+}
+
+/**
+ * Guarda-corpo de metal ao longo de z (local), de x0 a x1, sobre a laje em y: corrimão, travessa de baixo e
+ * montantes a cada ~1,2 m na malha; na camada de detalhe (perto), os balaústres a cada 12 cm.
+ */
+export function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y: number, col: number): void {
+  blank(mb);
+  prism(mb, f, x0, x1, z - 0.06, z, y + 0.98, y + 1.05, col, BMAT.Metal, 50, col, BMAT.Metal);
+  // the handrail in the mesh; the bottom rail, the posts and the balusters in the detail layer (near)
+  const det = f.out?.detail;
+  if (!det) return;
+  blank(det);
+  for (const x of [x0 + 0.03, x1 - 0.03]) prism(det, f, x - 0.03, x + 0.03, z - 0.06, z, y, y + 0.98, col, BMAT.Metal, 50, -1, 0);
+  prism(det, f, x0, x1, z - 0.05, z - 0.01, y + 0.1, y + 0.15, col, BMAT.Metal, 50, col, BMAT.Metal);
+  const n = Math.max(1, Math.round((x1 - x0) / 1.2));
+  for (let k = 1; k < n; k++) { const x = x0 + 0.03 + (x1 - x0 - 0.06) * k / n; prism(det, f, x - 0.03, x + 0.03, z - 0.06, z, y, y + 0.98, col, BMAT.Metal, 50, -1, 0); }
+  const m = Math.floor((x1 - x0) / 0.12);
+  for (let k = 1; k < m; k++) {
+    const x = x0 + (x1 - x0) * k / m;
+    ledge(det, f, x0, z - 0.05, 1, 0, 0, 1, x - x0 - 0.012, x - x0 + 0.012, y + 0.15, y + 0.98, 0.024, col, LEDGE_JAMB);
   }
 }
