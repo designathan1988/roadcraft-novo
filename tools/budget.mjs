@@ -36,8 +36,10 @@ const LIMITS = {
 const MEMORY_FACTOR = 1.5; // cityMB + roadsMB
 
 const script = (v) => `(async()=>{const g=window.__cidade.game;await g.view(0,0,${v.yaw},${v.pitch},${v.dist},${v.hour});` +
-  `await g.settle(10);await new Promise(r=>setTimeout(r,1500));await g.settle(5);` +
-  `console.log('BUDGET '+JSON.stringify({view:'${v.name}',...g.stats()}));})()`;
+  `let last='',same=0,s=g.stats();for(let i=0;i<60;i++){await g.settle(5);s=g.stats();` +
+  `const k=s.draws+':'+s.tris;if(k===last)same++;else{same=0;last=k;}` +
+  `if(same>=2)break;await new Promise(r=>setTimeout(r,100));}` +
+  `console.log('BUDGET '+JSON.stringify({view:'${v.name}',...s}));})()`;
 
 const seq = VIEWS.slice(1).map((v) => [path.join(out, `${v.name}.png`), script(v)]);
 const env = { ...process.env, CIDADE_W: '1920', CIDADE_H: '1080', CIDADE_SEQ: JSON.stringify(seq) };
