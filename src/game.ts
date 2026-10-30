@@ -94,6 +94,9 @@ const STILL_FRAMES = 40;
 export const OCCUPANCY_SEGS = 1 << 17;
 
 
+/** The hours "always day" and "always night" light the city at (Roadcraft 4.0 render/renderer.ts:3876: 16:00 and 22:00). */
+const DAY_LIGHT = 16, NIGHT_LIGHT = 22;
+
 export class Game {
   readonly world = new World();
   readonly pool: JobPool;
@@ -200,7 +203,10 @@ export class Game {
   /** The time of day: the World's (one clock with the city's, as Roadcraft 4.0). */
   private get hour(): number { return this.world.hour; }
   /** Chosen sky and weather set by the player (both go into the save). */
-  private skyMode: SkyMode = 'dia'; // as Roadcraft 4.0: a game opens in "always day"
+  /** ?hour (photos at a set hour) follows the clock for this run without changing the player's choice. */
+  private skyForRun: SkyMode | null = null;
+  /** The sky mode: the player's choice, always day unless chosen otherwise (Roadcraft 4.0 main.ts:2292-2303). */
+  private get skyMode(): SkyMode { return this.skyForRun ?? this.settings?.sky ?? 'day'; }
   /** Clouds placed by the player and the state of the Sky tool. */
   /** Inside view: the building and the floor shown. */
   private inside = new InsideView();
@@ -242,7 +248,7 @@ export class Game {
       get hud() { return gs.hud; },
       get settings() { return gs.settings; },
       life,
-      extras: () => ({ skyMode: gs.skyMode, weather: gs.sky.ctl, water: gs.water.ctl, clouds: gs.clouds.list, hour: gs.hour }),
+      extras: () => ({ weather: gs.sky.ctl, water: gs.water.ctl, clouds: gs.clouds.list, hour: gs.hour }),
       clearForOpen: () => gs.clearPage(),
       applyExtra: (ex) => gs.applyExtra(ex),
       setHour: (h) => gs.world.setHour(h),
@@ -371,7 +377,7 @@ export class Game {
         this.hud.toast(t('game.toast.flattened'));
       },
       weather: (w) => this.sky.set(w),
-      sky: (m) => { this.skyMode = m; this.unsaved = true; },
+      sky: (m) => { this.skyForRun = null; this.settings.sky = m; saveSettings(this.settings); },
       personSpec: (p) => { this.personSpec = p; },
       personOptions: (o) => { this.personOptions = o; },
       peopleCatalog: () => this.vehicles.people.catalog(),
@@ -529,7 +535,7 @@ export class Game {
     this.world.seed = Number(params.get('seed') ?? 1) >>> 0;
     this.world.gameId = (Math.random() * 2 ** 32) >>> 0;
     // a photo at a set hour (?hora) shows that hour's light: the sky follows the clock
-    if (params.has('hour')) { this.world.setHour(Number(params.get('hour')) % 24); this.clock.holdHour(); this.skyMode = 'ciclo'; }
+    if (params.has('hour')) { this.world.setHour(Number(params.get('hour')) % 24); this.clock.holdHour(); this.skyForRun = 'cycle'; }
     this.hud.setSky(this.skyMode);
     this.weather.onStrike = (d) => this.ambient.thunder(d);
     const preset = ['tempestade', 'chuva', 'limpo'].find((k) => params.has(k));
@@ -584,7 +590,7 @@ export class Game {
     this.hud.showLoading(t('game.loading.shaders'));
     // the sky's light first: the scene's environment map enters every lit material's pipeline key (three r186
     // NodeManager.getCacheKey), and without it everything compiled here was compiled again in play
-    setTimeOfDay(this.parts, this.skyMode === 'dia' ? 12 : this.skyMode === 'noite' ? 22 : this.hour, cloudsU.value, rainU.value);
+    setTimeOfDay(this.parts, this.skyMode === 'day' ? DAY_LIGHT : this.skyMode === 'night' ? NIGHT_LIGHT : this.hour, cloudsU.value, rainU.value);
     const warm = new THREE.Group();
     for (const l of this.layers) warm.add(l.warmupMesh());
     warm.add(this.textSigns.warmup());
@@ -750,7 +756,7 @@ export class Game {
     }
     const cam = this.rig.camera;
     // always day (or night) fixes the light only: the clock, and the traffic demand that follows it, go on
-    const light = this.skyMode === 'dia' ? 12 : this.skyMode === 'noite' ? 22 : this.hour;
+    const light = this.skyMode === 'day' ? DAY_LIGHT : this.skyMode === 'night' ? NIGHT_LIGHT : this.hour;
     // city clock in minutes (building decay); the sky mode only fixes the light
     if (!this.clock.paused) this.world.advanceClock(dt * this.clock.daySpeed);
     if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && this.life.editable) void this.saving.save(true); }
@@ -1640,7 +1646,7 @@ export class Game {
     this.textSigns.version++;
     this.transit.terminals = ex.terminals; this.transit.version++;
     this.clouds.load(ex.clouds); fogLevel.value = ex.fog;
-    this.skyMode = ex.sky === 'dia' || ex.sky === 'noite' ? ex.sky : 'ciclo'; this.hud.setSky(this.skyMode);
+    // the sky mode is the player's, not the map's: an older save's sky is not read
     this.sky.set(ex.weather, false);
   }
 

@@ -1,4 +1,4 @@
-// The map's extra description saved with it (meta.extra, JSON): sky mode, hand-set weather and water, clouds, fog,
+// The map's extra description saved with it (meta.extra, JSON): hand-set weather and water, clouds, fog,
 // transit terminals, sign texts, street names, clock, road paint and unlimited money. ONE codec for the writer
 // (app/session.ts) and the reader (opening a map): each field is read and checked on its own, so one bad or missing
 // field falls back to its default alone and never takes the others with it (before: one cast, one catch for all).
@@ -8,7 +8,6 @@ export interface ExtraWater { waves: number; foam: number; current: number }
 export interface ExtraCloud { x: number; z: number; y: number; size: number; density: number }
 
 export interface MapExtra {
-  sky: string;
   weather: ExtraWeather | null;
   water: ExtraWater | null;
   clouds: ExtraCloud[];
@@ -33,7 +32,6 @@ export function decodeExtra(text: string | undefined): MapExtra {
   if (text) { try { const v = JSON.parse(text) as unknown; if (v && typeof v === 'object') raw = v as Record<string, unknown>; } catch { /* not JSON: every field its default */ } }
   const list = (k: string): unknown[] => (Array.isArray(raw[k]) ? raw[k] as unknown[] : []);
   return {
-    sky: typeof raw.sky === 'string' ? raw.sky : 'ciclo',
     weather: isNums(raw.weather, ['rain', 'wind', 'dir', 'lightning', 'thunder']) ? raw.weather as ExtraWeather : null,
     water: isNums(raw.water, ['waves', 'foam', 'current']) ? raw.water as ExtraWater : null,
     clouds: list('clouds').filter((c) => isNums(c, ['x', 'z', 'y', 'size', 'density'])) as ExtraCloud[],

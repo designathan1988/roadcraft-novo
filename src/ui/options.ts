@@ -2,6 +2,7 @@
 // in Roadcraft's dialog look. Kept in the browser/Electron (localStorage when it works); without it, the defaults.
 
 import { LANGUAGES, lang, loose, onLanguageChange, setLang, t, type Lang } from '../shared/i18n/index.ts';
+import type { SkyMode } from './hudActions.ts';
 import { keyName, reservedKeys } from './keys.ts';
 
 export type Preset = 'baixo' | 'medio' | 'alto' | 'ultra';
@@ -26,6 +27,8 @@ export interface Settings {
   paint?: string;
   /** Furniture of new roads: 0 complete, 1 basic, 2 none. */
   furniture?: number;
+  /** Always day, always night or the clock's light (Roadcraft 4.0 keeps it with the player, not with the map). */
+  sky?: SkyMode;
   /** Road tool keys (key codes): raise and lower the road. */
   roadUp?: string;
   roadDown?: string;

@@ -19,7 +19,7 @@ import type { World } from '../world/world.ts';
 import type { Transit } from '../world/transit.ts';
 import type { Cloud } from '../render/cloudPuffs.ts';
 import type { CameraRig } from '../render/cameraRig.ts';
-import type { SkyMode, WeatherCtl } from '../ui/hudActions.ts';
+import type { WeatherCtl } from '../ui/hudActions.ts';
 
 export interface SaveWater { waves: number; foam: number; current: number }
 
@@ -129,7 +129,6 @@ export interface SaveHost {
   readonly rig: Pick<CameraRig, 'state'>;
   readonly transit: Transit;
   readonly settings: { paint?: string };
-  readonly skyMode: SkyMode;
   readonly weatherCtl: WeatherCtl | null;
   readonly waterCtl: SaveWater;
   readonly clouds: readonly Cloud[];
@@ -191,7 +190,7 @@ export async function saveSession(host: SaveHost, auto = false): Promise<boolean
   });
   for (const p of packs) p.catch(() => { /* reported below */ });
   const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: listed, camera: host.rig.state(), hour: host.hour, transit: host.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
-    extra: encodeExtra({ sky: host.skyMode, weather: host.weatherCtl, water: host.waterCtl, clouds: [...host.clouds], fog: fogLevel.value, terminals: host.transit.terminals,
+    extra: encodeExtra({ weather: host.weatherCtl, water: host.waterCtl, clouds: [...host.clouds], fog: fogLevel.value, terminals: host.transit.terminals,
       signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: host.settings.paint ?? 'br', unlimited: w.unlimited }) });
   try {
     const writer = await slot.begin();

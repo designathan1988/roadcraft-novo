@@ -12,7 +12,8 @@ export const TERRAIN_TOOLS: Tool[] = ['raise', 'lower', 'smooth', 'flatten', 'la
 /** Ground brushes (they share the radius). */
 export const GROUND_TOOLS: Tool[] = ['paint', 'forest', 'elements'];
 export const ROAD_TOOLS: Tool[] = ['road', 'curve', 'free', 'roundabout', 'upgrade', 'blocks', 'move', 'split', 'bulldoze'];
-export type SkyMode = 'ciclo' | 'dia' | 'noite';
+/** Always day, always night, or the light following the clock (the player's choice, kept between games). */
+export type SkyMode = 'day' | 'night' | 'cycle';
 export interface SkyToolState { cloud: 'none' | 'add' | 'move' | 'edit' | 'remove'; fog: 'none' | 'lay' | 'erase'; size: number; base: number; density: number; fogHeight: number }
 /** Rain 0..1, wind in m/s, direction in degrees (where it blows to), lightning per minute, thunder 0..1. */
 export interface WeatherCtl { rain: number; wind: number; dir: number; lightning: number; thunder: number }

@@ -223,7 +223,7 @@ export const SCENARIOS = {
   // B51: always day (or night) fixes the light, while the clock and the traffic demand go on
   'B51-always-day-clock': { query: '?empty&workers=3', script: `
     R.sky.setHour(8); A.speed(4); // the time of day follows the speed: 4 game hours per real minute
-    click('[data-sky=dia]'); await frames(2);
+    click('[data-sky=day]'); await frames(2);
     const h0 = R.sky.hour();
     await wait(4000);
     check('the clock goes on with always day', R.sky.hour() > h0 + 0.03, 'hour ' + h0.toFixed(3) + ' → ' + R.sky.hour().toFixed(3));
@@ -588,9 +588,9 @@ export const SCENARIOS = {
   `,
   // As the 4.0 (main.ts sky: 'day'): a game opens with the sky "always day", that button lit, the clock running
   'sky-starts-day': { query: '?empty&workers=3', script: `
-    check('the game opens in always day', R.sky.mode() === 'dia', 'sky ' + R.sky.mode());
+    check('the game opens in always day', R.sky.mode() === 'day', 'sky ' + R.sky.mode());
     const lit = QA('[data-sky].on').map((b) => b.dataset.sky).join(',');
-    check('the day button is the lit one', lit === 'dia', 'lit: ' + lit);
+    check('the day button is the lit one', lit === 'day', 'lit: ' + lit);
     const h0 = R.sky.hour(); await wait(3000);
     check('the clock runs', R.sky.hour() !== h0, 'hour ' + h0 + ' → ' + R.sky.hour());
   ` },

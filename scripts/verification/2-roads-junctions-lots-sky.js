@@ -110,7 +110,7 @@
   await check('flatten the map', () => { const f0 = fp(w.heights); const c0 = window.confirm; window.confirm = () => true; H.flattenMap(); window.confirm = c0; return fp(w.heights) !== f0 || 'the heights did not change'; });
 
   // ---------------- sky and weather
-  for (const m of ['dia', 'noite', 'ciclo']) await check(`sky: ${m}`, () => { H.sky(m); return R.sky.mode() === m || `stayed ${R.sky.mode()}`; });
+  for (const m of ['day', 'night', 'cycle']) await check(`sky: ${m}`, () => { H.sky(m); return R.sky.mode() === m || `stayed ${R.sky.mode()}`; });
   await check('adjustable weather', () => { H.weather({ rain: 0.6, wind: 0.5, dir: 90, lightning: 4, thunder: 1 }); const set = H.environment().weather; H.weather(null); const back = H.environment().weather; return (set && set.rain === 0.6 && set.lightning === 4 && back === null) || `weather ${JSON.stringify(set)} → ${JSON.stringify(back)}`; });
   await check('clouds: scatter and clear', () => { H.scatterClouds(6, 0.5); const n = R.sky.clouds(); H.clearClouds(); return n > 0 && R.sky.clouds() === 0 || `clouds ${n} → ${R.sky.clouds()}`; });
   await check('general fog', () => { H.fogLevel(2); const f2 = H.environment().fog; H.fogLevel(1); return (f2 === 2 && H.environment().fog === 1) || `fog ${f2} → ${H.environment().fog}`; });

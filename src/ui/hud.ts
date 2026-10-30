@@ -133,7 +133,7 @@ export class Hud {
     const hud = el('header', 'v2-hud');
     const city = el('div', 'v2-city');
     const sky = el('div', 'v2-seg v2-sky');
-    for (const [mode, key, icon] of [['dia', 'sky.day', 'sun'], ['noite', 'sky.night', 'moon'], ['ciclo', 'sky.cycle', 'cycle']] as const) {
+    for (const [mode, key, icon] of [['day', 'sky.day', 'sun'], ['night', 'sky.night', 'moon'], ['cycle', 'sky.cycle', 'cycle']] as const) {
       const b = button('v2-seg-b', t(key), () => { a.sky(mode); this.setSky(mode); }, svg(icon, 16));
       b.dataset.sky = mode;
       this.skyButtons.push(b);
@@ -304,7 +304,7 @@ export class Hud {
       this.relabels.push(() => { b.querySelector('.v2-cat-name')!.textContent = t(`v2.dock.${c.id}`); b.title = `${t(`ui.cat.${c.id}`)}  ${c.key}`; });
     }
     onLanguageChange(() => this.relabel());
-    this.setSky('ciclo');
+    this.setSky('cycle');
     this.syncSpeed();
     this.render();
   }

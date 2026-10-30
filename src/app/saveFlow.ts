@@ -37,7 +37,7 @@ export interface SaveFlowHost {
   /** The game's lifecycle (app/lifecycle.ts): the flows start and end their operation there. */
   readonly life: Lifecycle;
   /** What the save writes of the page's state (sky mode, weather, water, clouds, hour). */
-  extras(): { skyMode: SaveHost['skyMode']; weather: SaveHost['weatherCtl']; water: SaveHost['waterCtl']; clouds: SaveHost['clouds']; hour: number };
+  extras(): { weather: SaveHost['weatherCtl']; water: SaveHost['waterCtl']; clouds: SaveHost['clouds']; hour: number };
   /** Lets go of the city on screen before another opens (lots under way, layers, props, lines, history). */
   clearForOpen(): void;
   /** Applies the opened map's extra (sky, weather, water, clouds, signs, street names, terminals, paint, clock). */
@@ -94,7 +94,7 @@ export class SaveFlow {
     const f = this, h = this.h, x = h.extras();
     const host: SaveHost = {
       world: h.world, pool: h.pool, hud: h.hud, rig: h.rig, transit: h.transit, settings: h.settings,
-      skyMode: x.skyMode, weatherCtl: x.weather, waterCtl: x.water, clouds: x.clouds, hour: x.hour,
+      weatherCtl: x.weather, waterCtl: x.water, clouds: x.clouds, hour: x.hour,
       life: h.life,
       get slotBase() { return f.slotBase; }, set slotBase(v) { f.slotBase = v; },
       mayWrite: () => f.mayWrite(), slot: () => f.slot(), keepSlotForThisCity: (slot) => f.keepSlotForThisCity(slot),
