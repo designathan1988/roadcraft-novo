@@ -20,8 +20,8 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 240 |
-| Bytes / linhas | 3.706.968 / 66.529 |
+| Arquivos TS | 241 |
+| Bytes / linhas | 3.708.648 / 66.570 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
@@ -31,7 +31,7 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.120 linhas), `sim/traffic.ts` (2.940),
-`game.ts` (2.647), `jobs/buildingGen.ts` (2.521), `r40/render/buildings/signature.ts` (1.781),
+`game.ts` (2.644), `jobs/buildingGen.ts` (2.521), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
@@ -197,8 +197,9 @@ Ordem por risco e valor (não por tamanho):
 - Feito em 2026-10-29: `sim/traffic/laneChanges.ts` (MOBIL, obrigatória, escape e discricionária) com `LaneHost`;
   `sim/traffic/lines.ts` (`LineSpec`, `SimLine`, `resolveLine`, `indexStops`) e
   `jobs/buildingGen/polygon.ts` (`lotFit`, `lotPolygon`, `inPolygon`), com `props` importando direto.
-- Feito: `app/clicks.ts` (despacho de clique com `ClickHost`), depois de `app/session.ts` cobrir salvar/abrir/novo
-  mapa; `game.ts` ainda tem entrada/pointer, seleção e edição de lote/edifício.
+- Feito: `app/clicks.ts` (despacho de clique com `ClickHost`) e `app/buildings.ts` (seleção/círculo com
+  `SelectionHost`), depois de `app/session.ts` cobrir salvar/abrir/novo mapa; `game.ts` ainda tem entrada/pointer e
+  edição de lote/edifício.
 - Em andamento: `sim/traffic.ts` por micro/meso/sinais/ônibus, `buildingGen` com `GenContext` e `r40/api.ts`
   (imports externos de r40 estão concentrados em `jobs/building40.ts` e `render/propMeshes.ts`).
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
