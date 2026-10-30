@@ -20,8 +20,8 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 239 |
-| Bytes / linhas | 3.704.294 / 66.464 |
+| Arquivos TS | 240 |
+| Bytes / linhas | 3.706.968 / 66.529 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
@@ -31,7 +31,7 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.120 linhas), `sim/traffic.ts` (2.940),
-`jobs/buildingGen.ts` (2.521), `game.ts` (2.644), `r40/render/buildings/signature.ts` (1.781),
+`game.ts` (2.647), `jobs/buildingGen.ts` (2.521), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
