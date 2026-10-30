@@ -504,7 +504,7 @@ function vehicleMaterial(scaled: boolean, animated: boolean, inside = false): TH
     // wheels roll by the distance driven along the heading and the front ones steer by the turn rate (curvature ×
     // wheelbase from this frame's and last frame's pose), round their own centre (kept in the colour slot)
     const isWheel = step(float(WHEEL - 0.5), glowV);
-    const front = mod(glowV.sub(WHEEL), 2).mul(isWheel);
+    const front = step(float(0.5), mod(glowV.sub(WHEEL), 2)).mul(isWheel);
     const centre = attribute('color', 'vec3');
     const r = max(centre.y, float(0.1));
     const travelled = ipos.x.mul(sin(ipos.w)).add(ipos.z.mul(cos(ipos.w)));
@@ -554,8 +554,10 @@ function vehicleMaterial(scaled: boolean, animated: boolean, inside = false): TH
   const isBlob = step(abs(glowA.sub(BLOB)), float(0.5));
   const blobR = attribute('color', 'vec3').xy.length().div(1.414);
   const blobOk = isBlob.lessThan(0.5).or(float(1).sub(smoothstep(float(0.35), float(1), blobR)).mul(0.85).greaterThan(interleavedGradientNoise(screenCoordinate.xy.add(vec2(7.0, 13.0)))));
-  // wheel parts and puffs keep a centre in the colour slot: their colour is by part
-  const wPart = floor(glowA.sub(WHEEL).div(2));
+  // wheel parts and puffs keep a centre in the colour slot: their colour is by part. (glow is interpolated: a rear
+  // wheel's 102 arrives as 101.99998, and floor((glow - 100) / 2) flipped between hub and tyre pixel by pixel — the
+  // rear wheels' speckle; +0.5 keeps every part half a step from the rounding)
+  const wPart = floor(glowA.sub(WHEEL).add(0.5).div(2));
   const wheelC = select(wPart.lessThan(0.5), sRGBTransferEOTF(vec3(0.086, 0.086, 0.086)), select(wPart.lessThan(1.5), sRGBTransferEOTF(vec3(0.73, 0.74, 0.75)), sRGBTransferEOTF(vec3(0.16, 0.17, 0.18))));
   const isWheelF = step(float(WHEEL - 0.5), glowA);
   const isPuffF = step(abs(glowA.sub(PUFF)), float(0.5));
