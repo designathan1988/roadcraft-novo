@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 22h59.
+Atualizado: 2026-10-29, 23h03.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,9 +39,10 @@ Atualizado: 2026-10-29, 22h59.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `2cbc606` (GenOutputs), com `81655fa`/`c522b73` (ônibus),
-  `80bfefc`/`917e88f` (pessoas), `e89f6ed` (vidro, ocupantes e entre-eixos) e `8fb94b2`/`066b047`/
-  `0965073`/`b6f4857`/`084425c` antes. Sem push e sem merge em main; nenhum agente ativo.
+- Branch `port/roadcraft-features`; HEAD `61800d7` (check-save de 10 km), com `126b262` (docs do
+  GenOutputs), `2cbc606` (GenOutputs), `81655fa`/`c522b73` (ônibus), `80bfefc`/`917e88f` (pessoas),
+  `e89f6ed` (vidro, ocupantes e entre-eixos) e `8fb94b2`/`066b047`/`0965073`/`b6f4857`/`084425c`
+  antes. Sem push e sem merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
   `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
   `polygon.ts`, `geometry.ts`, `materials.ts` e `outputs.ts`, `src/r40/api.ts` e `src/roads/dash.ts`.
@@ -52,13 +53,12 @@ Atualizado: 2026-10-29, 22h59.
   `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget com o vidro: street 418 draws/
   11.483.609 tris, district 175/7.103.905, city 123/**4.002.312** (limite 4.044.328), map
   178/4.463.246, night 494/14.492.808; MB 611/591/301/261/731, todos dentro.
-- Testes: suíte **371/371 em 98,7 s** com o vidro; trânsito/defeitos/movimento **61/61 em 58,3 s**
-  na extração de regiões; prédios **50/50 em 5,2 s** depois do GenOutputs; tsc/build limpos.
-- Save/reabertura: `generated-reopens-same` deu **4 ok, 0 falhas** (cidade gerada, salva e recarregada
-  no mesmo processo, mesmas vias/prédios, sem reparo); `close-saves` deu **2 ok, 0 falhas** (fecha o
-  app de verdade e reabre, mapa pequeno); `check-user-data.mjs` manteve a pasta do jogador intacta
-  (14.340 arquivos). Os três rodaram antes de `2cbc606`. A cidade de 10 km **com processo fechado**
-  ainda não foi provada.
+- Testes: suíte **371/371 em 62,4 s** depois do GenOutputs; trânsito/defeitos/movimento **61/61 em
+  58,3 s** na extração de regiões; prédios **50/50 em 5,2 s**; tsc/build limpos.
+- Save/reabertura: `generated-close-reopens` deu **5 ok, 0 falhas**: cidade gerada de 10 km, salva,
+  app **encerrado e reaberto em outro processo**, mesmas vias/nós/prédios/ladrilhos. `close-saves`
+  deu **2 ok, 0 falhas** (mapa pequeno) e `check-user-data.mjs` manteve a pasta do jogador intacta
+  (14.340 arquivos). O cenário `generated-reopens-same` também passou 4 ok no mesmo processo.
 - Carros: `test-results/carros-qa-2026-10-29/01..09` (20/100/500 m, dia/noite, seguindo) mostra a
   carroceria opaca; `test-results/carros-vidro-perto-2026-10-29/01,07` mostra o motorista no carro
   preto a 8 m e passageiros brancos dentro do ônibus, com o vidro separado e transparente. O LOD
@@ -72,8 +72,8 @@ Atualizado: 2026-10-29, 22h59.
   acorde e o entre-eixos 6,2 m estão no código/testes; a prova visual da curva continua em aberto.
 - Pendente: extrair shell/fachada/cívico do `buildingGen` (agora sem sinks), o resto de `traffic`/
   `r40/buildingMesh`, bomba real, construtor completo, multidão/ônibus em curva, cidade organizada/250 mil.
-  A recarga da cidade gerada e o fechar/reabrir de um mapa pequeno estão provados; a cidade de 10 km
-  fechada e reaberta sem cache ainda não.
+  A cidade de 10 km fechada e reaberta em outro processo está provada; a de semente aleatória sem cache
+  ainda não foi isolada (o cenário usa a geração padrão e a pasta de teste).
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
