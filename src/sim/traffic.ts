@@ -66,6 +66,8 @@ const DOCK_CELL = 64, DOCK_CELLS = Math.ceil(MAP_SIZE / DOCK_CELL), YARD_REACH =
 
 /** Parking (roadcraft kerbStops/parking): deceleration, time to pull into the bay (s), and how long it stays before disappearing. */
 const PARK_DECEL = 2.6, PARK_SIDE_S = 2.4, PARK_STAY = 3;
+/** In a lane change the rear follows the front's sideways move this share of the change later (the body points into it). */
+const LC_REAR_LAG = 0.15;
 
 /** u of the middle of the parking strip on the right of someone driving in direction `dir` of the segment (NaN = no bays). */
 function parkU(profile: number, dir: number): number {
@@ -1580,6 +1582,7 @@ export class Traffic {
   private headOf(v: number, p: Float64Array): number {
     const c = this.veh.cols, sim = this.sim, q = this.tmp2;
     let lights = 0;
+    this.lcOff[0] = this.lcOff[1] = this.lcOff[2] = 0;
     // a lane change still under way (only between lanes of the same segment as the lane it is on or came from)
     const changing = c.lcT[v] < 1 && c.lcFrom[v] >= 0 && c.lane[v] >= 0 && laneSeg(c.lcFrom[v]) === laneSeg(c.lane[v]) && sim.net.segs.alive[laneSeg(c.lcFrom[v])];
     if (c.conn[v] >= 0) {
@@ -1590,6 +1593,7 @@ export class Traffic {
         sim.lanePoint(c.lcFrom[v], L, q); const qx = q[0], qz = q[2];
         sim.lanePoint(lane, L, q);
         p[0] += (qx - q[0]) * k; p[2] += (qz - q[2]) * k;
+        this.lcOff[0] = qx - q[0]; this.lcOff[1] = qz - q[2]; this.lcOff[2] = k;
       }
     } else {
       const lane = c.lane[v];
@@ -1601,11 +1605,14 @@ export class Traffic {
         // lane-change indicator: toward the new lane's side (driver's right = (−cos, sin) of the heading)
         if (c.lcT[v] < 0.8) lights |= -Math.cos(p[3]) * (p[0] - q[0]) + Math.sin(p[3]) * (p[2] - q[2]) > 0 ? LIGHT_RIGHT : LIGHT_LEFT;
         const t = c.lcT[v], k = 1 - t * t * (3 - 2 * t);
+        this.lcOff[0] = q[0] - p[0]; this.lcOff[1] = q[2] - p[2]; this.lcOff[2] = k;
         p[0] += (q[0] - p[0]) * k; p[2] += (q[2] - p[2]) * k;
       }
     }
     return lights;
   }
+  /** The sideways offset `headOf` gave the front for a lane change under way (x, z, its share k; k = 0: none). */
+  private lcOff = new Float64Array(3);
 
   /**
    * Middle of vehicle `v` as drawn (x, y, z, yaw into `p`): on its lane or connection, in the bay, at the kerb or on a
@@ -1614,39 +1621,40 @@ export class Traffic {
   private centreOf(v: number, p: Float64Array): number {
     const c = this.veh.cols, sim = this.sim;
     let lights = this.headOf(v, p);
-    let centred = false;
     if (c.mv[v] >= 0) {
       // on a manoeuvre: the pose is the vehicle centre on the Reeds-Shepp path; signal towards where it goes
       const mp = this.mvA;
       this.mvs.pose(c.mv[v], mp);
       p[0] = mp[0]; p[2] = mp[1]; p[3] = mp[2];
-      centred = true;
-      lights |= this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT;
-    } else if (c.dying[v] === 4 && c.conn[v] < 0) {
+      return lights | (this.mvs.t.cols.kind[c.mv[v]] === MKind.Unpark ? LIGHT_LEFT : LIGHT_RIGHT);
+    }
+    // the body goes round a bend on its path, both ends on it (roadcraft sim/pose.ts: the body on the path, its heading
+    // from a chord): middle and heading from the chord between the front and the point a length behind it. Taken from
+    // the front's tangent instead, the body pivoted about its nose and the rear swept across the junction (a car's rear
+    // 1.5 m off its path in a right turn on average, 3.5 m at worst; a lorry's 5-8.6 m)
+    const fx = p[0], fy = p[1], fz = p[2], rear = this.tmp2, off = this.lcOff;
+    backAlong(sim, c.lane[v], c.conn[v], c.s[v], c.len[v], rear);
+    // a lane change under way: the rear takes the front's sideways offset a moment later (the body points into it)
+    if (off[2] > 0) {
+      const t = Math.max(0, c.lcT[v] - LC_REAR_LAG), kr = 1 - t * t * (3 - 2 * t);
+      rear[0] += off[0] * kr; rear[2] += off[1] * kr;
+    }
+    const dx = fx - rear[0], dz = fz - rear[2];
+    if (dx * dx + dz * dz > 1e-6) p[3] = Math.atan2(dx, dz);
+    p[0] = (fx + rear[0]) / 2; p[1] = (fy + rear[1]) / 2; p[2] = (fz + rear[2]) / 2;
+    if (c.dying[v] === 4 && c.conn[v] < 0) {
       // at the kerb: 0.9 m to the right, hazard lights while stopped
       const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
       p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
       if (c.v[v] < 0.1 && ((this.time * 1.5) % 1) < 0.5) lights |= LIGHT_LEFT | LIGHT_RIGHT;
     }
     // in the bay or on the way to it (offset in u, along the segment direction): pulling in, right indicator; pulling out, left
-    if (!centred && c.dying[v] !== 4 && c.pk[v] > 0 && c.conn[v] < 0) {
+    else if (c.pk[v] > 0 && c.conn[v] < 0) {
       const lane = c.lane[v], dir = laneDir(lane);
       const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
       const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
       if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
       if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
-    }
-    // reference point at the middle of the vehicle; a bus takes its middle and heading from the chord between its front
-    // and rear on the path, so it turns around the bend instead of pivoting about its front
-    if (!centred && c.kind[v] === 1) {
-      const fx = p[0], fy = p[1], fz = p[2], rear = this.tmp2;
-      backAlong(sim, c.lane[v], c.conn[v], c.s[v], c.len[v], rear);
-      const dx = fx - rear[0], dz = fz - rear[2];
-      if (dx * dx + dz * dz > 1e-6) p[3] = Math.atan2(dx, dz);
-      p[0] = (fx + rear[0]) / 2; p[1] = (fy + rear[1]) / 2; p[2] = (fz + rear[2]) / 2;
-    } else {
-      const back = centred ? 0 : c.len[v] / 2;
-      p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
     }
     return lights;
   }

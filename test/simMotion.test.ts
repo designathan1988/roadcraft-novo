@@ -165,3 +165,36 @@ test('cars stop before the crosswalk and give way to people on it: nobody crossi
   assert.ok(onZebra <= stoppedAtLine * 0.01, `${onZebra} of ${stoppedAtLine} looks at approaching first-in-line vehicles on the zebra (${onIt.size} vehicles)`);
   assert.ok(inside <= crossingSeen * 0.001, `${inside} times in ${crossingSeen} someone crossing was inside a vehicle`);
 });
+
+test('vehicles go round a turn on their path: the drawn body\'s ends stay on it (no pivoting about the nose)', async () => {
+  const { backAlong } = await import('../src/sim/traffic.ts');
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 1 / 30;
+  const c = tr.veh.cols, k = sim.conns.cols, T = inner(tr);
+  const p = new Float64Array(4), f = new Float64Array(4), r = new Float64Array(4);
+  // the tightest corner the junctions build: a body spans more than the connection it is on
+  let kMax = 0;
+  for (let x = 0; x < sim.conns.end; x++) if (sim.conns.alive[x]) kMax = Math.max(kMax, k.k[x]);
+  let looked = 0, worst = 0, example = '';
+  for (let i = 0; i < 20 * 150; i++) {
+    tr.step(0.05);
+    if (i % 10 === 0) tr.checkWindow();
+    for (let j = 0; j < tr.microN; j++) {
+      const v = tr.micro[j], x = c.conn[v];
+      if (x < 0 || k.turn[x] === 1 || c.kind[v] === 4 || c.mv[v] >= 0 || c.lcT[v] < 1) continue;
+      T.centreOf(v, p);
+      const h = c.len[v] / 2, fx = Math.sin(p[3]), fz = Math.cos(p[3]);
+      backAlong(sim, c.lane[v], x, c.s[v], 0, f);
+      backAlong(sim, c.lane[v], x, c.s[v], c.len[v], r);
+      const off = Math.max(Math.hypot(p[0] + fx * h - f[0], p[2] + fz * h - f[2]), Math.hypot(p[0] - fx * h - r[0], p[2] - fz * h - r[2]));
+      // the chord between the ends cuts the bend: its sag (L² k / 8 at the sharpest curvature) is all a rigid body may
+      // leave its path by
+      const excess = off - (c.len[v] * c.len[v] * kMax / 8 + 0.3);
+      looked++;
+      if (excess > worst) { worst = excess; example = `vehicle ${v} (kind ${c.kind[v]}, ${c.len[v].toFixed(1)} m) ${off.toFixed(2)} m off its path`; }
+    }
+  }
+  assert.ok(looked > 5000, `vehicle-steps in turns ${looked}`);
+  assert.ok(worst <= 0, `the drawn body's front or rear left its path ${worst.toFixed(2)} m beyond a rigid body's sag: ${example}`);
+});

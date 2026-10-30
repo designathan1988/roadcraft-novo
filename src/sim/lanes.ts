@@ -6,13 +6,15 @@
 import { RoadNetwork, type NetOp } from '../roads/network.ts';
 import { Ctl, Rule, banned, effectiveControl, mainLegs, signalStages, type JunctionSpec } from '../roads/control.ts';
 import { PROFILE_INFO, PROFILES, TurnBit } from '../roads/profiles.ts';
-import { arcTable, bez, bezD, tAtLength, type Quad } from '../roads/geometry.ts';
+import { arcTable, bez, bezD, type Quad } from '../roads/geometry.ts';
 import { BULB_R, armOf, bulbAt, junctionRetreats } from '../roads/junction.ts';
 import { customExits } from '../roads/laneLinks.ts';
 import { SegFlag } from '../roads/flags.ts';
 import { Table } from '../core/table.ts';
 
 export const ARC_STEPS = 16;
+/** Arc-length samples of a connection's curve (it is short: a junction's turn). */
+export const CONN_ARC = 8;
 export const laneId = (seg: number, dir: number, idx: number) => seg * 16 + (dir > 0 ? 0 : 8) + idx;
 export const laneSeg = (l: number) => l >> 4;
 export const laneDir = (l: number) => ((l & 8) !== 0 ? -1 : 1);
@@ -42,6 +44,8 @@ export class SimNet {
   readonly net = new RoadNetwork({ touchCell() {} });
   readonly conns = new Table(connSchema, 1 << 14);
   arc = new Float32Array((1 << 14) * (ARC_STEPS + 1));
+  /** Each connection's cumulative length at CONN_ARC + 1 even steps of its curve's parameter (`connPoint`). */
+  connArc = new Float32Array((1 << 14) * (CONN_ARC + 1));
   retreat = new Float32Array((1 << 14) * 2);
   /** First connection of each node / leaving each lane (linked lists). */
   nodeConn = new Int32Array(1 << 14).fill(-1);
@@ -88,6 +92,7 @@ export class SimNet {
   laneMeters = 0;
 
   constructor() {
+    this.conns.onGrow((cap) => { this.connArc = grow(this.connArc, cap * (CONN_ARC + 1), 0); });
     this.net.nodes.onGrow((cap) => {
       this.nodeConn = grow(this.nodeConn, cap, -1);
       this.nodePhases = grow(this.nodePhases, cap, 0);
@@ -191,9 +196,7 @@ export class SimNet {
 
   /** From s (length along the segment) to t of the curve. */
   private tOf(seg: number, s: number): number {
-    const o = seg * (ARC_STEPS + 1);
-    const tab = this.arc.subarray(o, o + ARC_STEPS + 1);
-    return tAtLength(tab as unknown as Float64Array, s);
+    return tAtArc(this.arc, seg * (ARC_STEPS + 1), ARC_STEPS, s);
   }
 
   segLen(seg: number): number { return this.net.segs.cols.len[seg]; }
@@ -253,7 +256,9 @@ export class SimNet {
   /** Point on the connection (curve) d metres from its start. */
   connPoint(c: number, d: number, out: Float64Array): void {
     const k = this.conns.cols;
-    const t = Math.max(0, Math.min(1, d / Math.max(0.01, k.len[c])));
+    // d metres along the curve (its parameter does not run at an even speed: taken as d / length, a vehicle at a steady
+    // speed was drawn speeding up and slowing down through the turn, its ends at the wrong distance apart)
+    const t = tAtArc(this.connArc, c * (CONN_ARC + 1), CONN_ARC, d);
     const s = 1 - t;
     out[0] = s * s * k.x0[c] + 2 * s * t * k.cx[c] + t * t * k.x1[c];
     out[2] = s * s * k.z0[c] + 2 * s * t * k.cz[c] + t * t * k.z1[c];
@@ -411,7 +416,7 @@ export class SimNet {
             cx = (pa[0] + pb[0]) / 2 + d0x * ext; cz = (pa[2] + pb[2]) / 2 + d0z * ext;
           }
           kc.cx[c] = cx; kc.cz[c] = cz;
-          kc.len[c] = quadLen(pa[0], pa[2], cx, cz, pb[0], pb[2]);
+          kc.len[c] = connArcTable(this.connArc, c, pa[0], pa[2], cx, cz, pb[0], pb[2]);
           kc.k[c] = quadCurvature(pa[0], pa[2], cx, cz, pb[0], pb[2]);
           kc.turn[c] = turn; kc.arm[c] = armIndex.get(i) ?? 0;
           kc.nextAtNode[c] = this.nodeConn[n]; this.nodeConn[n] = c;
@@ -508,14 +513,32 @@ export function quadCurvature(x0: number, z0: number, cx: number, cz: number, x1
   return k;
 }
 
-function quadLen(x0: number, z0: number, cx: number, cz: number, x1: number, z1: number): number {
+/**
+ * Fills connection `c`'s arc table (cumulative length at CONN_ARC + 1 even steps of the curve's parameter) and returns
+ * its length (at least 0.5 m: a splice where the lanes meet has none; the table then spreads it evenly).
+ */
+function connArcTable(arc: Float32Array, c: number, x0: number, z0: number, cx: number, cz: number, x1: number, z1: number): number {
+  const o = c * (CONN_ARC + 1);
   let len = 0, px = x0, pz = z0;
-  for (let i = 1; i <= 8; i++) {
-    const t = i / 8, s = 1 - t;
+  arc[o] = 0;
+  for (let i = 1; i <= CONN_ARC; i++) {
+    const t = i / CONN_ARC, s = 1 - t;
     const x = s * s * x0 + 2 * s * t * cx + t * t * x1, z = s * s * z0 + 2 * s * t * cz + t * t * z1;
     len += Math.hypot(x - px, z - pz); px = x; pz = z;
+    arc[o + i] = len;
   }
-  return Math.max(0.5, len);
+  if (len < 0.5) { for (let i = 0; i <= CONN_ARC; i++) arc[o + i] = 0.5 * i / CONN_ARC; return 0.5; }
+  return len;
+}
+
+/** The curve's parameter at `s` metres along it, from the arc table of `n` steps at `o` in `arc` (no view made). */
+function tAtArc(arc: Float32Array, o: number, n: number, s: number): number {
+  if (s <= 0) return 0;
+  if (s >= arc[o + n]) return 1;
+  let lo = 0, hi = n;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arc[o + m] < s) lo = m; else hi = m; }
+  const f = (s - arc[o + lo]) / Math.max(1e-9, arc[o + hi] - arc[o + lo]);
+  return (lo + f) / n;
 }
 
 function grow<T extends Int32Array | Float32Array | Uint8Array>(a: T, cap: number, fill: number): T {
