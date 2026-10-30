@@ -41,11 +41,19 @@ aqui; antes de ler estado de outro módulo, use a API/porta/snapshot, nunca a c�
 - `render` mantém caches por célula/tile/placa; o `CellLayer` troca L0/L1/L2/L3 e faz fade por dither. Qualquer
   estado de LOD é derivado; não pode virar decisão de gameplay nem duplicar a lista de prédios.
 - `sim` mantém sinais, filas, linhas, ônibus e passageiros; a page não deve manter uma segunda lista de veículos.
-- `Game` concentra câmera, seleção, ferramenta, sessão e bomba; a Fase 3 está extraindo essas responsabilidades.
+  O vocabulário puro do worker está em `sim/traffic/state.ts` (`vehSchema`, `End`, inspeção e tipos); não é uma
+  segunda cópia mutável.
+- `Game` concentra câmera, seleção, ferramenta, sessão e bomba; `app/session.ts`, `app/tools.ts`, `app/clicks.ts`,
+  `app/buildings.ts` e `app/photoHooks.ts` já receberam as portas; a edição de lote/entrada continua nele.
+- O nível de detalhe do gerador viaja em `MeshBuilder.lod`; não há mais `genLod` global.
+- O r40 é uma dependência de geração/render atrás de `r40/api.ts`; nenhum consumidor externo importa seus módulos
+  internos. O pipeline de `buildingMesh.ts` ainda precisa ser dividido por responsabilidade.
 - `props` tem pool/cap e blocos por célula; o cap não pode virar corte silencioso nem mudar a cada quadro (E24).
-- `network`/`control`/`junction` têm ciclos de tipos; não são runtime, mas devem ser quebrados por contratos.
+- `network`/`control`/`junction` tiveram os ciclos de tipos removidos; não há ciclos runtime/tipo no HEAD.
 
 ## Portão
 
-- `npm run arch:check` deve ficar limpo para ciclos/vazamentos novos.
+- `npm run arch:check` no HEAD: **243 arquivos/66.759 linhas, 0 ciclos de runtime, 0 de tipos, 0 vazamentos**.
 - Cada nova feature atualiza esta matriz; nenhum estado novo sem dono.
+- O `MeshBuilder` é contexto de geração passado por prédio; `vehSchema`/`End` são vocabulário puro do worker, não
+  estado de jogo.
