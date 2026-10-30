@@ -64,7 +64,7 @@ peds.walkOk = (n, arm) => traffic.walkOk(n, arm);
 peds.onWait = (n, arm) => traffic.pedCall(n, arm);
 traffic.pedCrossing = (n) => peds.crossing(n);
 traffic.pedCrossingArms = (n, mask) => peds.crossingArms(n, mask);
-traffic.pedCrossingNear = (n, mask, x, z, r) => peds.crossingNear(n, mask, x, z, r);
+traffic.pedCrossingReach = (n, mask, x, z, reach, front) => peds.crossingReach(n, mask, x, z, reach, front);
 peds.carsOn = (n, arm) => traffic.carsOnCrossing(n, arm);
 traffic.sig.pedsOn = (n, mask) => peds.crossingArms(n, mask);
 // buses and pedestrians: bus riders walk to the stop, wait, ride and get off on foot

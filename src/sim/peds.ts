@@ -16,6 +16,7 @@ import { MAX_DEG } from '../roads/network.ts';
 import type { SimNet } from './lanes.ts';
 import { Router } from './routing.ts';
 import { stripAt } from './probe.ts';
+import { PED_BODY, PED_MIN_PACE, PED_REACH_TIME } from './traffic/state.ts';
 
 /**
  * Guard against a runaway only (2 million people, ~1 GB): the number of pedestrians is the demand (street length ×
@@ -70,6 +71,8 @@ const TURN_RATE = 3.5, TURN_STANDING = 6;
  * a rope of 0.45 m rounds it alike (0.9 m cut corners by up to 1.2 m, off the sidewalk).
  */
 const AHEAD = 0.45;
+/** A point further than this beside a walker's line is not on it (m). */
+const ON_LINE = 3;
 /** Furthest the body is drawn off its way (m): a corner rounded, a step aside followed. */
 const OFF_WAY = 0.25;
 /** Drawn this much further than AHEAD from its way's point (it was put elsewhere: a door, a bus), it is drawn there at once. */
@@ -267,18 +270,27 @@ export class Peds {
   }
 
   /**
-   * Is anyone walking a crossing over one of node `n`'s arms in `mask` within `r` m of (x, z)? A vehicle waits only
-   * for those on the part of the zebra it drives over (roadcraft intersections/crossingSpans.ts).
+   * Does anyone walking a crossing over one of node `n`'s arms in `mask` hold a vehicle whose lane crosses it at
+   * (x, z): on the stretch within `reach` of that point (its body PED_BODY counted), or walking towards it and there
+   * within PED_REACH_TIME plus `front` s at its pace, at least PED_MIN_PACE (roadcraft crossingSpans.ts:222
+   * pedestrianAffectsSpan; admission.ts:1017 crossingReachedFirst, `front` the time the vehicle's front takes to get
+   * there, a walker held still not counted for it). A vehicle waits only for those on, or coming onto, the part of the
+   * zebra it drives over.
    */
-  crossingNear(n: number, mask: number, x: number, z: number, r: number): boolean {
+  crossingReach(n: number, mask: number, x: number, z: number, reach: number, front: number): boolean {
     const c = this.t.cols;
     for (let p = this.head[n]; p >= 0; p = c.next[p]) {
       if (c.mode[p] !== 1) continue;
       const w = c.wIdx[p] - 1;
       const cross = w >= 0 ? this.ways[p * WAYS * 4 + w * 4 + 3] : 0;
       if (cross <= 0 || (mask & (1 << (cross - 1))) === 0) continue;
-      const q = this.posShown(p);
-      if (Math.abs(q[0] - x) < r && Math.abs(q[2] - z) < r && Math.hypot(q[0] - x, q[2] - z) < r) return true;
+      const q = this.posShown(p), hx = Math.sin(q[3]), hz = Math.cos(q[3]), dx = x - q[0], dz = z - q[2];
+      // how far ahead along its line the point is, and how far beside it (another line over the same arm: not this one)
+      const along = dx * hx + dz * hz;
+      if (Math.abs(dx * hz - dz * hx) > ON_LINE) continue;
+      if (Math.abs(along) <= reach + PED_BODY) return true;
+      const ahead = along - reach, pace = c.speed[p] * c.pace[p], held = c.pace[p] < 0.05;
+      if (ahead > 0 && ahead < Math.max(pace, PED_MIN_PACE) * (PED_REACH_TIME + (held ? 0 : front))) return true;
     }
     return false;
   }

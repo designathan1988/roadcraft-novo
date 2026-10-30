@@ -20,8 +20,14 @@ export const PED_COURTESY = 8;
 export const PED_CRITICAL_GAP = 4;
 /** Half widths of the vehicle kinds (car, bus, truck, motorbike, train), m. */
 export const BODY_HALF_W = [0.9, 1.27, 1.25, 0.4, 1.5];
-/** How near a walker on a zebra to where a vehicle's lane crosses it holds the vehicle (m). */
-export const SPAN_REACH = 2.55 / 2 + 0.9 + 0.6;
+/** The stretch of a zebra a vehicle drives over: the heavy body's half width and 0.9 m either side of where its lane
+ *  crosses it (roadcraft crossingSpans.ts:24 REACH). */
+export const SPAN_REACH = 2.55 / 2 + 0.9;
+/** A walker's body (m), the least pace (m/s) and the look-ahead (s) a walker on a zebra is counted with (roadcraft
+ *  crossingSpans.ts:195-197 PED_BODY, PED_MIN_PACE, PED_REACH_TIME). */
+export const PED_BODY = 1, PED_MIN_PACE = 0.8, PED_REACH_TIME = 4;
+/** Allowance over the time a front takes to reach a zebra (roadcraft admission.ts:1005 CLEAR_MARGIN). */
+export const CLEAR_MARGIN = 1.2;
 /** Waiting for the same full exit for this long (s), the driver claims its turn on it. */
 export const STARVE_SECONDS = 30;
 /** A train on its route within this distance (m) of a level crossing closes the barrier. */
@@ -42,6 +48,8 @@ export const WAGONS = 3, WAGON_LEN = 20.5;
 
 export const vehSchema = {
   lane: Int32Array, conn: Int32Array, s: Float32Array, v: Float32Array,
+  // the connection it last came out of, onto its lane (its rear may still be on it: `backAlong`); -1 none
+  cameBy: Int32Array,
   len: Float32Array, vf: Float32Array, micro: Uint8Array, kind: Uint8Array, color: Uint8Array,
   dest: Int32Array, rIdx: Uint8Array, rLen: Uint8Array,
   tExit: Float64Array,

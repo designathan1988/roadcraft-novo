@@ -48,7 +48,7 @@ test('people never jump: between two publications a walker moves at most a step 
   P.walkOk = (n: number, a: number) => T.walkOk(n, a);
   P.onWait = (n: number, a: number) => T.pedCall(n, a);
   tr.pedCrossing = (n) => peds.crossing(n);
-  tr.pedCrossingNear = (n, m, x, z, r) => peds.crossingNear(n, m, x, z, r);
+  tr.pedCrossingReach = (n, m, x, z, reach, front) => peds.crossingReach(n, m, x, z, reach, front);
   P.carsOn = (n: number, a: number) => T.carsOnCrossing(n, a);
   const c = peds.t.cols, buf = new Float32Array(11 * 8192);
   const lastX = new Float32Array(1 << 20), lastZ = new Float32Array(1 << 20), lastF = new Int32Array(1 << 20).fill(-9);
@@ -125,7 +125,7 @@ test('cars stop before the crosswalk and give way to people on it: nobody crossi
   P.onWait = (n: number, a: number) => T.pedCall(n, a);
   tr.pedCrossing = (n) => peds.crossing(n);
   if ('pedCrossingArms' in T) T.pedCrossingArms = (n: number, m: number) => peds.crossingArms(n, m);
-  if ('pedCrossingNear' in T) T.pedCrossingNear = (n: number, m: number, x: number, z: number, r: number) => peds.crossingNear(n, m, x, z, r);
+  if ('pedCrossingReach' in T) T.pedCrossingReach = (n: number, m: number, x: number, z: number, reach: number, front: number) => peds.crossingReach(n, m, x, z, reach, front);
   if ('carsOn' in P && 'carsOnCrossing' in T) P.carsOn = (n: number, a: number) => T.carsOnCrossing(n, a);
   const W = [1.8, 2.55, 2.5, 0.8, 3.0];
   let inside = 0, crossingSeen = 0, onZebra = 0, committedOnZebra = 0, stoppedAtLine = 0, looks = 0;
@@ -164,6 +164,42 @@ test('cars stop before the crosswalk and give way to people on it: nobody crossi
   // approaching first-in-line vehicle, allowing the physical overshoot of a stop at the line.
   assert.ok(onZebra <= stoppedAtLine * 0.01, `${onZebra} of ${stoppedAtLine} looks at approaching first-in-line vehicles on the zebra (${onIt.size} vehicles)`);
   assert.ok(inside <= crossingSeen * 0.001, `${inside} times in ${crossingSeen} someone crossing was inside a vehicle`);
+});
+
+test('vehicles come out of a turn without the body swinging round: the rear stays on the connection it came by', () => {
+  const { sim } = gridCity(5, 120);
+  const tr = traffic(sim);
+  tr.density = 1 / 30;
+  tr.setLines([{ id: 1, color: 3, buses: 4, stops: [-120, -189, 189, 0, 0, 189] }]);
+  const c = tr.veh.cols, T = inner(tr), p = new Float64Array(4);
+  // the drawn heading of each vehicle in the 2 s after it leaves a connection (its rear still on it): the lane is fed by
+  // several connections, and the rear put on another one turned the body up to 180 degrees in a step
+  const last = new Map<number, number>(), out = new Map<number, number>();
+  let looked = 0, jumps = 0, worst = 0;
+  for (let i = 0; i < 20 * 150; i++) {
+    tr.step(0.05);
+    if (i % 10 === 0) tr.checkWindow();
+    const seen = new Set<number>();
+    for (let j = 0; j < tr.microN; j++) {
+      const v = tr.micro[j];
+      if (c.kind[v] === 3 || c.kind[v] === 4) continue;
+      seen.add(v);
+      T.centreOf(v, p);
+      const prev = last.get(v);
+      last.set(v, p[3]);
+      if (c.conn[v] >= 0) { out.set(v, i); continue; }
+      // (an id given to a new vehicle in the meantime is not the same body)
+      if (prev === undefined || c.fade[v] < 1 || i - (out.get(v) ?? -1e9) > 40) continue;
+      let d = p[3] - prev;
+      d = Math.abs(d - Math.round(d / (2 * Math.PI)) * 2 * Math.PI) * 180 / Math.PI;
+      looked++;
+      if (d > 8) jumps++;
+      worst = Math.max(worst, d);
+    }
+    for (const v of last.keys()) if (!seen.has(v)) { last.delete(v); out.delete(v); }
+  }
+  assert.ok(looked > 5000, `vehicle-steps just out of a turn ${looked}`);
+  assert.equal(jumps, 0, `the body turned over 8 degrees in a step just out of a turn ${jumps} times (up to ${worst.toFixed(0)} degrees)`);
 });
 
 test('vehicles go round a turn on their path: the drawn body\'s ends stay on it (no pivoting about the nose)', async () => {

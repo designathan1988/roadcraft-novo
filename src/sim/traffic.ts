@@ -214,8 +214,11 @@ export class Traffic {
   pedCrossing: (n: number) => boolean = () => false;
   /** Is someone walking a crossing over one of node `n`'s arms in `mask` (bit per arm)? (from the pedestrians) */
   pedCrossingArms: (n: number, mask: number) => boolean = () => false;
-  /** Is someone walking a crossing over an arm of `n` in `mask` within `r` m of (x, z)? (from the pedestrians) */
-  pedCrossingNear: (n: number, mask: number, x: number, z: number, r: number) => boolean = () => false;
+  /**
+   * Is someone walking a crossing over an arm of `n` in `mask` on the stretch within `reach` m of (x, z), or walking
+   * towards it and there within the look-ahead plus `front` s? (from the pedestrians: `Peds.crossingReach`)
+   */
+  pedCrossingReach: (n: number, mask: number, x: number, z: number, reach: number, front: number) => boolean = () => false;
 
   /** Vehicles that went through each node (micro and meso), for the junction flow. */
   nodePass = new Uint32Array(1 << 14);
@@ -323,7 +326,7 @@ export class Traffic {
       get tmp2() { return g.tmp2; },
       get activeConns() { return g.activeConns; },
       pedCrossing: (n) => g.pedCrossing(n),
-      pedCrossingNear: (n, mask, x, z, r) => g.pedCrossingNear(n, mask, x, z, r),
+      pedCrossingReach: (n, mask, x, z, reach, front) => g.pedCrossingReach(n, mask, x, z, reach, front),
       stopBack: (lane) => g.stopBack(lane),
       nextSeg: (v) => g.nextSeg(v),
       routeAt: (v, k) => g.routeAt(v, k),
@@ -1083,7 +1086,7 @@ export class Traffic {
     }
     // the driver: its class's comfort figures and its own aggression; the share of the limit it drives at
     c.vf[v] = drawDriver(c, v, archOf(kind, style), this.sample);
-    c.lane[v] = -1; c.conn[v] = -1;
+    c.lane[v] = -1; c.conn[v] = -1; c.cameBy[v] = -1;
     c.brk[v] = 0; c.exitC[v] = -1; c.pk[v] = 0; c.mv[v] = -1; c.ms[v] = 0;
     c.micro[v] = 0; c.dying[v] = 0; c.fade[v] = 1; c.has[v] = 0;
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
@@ -1365,7 +1368,7 @@ export class Traffic {
       if (limit < c.len[v]) break;
       const s = Math.max(c.len[v], Math.min(est, limit));
       this.meso.unlink(v);
-      c.s[v] = s; c.conn[v] = -1; c.held[v] = 0; c.wait[v] = 0;
+      c.s[v] = s; c.conn[v] = -1; c.cameBy[v] = -1; c.held[v] = 0; c.wait[v] = 0;
       // in a queue it stands; otherwise it drives at what the lane has been driving at
       c.v[v] = s < est - 1 ? 0 : Math.min(free * c.vf[v], this.laneVel[lane] > 0 ? this.laneVel[lane] : free * 0.7);
       // never faster than what still stops comfortably at the line (whatever the junction asks of it there)
@@ -1417,10 +1420,10 @@ export class Traffic {
     const first = !prev;
     if (!prev) { prev = new Float32Array(WAGONS * 4); this.wagonPrev.set(v, prev); }
     for (let k = 0; k < WAGONS; k++) {
-      backAlong(this.sim, c.lane[v], c.conn[v], c.s[v], WAGON_LEN * (k + 0.5), p);
+      backAlong(this.sim, c.lane[v], c.conn[v], c.s[v], WAGON_LEN * (k + 0.5), p, c.cameBy[v]);
       // heading along the line between the wagon's ends (curves)
       const fx = p[0], fz = p[2];
-      backAlong(this.sim, c.lane[v], c.conn[v], c.s[v], WAGON_LEN * k + 1, this.tmp2);
+      backAlong(this.sim, c.lane[v], c.conn[v], c.s[v], WAGON_LEN * k + 1, this.tmp2, c.cameBy[v]);
       const yaw = Math.atan2(this.tmp2[0] - fx, this.tmp2[2] - fz);
       const o = n * stride, q = k * 4;
       if (first) { prev[q] = fx; prev[q + 1] = p[1]; prev[q + 2] = fz; prev[q + 3] = yaw; }
@@ -1633,9 +1636,10 @@ export class Traffic {
     // the front's tangent instead, the body pivoted about its nose and the rear swept across the junction (a car's rear
     // 1.5 m off its path in a right turn on average, 3.5 m at worst; a lorry's 5-8.6 m)
     const fx = p[0], fy = p[1], fz = p[2], rear = this.tmp2, off = this.lcOff;
-    backAlong(sim, c.lane[v], c.conn[v], c.s[v], c.len[v], rear);
-    // a lane change under way: the rear takes the front's sideways offset a moment later (the body points into it)
-    if (off[2] > 0) {
+    const viaOther = backAlong(sim, c.lane[v], c.conn[v], c.s[v], c.len[v], rear, c.cameBy[v]);
+    // a lane change under way: the rear takes the front's sideways offset a moment later (the body points into it);
+    // still on the way into the lane it changes from, it is on that lane's path already
+    if (off[2] > 0 && !viaOther) {
       const t = Math.max(0, c.lcT[v] - LC_REAR_LAG), kr = 1 - t * t * (3 - 2 * t);
       rear[0] += off[0] * kr; rear[2] += off[1] * kr;
     }
@@ -1660,29 +1664,49 @@ export class Traffic {
   }
 }
 
-/** Point `d` metres behind the vehicle's front (continues onto the previous lane along a straight line if needed). */
 /**
- * Point `d` metres behind the vehicle's front (a wagon): back along the connection and lanes it came by, through the
- * connections into each lane (a train's rear wagons follow the track round a bend); only past what is known, along a
- * straight line.
+ * Point `d` metres behind the vehicle's front (its rear, a wagon): back along the connection and lanes it came by,
+ * through the connections into each lane (a train's rear wagons follow the track round a bend); only past what is
+ * known, along a straight line. `cameBy`: the connection it came out of onto `lane` (one of several into it: taken as
+ * the first that leads there, a car's rear swung onto the straight-on connection just out of a turn, the body turning
+ * up to 180 degrees in one step). Returns whether the point is on the path into another lane of `lane`'s road (a lane
+ * change begun as it came out, with no way into `lane` from that road).
  */
-export function backAlong(sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array): void {
+export function backAlong(sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array, cameBy = -1): boolean {
   const k = sim.conns.cols;
   s -= d;
+  let other = false;
   for (let guard = 0; guard < 6; guard++) {
     if (conn >= 0) {
-      if (s >= 0) { sim.connPoint(conn, s, out); return; }
+      if (s >= 0) { sim.connPoint(conn, s, out); return other; }
       lane = k.from[conn]; s += sim.laneLen(lane); conn = -1;
       continue;
     }
-    if (s >= 0) { sim.lanePoint(lane, s, out); return; }
-    // the connection that leads into this lane (on rails there is one per lane, except at a switch)
+    if (s >= 0) { sim.lanePoint(lane, s, out); return other; }
+    // the connection it came by; a lane change begun as it came out (the body's sideways offset of the change is added
+    // after, from this lane's path): the one into this lane from the same lane, or from the same road (a neighbour of
+    // that lane: the same movement, beside it); or one that leads into this lane (on rails there is one per lane, except
+    // at a switch)
     let into = -1;
-    for (let x = sim.nodeConn[sim.laneFrom(lane)]; x >= 0; x = k.nextAtNode[x]) if (k.to[x] === lane) { into = x; break; }
+    if (cameBy >= 0 && sim.conns.alive[cameBy]) {
+      const from = k.from[cameBy];
+      if (k.to[cameBy] === lane) into = cameBy;
+      else for (let x = sim.nodeConn[sim.laneFrom(lane)]; x >= 0; x = k.nextAtNode[x]) {
+        if (k.to[x] !== lane || laneSeg(k.from[x]) !== laneSeg(from) || laneDir(k.from[x]) !== laneDir(from)) continue;
+        into = x;
+        if (k.from[x] === from) break;
+      }
+      // none from that road into this lane: the one it came by, into the lane it changes from (the rear is on that lane's
+      // path already: the caller adds no offset of the change to it)
+      if (into < 0 && laneSeg(k.to[cameBy]) === laneSeg(lane) && laneDir(k.to[cameBy]) === laneDir(lane)) { into = cameBy; other = true; }
+    }
+    cameBy = -1;
+    if (into < 0) for (let x = sim.nodeConn[sim.laneFrom(lane)]; x >= 0; x = k.nextAtNode[x]) if (k.to[x] === lane) { into = x; break; }
     if (into < 0) break;
     conn = into; s += k.len[into];
   }
   sim.lanePoint(lane, 0, out);
   out[0] += Math.sin(out[3]) * s; out[2] += Math.cos(out[3]) * s;
+  return other;
 }
 

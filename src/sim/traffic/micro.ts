@@ -13,7 +13,7 @@ import type { Meso } from './meso.ts';
 import type { Buses } from './buses.ts';
 import type { Junctions } from './junctions.ts';
 import type { SimLine } from './lines.ts';
-import { DWELL, JAM_SECONDS, PARK_SIDE_S, RELEASE_EVERY, REJOIN, ROUTE_CAP, STARVE_SECONDS, type vehSchema } from './state.ts';
+import { CROSSWALK, DWELL, JAM_SECONDS, PED_BODY, PARK_SIDE_S, RELEASE_EVERY, REJOIN, ROUTE_CAP, STARVE_SECONDS, type vehSchema } from './state.ts';
 import { TERMINAL_DWELL } from './buses.ts';
 
 export interface MicroHost {
@@ -253,10 +253,14 @@ export class Micro {
             if (sim.nodePhases[sim.laneTo(lane)] > 0 && !this.h.junctions.stageGreen(conn, true)) this.h.ranRed++;
           }
         }
-        // over the line, the light no longer stops it; a barrier coming down, someone in the box or somebody stepping
-        // into its way on the zebra ahead (the one it leaves by: it is over its own already) still does (roadcraft
-        // admission.ts stoppedForWalker)
-        if (open && c.pass[v] && conn >= 0 && (!this.h.junctions.boxClear(conn) || this.h.junctions.pedsInWay(conn, 0, false))) { gap = Math.min(gap, toEnd - 1); vl = 0; }
+        // over the line, the light no longer stops it; a barrier coming down, someone in the box or somebody on (or
+        // coming onto) the stretch of a zebra ahead it drives over still does (roadcraft obstacles.ts pedestrianAhead):
+        // the one it comes from while its front is short of it (the stop line is before it: over the line, it is still
+        // ahead), stopping short of the walker; the one it leaves by, at the end of the lane (into the box only when
+        // the way out is clear)
+        const J = this.h.junctions, pass = open && c.pass[v] === 1 && conn >= 0;
+        if (pass && toEnd > CROSSWALK / 2 && J.pedsInWay(conn, 0, true, 0, false)) { gap = Math.min(gap, Math.max(0, toEnd - CROSSWALK / 2 - PED_BODY - 0.3)); vl = 0; }
+        else if (pass && (!J.boxClear(conn) || J.pedsInWay(conn, 0, false))) { gap = Math.min(gap, toEnd - 1); vl = 0; }
         else if (open && conn >= 0) { const [g2, v2] = this.aheadThrough(conn); if (toEnd + g2 < gap) { gap = toEnd + g2; vl = v2; } } // (does not override the bus stop)
         // bus and train: a stop just past the node already counts for braking (a fast train cannot stop in 20 m)
         const sg = this.stopAhead(v, conn);
@@ -450,6 +454,10 @@ export class Micro {
         if (ahead < mine || (ahead === mine && h < v)) { const g = mine - ahead - c.len[h]; if (g < gap) { gap = g; vl = c.v[h]; } }
       }
     }
+    // somebody on (or coming onto) the stretch of the zebra it leaves by: it stops short of the walker, unless its
+    // front is over it already (roadcraft obstacles.ts pedestrianAhead, on a connector: the span along it less a margin)
+    const toWalker = L - c.s[v] + CROSSWALK / 2 - PED_BODY;
+    if (toWalker > 0 && this.h.junctions.pedsInWay(conn, 0, false)) { const g = Math.max(0, toWalker - 0.3); if (g < gap) { gap = g; vl = 0; } }
     const sg = this.stopAhead(v, conn);
     if (sg >= 0 && sg - c.s[v] < gap) { gap = Math.max(0, sg - c.s[v]); vl = 0; }
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2); // a lane change finishing on the way through
@@ -468,7 +476,7 @@ export class Micro {
     if (c.s[v] < L) return;
     // reached the next lane
     this.h.unlink(v);
-    c.conn[v] = -1;
+    c.conn[v] = -1; c.cameBy[v] = conn;
     const from = c.lane[v];
     this.h.setLaneCount(from, -1);
     this.h.setLaneCount(to, 1);

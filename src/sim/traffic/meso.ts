@@ -263,7 +263,7 @@ export class Meso {
       c.s[v] = 0;
       c.held[v] = 0;
       c.v[v] = Math.min(laneSpeed(sim.net.segs.cols.profile[ns]) * c.vf[v], tail >= 0 ? Math.max(2, (c.s[tail] - c.len[tail]) / T_HEAD) : 99);
-      c.conn[v] = -1;
+      c.conn[v] = -1; c.cameBy[v] = -1;
       c.fade[v] = 0;
       h.addMicro(v);
       h.insert(v, false, to);

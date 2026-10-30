@@ -173,7 +173,7 @@ export class Buses {
     const o = v * ROUTE_CAP;
     h.routes[o] = sim.laneFrom(lane); h.routes[o + 1] = sim.laneTo(lane);
     c.rLen[v] = 2; c.rIdx[v] = 1; c.dest[v] = sim.laneTo(lane);
-    c.lane[v] = lane; c.conn[v] = -1;
+    c.lane[v] = lane; c.conn[v] = -1; c.cameBy[v] = -1;
     c.s[v] = h.rng.next() * Math.max(0, ln.stopV[stop] - 6);
     h.enterLane(v, c.s[v]);
     h.setLaneCount(lane, 1);

@@ -6,10 +6,11 @@ import { Ctl, Rule } from '../../roads/control.ts';
 import { SegFlag } from '../../roads/flags.ts';
 import { PROFILE_INFO } from '../../roads/profiles.ts';
 import type { Columns } from '../../core/table.ts';
-import { Turn, laneCount, laneDir, laneId, laneSeg, type SimNet } from '../lanes.ts';
+import { Turn, laneCount, laneDir, laneId, laneSeg, laneSpeed, type SimNet } from '../lanes.ts';
 import type { Signals } from '../signals.ts';
 import type { SimLine } from './lines.ts';
-import { End, CROSSING_REACH, CROSSWALK, PED_COURTESY, PED_CRITICAL_GAP, SPAN_REACH, type vehSchema } from './state.ts';
+import { End, CLEAR_MARGIN, CROSSING_REACH, CROSSWALK, PED_COURTESY, PED_CRITICAL_GAP, SPAN_REACH, type vehSchema } from './state.ts';
+import { bendSpeed } from '../drivers.ts';
 
 export interface JunctionHost {
   readonly sim: SimNet;
@@ -27,7 +28,7 @@ export interface JunctionHost {
   readonly tmp2: Float64Array;
   readonly activeConns: Set<number>;
   pedCrossing(n: number): boolean;
-  pedCrossingNear(n: number, mask: number, x: number, z: number, r: number): boolean;
+  pedCrossingReach(n: number, mask: number, x: number, z: number, reach: number, front: number): boolean;
   stopBack(lane: number): number;
   nextSeg(v: number): number;
   routeAt(v: number, k: number): number;
@@ -101,6 +102,9 @@ export class Junctions {
         if (h < 0) continue;
         const toLine = sim.laneLen(lane) - c.s[h] - back;
         if (c.pass[h] || toLine < 0 || (toLine < 3 && c.v[h] > 0.5)) return true;
+        // too near to stop comfortably before its line (roadcraft permission.ts:131, idm canStopComfortably): the one
+        // on foot waits for it (a vehicle already braking for those on the zebra stopped on it)
+        if (c.v[h] > 0.5 && toLine < (c.v[h] * c.v[h]) / (2 * Math.max(0.5, c.db[h])) + 1) return true;
         // its turn (roadcraft permission.ts:105-126, PED_COURTESY): standing at the line this long, with the way open
         // to it but for the people stepping off in front of it, it goes next
         if (toLine < 4 && this.courtesyOwed(h)) return true;
@@ -110,6 +114,9 @@ export class Junctions {
       }
     }
     for (let x = sim.nodeConn[n]; x >= 0; x = k.nextAtNode[x]) {
+      // one gone on from this arm into the junction with its body still over the zebra (a lorry's rear is 9.5 m behind
+      // its front): the last on each such connection
+      if (laneSeg(k.from[x]) === seg) { const t = this.h.connTail[x]; if (t >= 0 && c.s[t] < c.len[t]) return true; }
       if (laneSeg(k.to[x]) !== seg) continue;
       if (this.h.connHead[x] >= 0) return true;
       // a car turning into this arm that has waited its share at its line (permission.ts:90-103), or coming to turn
@@ -154,17 +161,32 @@ export class Junctions {
   }
 
   /**
-   * People on the part of a zebra connection `conn` drives over (roadcraft crossingSpans.ts: within the heavy body's
-   * half width and 0.9 m of its path, :24, and the walker's 0.6 m, :29): where its lane in crosses the zebra of the arm
-   * it comes from, and where its lane out crosses the one of the arm it leaves by.
+   * Somebody on the stretch of a zebra connection `conn` drives over (roadcraft crossingSpans.ts: within the heavy
+   * body's half width and 0.9 m of its path), or walking towards it and there within the look-ahead plus `front` s
+   * (`frontOut` for the zebra it leaves by; roadcraft pedestrianAffectsSpan, admission.ts crossingReachedFirst): where
+   * its lane in crosses the zebra of the arm it comes from (`entry`), and where its lane out crosses the one of the arm
+   * it leaves by (`exit`).
    */
-  pedsInWay(conn: number, ahead = 0, entry = true): boolean {
+  pedsInWay(conn: number, front = 0, entry = true, frontOut = front, exit = true): boolean {
     const sim = this.h.sim, k = sim.conns.cols, n = k.node[conn], p = this.h.tmp2;
     const from = k.from[conn], to = k.to[conn];
     sim.lanePoint(from, Math.max(0, sim.laneLen(from) - CROSSWALK / 2), p);
-    if (entry && this.h.pedCrossingNear(n, 1 << k.arm[conn], p[0], p[2], SPAN_REACH + ahead)) return true;
+    if (entry && this.h.pedCrossingReach(n, 1 << k.arm[conn], p[0], p[2], SPAN_REACH, front)) return true;
+    if (!exit) return false;
     sim.lanePoint(to, Math.min(sim.laneLen(to), CROSSWALK / 2), p);
-    return this.h.pedCrossingNear(n, 1 << this.exitArm(conn), p[0], p[2], SPAN_REACH + ahead);
+    return this.h.pedCrossingReach(n, 1 << this.exitArm(conn), p[0], p[2], SPAN_REACH, frontOut);
+  }
+
+  /**
+   * Seconds, with CLEAR_MARGIN, vehicle `v` takes to bring its front `d` m on from its speed now, speeding up at its
+   * comfortable rate to the most it drives through connection `conn` (roadcraft admission.ts travelTime).
+   */
+  private frontTime(v: number, conn: number, d: number): number {
+    const c = this.h.veh.cols, sim = this.h.sim, k = sim.conns.cols;
+    const top = Math.max(2, Math.min(laneSpeedOf(sim, k.to[conn]) * c.vf[v], bendSpeed(c, v, k.k[conn], c.kind[v] !== 0)));
+    const a = Math.max(0.5, c.da[v]), v0 = Math.min(c.v[v], top), reach = (top * top - v0 * v0) / (2 * a);
+    const t = d <= reach ? (-v0 + Math.sqrt(v0 * v0 + 2 * a * d)) / a : (top - v0) / a + (d - reach) / top;
+    return CLEAR_MARGIN * t;
   }
 
   /** The arm of its node that connection `conn` leaves by. */
@@ -354,13 +376,21 @@ export class Junctions {
     } else if (sim.nodeRing[n]) return this.gateOpen(conn);
     // zebra: give way to whoever is crossing (the pedestrian only appears near the camera)
     else if (sim.nodeCtl[n] === Ctl.Zebra) return !this.h.pedCrossing(n);
-    // people on the crosswalks it drives over, the arm it comes from and the arm it leaves by: it waits for them
-    // (roadcraft crossings/permission; at a light, those still crossing as it turns green and those walking beside it
-    // when it turns)
-    // (and those who will be on it before it is across: a couple of seconds' walk more, crossingSpans.ts crossingReachedFirst)
-    // (a vehicle too close to stop comfortably goes on: those on foot wait for it, permission.ts:131)
-    if (sim.net.nodes.cols.deg[n] >= 3 && toEnd > (c.v[v] * c.v[v]) / (2 * 3) && this.pedsInWay(conn, 2.8)) return false;
-    else if (sim.armRule[n * 8 + k.arm[conn]] === Rule.Stop && c.wait[v] < 1.2) return false; // stop sign: halt before going on
+    // people on the crosswalks it drives over, the arm it comes from and the arm it leaves by, or who will be on them
+    // before its front is: it waits for them (roadcraft admission.ts:339 crossingBusy, crossingReachedFirst; at a light,
+    // those still crossing as it turns green and those walking beside it when it turns). No exception for a vehicle
+    // too close to stop comfortably: these are already on the zebra (it brakes harder); only those waiting at a kerb
+    // wait for it (permission.ts:131). `toEnd` here is to the stop line: the zebra's middle is the stop line's setback
+    // less half the zebra on, the zebra it leaves by the connection on. Those who will be there before its front only
+    // while it can still stop comfortably at its line (the admission's question); nearer, it is on its way and only
+    // those on the stretch or about to step onto it stop it (obstacles.ts pedestrianAhead): asked with the time its
+    // front takes, a walker speeding up let it go and stopped it again a moment later, past its line on the zebra.
+    if (sim.net.nodes.cols.deg[n] >= 3) {
+      const toZebra = Math.max(0, toEnd + this.h.stopBack(k.from[conn]) - CROSSWALK / 2);
+      const canStop = toEnd > (c.v[v] * c.v[v]) / (2 * Math.max(0.5, c.db[v]));
+      if (canStop ? this.pedsInWay(conn, this.frontTime(v, conn, toZebra), true, this.frontTime(v, conn, toZebra + CROSSWALK + k.len[conn])) : this.pedsInWay(conn)) return false;
+    }
+    if (sim.armRule[n * 8 + k.arm[conn]] === Rule.Stop && c.wait[v] < 1.2) return false; // stop sign: halt before going on
     // right of way: wait for those who go first (at a signal, only the permitted conflict, such as a left turn)
     const list = sim.conflicts.get(conn);
     if (!list) return true;
@@ -393,7 +423,7 @@ export class Junctions {
     for (let v = this.h.connHead[conn]; v >= 0;) {
       const next = c.next[v];
       this.h.unlink(v);
-      c.conn[v] = -1;
+      c.conn[v] = -1; c.cameBy[v] = -1;
       c.exitC[v] = sim.conns.cols.to[conn];
       this.inBox.push(v);
       v = next;
@@ -427,3 +457,6 @@ export class Junctions {
 
   /** Rebuilt nodes: a new plan for their lights, which start their cycle again. */
 }
+
+/** The limit (m/s) of the lane `lane`'s road. */
+function laneSpeedOf(sim: SimNet, lane: number): number { return laneSpeed(sim.net.segs.cols.profile[laneSeg(lane)]); }
