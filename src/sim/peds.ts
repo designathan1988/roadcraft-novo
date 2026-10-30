@@ -35,6 +35,8 @@ const WAYS = 12;
 const CROSS_AT = 2.15; // middle of the crosswalk, measured from the setback
 const WINDOW = 520;
 const CURB = 0.15;
+/** Farthest a sidewalk stretch may start past an end of its segment, level with where the walker was seen (m). */
+const SEEN_PAST = 1.5;
 /**
  * Walking paces (m/s): brisk and easy, inside the 1.2-1.5 m/s of people walking in town. Each pace keeps to its own
  * track on the sidewalk and the crosswalk, so nobody walks up into the person ahead in theirs.
@@ -617,6 +619,7 @@ export class Peds {
     const fromA = sc.a[s] === n0;
     // the same sidewalk from the same spot at the same pace as someone just before: a moment's gap first
     if (spacedStart && !c.bike[p] && frac === 0 && !this.spaced(p, this.stretchKey(p, s, c.side[p], fromA ? 1 : -1, n1))) return true;
+    this.seenNow(p);
     c.enter[p] = 0;
     c.seg[p] = s;
     c.da[p] = fromA ? r0 : r1;
@@ -625,6 +628,7 @@ export class Peds {
     const dur = Math.abs(c.db[p] - c.da[p]) / c.speed[p];
     c.dur[p] = Math.max(0.1, dur);
     c.t0[p] = this.time - frac * c.dur[p];
+    if (!c.bike[p]) this.keepSeen(p, frac === 0);
     this.unlink(p);
     this.link(p, n1);
     this.schedule(p, c.t0[p] + c.dur[p]);
@@ -639,8 +643,9 @@ export class Peds {
     if (i + 1 >= c.rLen[p]) {
       // arrived at the stop's corner: those taking the bus walk the last metres to the stop and wait there
       if (c.tLine[p] >= 0 && !Number.isNaN(c.tx[p])) {
-        const here = this.posNow(p);
+        const here = this.posShown(p);
         this.lineFrom[p * 3] = here[0]; this.lineFrom[p * 3 + 1] = here[1]; this.lineFrom[p * 3 + 2] = here[2];
+        c.lat[p] = c.latT[p] = 0;
         const o = p * WAYS * 4;
         this.ways[o] = c.tx[p]; this.ways[o + 1] = here[1]; this.ways[o + 2] = c.tz[p]; this.ways[o + 3] = 0;
         c.mode[p] = 3; c.wIdx[p] = 0; c.wLen[p] = 1;
@@ -664,10 +669,11 @@ export class Peds {
       sOut = this.segBetween(n, nNext);
       if (!usable(sOut)) return this.fadeOut(p);
     }
-    // start point = end of the sidewalk just finished
-    const here = this.posNow(p);
+    // start point = end of the sidewalk just finished, where it is seen (its step aside is now part of the line)
+    const here = this.posShown(p);
     this.lineFrom[p * 3] = here[0]; this.lineFrom[p * 3 + 1] = here[1]; this.lineFrom[p * 3 + 2] = here[2];
     c.pyaw[p] = here[3];
+    c.lat[p] = c.latT[p] = 0;
     c.mode[p] = 3;
     // node arms in counter-clockwise order (the same as traffic and the traffic lights)
     const segs = net.segsOf(n, []);
@@ -801,12 +807,14 @@ export class Peds {
       this.schedule(p, this.time + 0.5);
       return true;
     }
-    const [x0, y0, z0, yaw0] = this.posNow(p);
+    // the next line starts where it is seen: the step aside of the line just walked is part of it
+    const [x0, y0, z0, yaw0] = this.posShown(p);
     // the same stretch from the same spot at the same pace as someone just before: a moment's gap first
     if (!this.spaced(p, this.stretchKey(p, x0, z0, this.ways[o], this.ways[o + 2]))) return true;
     c.pyaw[p] = yaw0;
     const len = Math.hypot(this.ways[o] - x0, this.ways[o + 2] - z0);
     c.mode[p] = 1;
+    c.lat[p] = c.latT[p] = 0;
     c.t0[p] = this.time;
     c.dur[p] = Math.max(0.05, len / c.speed[p]);
     // the start point is stored in the line's px/py/pz
@@ -869,14 +877,17 @@ export class Peds {
       const net = sim.net, sc = net.segs.cols, nc = net.nodes.cols;
       const q = net.quad(s);
       const L = sim.segLen(s);
-      const t = sim.tAt(s, Math.max(0, Math.min(L, d)));
+      // a stretch may start a little past an end of the segment (where it was seen coming in, `keepSeen`): the
+      // sidewalk goes on straight along the end's tangent there
+      const dIn = Math.max(0, Math.min(L, d)), over = d - dIn;
+      const t = sim.tAt(s, dIn);
       bez(q, t, p2); bezD(q, t, d2);
       const l = Math.hypot(d2[0], d2[1]) || 1;
       const dx = d2[0] / l, dz = d2[1] / l;
       const dir = c.db[p] >= c.da[p] ? 1 : -1;
       // cyclist: in the middle of the bike lane on its side; pedestrian: keeping right, on its pace's track
       const uu = c.bike[p] ? bikeU(sc.profile[s], dir) : this.trackU(p, sc.profile[s], c.side[p], dir);
-      out[0] = p2[0] + dz * uu; out[2] = p2[1] - dx * uu;
+      out[0] = p2[0] + dz * uu + dx * over; out[2] = p2[1] - dx * uu + dz * over;
       const ya = nc.y[sc.a[s]], yb = nc.y[sc.b[s]];
       out[1] = ya + (yb - ya) * (d / Math.max(1e-6, L)) + (c.bike[p] ? 0.02 : CURB);
       out[3] = Math.atan2(dx * dir, dz * dir);
@@ -912,7 +923,7 @@ export class Peds {
   private fadeOut(p: number, lost = false): boolean {
     const c = this.t.cols;
     // lost: where it was going is not a place (an invalid point); it fades out at the start of that line
-    const q = lost ? [this.lineFrom[p * 3], this.lineFrom[p * 3 + 1], this.lineFrom[p * 3 + 2], c.pyaw[p]] : this.posNow(p);
+    const q = lost ? [this.lineFrom[p * 3], this.lineFrom[p * 3 + 1], this.lineFrom[p * 3 + 2], c.pyaw[p]] : this.posShown(p);
     if (!Number.isFinite(q[0]) || !Number.isFinite(q[2])) { this.kill(p); return false; }
     this.lineFrom[p * 3] = q[0]; this.lineFrom[p * 3 + 1] = q[1]; this.lineFrom[p * 3 + 2] = q[2];
     c.pyaw[p] = q[3];
@@ -1191,6 +1202,41 @@ export class Peds {
     const c = this.t.cols, q = this.posNow(p), l = c.mode[p] === 0 || c.mode[p] === 1 ? c.lat[p] : 0;
     if (l) { q[0] -= Math.cos(q[3]) * l; q[2] += Math.sin(q[3]) * l; }
     return q;
+  }
+
+  /**
+   * Where `p` is seen now, before its stretch changes (x, z into `seenAt`): the next stretch starts there. The step
+   * aside is right of the heading, so carried over a corner as it is it would swing the body across (up to 1.4 × the
+   * step at a right angle, metres on a wide sidewalk); `keepSeen` re-expresses it in the new heading instead.
+   */
+  private seenNow(p: number): void {
+    const c = this.t.cols;
+    if (c.mode[p] === 0 && !this.sim.net.segs.alive[c.seg[p]]) { this.seenAt[0] = NaN; return; }
+    const q = this.posShown(p);
+    this.seenAt[0] = q[0]; this.seenAt[1] = q[1]; this.seenAt[2] = q[2];
+  }
+  private seenAt = new Float64Array(3);
+
+  /**
+   * After `p` entered a sidewalk stretch at its start: the stretch starts level with where it was seen (`seenNow`; the
+   * last leg comes in across the sidewalk, so the step aside on it lies along the sidewalk) and the step aside that
+   * keeps it there across, within its room. `fromStart`: it entered at the stretch's start (not part-way, from a door).
+   */
+  private keepSeen(p: number, fromStart: boolean): void {
+    const c = this.t.cols;
+    c.lat[p] = c.latT[p] = 0;
+    if (!c.has[p] || Number.isNaN(this.seenAt[0])) return;
+    let q = this.posNow(p);
+    if (fromStart) {
+      const along = (this.seenAt[0] - q[0]) * Math.sin(q[3]) + (this.seenAt[2] - q[2]) * Math.cos(q[3]);
+      const dir = c.db[p] >= c.da[p] ? 1 : -1, L = this.sim.segLen(c.seg[p]);
+      c.da[p] = Math.max(-SEEN_PAST, Math.min(L + SEEN_PAST, c.da[p] + along * dir));
+      c.dur[p] = Math.max(0.1, Math.abs(c.db[p] - c.da[p]) / c.speed[p]);
+      q = this.posNow(p);
+    }
+    const rx = -Math.cos(q[3]), rz = Math.sin(q[3]);
+    const [lo, hi] = this.latRoom(p);
+    c.lat[p] = c.latT[p] = Math.max(lo, Math.min(hi, (this.seenAt[0] - q[0]) * rx + (this.seenAt[2] - q[2]) * rz));
   }
 
   /** The camera moved: nodes whose lists enter the window. */

@@ -38,6 +38,41 @@ test('pedestrians keep walking when a route crosses a street without sidewalks (
   assert.ok(frozen <= walking * 0.01, `${frozen} of ${walking} walking people had not moved in a second`);
 });
 
+test('people never jump: between two publications a walker moves at most a step (corners, crosswalks, waits)', (t) => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 1 / 40;
+  const peds = new Peds(sim);
+  peds.density = 1 / 6; // busy sidewalks: people step aside for each other, then turn corners and cross
+  const P = inner(peds), T = inner(tr);
+  P.walkOk = (n: number, a: number) => T.walkOk(n, a);
+  P.onWait = (n: number, a: number) => T.pedCall(n, a);
+  tr.pedCrossing = (n) => peds.crossing(n);
+  tr.pedCrossingNear = (n, m, x, z, r) => peds.crossingNear(n, m, x, z, r);
+  P.carsOn = (n: number, a: number) => T.carsOnCrossing(n, a);
+  const c = peds.t.cols, buf = new Float32Array(11 * 8192);
+  const lastX = new Float32Array(1 << 20), lastZ = new Float32Array(1 << 20), lastF = new Int32Array(1 << 20).fill(-9);
+  let steps = 0, jumps = 0, worst = 0, example = '';
+  for (let i = 0; i < 20 * 120; i++) {
+    tr.step(0.05); peds.setBodies(tr.bodyBuf, tr.writeBodies(0, 0, 180)); peds.step(0.05);
+    if (i % 10 === 0) { tr.checkWindow(); peds.checkWindow(); }
+    peds.writePoses(buf, 11, 0, buf.length / 11);
+    const frame = P.frame;
+    for (let p = 0; p < peds.t.end; p++) {
+      if (!peds.t.alive[p] || c.wf[p] !== frame || c.bike[p]) continue;
+      if (i > 20 * 20 && lastF[p] === frame - 1) {
+        const d = Math.hypot(c.px[p] - lastX[p], c.pz[p] - lastZ[p]);
+        steps++;
+        if (d > 0.3) { jumps++; if (d > worst) { worst = d; example = `person ${p} moved ${d.toFixed(2)} m in 50 ms (mode ${c.mode[p]})`; } }
+      }
+      lastX[p] = c.px[p]; lastZ[p] = c.pz[p]; lastF[p] = frame;
+    }
+  }
+  t.diagnostic(`published walker steps ${steps}, jumps over 0.3 m ${jumps}, worst ${worst.toFixed(2)} m`);
+  assert.ok(steps > 100000, `walker steps looked at ${steps}`);
+  assert.equal(jumps, 0, `${jumps} jumps over 0.3 m in a 50 ms publication; worst: ${example}`);
+});
+
 test('people do not walk inside each other: on the sidewalk, across the crosswalk, waiting at the light, at a 1.2-1.5 m/s pace', (t) => {
   const { sim } = gridCity(4, 120);
   const tr = traffic(sim);
