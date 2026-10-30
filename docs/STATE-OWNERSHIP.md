@@ -57,7 +57,7 @@ aqui; antes de ler estado de outro módulo, use a API/porta/snapshot, nunca a c�
 
 ## Portão
 
-- `npm run arch:check` no HEAD: **260 arquivos/67.114 linhas, 0 ciclos de runtime, 0 de tipos, 0 vazamentos**.
+- `npm run arch:check` no HEAD: **259 arquivos/67.109 linhas, 0 ciclos de runtime, 0 de tipos, 0 vazamentos**.
 - Cada nova feature atualiza esta matriz; nenhum estado novo sem dono.
 - O `MeshBuilder` é contexto de geração passado por prédio; `vehSchema`/`End` são vocabulário puro do worker, não
   estado de jogo.

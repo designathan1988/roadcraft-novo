@@ -20,19 +20,19 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 260 |
-| Bytes / linhas | 3.731.037 / 67.114 |
-| Arquivos >= 50 KB | 10 |
+| Arquivos TS | 259 |
+| Bytes / linhas | 3.641.931 / 67.109 |
+| Arquivos >= 50 KB | 9 |
 | Arquivos >= 100 KB | 4 |
 | Arquivos >= 150 KB | 2 |
-| Arestas de import | 1105 (196 só de tipo) |
+| Arestas de import | 1104 (196 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.752),
-`game.ts` (2.645), `r40/render/buildings/signature.ts` (1.781), `jobs/buildingGen/plans.ts` (422),
-`world/catalogData.ts` (87 KB em 5 linhas de dados).
+`game.ts` (2.645), `r40/render/buildings/signature.ts` (1.781), `jobs/buildingGen/plans.ts` (422).
+O catálogo de 38 projetos é `world/catalogData.json` (asset, não código).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
 `roads/build.ts -> ui/i18n.ts`, `roads/network.ts -> jobs/protocol.ts`, `world/* -> jobs/protocol.ts`,
