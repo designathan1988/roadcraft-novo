@@ -9,7 +9,7 @@ import { BrushStroke, LANDFORM_ROCK, type BrushParams } from '../world/brush.ts'
 import { GroundStroke } from '../world/ground.ts';
 import { ElementStroke } from '../world/items.ts';
 import { deleteLotsAlong } from '../world/lotEdit.ts';
-import { demolishBox } from '../tools/demolish.ts';
+import { demolishBox } from '../features/demolition/demolish.ts';
 import { clickTool, type ClickHost } from './clicks.ts';
 import { duplicateRoad } from '../roads/build.ts';
 import { loose, money, plural, t } from '../shared/i18n/index.ts';
@@ -20,14 +20,14 @@ import type { HealthPanel } from '../ui/health.ts';
 import type { Hud } from '../ui/hud.ts';
 import type { InsideView } from '../render/inside.ts';
 import type { Inspector } from '../ui/inspector.ts';
-import type { ItemTool } from '../tools/itemTool.ts';
+import type { ItemTool } from '../features/streetscape/itemTool.ts';
 import type { OptionsPanel } from '../ui/options.ts';
 import type { RoadPreview } from '../render/preview.ts';
-import type { RoadTool } from '../tools/roadTool.ts';
+import type { RoadTool } from '../features/roads/roadTool.ts';
 import type { StartMenu } from '../ui/menu.ts';
 import type { VehicleRenderer } from '../render/vehicles.ts';
 import type { World } from '../world/world.ts';
-import type { ZoneTool } from '../tools/zoneTool.ts';
+import type { ZoneTool } from '../features/zones/zoneTool.ts';
 
 export interface InputHost {
   readonly canvas: HTMLCanvasElement;

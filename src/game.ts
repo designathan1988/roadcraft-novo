@@ -28,14 +28,14 @@ import { Post } from './render/post.ts';
 import { achieve } from './platform/steam.ts';
 import { OptionsPanel, PRESETS, keepOverAddress, loadSettings, saveSettings, type Preset, type Settings } from './ui/options.ts';
 import { StartMenu } from './ui/menu.ts';
-import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
+import { Weather, cloudsU, flashU, rainU, windU } from './render/weather.ts';
 import { Ambient } from './platform/audio.ts';
 import { Particles } from './render/particles.ts';
 import { fmtInt, followLanguage, loose, onLanguageChange, plural, setLang, t } from './shared/i18n/index.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import type { Design } from './world/design.ts';
-import { currentU, fogLevel, foamU, nightU, waveU } from './render/scene.ts';
+import { fogLevel, nightU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
 import type { JunctionSpec } from './roads/control.ts';
 import { PROFILES, PROFILE_INFO, customProfiles, onProfileAdded, setCustomProfiles, type Profile } from './roads/profiles.ts';
@@ -48,20 +48,24 @@ import { Inspector } from './ui/inspector.ts';
 import { BOMB_START } from './shared/contracts/bomb.ts';
 import { Demolition } from './features/demolition/demolition.ts';
 import { demandFactor, zoomPercent } from './ui/readouts.ts';
-import { ItemTool } from './tools/itemTool.ts';
-import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
-import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
+import { ItemTool } from './features/streetscape/itemTool.ts';
+import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type Tool, type WeatherCtl } from './ui/hud.ts';
+import type { Cloud } from './render/cloudPuffs.ts';
+import { Clouds } from './features/sky/clouds.ts';
+import { RiverTool } from './features/terrain/riverTool.ts';
+import { WeatherControl, weatherPreset } from './features/sky/weatherControl.ts';
+import { DEFAULT_WATER, WaterControl } from './features/water/waterControl.ts';
 import { InsideView } from './render/inside.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
-import { demolishBox } from './tools/demolish.ts';
+import { demolishBox } from './features/demolition/demolish.ts';
 import { lotAt, lotToWorld, polygonLot } from './world/lotEdit.ts';
-import type { FeatureActions } from './tools/featureActions.ts';
+import type { FeatureActions } from './app/featureActions.ts';
 import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
-import { Ground, GroundStroke, RiverCommand, WATER_MAP_RES, waterAt, waterCoord, waterIndex } from './world/ground.ts';
+import { Ground, GroundStroke, WATER_MAP_RES, waterAt, waterCoord, waterIndex } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
-import { RoadTool } from './tools/roadTool.ts';
-import { ZoneTool } from './tools/zoneTool.ts';
+import { RoadTool } from './features/roads/roadTool.ts';
+import { ZoneTool } from './features/zones/zoneTool.ts';
 import { Growth } from './world/growth.ts';
 import { addCrossing, addUTurn, buildRoad, streetChain, demolishSeg, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, segPreview, snap, splitAt, bulbAt } from './roads/build.ts';
 import { BULB_R, BULB_WALK } from './roads/junction.ts';
@@ -177,8 +181,6 @@ export class Game {
   private forestSpecies = 0;
   /** Trees: one per click instead of the brush. */
   private forestOne = false;
-  private riverWidth = 14;
-  private riverPts: Array<[number, number]> = [];
   private pointer = { x: 0, y: 0, inside: false };
   private drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' | 'lots' = 'none';
   /** Points of the lot delete stroke being dragged (Roadcraft: every lot under it goes, in one step). */
@@ -216,18 +218,16 @@ export class Game {
   private clockSpeed = 1;
   /** Chosen sky and weather set by the player (both go into the save). */
   private skyMode: SkyMode = 'dia'; // as Roadcraft 4.0: a game opens in "always day"
-  private weatherCtl: WeatherCtl | null = null;
-  private waterCtl = { waves: 0.3, foam: 0.4, current: 0.5 };
   /** Clouds placed by the player and the state of the Sky tool. */
-  private clouds: Cloud[] = [];
-  private cloudView = new CloudPuffs();
-  private skyTool: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
-  private cloudGrab = -1;
   /** Inside view: the building and the floor shown. */
   private inside = new InsideView();
   private textSigns!: TextSigns;
   /** The bomb: explosion, breaking buildings and what it throws (features/demolition). */
   private demolition!: Demolition;
+  private clouds!: Clouds;
+  private river!: RiverTool;
+  private sky!: WeatherControl;
+  private water!: WaterControl;
   private shakeOffset = new THREE.Vector3();
   /** People from the creator and the bomb strength. */
   private personSpec = { color: 3, height: 7, walk: false, count: 1 };
@@ -249,6 +249,14 @@ export class Game {
     debug.game = this;
     this.pool = new JobPool({ heights: this.world.heightsSab, ground: this.world.groundSab, water: this.world.waterSab });
     this.rig = new CameraRig(this.world.heights);
+    // the features the page wires: each owns its state (sky, water, river tool)
+    this.water = new WaterControl(() => { this.unsaved = true; });
+    this.sky = new WeatherControl({ weather: this.weather, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.settings?.weather, changed: () => { this.unsaved = true; } });
+    this.river = new RiverTool({ world: this.world, preview: this.preview, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text) });
+    this.clouds = new Clouds({
+      heights: this.world.heights, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
+      changed: () => { this.unsaved = true; }, target: () => this.rig.target,
+    });
     // the camera never enters a building (roadcraft): core of the lot (70% × 60%) up to the top given by the floors
     this.rig.solid = (x, z) => {
       const col = this.world.buildings.cols;
@@ -348,7 +356,7 @@ export class Game {
       forestOne: (one) => { this.forestOne = one; this.hud.setHint(one ? t('game.hint.forest.one') : t('game.hint.forest')); },
       poleLights: (m) => { this.itemTool.poleLights = m; },
       biome: (b) => this.setBiome(b),
-      riverWidth: (w) => { this.riverWidth = w; },
+      riverWidth: (w) => { this.river.width = w; },
       elements: (e) => { this.elem = e; },
       landform: (m) => { this.landformMode = m as BrushMode; if (this.tool === 'landform') this.brush.mode = this.landformMode; },
       flattenMap: () => {
@@ -356,17 +364,17 @@ export class Game {
         this.commands.run(new FlattenMap(this.world, heightAt(this.world.heights, this.rig.target.x, this.rig.target.z)));
         this.hud.toast(t('game.toast.flattened'));
       },
-      weather: (w) => this.setWeather(w),
+      weather: (w) => this.sky.set(w),
       sky: (m) => { this.skyMode = m; this.unsaved = true; },
       personSpec: (p) => { this.personSpec = p; },
       personOptions: (o) => { this.personOptions = o; },
       peopleCatalog: () => this.vehicles.people.catalog(),
       bombForce: (f) => { this.bombForce = f; },
       roadKeys: (patch) => { Object.assign(this.settings, patch); saveSettings(this.settings); },
-      water: (w) => this.setWater(w),
-      skyTool: (s) => { this.skyTool = s; this.skyHint(); },
-      scatterClouds: (n, v) => this.scatterClouds(n, v),
-      clearClouds: () => this.setClouds([], 'apagar nuvens'),
+      water: (w) => this.water.set(w),
+      skyTool: (s) => { this.clouds.tool = s; this.skyHint(); },
+      scatterClouds: (n, v) => this.clouds.scatter(n, v),
+      clearClouds: () => this.clouds.clear(),
       fogLevel: (v) => { fogLevel.value = v; this.unsaved = true; },
       radius: (r) => { this.brush.radius = r; },
       strength: (s) => { this.brush.strength = s; },
@@ -453,7 +461,7 @@ export class Game {
         void this.applySettings(s);
       },
       resetView: () => { if (this.homeView) this.rig.restore(this.homeView); },
-      environment: () => ({ water: { ...this.waterCtl }, weather: this.weatherCtl ? { ...this.weatherCtl } : null, fog: fogLevel.value }),
+      environment: () => ({ water: { ...this.water.ctl }, weather: this.sky.ctl ? { ...this.sky.ctl } : null, fog: fogLevel.value }),
       showImpossible: () => {
         // the next one after the last visited (the set is small: only the nodes under 25°)
         const ids = [...this.world.impossible.nodes.keys()];
@@ -519,9 +527,8 @@ export class Game {
     if (params.has('hora')) { this.hour = Number(params.get('hora')) % 24; this.clockSpeed = 0; this.skyMode = 'ciclo'; }
     this.hud.setSky(this.skyMode);
     this.weather.onStrike = (d) => this.ambient.thunder(d);
-    if (params.has('tempestade')) this.weather.fixed = { clouds: 1, rain: 1, storm: 1 };
-    else if (params.has('chuva')) this.weather.fixed = { clouds: 0.95, rain: 0.9 };
-    else if (params.has('limpo')) this.weather.fixed = { clouds: 0.15, rain: 0 };
+    const preset = ['tempestade', 'chuva', 'limpo'].find((k) => params.has(k));
+    if (preset) this.weather.fixed = weatherPreset(preset);
 
     this.hud.showLoading(t('game.loading.video'));
     this.parts = await createScene(this.canvas);
@@ -550,7 +557,7 @@ export class Game {
       push: (cmd) => this.commands.push(cmd), sim: { postMessage: (msg) => this.sim.postMessage(msg) }, hud: this.hud, ambient: this.ambient, flash: flashU,
     });
     scene.add(this.particles.mesh);
-    scene.add(this.cloudView.mesh);
+    scene.add(this.clouds.view.mesh);
     scene.add(this.inside.group);
     scene.add(this.demolition.group);
     this.textSigns = new TextSigns(this.world, this.world.signTexts);
@@ -751,14 +758,14 @@ export class Game {
     // tool under the cursor
     let hit: THREE.Vector3 | null = null;
     if (this.tool !== 'camera' && this.pointer.inside && this.drag !== 'pan' && this.drag !== 'rotate') hit = this.rig.pick(this.ndcX(), this.ndcY());
-    const terrainTool = TERRAIN_TOOLS.includes(this.tool) || GROUND_TOOLS.includes(this.tool) || (this.tool === 'sky' && this.skyTool.fog !== 'none');
+    const terrainTool = TERRAIN_TOOLS.includes(this.tool) || GROUND_TOOLS.includes(this.tool) || (this.tool === 'sky' && this.clouds.tool.fog !== 'none');
     if (terrainTool && hit) this.terrain.brush.value.set(hit.x, hit.z, this.brush.radius, 1);
     else if (this.tool === 'zone' && hit) this.terrain.brush.value.set(hit.x, hit.z, this.zoneTool.radius, 1);
     else this.terrain.brush.value.w = 0;
     if (this.drag === 'zone' && hit) this.zoneTool.dab(hit.x, hit.z);
     if (this.tool === 'building') this.hoverLotTool(hit);
     if (this.drag === 'brush' && this.elemStroke && hit) {
-      if (this.tool === 'sky') this.elemStroke.dab(hit.x, hit.z, this.brush.radius, Item.Mist, 0.25, this.skyTool.fogHeight, this.skyTool.fog === 'erase' ? 'eraseKind' : 'lay', dt, 22);
+      if (this.tool === 'sky') this.elemStroke.dab(hit.x, hit.z, this.brush.radius, Item.Mist, 0.25, this.clouds.tool.fogHeight, this.clouds.tool.fog === 'erase' ? 'eraseKind' : 'lay', dt, 22);
       else this.elemStroke.dab(hit.x, hit.z, this.brush.radius, this.elem.kind, this.elem.density, this.elem.size, this.elem.mode, dt);
     }
     if (this.drag === 'brush' && this.stroke && hit) {
@@ -769,7 +776,7 @@ export class Game {
         if (this.rockStroke && rock !== undefined) this.rockStroke.dab(hit.x, hit.z, this.brush.radius * (this.brush.mode === 'gully' ? 0.6 : 0.95), 'paint', rock, 1, 1);
       }
     }
-    if (this.tool === 'river') this.hoverRiver(hit);
+    if (this.tool === 'river') this.river.hover(hit);
     if (this.drag === 'free') this.roadTool.freeMove(hit);
     else if (this.drag === 'row' && this.boxStart) this.itemTool.hoverRow(this.boxStart.x, this.boxStart.z, hit);
     else if (this.drag === 'box' && this.boxStart && hit) {
@@ -1034,14 +1041,14 @@ export class Game {
       get selected() { return g.selected; },
       get tool() { return g.tool; },
       brush: this.brush,
-      skyTool: this.skyTool,
+      get skyTool() { return g.clouds.tool; },
       get forestOne() { return g.forestOne; },
       get zoneBlock() { return g.zoneBlock; },
       get simSpeed() { return g.simSpeed; },
       get paused() { return g.paused; },
       get homeView() { return g.homeView; },
       polyPts: this.polyPts,
-      riverPts: this.riverPts,
+      riverPts: this.river.points,
       lotStroke: this.lotStroke,
       get lotPts() { return g.lotPts; },
       get lotMode() { return g.lotMode; },
@@ -1050,7 +1057,7 @@ export class Game {
       get joinFirst() { return g.joinFirst; }, set joinFirst(v) { g.joinFirst = v; },
       get cornerDrag() { return g.cornerDrag; }, set cornerDrag(v) { g.cornerDrag = v; },
       get insideId() { return g.insideId; },
-      get cloudGrab() { return g.cloudGrab; },
+      get cloudGrab() { return g.clouds.grabbed; },
       get pointer() { return g.pointer; },
       get drag() { return g.drag; }, set drag(v) { g.drag = v; },
       get stroke() { return g.stroke; }, set stroke(v) { g.stroke = v; },
@@ -1060,11 +1067,11 @@ export class Game {
       get wallOpen() { return g.wallOpen; }, set wallOpen(v) { g.wallOpen = v; },
       ndcX: () => g.ndcX(), ndcY: () => g.ndcY(),
       clickHost: () => g.clickHost(),
-      grabCloud: (hit) => g.grabCloud(hit),
-      dropCloud: (hit) => g.dropCloud(hit),
+      grabCloud: (hit) => !!hit && g.clouds.grab(hit.x, hit.z),
+      dropCloud: (hit) => g.clouds.drop(hit),
       grabCorner: (hit) => g.grabCorner(hit),
       dropCorner: (hit) => g.dropCorner(hit),
-      finishRiver: () => g.finishRiver(),
+      finishRiver: () => g.river.finish(),
       finishPoly: () => g.finishPoly(),
       insideCmd: (c) => g.insideCmd(c),
       setTool: (t) => g.setTool(t),
@@ -1097,8 +1104,8 @@ export class Game {
     if (t === 'building' && this.lotMode === 'poly' && c === 'Backspace') { this.polyPts.pop(); return true; }
     if (t === 'barrier' && c === 'Backspace') { this.itemTool.back(); return true; }
     if (t === 'barrier' && c === 'Enter') { this.itemTool.cancel(); this.wallOpen = false; return true; }
-    if (t === 'river' && c === 'Enter') { this.finishRiver(); return true; }
-    if (t === 'river' && c === 'Backspace') { this.riverPts.pop(); return true; }
+    if (t === 'river' && c === 'Enter') { this.river.finish(); return true; }
+    if (t === 'river' && c === 'Backspace') { this.river.points.pop(); return true; }
     if (t === 'inspect' && (c === 'Delete' || c === 'Backspace') && this.inspector.seg >= 0) {
       const j = demolishSeg(this.world, this.inspector.seg);
       if (j.settle()) this.commands.push(j);
@@ -1135,8 +1142,7 @@ export class Game {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.updatePixelScale();
     // the option's weather; weather set by hand in the Sky panel (saved with the map) stays
-    if (this.weatherCtl) { const was = this.unsavedNow; this.setWeather(this.weatherCtl); this.unsavedNow = was; }
-    else this.weather.fixed = s.weather === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s.weather === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s.weather === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
+    this.sky.optionChanged();
     this.ambient.setVolume(s.volume ?? 0.6);
     setPaintStyle(s.paint ?? 'br');
     this.roadTool.furniture = s.furniture ?? 0;
@@ -1233,8 +1239,8 @@ export class Game {
     return {
       get tool() { return g.tool; }, set tool(v) { g.tool = v; },
       get wallOpen() { return g.wallOpen; }, set wallOpen(v) { g.wallOpen = v; },
-      zoneLayer: g.zoneLayer, brush: g.brush, landformMode: g.landformMode, lotMode: g.lotMode, skyTool: g.skyTool,
-      riverPts: g.riverPts, roadTool: g.roadTool, itemTool: g.itemTool, inspector: g.inspector, transitView: g.transitView,
+      zoneLayer: g.zoneLayer, brush: g.brush, landformMode: g.landformMode, lotMode: g.lotMode, skyTool: g.clouds.tool,
+      riverPts: g.river.points, roadTool: g.roadTool, itemTool: g.itemTool, inspector: g.inspector, transitView: g.transitView,
       preview: g.preview, creator: g.creator, inside: g.inside,
       get insideId() { return g.insideId; }, set insideId(v) { g.insideId = v; },
       hud: g.hud, health: g.health, canvas: g.canvas, ambient: g.ambient,
@@ -1248,11 +1254,11 @@ export class Game {
     return {
       tool: g.tool, itemRemove: g.itemRemove, forestOne: g.forestOne, zoneBlock: g.zoneBlock, transitTerminal: g.transitTerminal,
       get wallOpen() { return g.wallOpen; }, set wallOpen(v) { g.wallOpen = v; },
-      inspector: g.inspector, riverPts: g.riverPts, itemTool: g.itemTool, roadTool: g.roadTool, zoneTool: g.zoneTool, hud: g.hud,
+      inspector: g.inspector, riverPts: g.river.points, itemTool: g.itemTool, roadTool: g.roadTool, zoneTool: g.zoneTool, hud: g.hud,
       removePole: (hit) => g.removePole(hit),
       clickBuilding: (hit, shift) => g.clickBuilding(hit, shift),
       clickTransit: (hit, terminal) => g.clickTransit(hit, terminal),
-      clickSky: (x, z) => g.clickSky(x, z),
+      clickSky: (x, z) => g.clouds.click(x, z),
       plantTree: (x, z) => g.plantTree(x, z),
       placePerson: (x, z) => g.placePerson(x, z),
       shoot: (x, z) => g.shoot(x, z),
@@ -1274,7 +1280,7 @@ export class Game {
     },
     /** What the creator screen offers (clothes by sex and age, colours, modes, objects); null before loading. */
     peopleCatalog: () => this.vehicles.people.catalog(),
-    river: (pts: Array<[number, number]>, width = 14) => { this.riverPts = pts.slice(); this.riverWidth = width; this.finishRiver(); },
+    river: (pts: Array<[number, number]>, width = 14) => this.river.lay(pts, width),
     paint: (x: number, z: number, r: number, kind: number, mode: 'paint' | 'forest' | 'cut' = 'paint', species = 0) => {
       const s = new GroundStroke(this.world);
       s.dab(x, z, r, mode, kind, 1, 1, species);
@@ -1402,86 +1408,7 @@ export class Game {
     passTime: (minutes: number) => this.world.advanceClock(minutes),
   };
 
-  /** River: shows the stretch from the last point to the cursor. */
-  private hoverRiver(hit: THREE.Vector3 | null): void {
-    const pv = this.preview;
-    if (!hit || this.riverPts.length === 0) { pv.hide(); return; }
-    const [ax, az] = this.riverPts[this.riverPts.length - 1];
-    const ya = heightAt(this.world.heights, ax, az), yb = heightAt(this.world.heights, hit.x, hit.z);
-    pv.show({ x0: ax, z0: az, cx: (ax + hit.x) / 2, cz: (az + hit.z) / 2, x1: hit.x, z1: hit.z }, this.riverWidth / 2, [0, 1], [ya + 0.3, yb + 0.3], true, 0x3d8fd0);
-  }
-
-  private finishRiver(): void {
-    if (this.riverPts.length >= 2) {
-      const c = new RiverCommand(this.world, this.riverPts, this.riverWidth, Math.min(4, 1.2 + this.riverWidth / 12));
-      if (!c.empty) { this.commands.run(c); this.hud.toast(t('game.toast.river')); }
-    }
-    this.riverPts.length = 0;
-    this.preview.hideAll();
-  }
-
   private skyHint(): void { skyHintOf(this.toolHost()); }
-
-  /** Replaces the cloud list as a command (undo brings back the previous one). */
-  private setClouds(next: Cloud[], label: string): void {
-    const before = this.clouds.map((c) => ({ ...c })), after = next.map((c) => ({ ...c }));
-    const set = (l: Cloud[]) => { this.clouds = l.map((c) => ({ ...c })); this.cloudView.set(this.clouds); this.unsaved = true; };
-    this.commands.run({ label, apply: () => set(after), invert: () => set(before) });
-  }
-
-  /** Cloud whose projection on the ground is near (x, z), or −1. */
-  private cloudAt(x: number, z: number): number {
-    let best = -1, bd = Infinity;
-    this.clouds.forEach((c, i) => { const d = Math.hypot(c.x - x, c.z - z); if (d < c.size && d < bd) { bd = d; best = i; } });
-    return best;
-  }
-
-  private clickSky(x: number, z: number): void {
-    const s = this.skyTool;
-    if (s.fog !== 'none') return;
-    const i = this.cloudAt(x, z);
-    if (s.cloud === 'add') {
-      if (this.clouds.length >= MAX_CLOUDS) { this.hud.toast(t('game.toast.maxClouds', { n: MAX_CLOUDS })); return; }
-      const y = heightAt(this.world.heights, x, z) + s.base;
-      this.setClouds([...this.clouds, { x, z, y, size: s.size, density: s.density }], 'criar nuvem');
-    } else if (s.cloud === 'remove' && i >= 0) this.setClouds(this.clouds.filter((_, k) => k !== i), 'apagar nuvem');
-    else if (s.cloud === 'edit' && i >= 0) {
-      const c = this.clouds[i];
-      this.setClouds(this.clouds.map((d, k) => k === i ? { ...c, size: s.size, density: s.density, y: c.y - (c.y - heightAt(this.world.heights, c.x, c.z)) + s.base } : d), 'ajustar nuvem');
-    } else if (i < 0 && s.cloud !== 'none') this.hud.toast(t('game.toast.noCloud'));
-  }
-
-  private grabCloud(hit: THREE.Vector3 | null): boolean {
-    this.cloudGrab = hit ? this.cloudAt(hit.x, hit.z) : -1;
-    return this.cloudGrab >= 0;
-  }
-
-  private dropCloud(hit: THREE.Vector3 | null): void {
-    const i = this.cloudGrab;
-    this.cloudGrab = -1;
-    if (i < 0 || !hit) return;
-    const c = this.clouds[i];
-    const ground = heightAt(this.world.heights, hit.x, hit.z), base = c.y - heightAt(this.world.heights, c.x, c.z);
-    this.setClouds(this.clouds.map((d, k) => k === i ? { ...c, x: hit.x, z: hit.z, y: ground + base } : d), 'mover nuvem');
-  }
-
-  /** Scatters clouds around the camera (size and base from the sliders, with variation). */
-  private scatterClouds(n: number, variation: number): void {
-    const s = this.skyTool, out = this.clouds.slice(0, Math.max(0, MAX_CLOUDS - n));
-    const t = this.rig.target;
-    for (let k = 0; k < n && out.length < MAX_CLOUDS; k++) {
-      const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * 5000;
-      const x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
-      const vary = (v: number) => v * (1 + (Math.random() * 2 - 1) * variation);
-      out.push({ x, z, y: heightAt(this.world.heights, x, z) + vary(s.base), size: vary(s.size), density: Math.min(1, vary(s.density)) });
-    }
-    this.setClouds(out, 'espalhar nuvens');
-  }
-
-  private setWater(w: { waves: number; foam: number; current: number }): void {
-    this.waterCtl = w; this.unsaved = true;
-    waveU.value = w.waves; foamU.value = w.foam; currentU.value = w.current;
-  }
 
   /** People creator: standing (saved item) or walking (simulation pedestrians in the chosen clothes). */
   /** The people creator screen's choices (src/render/people/creator.ts), used when the cooked people are loaded. */
@@ -1524,25 +1451,6 @@ export class Game {
     this.hitKind = null;
     if (k === 'pistol') this.hud.toast(people ? t('game.toast.hit') : t('game.toast.missed'));
     else if (k === 'bomb' && people + vehicles > 0) this.hud.toast(t('game.toast.victims', { people: plural('status.people', people), vehicles: plural('status.vehicles', vehicles) }));
-  }
-
-  /** Weather from the panel: rain, wind, direction, lightning and thunder; null goes back to weather that changes by itself (or to the option). */
-  private setWeather(w: WeatherCtl | null): void {
-    this.weatherCtl = w;
-    this.unsaved = true;
-    const wt = this.weather;
-    if (!w) {
-      wt.windFixed = null; wt.lightningRate = 0; this.ambient.thunderVolume = 1;
-      const s = this.settings?.weather;
-      wt.fixed = s === 'chuva' ? { clouds: 0.95, rain: 0.85 } : s === 'tempestade' ? { clouds: 1, rain: 1, storm: 1 } : s === 'limpo' ? { clouds: 0.15, rain: 0 } : null;
-      return;
-    }
-    wt.fixed = { clouds: w.rain > 0 ? 0.6 + 0.4 * w.rain : w.lightning > 0 ? 0.85 : 0.25, rain: w.rain, storm: w.lightning > 0 ? 1 : 0 };
-    wt.windFixed = Math.min(1, w.wind / 20);
-    wt.lightningRate = w.lightning;
-    const r = w.dir * Math.PI / 180;
-    windDirU.value.set(Math.sin(r), Math.cos(r));
-    this.ambient.thunderVolume = w.thunder;
   }
 
   /** One tree of the chosen species (mixed: oak or cypress at random). */
@@ -1787,7 +1695,7 @@ export class Game {
     this.demolition.clear();
     this.transit.clear();
     this.commands.clear();
-    this.clouds = []; this.cloudView.set([]);
+    this.clouds.load([]);
     w.signTexts.clear(); w.streetNames.clear(); this.textSigns.version++;
     w.money = START_MONEY;
     // another city: nothing of it is in the save yet, and it is not the city the slot holds
@@ -1985,7 +1893,7 @@ export class Game {
     const g = this;
     const host: SaveHost = {
       world: g.world, pool: g.pool, hud: g.hud, rig: g.rig, transit: g.transit, settings: g.settings,
-      skyMode: g.skyMode, weatherCtl: g.weatherCtl, waterCtl: g.waterCtl, clouds: g.clouds, hour: g.hour,
+      skyMode: g.skyMode, weatherCtl: g.sky.ctl, waterCtl: g.water.ctl, clouds: g.clouds.list, hour: g.hour,
       get saveBlocked() { return g.saveBlocked; },
       get unsavedSerial() { return g.unsavedSerial; },
       get busy() { return g.busy; }, set busy(v) { g.busy = v; },
@@ -2047,7 +1955,7 @@ export class Game {
     if (meta.transit) this.transit.decode(meta.transit); else this.transit.clear();
     try {
       const extra = meta.extra ? JSON.parse(meta.extra) as { sky?: SkyMode; weather?: WeatherCtl | null; water?: { waves: number; foam: number; current: number } } : {};
-      this.setWater(extra.water ?? { waves: 0.3, foam: 0.4, current: 0.5 });
+      this.water.set(extra.water ?? DEFAULT_WATER, false);
       const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]>; clock?: number; paint?: string; unlimited?: boolean };
       w.clock = ex.clock ?? 0;
       if (ex.unlimited !== undefined) w.unlimited = ex.unlimited;
@@ -2057,9 +1965,9 @@ export class Game {
       w.streetNames.clear(); for (const [k, v] of ex.streets ?? []) w.streetNames.set(k, v);
       this.textSigns.version++;
       this.transit.terminals = ex.terminals ?? []; this.transit.version++;
-      this.clouds = ex.clouds ?? []; this.cloudView.set(this.clouds); fogLevel.value = ex.fog ?? 1;
+      this.clouds.load(ex.clouds ?? []); fogLevel.value = ex.fog ?? 1;
       this.skyMode = extra.sky ?? 'ciclo'; this.hud.setSky(this.skyMode);
-      this.setWeather(extra.weather ?? null);
+      this.sky.set(extra.weather ?? null, false);
     } catch { /* old save */ }
     w.tileInSave.fill(0);
     for (const t of g.tiles.keys()) w.tileInSave[t] = 1;

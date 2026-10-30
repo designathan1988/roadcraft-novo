@@ -9,7 +9,7 @@ import { heightIndex, sampleCoord } from '../src/world/heights.ts';
 import { waterCoord, waterIndex } from '../src/world/ground.ts';
 import { HEIGHT_MAP_RES } from '../src/config.ts';
 import { CommandStack, type Command } from '../src/core/commands.ts';
-import { demolishBox } from '../src/tools/demolish.ts';
+import { demolishBox } from '../src/features/demolition/demolish.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { MAX_DEG } from '../src/roads/network.ts';
 import { Zone } from '../src/roads/zones.ts';
@@ -708,7 +708,7 @@ test('D21: a road over another one, or a second road between the same two nodes,
 });
 
 test('D22: repainting a street\'s zone leaves the corner buildings that front the cross street', async () => {
-  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const { ZoneTool } = await import('../src/features/zones/zoneTool.ts');
   const w = flatWorld(1e9);
   road(w, -150, 0, 150, 0);
   road(w, 0, -150, 0, 150);
@@ -725,7 +725,7 @@ test('D22: repainting a street\'s zone leaves the corner buildings that front th
 });
 
 test('D23: the zone brush never zones rails, highways or ramps', async () => {
-  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const { ZoneTool } = await import('../src/features/zones/zoneTool.ts');
   const names = ['Ferrovia dupla', 'Metrô (duplo)', 'Rodovia 6 faixas', 'Alça de acesso', 'Pista dupla, 2 faixas'];
   for (const name of names) {
     const w = flatWorld(1e9);
@@ -748,7 +748,7 @@ test('D23: the zone brush never zones rails, highways or ramps', async () => {
 test('D24: demolishing a Stop sign takes its rule away; undo puts both back', async () => {
   const { signRuleCommand, SIGN_STOP } = await import('../src/roads/signRule.ts');
   const { ItemsCommand, Item } = await import('../src/world/items.ts');
-  const { demolishTarget, demolishBox } = await import('../src/tools/demolish.ts');
+  const { demolishTarget, demolishBox } = await import('../src/features/demolition/demolish.ts');
   for (const how of ['click', 'box'] as const) {
     const w = flatWorld(1e9);
     road(w, -150, 0, 150, 0);
@@ -771,7 +771,7 @@ test('D24: demolishing a Stop sign takes its rule away; undo puts both back', as
 });
 
 test('D25b: a pole line stays on the footway and above firm ground', async () => {
-  const { ItemTool } = await import('../src/tools/itemTool.ts');
+  const { ItemTool } = await import('../src/features/streetscape/itemTool.ts');
   const { Item } = await import('../src/world/items.ts');
   const w = flatWorld(1e9);
   road(w, -100, 0, 100, 0);
@@ -799,7 +799,7 @@ test('D25b: a pole line stays on the footway and above firm ground', async () =>
 });
 
 test('D25: Backspace in the wall tool takes back its own last run, never another command', async () => {
-  const { ItemTool } = await import('../src/tools/itemTool.ts');
+  const { ItemTool } = await import('../src/features/streetscape/itemTool.ts');
   const { Item } = await import('../src/world/items.ts');
   const w = flatWorld(1e9);
   const commands = new CommandStack();
@@ -980,7 +980,7 @@ test('D35: a new road through any part of a lot clears it; a lot beside the road
 });
 
 test('D36: changing only the density keeps the buildings that fit it; towers go when the zone turns low', async () => {
-  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const { ZoneTool } = await import('../src/features/zones/zoneTool.ts');
   const w = flatWorld(1e9);
   road(w, -150, 0, 150, 0);
   const z = new RoadJournal(w, 'zone');
@@ -997,7 +997,7 @@ test('D36: changing only the density keeps the buildings that fit it; towers go 
 });
 
 test('D43: undo while a stroke is still open does nothing; after it closes it undoes the stroke', async () => {
-  const { ZoneTool } = await import('../src/tools/zoneTool.ts');
+  const { ZoneTool } = await import('../src/features/zones/zoneTool.ts');
   const w = flatWorld(1e9);
   const commands = new CommandStack();
   commands.push(road(w, -150, 0, 150, 0));

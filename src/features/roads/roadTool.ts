@@ -2,19 +2,19 @@
 // profile and demolish. Every valid click becomes a command in the history.
 
 import type * as THREE from 'three/webgpu';
-import type { CommandStack } from '../core/commands.ts';
-import { RoadJournal, buildRoad, buildRoundabout, planPrice, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../roads/build.ts';
-import { bez, type Quad } from '../roads/geometry.ts';
-import { PROFILE_INFO } from '../roads/profiles.ts';
-import { registerVariant, type RoadOptions } from '../roads/roadVariant.ts';
-import { SegFlag } from '../roads/flags.ts';
-import type { RoadPreview } from '../render/preview.ts';
-import type { Hud, Tool } from '../ui/hud.ts';
-import { heightAt } from '../world/heights.ts';
-import { demolishTarget, targetAt, type Target } from './demolish.ts';
-import { lotToWorld } from '../world/lotEdit.ts';
-import type { World } from '../world/world.ts';
-import { money, t } from '../shared/i18n/index.ts';
+import type { CommandStack } from '../../core/commands.ts';
+import { RoadJournal, buildRoad, buildRoundabout, planPrice, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../../roads/build.ts';
+import { bez, type Quad } from '../../roads/geometry.ts';
+import { PROFILE_INFO } from '../../roads/profiles.ts';
+import { registerVariant, type RoadOptions } from '../../roads/roadVariant.ts';
+import { SegFlag } from '../../roads/flags.ts';
+import type { RoadPreview } from '../../render/preview.ts';
+import type { Hud, Tool } from '../../ui/hud.ts';
+import { heightAt } from '../../world/heights.ts';
+import { demolishTarget, targetAt, type Target } from '../demolition/demolish.ts';
+import { lotToWorld } from '../../world/lotEdit.ts';
+import type { World } from '../../world/world.ts';
+import { money, t } from '../../shared/i18n/index.ts';
 
 const p2 = new Float64Array(2);
 

@@ -1,15 +1,15 @@
 // Zoning brush: paints the zone on the sides of the roads the brush touches.
 // Changing the zone knocks down the buildings of the old zone on that side. A stroke is one command.
 
-import type { CommandStack } from '../core/commands.ts';
-import { RoadJournal } from '../roads/build.ts';
-import { bez, bezD } from '../roads/geometry.ts';
-import { PROFILE_INFO } from '../roads/profiles.ts';
-import { baseZone, zoneDensity } from '../roads/zones.ts';
+import type { CommandStack } from '../../core/commands.ts';
+import { RoadJournal } from '../../roads/build.ts';
+import { bez, bezD } from '../../roads/geometry.ts';
+import { PROFILE_INFO } from '../../roads/profiles.ts';
+import { baseZone, zoneDensity } from '../../roads/zones.ts';
 
 /** Most floors a low-density zone grows (world/growth.ts floorsFor: houses up to 3, shops up to 4). */
 const LOW_DENSITY_FLOORS = 4;
-import type { World } from '../world/world.ts';
+import type { World } from '../../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 

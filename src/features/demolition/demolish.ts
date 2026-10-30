@@ -1,12 +1,12 @@
 // Demolish anything: what is under the cursor (item or wall, building, road) or everything inside
 // a dragged rectangle. Queries only through the area's spatial index; a single command (undo).
 
-import type { Command } from '../core/commands.ts';
-import { RoadJournal } from '../roads/build.ts';
-import { Item, ItemsCommand, MAX_RUN } from '../world/items.ts';
-import { signRuleCommand } from '../roads/signRule.ts';
-import { lotAt } from '../world/lotEdit.ts';
-import type { World } from '../world/world.ts';
+import type { Command } from '../../core/commands.ts';
+import { RoadJournal } from '../../roads/build.ts';
+import { Item, ItemsCommand, MAX_RUN } from '../../world/items.ts';
+import { signRuleCommand } from '../../roads/signRule.ts';
+import { lotAt } from '../../world/lotEdit.ts';
+import type { World } from '../../world/world.ts';
 
 export type Target = { kind: 'item'; id: number } | { kind: 'building'; id: number } | { kind: 'seg'; id: number } | null;
 

@@ -7,9 +7,9 @@ import type { Vector3 } from 'three/webgpu';
 import type { Tool } from '../ui/hudActions.ts';
 import type { Hud } from '../ui/hud.ts';
 import type { Inspector } from '../ui/inspector.ts';
-import type { ItemTool } from '../tools/itemTool.ts';
-import type { RoadTool } from '../tools/roadTool.ts';
-import type { ZoneTool } from '../tools/zoneTool.ts';
+import type { ItemTool } from '../features/streetscape/itemTool.ts';
+import type { RoadTool } from '../features/roads/roadTool.ts';
+import type { ZoneTool } from '../features/zones/zoneTool.ts';
 
 export interface ClickHost {
   readonly tool: Tool;

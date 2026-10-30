@@ -3,20 +3,20 @@
 // objects next to the curb, barriers at the back of the sidewalk.
 
 import type * as THREE from 'three/webgpu';
-import type { Command, CommandStack } from '../core/commands.ts';
-import { SIGN_STOP, signRuleCommand } from '../roads/signRule.ts';
-import { addressAt } from '../roads/streetNames.ts';
-import { bez, bezD } from '../roads/geometry.ts';
-import { PROFILE_INFO } from '../roads/profiles.ts';
-import { SegFlag } from '../roads/flags.ts';
-import type { RoadPreview } from '../render/preview.ts';
-import type { Hud } from '../ui/hud.ts';
-import { heightAt } from '../world/heights.ts';
-import { waterAt } from '../world/ground.ts';
-import { Item, ItemsCommand, MAX_RUN, isBarrier, isEffect } from '../world/items.ts';
-import { RoadGround, roadGroundAt } from '../roads/ground.ts';
-import { t } from '../shared/i18n/index.ts';
-import type { World } from '../world/world.ts';
+import type { Command, CommandStack } from '../../core/commands.ts';
+import { SIGN_STOP, signRuleCommand } from '../../roads/signRule.ts';
+import { addressAt } from '../../roads/streetNames.ts';
+import { bez, bezD } from '../../roads/geometry.ts';
+import { PROFILE_INFO } from '../../roads/profiles.ts';
+import { SegFlag } from '../../roads/flags.ts';
+import type { RoadPreview } from '../../render/preview.ts';
+import type { Hud } from '../../ui/hud.ts';
+import { heightAt } from '../../world/heights.ts';
+import { waterAt } from '../../world/ground.ts';
+import { Item, ItemsCommand, MAX_RUN, isBarrier, isEffect } from '../../world/items.ts';
+import { RoadGround, roadGroundAt } from '../../roads/ground.ts';
+import { t } from '../../shared/i18n/index.ts';
+import type { World } from '../../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 

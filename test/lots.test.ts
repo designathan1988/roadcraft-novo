@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { CommandStack } from '../src/core/commands.ts';
 import { buildRoad, planRoad, snap } from '../src/roads/build.ts';
-import { ZoneTool } from '../src/tools/zoneTool.ts';
+import { ZoneTool } from '../src/features/zones/zoneTool.ts';
 import { deleteLot, joinLots, lotAt, moveLotCorner, polygonRect, setLotFront, splitLot } from '../src/world/lotEdit.ts';
 
 function flatWorld(): World {

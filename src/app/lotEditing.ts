@@ -16,7 +16,7 @@ import { CameraRig } from '../render/cameraRig.ts';
 import { InsideView, insideTarget } from '../render/inside.ts';
 import type { Settings } from '../ui/options.ts';
 import type { Hud, LotMode, Tool } from '../ui/hud.ts';
-import type { FeatureActions } from '../tools/featureActions.ts';
+import type { FeatureActions } from './featureActions.ts';
 import type { World } from '../world/world.ts';
 import type { Transit } from '../world/transit.ts';
 import { encodeDesign, type Design } from '../world/design.ts';

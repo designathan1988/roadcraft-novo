@@ -132,7 +132,7 @@ export interface SaveHost {
   readonly skyMode: SkyMode;
   readonly weatherCtl: WeatherCtl | null;
   readonly waterCtl: SaveWater;
-  readonly clouds: Cloud[];
+  readonly clouds: readonly Cloud[];
   readonly hour: number;
   readonly saveBlocked: boolean;
   readonly unsavedSerial: number;
