@@ -72,10 +72,13 @@ export function generateCity(seed: number, medium = false): CityRoads {
     flush();
   };
 
-  // the grid's span is 1.7 radii (4.0: ~8.85 km at radius 5,200 m on the 10 km map); avenues and collectors bridge
-  // water, local streets stop at it; a grid line is straight, so after march walked its dense points for water and
-  // slope the street keeps only its ends and its nodes are the crossings
-  const R = medium ? 1100 : Math.min(5200, ((MAP_HALF - 420) * 2) / 1.7);
+  // the grid's span is 1.7 radii. The city fills the chosen map (the owner's decision, 2026-10-30): its radius is 4.0's
+  // cap for a round city, the map's half side less 60 m (4.0 world/cityGen/plan.ts:71-77, ROUND_REACH = MAP_HALF, the
+  // same 5,120 m half side on the 10-tile map), so a 24 km map gets a 24 km city, not the 10 km one a fixed 5,200 m did
+  // (4.0's own menu city is smaller, 1,600 m, largeCity.ts:7; the plan at a larger radius is the same, largeCity.ts:9).
+  // Avenues and collectors bridge water, local streets stop at it; a grid line is straight, so after march walked its
+  // dense points for water and slope the street keeps only its ends and its nodes are the crossings
+  const R = medium ? 1100 : MAP_HALF - 60;
   for (const l of blockLines(0, 0, R)) {
     const profile = l.level === 0 ? GEN.Avenue : l.level === 1 ? GEN.Collector : GEN.Local;
     const first = polys.length;

@@ -74,8 +74,9 @@ const bedProfile = (d: number, reach: number) => influence(Math.min(1, (1 - d / 
 /** The river's course: z of its middle at x. */
 /**
  * The river's course: a straight canal along x, outside the city (the owner, 2026-10-30: "tire o rio do meio da
- * cidade, faça o rio reto como um canal"). The generated city's grid reaches 4,420 m from the middle (cityGen.ts,
- * 4.0's 1.7 radii of 5,200 m), so the canal runs CANAL_FROM_EDGE in from the map's north edge, past its last avenue.
+ * cidade, faça o rio reto como um canal"). The generated city's grid reaches 0.85 of its radius from the middle (cityGen.ts:
+ * radius MAP_HALF - 60 as in 4.0, 1.7 radii across: 4,300 m on the 10 km map), so the canal runs CANAL_FROM_EDGE in
+ * from the map's north edge, past its last avenue on every map size.
  */
 export const courseZ = (_x: number, _seed: number) => MAP_HALF - CANAL_FROM_EDGE;
 
