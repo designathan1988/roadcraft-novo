@@ -12,10 +12,14 @@ import { SegFlag } from '../roads/flags.ts';
 import type { RoadPreview } from '../render/preview.ts';
 import type { Hud } from '../ui/hud.ts';
 import { heightAt } from '../world/heights.ts';
+import { waterAt } from '../world/ground.ts';
 import { Item, ItemsCommand, MAX_RUN, isBarrier, isEffect } from '../world/items.ts';
 import type { World } from '../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
+
+/** Distance between poles of a drawn run (the same 32 m the automatic lines use). */
+const POLE_SPACING = 32;
 
 /** Two commands already applied, as one undo step. */
 function both(a: Command, b: Command): Command {
@@ -153,15 +157,28 @@ export class ItemTool {
       return;
     }
     const sp = this.spot(hit.x, hit.z, true);
-    if (!this.last) { this.last = { x: sp.x, z: sp.z }; this.hint(); return; }
+    if (!this.last) {
+      if (this.barrier === Item.PoleLine && !this.poleGround(sp)) return;
+      this.last = { x: sp.x, z: sp.z }; this.hint(); return;
+    }
     const a = this.last;
     const L = Math.hypot(sp.x - a.x, sp.z - a.z);
     if (L < 0.5) return;
+    if (this.barrier === Item.PoleLine) {
+      if (!this.poleGround(sp) || !this.poleRunGround(a, sp)) return;
+      // The run keeps its ends on the footway; the props job puts a pole every 32 m and the wires between them.
+      const c = new ItemsCommand(items, 'postes com fios');
+      c.add([a.x, a.z, sp.x, sp.z, Item.PoleLine, this.poleLights]);
+      this.commands.push(c);
+      this.runs.push({ cmd: c, from: a });
+      this.last = { x: sp.x, z: sp.z };
+      return;
+    }
     const c = new ItemsCommand(items, 'muro');
     const n = Math.ceil(L / MAX_RUN);
     for (let i = 0; i < n; i++) {
       const t0 = i / n, t1 = (i + 1) / n;
-      c.add([a.x + (sp.x - a.x) * t0, a.z + (sp.z - a.z) * t0, a.x + (sp.x - a.x) * t1, a.z + (sp.z - a.z) * t1, this.barrier, this.barrier === Item.PoleLine ? this.poleLights : 0]);
+      c.add([a.x + (sp.x - a.x) * t0, a.z + (sp.z - a.z) * t0, a.x + (sp.x - a.x) * t1, a.z + (sp.z - a.z) * t1, this.barrier, 0]);
     }
     this.commands.push(c);
     this.runs.push({ cmd: c, from: a });
@@ -173,6 +190,35 @@ export class ItemTool {
     const S: Record<number, number> = { [Item.Tree]: 9, [Item.Conifer]: 8, [Item.Palm]: 10, [Item.Bush]: 4, [Item.Bench]: 14, [Item.Bin]: 22, [Item.Lamp]: 25,
       [Item.Hydrant]: 60, [Item.Postbox]: 60, [Item.Phone]: 50, [Item.Drain]: 30, [Item.Bollard]: 2.5, [Item.Planter]: 6, [Item.Sign]: 40 };
     return S[t] ?? 10;
+  }
+
+  /** A pole must stand on the footway and above the water, never on the carriageway or in a river. */
+  private poleGround(sp: Spot): boolean {
+    if (!sp.onWalk) { this.hud.toast('Postes vão na calçada.'); return false; }
+    const ground = heightAt(this.world.heights, sp.x, sp.z);
+    if (waterAt(this.world.water, sp.x, sp.z) > ground - 0.5) { this.hud.toast('Não dá para pôr postes na água.'); return false; }
+    return true;
+  }
+
+  /** Every pole and wire in the run must stay on firm footway, not only its two ends. */
+  private poleRunGround(a: { x: number; z: number }, b: { x: number; z: number }): boolean {
+    const L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(L / POLE_SPACING));
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
+      if (!this.poleGround(this.spot(x, z, true))) return false;
+    }
+    return true;
+  }
+
+  /** A pole run from the page/tests: same validation and command as the tool. */
+  placePoleLine(ax: number, az: number, bx: number, bz: number, lights = 0): boolean {
+    this.mode = 'barrier'; this.barrier = Item.PoleLine; this.poleLights = lights;
+    const a = this.spot(ax, az, true), b = this.spot(bx, bz, true);
+    if (!this.poleGround(a) || !this.poleGround(b) || !this.poleRunGround(a, b)) return false;
+    const c = new ItemsCommand(this.world.items, 'postes com fios');
+    c.add([a.x, a.z, b.x, b.z, Item.PoleLine, lights]);
+    this.commands.push(c);
+    return true;
   }
 
   /** Row of the chosen item from a to b, each snapped to the sidewalk (a single command). */

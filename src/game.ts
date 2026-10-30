@@ -1344,6 +1344,7 @@ export class Game {
       if (s.finish()) this.commands.push(s);
     },
     item: (x: number, z: number, kind: number, variant = 0) => { this.itemTool.item = kind; this.itemTool.sign = variant; this.itemTool.mode = 'streetscape'; this.itemTool.click({ x, z } as THREE.Vector3, false); },
+    poleLine: (ax: number, az: number, bx: number, bz: number, lights = 0) => this.itemTool.placePoleLine(ax, az, bx, bz, lights),
     /** Drawn lot: front A→B, back out to C. */
     lot: (ax: number, az: number, bx: number, bz: number, cx: number, cz: number, use = 1, floors?: number) => {
       this.lotUse = use;

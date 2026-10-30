@@ -769,6 +769,26 @@ test('D24: demolishing a Stop sign takes its rule away; undo puts both back', as
   }
 });
 
+test('D25b: a pole line stays on the footway and above firm ground', async () => {
+  const { ItemTool } = await import('../src/tools/itemTool.ts');
+  const { Item } = await import('../src/world/items.ts');
+  const w = flatWorld(1e9);
+  road(w, -100, 0, 100, 0);
+  const commands = new CommandStack();
+  const stub = new Proxy({}, { get: () => () => {} });
+  const tool = new ItemTool(w, commands, stub as never, stub as never);
+  assert.ok(tool.placePoleLine(0, 6, 64, 6, 2), 'a line along the sidewalk is built');
+  assert.equal(w.items.size, 1, 'one pole run');
+  // the same line over water is refused before anything is added
+  const wet = flatWorld(1e9);
+  road(wet, -100, 0, 100, 0);
+  wet.water.fill(100);
+  const wetTool = new ItemTool(wet, new CommandStack(), stub as never, stub as never);
+  assert.equal(wetTool.placePoleLine(0, 6, 64, 6, 2), false, 'poles over water are refused');
+  assert.equal(wet.items.size, 0, 'no item was added over water');
+  assert.equal(w.items.t.cols.type[0], Item.PoleLine);
+});
+
 test('D25: Backspace in the wall tool takes back its own last run, never another command', async () => {
   const { ItemTool } = await import('../src/tools/itemTool.ts');
   const { Item } = await import('../src/world/items.ts');
