@@ -5,11 +5,12 @@ import { PROFILE_INFO } from '../profiles.ts';
 import { armOf } from '../junction.ts';
 import { RoadJournal } from './journal.ts';
 import { clearAndConform } from './execute.ts';
+import { NO_SEG, type SegId } from '../../core/ids.ts';
 
 // ------------------------------------------------------------ other edits
 
 /** Demolishes a segment; nodes left loose go with it. */
-export function demolishSeg(world: World, s: number): RoadJournal {
+export function demolishSeg(world: World, s: SegId): RoadJournal {
   const net = world.roads;
   const j = new RoadJournal(world, 'demolir via');
   const rec = j.removeSeg(s);
@@ -17,7 +18,7 @@ export function demolishSeg(world: World, s: number): RoadJournal {
   return j;
 }
 
-export function changeProfile(world: World, s: number, profile: number): RoadJournal {
+export function changeProfile(world: World, s: SegId, profile: number): RoadJournal {
   const j = new RoadJournal(world, 'trocar perfil');
   if (world.roads.segs.cols.flags[s] & SegFlag.Ring) return j;
   j.guard(() => { j.setProfile(s, profile); settleUnder(j, world, s); });
@@ -25,7 +26,7 @@ export function changeProfile(world: World, s: number, profile: number): RoadJou
 }
 
 /** After a profile change: like a new road, what the (wider) road now covers goes and the terrain settles under it. */
-function settleUnder(j: RoadJournal, world: World, s: number): void {
+function settleUnder(j: RoadJournal, world: World, s: SegId): void {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const sq = net.quad(s), t = arcTable(sq, 32), L = t[t.length - 1];
   const ya = nc.y[sc.a[s]], yb = nc.y[sc.b[s]];
@@ -37,14 +38,14 @@ function settleUnder(j: RoadJournal, world: World, s: number): void {
  * that continues straightest (up to 35°) with the same profile (`anyProfile`: whatever its profile, never from a
  * road onto rails or back). One-way roads only follow the same direction.
  */
-export function streetChain(world: World, s0: number, anyProfile = false): number[] {
+export function streetChain(world: World, s0: SegId, anyProfile = false): SegId[] {
   const net = world.roads, sc = net.segs.cols;
   const prof = sc.profile[s0];
   const oneWay = PROFILE_INFO[prof].oneWay;
   const out = [s0];
   const seen = new Set([s0]);
   const q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
-  const list: number[] = [];
+  const list: SegId[] = [];
   for (const startEnd of [1, 0] as const) {
     let s = s0, end: 0 | 1 = startEnd;
     for (let guard = 0; guard < 4000; guard++) {
@@ -52,7 +53,7 @@ export function streetChain(world: World, s0: number, anyProfile = false): numbe
       const here = armOf(net.quad(s, q), prof, end);
       // arrival heading = opposite of the arm
       const hx = -here.dx, hz = -here.dz;
-      let best = -1, bestDot = Math.cos(35 * Math.PI / 180), bestEnd: 0 | 1 = 0;
+      let best = NO_SEG, bestDot = Math.cos(35 * Math.PI / 180), bestEnd: 0 | 1 = 0;
       for (const t of net.segsOf(n, list)) {
         if (seen.has(t) || (sc.flags[t] & SegFlag.Ring)) continue;
         if (anyProfile ? PROFILE_INFO[sc.profile[t]].rail !== PROFILE_INFO[prof].rail : sc.profile[t] !== prof) continue;
@@ -71,7 +72,7 @@ export function streetChain(world: World, s0: number, anyProfile = false): numbe
 }
 
 /** Changes the profile of several segments in a single command. */
-export function changeProfiles(world: World, segs: number[], profile: number, ref = segs[0]): RoadJournal {
+export function changeProfiles(world: World, segs: SegId[], profile: number, ref = segs[0]): RoadJournal {
   const j = new RoadJournal(world, 'trocar perfil da rua');
   const net = world.roads;
   // a profile that is not the same seen from both ends (parking on one side, a bus lane…) is laid the way `ref` runs:
@@ -106,9 +107,9 @@ export function mirrorSymmetric(profile: number): boolean {
  * Whether each segment of a connected street runs the way `ref` does (true) or against it, walking from `ref` through
  * the nodes the segments share.
  */
-export function alongStreet(world: World, segs: number[], ref: number): Map<number, boolean> {
+export function alongStreet(world: World, segs: SegId[], ref: SegId): Map<SegId, boolean> {
   const sc = world.roads.segs.cols, set = new Set(segs);
-  const out = new Map<number, boolean>([[ref, true]]);
+  const out = new Map<SegId, boolean>([[ref, true]]);
   const queue = [ref];
   while (queue.length) {
     const s = queue.pop()!, fwd = out.get(s)!;

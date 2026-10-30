@@ -77,9 +77,9 @@ test('rede: adjacência, sujeira e montagem da malha do cruzamento', () => {
   const c = cross(net);
   assert.equal(net.nodes.cols.deg[c], 4);
   assert.ok(w.dirty.pending(Dirty.Roads) > 0);
-  const segs: number[] = [], nodes: number[] = [];
-  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) segs.push(s);
-  for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n]) nodes.push(n);
+  const segs: SegId[] = [], nodes: NodeId[] = [];
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) segs.push(asSeg(s));
+  for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n]) nodes.push(asNode(n));
   const g = net.gather(segs, nodes);
   const m = buildRoadMesh(w.heights, g, -256, -256, 512, 0)!;
   assert.ok(m && m.vertexCount > 100);
@@ -116,7 +116,7 @@ function flatWorld(y = 10): World {
 function snapshot(net: RoadNetwork): string {
   const out: string[] = [];
   for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) {
-    const r = net.segRec(s), c = net.nodes.cols;
+    const r = net.segRec(asSeg(s)), c = net.nodes.cols;
     out.push([s, r.a, r.b, r.profile, c.x[r.a].toFixed(2), c.z[r.a].toFixed(2), c.x[r.b].toFixed(2), c.z[r.b].toFixed(2)].join(','));
   }
   return out.sort().join('|');
@@ -227,6 +227,7 @@ test('rotatória sobre cruzamento com emendas curtas fecha um anel simples', () 
 
 import { buildLots } from '../src/jobs/lots.ts';
 import { cellId, cellX } from '../src/core/grid.ts';
+import { asNode, asSeg, type NodeId, type SegId } from '../src/core/ids.ts';
 
 test('lotes ao longo das vias zoneadas, sem sobrepor vias nem uns aos outros', () => {
   const w = flatWorld();
@@ -237,11 +238,11 @@ test('lotes ao longo das vias zoneadas, sem sobrepor vias nem uns aos outros', (
     const a = h ? snap(net, -100, c, 8) : snap(net, c, -100, 8), b = h ? snap(net, 100, c, 8) : snap(net, c, 100, 8);
     buildRoad(w, planRoad(w, a, null, b, 0, 0), a, b, 0);
   }
-  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) { net.setZone(s, 0, 1); net.setZone(s, 1, 1); }
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) { net.setZone(asSeg(s), 0, 1); net.setZone(asSeg(s), 1, 1); }
   const all: Array<{ x: number; z: number; w: number; d: number; rot: number }> = [];
   for (const [x, z] of [[-60, -60], [60, -60], [-60, 60], [60, 60], [0, 0]]) {
     const cell = cellId(cellX(x), cellX(z));
-    const segs: number[] = [];
+    const segs: SegId[] = [];
     net.forSegsNear(x - 400, z - 400, x + 400, z + 400, (s) => segs.push(s));
     const lots = buildLots(w.heights, net.gather(segs, []), cell);
     for (let i = 0; i < lots.count; i++) all.push({ x: lots.x[i], z: lots.z[i], w: lots.w[i], d: lots.d[i], rot: lots.rot[i] });

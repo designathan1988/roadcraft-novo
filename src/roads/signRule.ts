@@ -6,6 +6,7 @@ import type { Command } from '../core/commands.ts';
 import type { World } from '../world/world.ts';
 import { Ctl, Rule, effectiveControl, type JunctionSpec } from './control.ts';
 import { PROFILE_INFO } from './profiles.ts';
+import type { NodeId, SegId } from '../core/ids.ts';
 
 /** Sign variants that are rules (jobs/props.ts SIGN). */
 export const SIGN_STOP = 4, SIGN_YIELD = 1;
@@ -13,7 +14,7 @@ export const SIGN_STOP = 4, SIGN_YIELD = 1;
 export const SIGN_REACH = 40;
 
 /** Junction arm a sign at (x, z) belongs to: [node, segment], or null. */
-export function signArm(world: World, x: number, z: number): [number, number] | null {
+export function signArm(world: World, x: number, z: number): [NodeId, SegId] | null {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const near = net.nearestSeg(x, z, 25, (s) => !PROFILE_INFO[sc.profile[s]]?.rail);
   if (!near) return null;

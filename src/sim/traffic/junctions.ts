@@ -11,6 +11,7 @@ import type { Signals } from '../signals.ts';
 import type { SimLine } from './lines.ts';
 import { End, CLEAR_MARGIN, CROSSING_REACH, CROSSWALK, PED_COURTESY, PED_CRITICAL_GAP, SPAN_REACH, type vehSchema } from './state.ts';
 import { bendSpeed } from '../drivers.ts';
+import { asNode } from '../../core/ids.ts';
 
 export interface JunctionHost {
   readonly sim: SimNet;
@@ -354,7 +355,7 @@ export class Junctions {
       const open = until < this.h.time || !sim.net.nodes.alive[n];
       if (this.h.signals && n < this.h.signals.length) {
         let mask = 0;
-        if (!open) { const segs = sim.net.segsOf(n, []); segs.forEach((s, a) => { if (PROFILE_INFO[sc.profile[s]].rail) mask |= 1 << a; }); }
+        if (!open) { const segs = sim.net.segsOf(asNode(n), []); segs.forEach((s, a) => { if (PROFILE_INFO[sc.profile[s]].rail) mask |= 1 << a; }); }
         this.h.signals[n] = open ? 0 : 128 | (mask & 63);
       }
       if (open) this.crossingClosed.delete(n);

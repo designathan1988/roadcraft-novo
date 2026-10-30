@@ -8,6 +8,7 @@ import { cellId, cellX } from '../src/core/grid.ts';
 
 import { Zone } from '../src/roads/zones.ts';
 import { Ctl } from '../src/roads/control.ts';
+import type { SegId } from '../src/core/ids.ts';
 
 test('peças: determinísticas, cada uma na sua célula, semáforo por braço', () => {
   const w = new World();
@@ -20,7 +21,7 @@ test('peças: determinísticas, cada uma na sua célula, semáforo por braço', 
     const ex = net.nodes.cols.x[e], ez = net.nodes.cols.z[e];
     net.addSeg({ a: c, b: e, cx: ex / 2, cz: ez / 2, profile: i % 2 ? 3 : 1, flags: 0, zl: Zone.Commercial, zr: Zone.Residential });
   });
-  const segs: number[] = [];
+  const segs: SegId[] = [];
   net.forSegsNear(-300, -300, 300, 300, (s) => segs.push(s));
   // automático: avenida principal, a rua dá a preferência (placas, sem semáforo)
   let auto = 0;

@@ -7,8 +7,9 @@ import { Item, ItemsCommand, MAX_RUN } from '../../world/items.ts';
 import { signRuleCommand } from '../../roads/signRule.ts';
 import { lotAt } from '../../world/lotEdit.ts';
 import type { World } from '../../world/world.ts';
+import type { SegId } from '../../core/ids.ts';
 
-export type Target = { kind: 'item'; id: number } | { kind: 'building'; id: number } | { kind: 'seg'; id: number } | null;
+export type Target = { kind: 'item'; id: number } | { kind: 'building'; id: number } | { kind: 'seg'; id: SegId } | null;
 
 /** What a click at (x, z) would demolish: an item or wall very near, else the building, else the road. */
 export function targetAt(world: World, x: number, z: number): Target {
@@ -61,7 +62,7 @@ export function demolishTarget(world: World, t: NonNullable<Target>): { cmd: Com
   return { cmd: j, charge: j.charge };
 }
 
-function removeSegAndOrphans(world: World, j: RoadJournal, s: number): void {
+function removeSegAndOrphans(world: World, j: RoadJournal, s: SegId): void {
   const net = world.roads;
   const rec = j.removeSeg(s);
   for (const n of [rec.a, rec.b]) if (net.nodes.alive[n] && net.nodes.cols.deg[n] === 0) j.removeNode(n);
@@ -72,7 +73,7 @@ export function demolishBox(world: World, x0: number, z0: number, x1: number, z1
   const ax = Math.min(x0, x1), bx = Math.max(x0, x1), az = Math.min(z0, z1), bz = Math.max(z0, z1);
   const inside = (x: number, z: number) => x >= ax && x <= bx && z >= az && z <= bz;
   const net = world.roads, sc = net.segs.cols, col = world.buildings.cols;
-  const segs: number[] = [], blds: number[] = [], its: number[] = [];
+  const segs: SegId[] = [], blds: number[] = [], its: number[] = [];
   net.forSegsNear(ax, az, bx, bz, (s) => { if (inside(sc.mx[s], sc.mz[s])) segs.push(s); });
   world.buildingIndex.query(ax, az, bx, bz, (id) => { if (inside(col.x[id], col.z[id])) blds.push(id); });
   const ic = world.items.t.cols;

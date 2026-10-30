@@ -7,6 +7,7 @@
 // window reads only the lists of the nodes near the camera.
 
 import { Table } from '../core/table.ts';
+import { NO_NODE, NO_SEG, asNode, idColumn, type NodeId, type SegId } from '../core/ids.ts';
 import { Rng } from '../core/rng.ts';
 import { armAngle, bez, bezD, closestT } from '../roads/geometry.ts';
 import { armOf } from '../roads/junction.ts';
@@ -121,7 +122,7 @@ const schema = {
   // the network edit (SimNet.epoch) its route was planned at
   repoch: Uint32Array,
   // current segment (sidewalk): from da to db metres from node a, on side `side` (+1 = u+)
-  seg: Int32Array, side: Int8Array, da: Float32Array, db: Float32Array,
+  seg: idColumn<SegId>(), side: Int8Array, da: Float32Array, db: Float32Array,
   // current step: 0 sidewalk, 1 straight line between points, 2 waiting
   mode: Uint8Array, wIdx: Uint8Array, wLen: Uint8Array,
   // its place to wait at a kerb (`waitSpot`): 0 none, 1 walking to it, 2 standing there; where it is
@@ -161,10 +162,11 @@ export class Peds {
   readonly t = new Table(schema, 4096);
   private sim: SimNet;
   private router: Router;
-  private routes = new Int32Array(4096 * ROUTE);
+  /** Each person's route: the nodes it walks through, ROUTE slots per person. */
+  private routes = new (idColumn<NodeId>())(4096 * ROUTE);
   /** Waypoints per person: x, y, z, crossed arm + 1 (0 = not a crossing). */
   private ways = new Float32Array(4096 * WAYS * 4);
-  private wayNode = new Int32Array(4096);
+  private wayNode = new (idColumn<NodeId>())(4096);
   /** Start point of the current straight line (or where it is standing). */
   private lineFrom = new Float32Array(4096 * 3);
   private pos3 = [0, 0, 0, 0];
@@ -236,10 +238,10 @@ export class Peds {
     this.sim = sim;
     this.router = new Router(sim);
     this.t.onGrow((cap) => {
-      const r = new Int32Array(cap * ROUTE); r.set(this.routes); this.routes = r;
+      const r = new (idColumn<NodeId>())(cap * ROUTE); r.set(this.routes); this.routes = r;
       const wf = new Float32Array(cap * 2); wf.set(this.waitFrom); this.waitFrom = wf;
       const w = new Float32Array(cap * WAYS * 4); w.set(this.ways); this.ways = w;
-      const n = new Int32Array(cap); n.set(this.wayNode); this.wayNode = n;
+      const n = new (idColumn<NodeId>())(cap); n.set(this.wayNode); this.wayNode = n;
       const f = new Float32Array(cap * 3); f.set(this.lineFrom); this.lineFrom = f;
     });
     sim.net.nodes.onGrow((cap) => {
@@ -347,10 +349,10 @@ export class Peds {
 
   // ------------------------------------------------------------ spawning and removal
 
-  private randomNode(): number {
+  private randomNode(): NodeId {
     const net = this.sim.net, t = net.nodes, sc = net.segs.cols;
     for (let i = 0; i < 12; i++) {
-      const n = this.rng.int(0, t.end);
+      const n = asNode(this.rng.int(0, t.end));
       if (!t.alive[n] || t.cols.deg[n] === 0) continue;
       // more people where there is commerce
       let pull = 0;
@@ -360,7 +362,7 @@ export class Peds {
       }
       if (this.rng.next() < pull) return n;
     }
-    return -1;
+    return NO_NODE;
   }
 
   /** Random bus trip (from traffic): [line, boarding stop, alighting stop, boarding node]. */
@@ -396,7 +398,7 @@ export class Peds {
   transitShare = 0.3;
 
   /** Got off the bus at the node: they walk on to a nearby destination. */
-  spawnAt(node: number, count: number, color = -1): void {
+  spawnAt(node: NodeId, count: number, color = -1): void {
     for (let k = 0; k < count && this.t.size < PEDS_GUARD; k++) {
       this.nextColor = color;
       this.spawnFrom(node, 600, -1, 0, 0, 0);
@@ -434,13 +436,13 @@ export class Peds {
     if (this.rng.next() < this.transitShare) {
       const trip = this.pickTrip();
       if (trip) {
-        const [li, from, to, stopNode, sx, sz] = trip;
+        const [li, from, to, stop, sx, sz] = trip, stopNode = asNode(stop);
         const net = this.sim.net, nc = net.nodes.cols;
         if (!net.nodes.alive[stopNode]) return;
         const a = this.nodeAround(nc.x[stopNode], nc.z[stopNode], 60, 500);
         // the last stretch is the stop's own segment, walked on the stop's side up to the stop
         const seg = this.stopSegment(stopNode, sx, sz);
-        const far = seg < 0 ? -1 : net.segs.cols.a[seg] === stopNode ? net.segs.cols.b[seg] : net.segs.cols.a[seg];
+        const far = seg < 0 ? NO_NODE : net.segs.cols.a[seg] === stopNode ? net.segs.cols.b[seg] : net.segs.cols.a[seg];
         if (a >= 0 && a !== stopNode && far >= 0) this.spawnRoute(a, stopNode, li, from, to, 0, sx, sz, far);
         return;
       }
@@ -515,7 +517,7 @@ export class Peds {
    * Cyclist: leaves `a` along a segment with a bike lane and follows the bike lanes (preferably straight on) until they
    * end or BIKE_LEGS segments. Route without the router: a wander that fits in the person's node list.
    */
-  private spawnBike(a: number): boolean {
+  private spawnBike(a: NodeId): boolean {
     const net = this.sim.net, sc = net.segs.cols, nc = net.nodes.cols;
     const segs = net.segsOf(a, []).filter((s) => !Number.isNaN(bikeU(sc.profile[s], 1)));
     if (!segs.length) return false;
@@ -531,7 +533,7 @@ export class Peds {
       const q = net.quad(s);
       const inx = sc.a[s] === next ? q.x0 - q.cx : q.x1 - q.cx, inz = sc.a[s] === next ? q.z0 - q.cz : q.z1 - q.cz;
       const il = Math.hypot(inx, inz) || 1;
-      let best = -1, bestScore = -Infinity;
+      let best = NO_SEG, bestScore = -Infinity;
       for (const o of net.segsOf(next, [])) {
         if (o === s || Number.isNaN(bikeU(sc.profile[o], 1))) continue;
         const oq = net.quad(o);
@@ -558,7 +560,7 @@ export class Peds {
    * of the ring (a small query each try). A list of the nodes in the box, cut at a few hundred, came out in the
    * index's order, south first. −1 if none in a few tries.
    */
-  private nodeAround(x: number, z: number, rMin: number, rMax: number): number {
+  private nodeAround(x: number, z: number, rMin: number, rMax: number): NodeId {
     const net = this.sim.net, nc = net.nodes.cols;
     for (let i = 0; i < 8; i++) {
       const ang = this.rng.next() * Math.PI * 2, r = Math.sqrt(rMin * rMin + this.rng.next() * (rMax * rMax - rMin * rMin));
@@ -567,11 +569,11 @@ export class Peds {
       const d = Math.hypot(nc.x[n] - x, nc.z[n] - z);
       if (d >= rMin && d <= rMax) return n;
     }
-    return -1;
+    return NO_NODE;
   }
 
   /** Spawns at `a` and walks to a random node up to `radius` metres away. */
-  private spawnFrom(a: number, radius: number, li: number, from: number, to: number, frac: number): void {
+  private spawnFrom(a: NodeId, radius: number, li: number, from: number, to: number, frac: number): void {
     const net = this.sim.net, nc = net.nodes.cols;
     if (!net.nodes.alive[a]) return;
     const b = this.nodeAround(nc.x[a], nc.z[a], 150, radius);
@@ -583,7 +585,7 @@ export class Peds {
    * A person walking from `a` to `b` (for a bus trip when `li` >= 0, to the stop at (`sx`, `sz`) on the segment from `b`
    * to `far`: the route ends along it); returns its id, or −1.
    */
-  private spawnRoute(a: number, b: number, li: number, from: number, to: number, frac = 0, sx = NaN, sz = NaN, far = -1): number {
+  private spawnRoute(a: NodeId, b: NodeId, li: number, from: number, to: number, frac = 0, sx = NaN, sz = NaN, far = NO_NODE): number {
     const p = this.t.alloc();
     const c = this.t.cols;
     let len = this.router.route(a, b, this.routes, p * ROUTE, ROUTE, true);
@@ -612,14 +614,14 @@ export class Peds {
 
   // ------------------------------------------------------------ walking
 
-  private segBetween(a: number, b: number): number {
+  private segBetween(a: NodeId, b: NodeId): SegId {
     const net = this.sim.net, sc = net.segs.cols;
     const d = net.nodes.cols.deg[a];
     for (let k = 0; k < d; k++) {
       const s = net.adj[a * MAX_DEG + k];
       if (s >= 0 && ((sc.a[s] === a && sc.b[s] === b) || (sc.b[s] === a && sc.a[s] === b))) return s;
     }
-    return -1;
+    return NO_SEG;
   }
 
   /** u of the sidewalk on the requested side (or the other side, if that one has none). */
@@ -715,9 +717,9 @@ export class Peds {
   }
 
   /** The segment of node `n` the stop at (x, z) stands beside (its curve nearest), or −1. */
-  private stopSegment(n: number, x: number, z: number): number {
+  private stopSegment(n: NodeId, x: number, z: number): SegId {
     const net = this.sim.net;
-    let best = -1, bd = Infinity;
+    let best = NO_SEG, bd = Infinity;
     for (const s of net.segsOf(n, [])) {
       const [, d] = closestT(net.quad(s), x, z);
       if (d < bd) { bd = d; best = s; }
@@ -729,7 +731,7 @@ export class Peds {
    * Is segment `s` the last of bus rider `p`'s way, to its stop? If so `stopAt` holds the stop's distance along it (m
    * from node a) and the side of its sidewalk (+1: u+, the left of a → b).
    */
-  private toStop(p: number, s: number): boolean {
+  private toStop(p: number, s: SegId): boolean {
     const c = this.t.cols;
     if (c.tLine[p] < 0 || Number.isNaN(c.tx[p]) || c.rIdx[p] + 2 !== c.rLen[p] || s < 0) return false;
     const net = this.sim.net, q = net.quad(s), [t] = closestT(q, c.tx[p], c.tz[p]);
@@ -798,7 +800,7 @@ export class Peds {
    * crossed + 1). Returns how many; the side of the exit sidewalk it ends on in `cornerSide`. Changes nothing of the
    * person: `atNode` walks them, `aheadPoint` reads the first one before the corner.
    */
-  private planCorner(p: number, n: number, sIn: number, sOut: number, buf: Float32Array, base: number, fromX: number, fromZ: number): number {
+  private planCorner(p: number, n: NodeId, sIn: SegId, sOut: SegId, buf: Float32Array, base: number, fromX: number, fromZ: number): number {
     const c = this.t.cols, sim = this.sim, net = sim.net, sc = net.segs.cols;
     const i = c.rIdx[p];
     // node arms in counter-clockwise order (the same as traffic and the traffic lights)
@@ -927,7 +929,7 @@ export class Peds {
   private ahead = new Float64Array(2);
 
   /** Cyclist at a node: a straight line from the end of the incoming bike lane to the start of the outgoing one (through the junction, like a car). */
-  private bikeThrough(p: number, n: number, sIn: number, sOut: number): boolean {
+  private bikeThrough(p: number, n: NodeId, sIn: SegId, sOut: SegId): boolean {
     const c = this.t.cols, sim = this.sim, net = sim.net, sc = net.segs.cols;
     if (sOut < 0 || !net.segs.alive[sIn] || Number.isNaN(bikeU(sc.profile[sOut], 1))) return false;
     const here = this.posNow(p);
@@ -953,7 +955,7 @@ export class Peds {
 
   /** Point on an arm's sidewalk (or crosswalk), d metres from the node, on the arm's left/right side. */
   /** `who` ≥ 0: on that person's track along the sidewalk, walking in direction `dir` of the segment. */
-  private armPoint(s: number, end: 0 | 1, d: number, armLeft: boolean, out: Float64Array, sidewalk: boolean, who = -1, dir = 1): void {
+  private armPoint(s: SegId, end: 0 | 1, d: number, armLeft: boolean, out: Float64Array, sidewalk: boolean, who = -1, dir = 1): void {
     const sim = this.sim, net = sim.net, sc = net.segs.cols, nc = net.nodes.cols;
     const L = sim.segLen(s);
     const fromA = end === 0 ? d : L - d;

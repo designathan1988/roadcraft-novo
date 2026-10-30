@@ -9,6 +9,7 @@ import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/shared/cont
 import { Zone } from '../src/roads/zones.ts';
 import { encodeDesign } from '../src/world/design.ts';
 import { Fn } from '../src/world/arch.ts';
+import { asNode, asSeg, type SegId } from '../src/core/ids.ts';
 
 /** World positions of a packed mesh's vertices. */
 function positions(m: PackedMesh): Array<[number, number, number]> {
@@ -481,7 +482,7 @@ async function lotsOfCell(w: World, cell: number) {
   const { buildLots } = await import('../src/jobs/lots.ts');
   const { cellOriginX } = await import('../src/core/grid.ts');
   const { MAP_CELLS, CELL_SIZE } = await import('../src/config.ts');
-  const x0 = cellOriginX(cell % MAP_CELLS), z0 = cellOriginX((cell / MAP_CELLS) | 0), segs: number[] = [];
+  const x0 = cellOriginX(cell % MAP_CELLS), z0 = cellOriginX((cell / MAP_CELLS) | 0), segs: SegId[] = [];
   w.roads.forSegsNear(x0 - 160, z0 - 160, x0 + CELL_SIZE + 160, z0 + CELL_SIZE + 160, (s) => segs.push(s));
   return buildLots(w.heights, w.roads.gather(segs, []), cell);
 }
@@ -509,7 +510,7 @@ test('F12: lots keep off the roads (curves and dead-end bulbs) and off each othe
   const { BULB_R, BULB_WALK, bulbAt } = await import('../src/roads/junction.ts');
   const { cellId, cellX } = await import('../src/core/grid.ts');
   const w = await lotNetwork(), net = w.roads, sc = net.segs.cols;
-  const segs: number[] = [];
+  const segs: SegId[] = [];
   net.forSegsNear(-1e5, -1e5, 1e5, 1e5, (s) => segs.push(s));
   const failures: string[] = [], all: Array<Array<[number, number]>> = [];
   for (const cell of [cellId(cellX(100), cellX(100)), cellId(cellX(300), cellX(100)), cellId(cellX(100), cellX(-100)), cellId(cellX(300), cellX(-100))]) {
@@ -522,12 +523,12 @@ test('F12: lots keep off the roads (curves and dead-end bulbs) and off each othe
       for (let u = 0.1; u < 1; u += 0.2) for (let v = 0.1; v < 1; v += 0.2) pts.push([box[0][0] + (box[1][0] - box[0][0]) * u + (box[3][0] - box[0][0]) * v, box[0][1] + (box[1][1] - box[0][1]) * u + (box[3][1] - box[0][1]) * v]);
       const q = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 }, p2 = new Float64Array(2);
       for (const s of segs) {
-        net.quad(s, q);
+        net.quad(asSeg(s), q);
         const half = Math.max(PROFILE_INFO[sc.profile[s]].left, PROFILE_INFO[sc.profile[s]].right);
         for (const [x, z] of pts) { const [, dist] = closestT(q, x, z); if (dist < half - 0.05) { failures.push(`cell ${cell} lot ${i}: ${(half - dist).toFixed(1)} m on road ${s}`); break; } }
       }
       for (let n = 0; n < net.nodes.end; n++) {
-        if (!bulbAt(net, n)) continue;
+        if (!bulbAt(net, asNode(n))) continue;
         const nx = net.nodes.cols.x[n], nz = net.nodes.cols.z[n];
         for (const [x, z] of pts) if (Math.hypot(x - nx, z - nz) < BULB_R + BULB_WALK - 0.05) { failures.push(`cell ${cell} lot ${i}: on the bulb of node ${n}`); break; }
       }
@@ -550,11 +551,11 @@ test('F13: neighbouring cells place the same lots at their border (no overlaps b
   for (let j = 0; j < 7; j++) { ids.push([]); for (let i = 0; i < 7; i++) ids[j].push(n(256 - 280 + i * 90 + j * 4, 256 - 280 + j * 90 - i * 4)); }
   for (let j = 0; j < 7; j++) for (let i = 0; i < 6; i++) {
     const a = ids[j][i], b = ids[j][i + 1], A = net.nodes.cols;
-    net.addSeg({ a, b, cx: (A.x[a] + A.x[b]) / 2, cz: (A.z[a] + A.z[b]) / 2, profile: (i + j) % 3 === 0 ? 2 : 0, flags: 0, zl: zones[(i + j) % 3], zr: zones[(i * 2 + j) % 3] });
+    net.addSeg({ a: asNode(a), b: asNode(b), cx: (A.x[a] + A.x[b]) / 2, cz: (A.z[a] + A.z[b]) / 2, profile: (i + j) % 3 === 0 ? 2 : 0, flags: 0, zl: zones[(i + j) % 3], zr: zones[(i * 2 + j) % 3] });
   }
   for (let i = 0; i < 7; i++) for (let j = 0; j < 6; j++) {
     const a = ids[j][i], b = ids[j + 1][i], A = net.nodes.cols;
-    net.addSeg({ a, b, cx: (A.x[a] + A.x[b]) / 2 + 6, cz: (A.z[a] + A.z[b]) / 2, profile: 0, flags: 0, zl: zones[(i + 2 * j) % 3], zr: zones[(i + j + 1) % 3] });
+    net.addSeg({ a: asNode(a), b: asNode(b), cx: (A.x[a] + A.x[b]) / 2 + 6, cz: (A.z[a] + A.z[b]) / 2, profile: 0, flags: 0, zl: zones[(i + 2 * j) % 3], zr: zones[(i + j + 1) % 3] });
   }
   const lots: Array<{ cell: number; box: Array<[number, number]> }> = [];
   for (const cz of [-1, 0, 1]) for (const cx of [-1, 0, 1]) {

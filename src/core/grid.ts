@@ -74,7 +74,8 @@ export function cellsOfTile(t: number): number[] {
  * One per table. Insert/remove/move is O(1); a rectangle query
  * visits only the subcells it touches.
  */
-export class SpatialIndex {
+/** `I`: the indexed table's id type (core/ids.ts), a plain number by default. */
+export class SpatialIndex<I extends number = number> {
   readonly head = new Int32Array(SUBCELL_COUNT).fill(-1);
   next: Int32Array;
   prev: Int32Array;
@@ -101,7 +102,7 @@ export class SpatialIndex {
     this.slot.fill(-1);
   }
 
-  insert(id: number, x: number, z: number): void {
+  insert(id: I, x: number, z: number): void {
     const s = subcellX(z) * MAP_SUBCELLS + subcellX(x);
     const h = this.head[s];
     this.next[id] = h;
@@ -111,7 +112,7 @@ export class SpatialIndex {
     this.slot[id] = s;
   }
 
-  remove(id: number): void {
+  remove(id: I): void {
     const s = this.slot[id];
     if (s < 0) return;
     const n = this.next[id];
@@ -123,7 +124,7 @@ export class SpatialIndex {
     this.prev[id] = -1;
   }
 
-  move(id: number, x: number, z: number): void {
+  move(id: I, x: number, z: number): void {
     const s = subcellX(z) * MAP_SUBCELLS + subcellX(x);
     if (s === this.slot[id]) return;
     this.remove(id);
@@ -131,23 +132,23 @@ export class SpatialIndex {
   }
 
   /** Calls fn for each entity whose subcells touch the rectangle. */
-  query(minX: number, minZ: number, maxX: number, maxZ: number, fn: (id: number) => void): void {
+  query(minX: number, minZ: number, maxX: number, maxZ: number, fn: (id: I) => void): void {
     const x0 = subcellX(minX), x1 = subcellX(maxX);
     const z0 = subcellX(minZ), z1 = subcellX(maxZ);
     for (let sz = z0; sz <= z1; sz++) {
       for (let sx = x0; sx <= x1; sx++) {
-        for (let id = this.head[sz * MAP_SUBCELLS + sx]; id >= 0; id = this.next[id]) fn(id);
+        for (let id = this.head[sz * MAP_SUBCELLS + sx]; id >= 0; id = this.next[id]) fn(id as I);
       }
     }
   }
 
   /** Entities in a 256 m cell (4×4 subcells). */
-  queryCell(cid: number, fn: (id: number) => void): void {
+  queryCell(cid: number, fn: (id: I) => void): void {
     const per = CELL_SIZE / SUBCELL_SIZE;
     const cx = cid % MAP_CELLS, cz = (cid / MAP_CELLS) | 0;
     for (let sz = cz * per; sz < cz * per + per; sz++) {
       for (let sx = cx * per; sx < cx * per + per; sx++) {
-        for (let id = this.head[sz * MAP_SUBCELLS + sx]; id >= 0; id = this.next[id]) fn(id);
+        for (let id = this.head[sz * MAP_SUBCELLS + sx]; id >= 0; id = this.next[id]) fn(id as I);
       }
     }
   }

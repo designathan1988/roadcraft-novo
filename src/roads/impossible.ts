@@ -5,6 +5,7 @@
 
 import { dirOut } from './control.ts';
 import type { NetOp, RoadNetwork } from './network.ts';
+import { NO_NODE, idColumn, type NodeId } from '../core/ids.ts';
 
 /** Below this angle (degrees) between two neighbouring legs the junction does not close (Roadcraft MIN_LEG_ANGLE). */
 export const MIN_LEG_ANGLE = 25;
@@ -13,8 +14,9 @@ export class ImpossibleNodes {
   /** Node → smallest angle between neighbouring legs (degrees), for the nodes under MIN_LEG_ANGLE. */
   readonly nodes = new Map<number, number>();
   /** Ends of each segment (the remove op carries only the id). */
-  private segA = new Int32Array(1 << 14).fill(-1);
-  private segB = new Int32Array(1 << 14).fill(-1);
+  /** Each segment's ends, kept from the network's changes (-1: no segment). */
+  private segA = new (idColumn<NodeId>())(1 << 14).fill(-1);
+  private segB = new (idColumn<NodeId>())(1 << 14).fill(-1);
   private net: RoadNetwork;
   /** Bumped when the set changes (the page refreshes the warning). */
   version = 0;
@@ -40,7 +42,7 @@ export class ImpossibleNodes {
       }
       case 'remSeg': {
         const a = this.segA[op.id], b = this.segB[op.id];
-        this.segA[op.id] = this.segB[op.id] = -1;
+        this.segA[op.id] = this.segB[op.id] = NO_NODE;
         if (a >= 0) this.check(a);
         if (b >= 0) this.check(b);
         break;
@@ -53,12 +55,12 @@ export class ImpossibleNodes {
   private grow(min: number): void {
     let cap = this.segA.length;
     while (cap < min) cap *= 2;
-    const a = new Int32Array(cap).fill(-1); a.set(this.segA); this.segA = a;
-    const b = new Int32Array(cap).fill(-1); b.set(this.segB); this.segB = b;
+    const a = new (idColumn<NodeId>())(cap).fill(-1); a.set(this.segA); this.segA = a;
+    const b = new (idColumn<NodeId>())(cap).fill(-1); b.set(this.segB); this.segB = b;
   }
 
   /** Looks again at one node: the smallest angle between its neighbouring legs. */
-  check(n: number): void {
+  check(n: NodeId): void {
     const net = this.net;
     let gap = 360;
     if (net.nodes.alive[n] && net.nodes.cols.deg[n] >= 2) {

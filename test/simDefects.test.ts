@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import type { SimNet } from '../src/sim/lanes.ts';
 import { ROUTE_CAP, type Traffic } from '../src/sim/traffic.ts';
 import { gridCity, inner, traffic } from './simCity.ts';
+import { asNode, asSeg } from '../src/core/ids.ts';
 
 /** A connection whose two lanes are both long enough to hold a queue. */
 function someConn(sim: SimNet): number {
@@ -54,7 +55,7 @@ test('C8: a far vehicle that finds no room at the start of the next lane is not 
 /** Segment between two nodes (−1 if none). */
 function segBetween(sim: SimNet, a: number, b: number): number {
   const sc = sim.net.segs.cols;
-  for (const s of sim.net.segsOf(a, [])) if ((sc.a[s] === a && sc.b[s] === b) || (sc.b[s] === a && sc.a[s] === b)) return s;
+  for (const s of sim.net.segsOf(asNode(a), [])) if ((sc.a[s] === a && sc.b[s] === b) || (sc.b[s] === a && sc.a[s] === b)) return s;
   return -1;
 }
 
@@ -84,7 +85,7 @@ test('C12: routes never use a banned turn or a movement the hand-made lane conne
   let n = -1;
   for (let i = 0; i < sim.net.nodes.end && n < 0; i++) if (sim.net.nodes.alive[i] && nc.deg[i] === 4 && Math.abs(nc.x[i]) < 100 && Math.abs(nc.z[i]) < 100) n = i;
   assert.ok(n >= 0, 'an inner junction');
-  const segs = sim.net.segsOf(n, []);
+  const segs = sim.net.segsOf(asNode(n), []);
   const dir = (s: number) => { const o = sc.a[s] === n ? sc.b[s] : sc.a[s]; return [nc.x[o] - nc.x[n], nc.z[o] - nc.z[n]]; };
   const A = segs[0], [ax, az] = dir(A);
   const B = segs.find((s) => { const [bx, bz] = dir(s); return bx * ax + bz * az < -0.5 * Math.hypot(ax, az) * Math.hypot(bx, bz); })!;
@@ -95,14 +96,14 @@ test('C12: routes never use a banned turn or a movement the hand-made lane conne
   let len = router.route(n, far, path, 0, 64, false, A);
   assert.deepEqual([...path.subarray(0, len)], [n, far], 'straight on before the ban');
   // the player bans that movement
-  w.roads.setJunction(n, { ctl: 0, bans: [A, B] });
+  w.roads.setJunction(asNode(n), { ctl: 0, bans: [A, B] });
   mirror(sim, ops.splice(0)); sim.rebuild();
   len = router.route(n, far, path, 0, 64, false, A);
   assert.ok(len >= 2 && path[len - 1] === far, 'still reachable another way');
   assert.equal(illegalTurn(sim, A, path, len), null, `route ${[...path.subarray(0, len)]}`);
   // hand-made connectors: the lanes of A at n may only turn into one other arm
   const C = segs.find((s) => s !== A && s !== B)!;
-  w.roads.setJunction(n, { ctl: 0, lanes: [[A, 0, [C]], [A, 1, [C]]] });
+  w.roads.setJunction(asNode(n), { ctl: 0, lanes: [[A, 0, [C]], [A, 1, [C]]] });
   mirror(sim, ops.splice(0)); sim.rebuild();
   len = router.route(n, far, path, 0, 64, false, A);
   assert.ok(len >= 2 && path[len - 1] === far, 'still reachable another way');
@@ -285,7 +286,7 @@ test('C15: trips that end without reaching their destination are counted as lost
   const [seg, cars] = [...on].sort((a, b) => b[1] - a[1])[0];
   assert.ok(cars >= 2, `cars on the busiest segment: ${cars}`);
   const arrived = tr.arrived, lost = tr.lost;
-  w.roads.removeSeg(seg);
+  w.roads.removeSeg(asSeg(seg));
   mirror(sim, ops.splice(0));
   syncNet(sim, tr);
   assert.equal(tr.arrived, arrived, 'removed cars were counted as arrivals');
@@ -315,9 +316,9 @@ test('C16: a new road that reuses a demolished one\'s id does not inherit its fa
   for (let i = 0; i < 20 * 90; i++) tr.step(0.05);
   const seg = busiest(tr), before = onSeg(tr, seg).far.length;
   assert.ok(before >= 2, `far vehicles on the busiest segment: ${before}`);
-  const rec = w.roads.segRec(seg), lost = tr.lost;
+  const rec = w.roads.segRec(asSeg(seg)), lost = tr.lost;
   // demolished and rebuilt in the same frame: the new segment takes the freed id
-  w.roads.removeSeg(seg);
+  w.roads.removeSeg(asSeg(seg));
   const again = w.roads.addSeg({ a: rec.a, b: rec.b, cx: rec.cx, cz: rec.cz, profile: rec.profile, flags: rec.flags, zl: rec.zl, zr: rec.zr });
   assert.equal(again, seg, 'the id is reused');
   mirror(sim, ops.splice(0));
@@ -347,7 +348,7 @@ test('C17: upgrading a road keeps the vehicles that are on it', async () => {
     const seg = busiest(tr), cars = onSeg(tr, seg).all.filter((v) => !tr.veh.cols.dying[v]);
     assert.ok(cars.length >= 2, `vehicles on the busiest segment: ${cars.length}`);
     const to = sim.net.segs.cols.profile[seg] === 3 ? 0 : 3;
-    w.roads.setProfile(seg, to);
+    w.roads.setProfile(asSeg(seg), to);
     mirror(sim, ops.splice(0));
     syncNet(sim, tr);
     const c = tr.veh.cols;
@@ -392,13 +393,13 @@ test('C3: far from the camera a car whose turn was banned on the way finds anoth
   inner(tr).replanFrom(v, node);
   // the route turns somewhere at the node: the player bans exactly that movement
   const nextSeg = inner(tr).nextSeg(v), inSeg = from >> 4;
-  w.roads.setJunction(node, { ctl: 0, bans: [inSeg, nextSeg] });
+  w.roads.setJunction(asNode(node), { ctl: 0, bans: [inSeg, nextSeg] });
   mirror(sim, ops.splice(0)); syncNet(sim, tr);
   for (let i = 0; i < 20 * 10 && tr.veh.alive[v] && c.lane[v] === from; i++) tr.step(0.05);
   assert.ok(tr.veh.alive[v], `the car disappeared (lost ${tr.lost})`);
   assert.notEqual(c.lane[v] >> 4, nextSeg, 'the car went through the banned turn');
   assert.ok(c.lane[v] !== from, 'the car never moved on');
-  assert.ok(sim.turnOk(node, inSeg, c.lane[v] >> 4, false), 'the movement it made exists');
+  assert.ok(sim.turnOk(asNode(node), asSeg(inSeg), asSeg(c.lane[v] >> 4), false), 'the movement it made exists');
 });
 
 test('C20: pedestrians look as many ways as their appearance ids, not 16, and are not all in step', async () => {
@@ -607,11 +608,11 @@ test('C32: level crossing barriers close for trains far from the camera too, and
       closed++;
       if (closed === 1) {
         // a far car arrives at the crossing on the road while the barrier is down
-        const road = sim.net.segsOf(x, []).find((s) => sc.profile[s] === 0)!;
+        const road = sim.net.segsOf(asNode(x), []).find((s) => sc.profile[s] === 0)!;
         const lane = laneId(road, sc.b[road] === x ? 1 : -1, 0);
         const T = inner(tr), c = tr.veh.cols, v = tr.veh.alloc();
         T.initVehicle(v); c.len[v] = 4.4;
-        const other = sim.net.segsOf(x, []).find((s) => s !== road && sc.profile[s] === 0)!;
+        const other = sim.net.segsOf(asNode(x), []).find((s) => s !== road && sc.profile[s] === 0)!;
         const far = sc.a[other] === x ? sc.b[other] : sc.a[other];
         tr.routes[v * 96] = sim.laneFrom(lane); tr.routes[v * 96 + 1] = x; tr.routes[v * 96 + 2] = far;
         c.rLen[v] = 3; c.rIdx[v] = 1; c.dest[v] = far; c.lane[v] = lane; c.s[v] = sim.laneLen(lane);
@@ -737,7 +738,7 @@ test('C40: car trips never start or end at a node that only rails reach', async 
   const sim = new SimNet(); mirror(sim, ops); sim.rebuild(); sim.removedSegs.length = 0;
   const tr = traffic(sim);
   const sc = sim.net.segs.cols, nc = sim.net.nodes.cols;
-  const railOnly = (n: number) => { for (const s of sim.net.segsOf(n, [])) if (!PROFILE_INFO[sc.profile[s]].rail) return false; return true; };
+  const railOnly = (n: number) => { for (const s of sim.net.segsOf(asNode(n), [])) if (!PROFILE_INFO[sc.profile[s]].rail) return false; return true; };
   let picks = 0, rail = 0;
   for (let i = 0; i < 2000; i++) { const n = inner(tr).zonedNode([1, 1, 1, 1, 1]); if (n < 0) continue; picks++; if (railOnly(n)) rail++; }
   assert.ok(picks > 1000 && nc.deg.length > 0, `picks ${picks}`);
@@ -750,11 +751,11 @@ test('C45: with two segments between the same nodes, a car takes the one it may 
   const one = PROFILES.findIndex((p) => p.oneWay && !p.name.toLowerCase().includes('ferro'));
   assert.ok(one >= 0, 'a one-way profile');
   const sim = new SimNet();
-  sim.apply({ t: 'addNode', rec: { id: 0, x: 0, z: 0, y: 10 } });
-  sim.apply({ t: 'addNode', rec: { id: 1, x: 200, z: 0, y: 10 } });
+  sim.apply({ t: 'addNode', rec: { id: asNode(0), x: 0, z: 0, y: 10 } });
+  sim.apply({ t: 'addNode', rec: { id: asNode(1), x: 200, z: 0, y: 10 } });
   // first a one-way street from 1 to 0 (curving north), then a one-way from 0 to 1 (curving south)
-  sim.apply({ t: 'addSeg', rec: { id: 0, a: 1, b: 0, cx: 100, cz: 60, profile: one, flags: 0, zl: 0, zr: 0 } });
-  sim.apply({ t: 'addSeg', rec: { id: 1, a: 0, b: 1, cx: 100, cz: -60, profile: one, flags: 0, zl: 0, zr: 0 } });
+  sim.apply({ t: 'addSeg', rec: { id: asSeg(0), a: asNode(1), b: asNode(0), cx: 100, cz: 60, profile: one, flags: 0, zl: 0, zr: 0 } });
+  sim.apply({ t: 'addSeg', rec: { id: asSeg(1), a: asNode(0), b: asNode(1), cx: 100, cz: -60, profile: one, flags: 0, zl: 0, zr: 0 } });
   sim.rebuild();
   const tr = traffic(sim);
   assert.equal(inner(tr).segBetween(0, 1), 1, 'from node 0 to node 1 by the street that runs that way');
@@ -775,7 +776,7 @@ test('C25: bus riders walk to the stop itself to board and step off the bus at t
   peds.onStop = ((l: number, a: number, b: number, x?: number, z?: number) => { boarded++; if (x === undefined || !near(x, z!)) boardFar++; tr.pedAtStop(l, a, b); }) as typeof peds.onStop;
   tr.onAlight = ((node: number, n: number, x?: number, z?: number) => {
     const before = new Set<number>(); for (let p = 0; p < peds.t.end; p++) if (peds.t.alive[p]) before.add(p);
-    if (x !== undefined && typeof P.spawnFromStop === 'function') P.spawnFromStop(x, z, n); else peds.spawnAt(node, n);
+    if (x !== undefined && typeof P.spawnFromStop === 'function') P.spawnFromStop(x, z, n); else peds.spawnAt(asNode(node), n);
     for (let p = 0; p < peds.t.end; p++) if (peds.t.alive[p] && !before.has(p)) { alighted++; const q = P.posNow(p); if (!near(q[0], q[2])) alightFar++; }
   }) as typeof tr.onAlight;
   tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
@@ -807,11 +808,11 @@ test('C24: the rear wagons of a train stay on the track through a bend', async (
   const T = await import('../src/sim/traffic.ts') as unknown as { backAlong?: (sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array) => void };
   const rail = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
   const sim = new SimNet();
-  sim.apply({ t: 'addNode', rec: { id: 0, x: 0, z: 0, y: 10 } });
-  sim.apply({ t: 'addNode', rec: { id: 1, x: 200, z: 0, y: 10 } });
-  sim.apply({ t: 'addNode', rec: { id: 2, x: 300, z: 150, y: 10 } });
-  sim.apply({ t: 'addSeg', rec: { id: 0, a: 0, b: 1, cx: 100, cz: 0, profile: rail, flags: 0, zl: 0, zr: 0 } });
-  sim.apply({ t: 'addSeg', rec: { id: 1, a: 1, b: 2, cx: 250, cz: 75, profile: rail, flags: 0, zl: 0, zr: 0 } });
+  sim.apply({ t: 'addNode', rec: { id: asNode(0), x: 0, z: 0, y: 10 } });
+  sim.apply({ t: 'addNode', rec: { id: asNode(1), x: 200, z: 0, y: 10 } });
+  sim.apply({ t: 'addNode', rec: { id: asNode(2), x: 300, z: 150, y: 10 } });
+  sim.apply({ t: 'addSeg', rec: { id: asSeg(0), a: asNode(0), b: asNode(1), cx: 100, cz: 0, profile: rail, flags: 0, zl: 0, zr: 0 } });
+  sim.apply({ t: 'addSeg', rec: { id: asSeg(1), a: asNode(1), b: asNode(2), cx: 250, cz: 75, profile: rail, flags: 0, zl: 0, zr: 0 } });
   sim.rebuild();
   assert.ok(typeof T.backAlong === 'function', 'wagon placement is reachable');
   const front = laneId(1, 1, 0), behind = laneId(0, 1, 0), out = new Float64Array(4), q = new Float64Array(4);
@@ -847,7 +848,7 @@ test('C26: a pedestrian whose way ahead was demolished walks round another way; 
   // who disappears before reaching the end of the route
   const gone = new Set<number>(), kill = P.kill.bind(P), alive = new Set(watch);
   P.kill = (p: number) => { if (alive.has(p)) { alive.delete(p); if (c.rIdx[p] + 1 < c.rLen[p]) gone.add(p); } kill(p); };
-  for (const s of doomed) w.roads.removeSeg(s);
+  for (const s of doomed) w.roads.removeSeg(asSeg(s));
   mirror(sim, ops.splice(0)); sim.rebuild();
   const out = new Float32Array(11 * 40000);
   let faded = 0;
@@ -931,7 +932,7 @@ test('C23: changing a junction\'s control keeps the cars inside it where they ar
   }
   const where = (v: number) => { const p = new Float64Array(4); if (c.conn[v] >= 0) sim.connPoint(c.conn[v], c.s[v], p); else sim.lanePoint(c.lane[v], c.s[v], p); return p; };
   const before = cars.map(where);
-  w.roads.setJunction(node, { ctl: 3 }); // stop signs on every arm
+  w.roads.setJunction(asNode(node), { ctl: 3 }); // stop signs on every arm
   mirror(sim, ops.splice(0)); syncNet(sim, tr);
   cars.forEach((v, i) => {
     const p = where(v);

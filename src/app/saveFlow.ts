@@ -22,6 +22,7 @@ import type { Hud } from '../ui/hud.ts';
 import { errorText } from '../shared/errors.ts';
 import { t } from '../shared/i18n/index.ts';
 import { loadSession, newMapSession, saveSession, type LoadHost, type NewMapHost, type SaveHost } from './session.ts';
+import type { NodeId } from '../core/ids.ts';
 
 /** The save slot of the city (one city per slot; previous cities are kept aside, platform/mapFile.ts). */
 export const SLOT = 'cidade-1';
@@ -208,7 +209,7 @@ export class SaveFlow {
     // the far road paint of every tile is made again (a tile that lost its roads would keep the old paint)
     for (let t = 0; t < TILE_COUNT; t++) w.dirty.mark(cellsOfTile(t)[0], Dirty.RoadPaint);
     try {
-      for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[number, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
+      for (const [id, spec] of meta.junctions ? JSON.parse(meta.junctions) as Array<[NodeId, JunctionSpec]> : []) if (w.roads.nodes.alive[id]) w.roads.setJunction(id, spec);
     } catch { /* save without chosen junctions */ }
     // what was read is what the save holds (opening itself marked it unsaved: clearing the history, water, weather);
     // only the repair below and the tiles that lost a segment or could not be read need writing

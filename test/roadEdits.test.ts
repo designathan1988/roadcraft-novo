@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { buildRoad, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, snap, splitAt } from '../src/roads/build.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
+import { asSeg } from '../src/core/ids.ts';
 
 function flatWorld(): World {
   const w = new World();
@@ -34,7 +35,7 @@ test('dividir e unir: dois trechos e de volta a um; desfazer volta igual', () =>
   road(w, -50, 0, 50, 0);
   const before = shape(w);
   const s = [...Array(w.roads.segs.end).keys()].find((i) => w.roads.segs.alive[i])!;
-  const j = splitAt(w, s, 0.5);
+  const j = splitAt(w, asSeg(s), 0.5);
   assert.equal(w.roads.segs.size, 2);
   const mid = w.roads.nearestNode(0, 0, 3);
   assert.ok(mid >= 0);

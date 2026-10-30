@@ -3,11 +3,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeExtra, encodeExtra, type MapExtra } from '../src/platform/mapExtra.ts';
+import { asSeg } from '../src/core/ids.ts';
 
 const full: MapExtra = {
   weather: { rain: 0.5, wind: 8, dir: 90, lightning: 0.2, thunder: 1 }, water: { waves: 0.6, foam: 0.1, current: 0.9 },
   clouds: [{ x: 1, z: 2, y: 300, size: 400, density: 0.7 }], fog: 0.4, terminals: [3, 4], signs: [['a', 'Rua A']],
-  streets: [[7, 'Avenida B']], clock: 1234, paint: 'us', unlimited: true,
+  streets: [[asSeg(7), 'Avenida B']], clock: 1234, paint: 'us', unlimited: true,
 };
 
 test('the extra written is the extra read', () => {

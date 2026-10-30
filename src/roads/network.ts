@@ -2,6 +2,7 @@
 // Every change goes through addNode/addSeg/removeSeg/removeNode, which mark the
 // dirty cells (the segment, the nodes and the neighbours that depend on the nodes).
 
+import { NO_NODE, NO_SEG, asNode, asSeg, idColumn, type IdColumn, type NodeId, type SegId } from '../core/ids.ts';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_TILES } from '../config.ts';
 import { CELL_COUNT, Dirty, SpatialIndex, cellId, cellX } from '../core/grid.ts';
 import { Table } from '../core/table.ts';
@@ -21,7 +22,7 @@ import { kindOfFlags } from './economy.ts';
 
 export const nodeSchema = { x: Float32Array, z: Float32Array, y: Float32Array, deg: Uint8Array, cell: Int32Array };
 export const segSchema = {
-  a: Int32Array, b: Int32Array, cx: Float32Array, cz: Float32Array,
+  a: idColumn<NodeId>(), b: idColumn<NodeId>(), cx: Float32Array, cz: Float32Array,
   profile: Uint16Array, flags: Uint8Array, len: Float32Array, cell: Int32Array,
   mx: Float32Array, mz: Float32Array,
   /** Zone on each side (left/right in the a → b direction). */
@@ -34,17 +35,17 @@ export interface CellToucher { touchCell(cid: number, kinds: number): void }
 /** A network change, to mirror elsewhere. */
 export type NetOp =
   | { t: 'addNode'; rec: NodeRec }
-  | { t: 'remNode'; id: number }
+  | { t: 'remNode'; id: NodeId }
   | { t: 'addSeg'; rec: SegRec }
-  | { t: 'remSeg'; id: number }
-  | { t: 'profile'; id: number; profile: number }
-  | { t: 'zone'; id: number; side: number; zone: number }
-  | { t: 'junction'; id: number; spec: JunctionSpec | null }
+  | { t: 'remSeg'; id: SegId }
+  | { t: 'profile'; id: SegId; profile: number }
+  | { t: 'zone'; id: SegId; side: number; zone: number }
+  | { t: 'junction'; id: NodeId; spec: JunctionSpec | null }
   | { t: 'clear' };
 
 /** A node's data, for recording in commands. */
-export interface NodeRec { id: number; x: number; z: number; y: number; /** control chosen by the player */ j?: JunctionSpec }
-export interface SegRec { id: number; a: number; b: number; cx: number; cz: number; profile: number; flags: number; zl?: number; zr?: number }
+export interface NodeRec { id: NodeId; x: number; z: number; y: number; /** control chosen by the player */ j?: JunctionSpec }
+export interface SegRec { id: SegId; a: NodeId; b: NodeId; cx: number; cz: number; profile: number; flags: number; zl?: number; zr?: number }
 export { Zone } from './zones.ts';
 import { effectiveControl, type JunctionSpec, isMidNode } from './control.ts';
 import { BULB_R, NODE_BULB, armOf, bulbAt } from './junction.ts';
@@ -52,31 +53,32 @@ import { BULB_R, NODE_BULB, armOf, bulbAt } from './junction.ts';
 const p2 = new Float64Array(2);
 
 export class RoadNetwork {
-  readonly nodes = new Table(nodeSchema, 1 << 14);
-  readonly segs = new Table(segSchema, 1 << 14);
-  readonly nodeIndex = new SpatialIndex(1 << 14);
-  readonly segIndex = new SpatialIndex(1 << 14);
-  adj = new Int32Array((1 << 14) * MAX_DEG).fill(-1);
+  readonly nodes = new Table<typeof nodeSchema, NodeId>(nodeSchema, 1 << 14);
+  readonly segs = new Table<typeof segSchema, SegId>(segSchema, 1 << 14);
+  readonly nodeIndex = new SpatialIndex<NodeId>(1 << 14);
+  readonly segIndex = new SpatialIndex<SegId>(1 << 14);
+  /** The segments of each node, MAX_DEG slots per node (-1 empty). */
+  adj: IdColumn<SegId> = new (idColumn<SegId>())((1 << 14) * MAX_DEG).fill(-1);
   /** Segments (by midpoint) and nodes per cell. */
   readonly cellCount = new Uint32Array(CELL_COUNT);
   private world: CellToucher;
   /** Change listeners (the simulation worker mirrors the network through here). */
   readonly listeners: Array<(op: NetOp) => void> = [];
   /** Junctions with a player-chosen control (the others are automatic). */
-  readonly junctions = new Map<number, JunctionSpec>();
+  readonly junctions = new Map<NodeId, JunctionSpec>();
   /** What the flow measured by the simulation asks for at automatic junctions (Flow; page only, not sent to the sim). */
-  readonly flow = new Map<number, number>();
+  readonly flow = new Map<NodeId, number>();
 
   constructor(world: CellToucher) {
     this.world = world;
     this.nodes.onGrow((cap) => {
       this.nodeIndex.grow(cap);
-      const a = new Int32Array(cap * MAX_DEG).fill(-1); a.set(this.adj); this.adj = a;
+      const a = new (idColumn<SegId>())(cap * MAX_DEG).fill(-1); a.set(this.adj); this.adj = a;
     });
     this.segs.onGrow((cap) => this.segIndex.grow(cap));
   }
 
-  quad(s: number, out?: Quad): Quad {
+  quad(s: SegId, out?: Quad): Quad {
     const c = this.segs.cols, n = this.nodes.cols;
     const q = out ?? { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
     q.x0 = n.x[c.a[s]]; q.z0 = n.z[c.a[s]];
@@ -87,14 +89,14 @@ export class RoadNetwork {
 
   // ------------------------------------------------------------ changes
 
-  addNode(rec: Omit<NodeRec, 'id'> & { id?: number }): number {
+  addNode(rec: Omit<NodeRec, 'id'> & { id?: NodeId }): NodeId {
     const t = this.nodes;
-    let id: number;
+    let id: NodeId;
     if (rec.id !== undefined) { t.allocAt(rec.id); id = rec.id; } else id = t.alloc();
     const c = t.cols;
     c.x[id] = rec.x; c.z[id] = rec.z; c.y[id] = rec.y; c.deg[id] = 0;
     c.cell[id] = cellId(cellX(rec.x), cellX(rec.z));
-    for (let k = 0; k < MAX_DEG; k++) this.adj[id * MAX_DEG + k] = -1;
+    for (let k = 0; k < MAX_DEG; k++) this.adj[id * MAX_DEG + k] = NO_SEG;
     this.nodeIndex.insert(id, rec.x, rec.z);
     this.cellCount[c.cell[id]]++;
     this.touchNode(id);
@@ -103,7 +105,7 @@ export class RoadNetwork {
     return id;
   }
 
-  removeNode(id: number): void {
+  removeNode(id: NodeId): void {
     if (!this.nodes.alive[id]) return;
     if (this.nodes.cols.deg[id] !== 0) throw new Error('node still connected');
     this.touchNode(id);
@@ -115,10 +117,10 @@ export class RoadNetwork {
     this.emit({ t: 'remNode', id });
   }
 
-  addSeg(rec: Omit<SegRec, 'id'> & { id?: number }): number {
+  addSeg(rec: Omit<SegRec, 'id'> & { id?: SegId }): SegId {
     const t = this.segs;
     if (this.nodes.cols.deg[rec.a] >= MAX_DEG || this.nodes.cols.deg[rec.b] >= MAX_DEG) throw new Error('node has too many connections');
-    let id: number;
+    let id: SegId;
     if (rec.id !== undefined) { t.allocAt(rec.id); id = rec.id; } else id = t.alloc();
     const c = t.cols;
     c.a[id] = rec.a; c.b[id] = rec.b; c.cx[id] = rec.cx; c.cz[id] = rec.cz;
@@ -139,7 +141,7 @@ export class RoadNetwork {
     return id;
   }
 
-  removeSeg(id: number): SegRec {
+  removeSeg(id: SegId): SegRec {
     const c = this.segs.cols;
     const rec: SegRec = { id, a: c.a[id], b: c.b[id], cx: c.cx[id], cz: c.cz[id], profile: c.profile[id], flags: c.flags[id], zl: c.zl[id], zr: c.zr[id] };
     this.touchSeg(id);
@@ -155,21 +157,21 @@ export class RoadNetwork {
     return rec;
   }
 
-  nodeRec(id: number): NodeRec {
+  nodeRec(id: NodeId): NodeRec {
     const c = this.nodes.cols;
     const j = this.junctions.get(id);
     return j ? { id, x: c.x[id], z: c.z[id], y: c.y[id], j } : { id, x: c.x[id], z: c.z[id], y: c.y[id] };
   }
 
   /** Flow-based automatic mode switched the node's control (notice from the simulation): repaint, without sending back to the sim. */
-  setFlow(id: number, flow: number): void {
+  setFlow(id: NodeId, flow: number): void {
     if (!this.nodes.alive[id] || (this.flow.get(id) ?? 0) === flow) return;
     if (flow) this.flow.set(id, flow); else this.flow.delete(id);
     this.touchRules(id);
   }
 
   /** Junction control chosen by the player (null = automatic). */
-  setJunction(id: number, spec: JunctionSpec | null): void {
+  setJunction(id: NodeId, spec: JunctionSpec | null): void {
     // a missing node (−1 from a search that found nothing, or one already removed) is refused clearly
     if (!(id >= 0) || !this.nodes.alive[id]) throw new Error(`setJunction: node ${id} does not exist`);
     if (spec) this.junctions.set(id, spec); else this.junctions.delete(id);
@@ -179,19 +181,19 @@ export class RoadNetwork {
     this.emit({ t: 'junction', id, spec });
   }
 
-  segRec(id: number): SegRec {
+  segRec(id: SegId): SegRec {
     const c = this.segs.cols;
     return { id, a: c.a[id], b: c.b[id], cx: c.cx[id], cz: c.cz[id], profile: c.profile[id], flags: c.flags[id], zl: c.zl[id], zr: c.zr[id] };
   }
 
-  setProfile(id: number, profile: number): void {
+  setProfile(id: SegId, profile: number): void {
     this.segs.cols.profile[id] = profile;
     this.touchSeg(id);
     this.emit({ t: 'profile', id, profile });
   }
 
   /** Zone of one side of the segment (0 = left, 1 = right). */
-  setZone(id: number, side: number, zone: number): void {
+  setZone(id: SegId, side: number, zone: number): void {
     (side === 0 ? this.segs.cols.zl : this.segs.cols.zr)[id] = zone;
     this.markLots(id);
     this.emit({ t: 'zone', id, side, zone });
@@ -201,25 +203,25 @@ export class RoadNetwork {
   version = 0;
   private emit(op: NetOp): void { this.version++; for (const l of this.listeners) l(op); }
 
-  private link(n: number, s: number): void {
+  private link(n: NodeId, s: SegId): void {
     const o = n * MAX_DEG;
     for (let k = 0; k < MAX_DEG; k++) if (this.adj[o + k] < 0) { this.adj[o + k] = s; this.nodes.cols.deg[n]++; return; }
   }
 
-  private unlink(n: number, s: number): void {
+  private unlink(n: NodeId, s: SegId): void {
     const o = n * MAX_DEG;
     for (let k = 0; k < MAX_DEG; k++) if (this.adj[o + k] === s) {
       // keep it compact
       const last = o + this.nodes.cols.deg[n] - 1;
       this.adj[o + k] = this.adj[last];
-      this.adj[last] = -1;
+      this.adj[last] = NO_SEG;
       this.nodes.cols.deg[n]--;
       return;
     }
   }
 
   /** Segments connected to a node. */
-  segsOf(n: number, out: number[] = []): number[] {
+  segsOf(n: NodeId, out: SegId[] = []): SegId[] {
     out.length = 0;
     const o = n * MAX_DEG, d = this.nodes.cols.deg[n];
     for (let k = 0; k < d; k++) out.push(this.adj[o + k]);
@@ -282,8 +284,8 @@ export class RoadNetwork {
 
   // ------------------------------------------------------------ queries
 
-  nearestNode(x: number, z: number, radius: number): number {
-    let best = -1, bd = radius * radius;
+  nearestNode(x: number, z: number, radius: number): NodeId {
+    let best = NO_NODE, bd = radius * radius;
     const c = this.nodes.cols;
     this.nodeIndex.query(x - radius, z - radius, x + radius, z + radius, (id) => {
       const d = (c.x[id] - x) ** 2 + (c.z[id] - z) ** 2;
@@ -293,7 +295,7 @@ export class RoadNetwork {
   }
 
   /** Nearest segment within the radius of its edge: [segment, t, distance] or null. */
-  nearestSeg(x: number, z: number, radius: number, accept?: (s: number) => boolean): [number, number, number] | null {
+  nearestSeg(x: number, z: number, radius: number, accept?: (s: SegId) => boolean): [SegId, number, number] | null {
     let best: [number, number, number] | null = null;
     const q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
     this.forSegsNear(x - radius, z - radius, x + radius, z + radius, (s) => {
@@ -306,7 +308,7 @@ export class RoadNetwork {
   }
 
   /** Segments that may touch the rectangle (by midpoint + margin). */
-  forSegsNear(minX: number, minZ: number, maxX: number, maxZ: number, fn: (s: number) => void): void {
+  forSegsNear(minX: number, minZ: number, maxX: number, maxZ: number, fn: (s: SegId) => void): void {
     const sc = this.segs.cols;
     const m = SEG_MARGIN;
     this.segIndex.query(minX - m, minZ - m, maxX + m, maxZ + m, (s) => {
@@ -317,7 +319,7 @@ export class RoadNetwork {
   }
 
   /** Segments and nodes of a cell (by midpoint / position). */
-  cellContents(cid: number, segsOut: number[], nodesOut: number[]): void {
+  cellContents(cid: number, segsOut: SegId[], nodesOut: NodeId[]): void {
     const sc = this.segs.cols, nc = this.nodes.cols;
     this.segIndex.queryCell(cid, (s) => { if (sc.cell[s] === cid) segsOut.push(s); });
     this.nodeIndex.queryCell(cid, (n) => { if (nc.cell[n] === cid) nodesOut.push(n); });
@@ -327,18 +329,18 @@ export class RoadNetwork {
    * Piece of the network for a worker: the segments and nodes to build, plus all the
    * segments connected to the involved nodes (they define the setbacks and corners).
    */
-  gather(ownSegs: number[], ownNodes: number[]): RoadGraph {
+  gather(ownSegs: SegId[], ownNodes: NodeId[]): RoadGraph {
     const sc = this.segs.cols, nc = this.nodes.cols;
-    const nodeIdx = new Map<number, number>();
-    const segIdx = new Map<number, number>();
-    const nodeList: number[] = [], segList: number[] = [];
-    const addNode = (n: number) => { if (!nodeIdx.has(n)) { nodeIdx.set(n, nodeList.length); nodeList.push(n); } };
-    const addSeg = (s: number) => {
+    const nodeIdx = new Map<NodeId, number>();
+    const segIdx = new Map<SegId, number>();
+    const nodeList: NodeId[] = [], segList: SegId[] = [];
+    const addNode = (n: NodeId) => { if (!nodeIdx.has(n)) { nodeIdx.set(n, nodeList.length); nodeList.push(n); } };
+    const addSeg = (s: SegId) => {
       if (segIdx.has(s)) return;
       segIdx.set(s, segList.length); segList.push(s);
       addNode(sc.a[s]); addNode(sc.b[s]);
     };
-    const involved = new Set<number>(ownNodes);
+    const involved = new Set<NodeId>(ownNodes);
     for (const s of ownSegs) { involved.add(sc.a[s]); involved.add(sc.b[s]); }
     for (const s of ownSegs) addSeg(s);
     for (const n of involved) {
@@ -405,11 +407,11 @@ export class RoadNetwork {
 
   /** Recreates saved nodes (first) or segments (after), with the same ids. */
   loadNodes(r: RoadSave): void {
-    for (let k = 0; k < r.nodes.length; k += NODE_REC) this.addNode({ id: r.nodes[k], x: r.nodes[k + 1], z: r.nodes[k + 2], y: r.nodes[k + 3] });
+    for (let k = 0; k < r.nodes.length; k += NODE_REC) this.addNode({ id: asNode(r.nodes[k]), x: r.nodes[k + 1], z: r.nodes[k + 2], y: r.nodes[k + 3] });
   }
   loadSegs(r: RoadSave): void {
     const s = r.segs;
-    for (let k = 0; k < s.length; k += SEG_REC) this.addSeg({ id: s[k], a: s[k + 1], b: s[k + 2], cx: s[k + 3], cz: s[k + 4], profile: s[k + 5], flags: s[k + 6], zl: s[k + 7], zr: s[k + 8] });
+    for (let k = 0; k < s.length; k += SEG_REC) this.addSeg({ id: asSeg(s[k]), a: asNode(s[k + 1]), b: asNode(s[k + 2]), cx: s[k + 3], cz: s[k + 4], profile: s[k + 5], flags: s[k + 6], zl: s[k + 7], zr: s[k + 8] });
   }
 
   private cellsOfTile(tile: number): number[] {

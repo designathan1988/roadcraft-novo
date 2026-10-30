@@ -6,6 +6,7 @@ import { MAX_DEG } from '../roads/network.ts';
 import { PROFILES, PROFILE_INFO } from '../roads/profiles.ts';
 import { Ctl, Rule } from '../roads/control.ts';
 import type { SimNet } from './lanes.ts';
+import { asSeg, type NodeId } from '../core/ids.ts';
 
 const MAX_SPEED = 90 / 3.6;
 /**
@@ -184,7 +185,8 @@ export class Router {
     const tx = nc.x[dst], tz = nc.z[dst];
     const vmax = rail ? MAX_SPEED : GUESS_SPEED;
     const h = (n: number) => Math.hypot(nc.x[n] - tx, nc.z[n] - tz) / vmax;
-    const head = (e: number) => ((e & 1) === 0 ? sc.b[e >> 1] : sc.a[e >> 1]);
+    // a directed edge is a segment travelled a → b (even) or b → a (odd); its head is the node it arrives at
+    const head = (e: number): NodeId => ((e & 1) === 0 ? sc.b[e >> 1] : sc.a[e >> 1]);
     const load = this.segLoad;
     /** Time to drive segment `s` leaving node `n` (−1: a vehicle cannot), slowed by how full it is. */
     const drive = (s: number, n: number): number => {
@@ -231,7 +233,7 @@ export class Router {
       const n = head(e);
       if (n === dst && e !== start && (goal < 0 || e === goal)) { found = e; break; }
       if (++expanded > this.limit) break;
-      const sIn = e >> 1, o = n * MAX_DEG, d = nc.deg[n];
+      const sIn = asSeg(e >> 1), o = n * MAX_DEG, d = nc.deg[n];
       for (let k = 0; k < d; k++) {
         const s = net.adj[o + k];
         if (e === start && s === ban2) continue;

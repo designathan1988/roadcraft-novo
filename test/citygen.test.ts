@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateCity } from '../src/jobs/cityGen.ts';
 import { baseHeight } from '../src/jobs/terrainGen.ts';
+import { asNode } from '../src/core/ids.ts';
 
 test('cidade gerada: determinística, grafo limpo, nós em terra', () => {
   const a = generateCity(3), b = generateCity(3);
@@ -41,7 +42,7 @@ test('the generated city is born clean: no impossible node, no dead end lying in
     const nc = w.roads.nodes.cols;
     for (let k = 0; k < city.segs.length; k += 5) {
       const a = ids[city.segs[k]], b = ids[city.segs[k + 1]];
-      w.roads.addSeg({ a, b, cx: (nc.x[a] + nc.x[b]) / 2, cz: (nc.z[a] + nc.z[b]) / 2, profile: city.segs[k + 2], flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
+      w.roads.addSeg({ a: asNode(a), b: asNode(b), cx: (nc.x[a] + nc.x[b]) / 2, cz: (nc.z[a] + nc.z[b]) / 2, profile: city.segs[k + 2], flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
     }
     assert.equal(w.impossible.count, 0, `seed ${seed}: ${w.impossible.count} impossible nodes`);
     assert.equal(repairDanglingEnds(w), 0, `seed ${seed}: dead ends inside other roads`);

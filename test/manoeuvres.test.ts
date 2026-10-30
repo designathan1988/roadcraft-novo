@@ -9,6 +9,7 @@ import { MKind } from '../src/sim/manoeuvres.ts';
 import { PROFILES } from '../src/roads/profiles.ts';
 import { Zone } from '../src/roads/zones.ts';
 import type { NetOp } from '../src/roads/network.ts';
+import { asSeg } from '../src/core/ids.ts';
 
 /** Warehouse loading docks next to the streets (as the page sends them: point, heading facing the street). */
 const DOCKS = [[-200, -100, Math.PI / 2], [60, 200, Math.PI], [200, 40, -Math.PI / 2], [-100, 60, 0]];
@@ -30,10 +31,10 @@ function parkingGrid(n = 4, step = 160): SimNet {
     assert.ok(p.ok, p.reason);
     buildRoad(w, p, a, b, prof);
   }
-  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { w.roads.setZone(s, 0, Zone.Residential); w.roads.setZone(s, 1, Zone.Commercial); }
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { w.roads.setZone(asSeg(s), 0, Zone.Residential); w.roads.setZone(asSeg(s), 1, Zone.Commercial); }
   // the warehouses with docks (the test's docks) stand on industrial streets: trucks carry goods to industry
   const sc = w.roads.segs.cols;
-  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && DOCKS.some(([x, z]) => Math.hypot(sc.mx[s] - x, sc.mz[s] - z) < 120)) { w.roads.setZone(s, 0, Zone.Industrial); w.roads.setZone(s, 1, Zone.Industrial); }
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && DOCKS.some(([x, z]) => Math.hypot(sc.mx[s] - x, sc.mz[s] - z) < 120)) { w.roads.setZone(asSeg(s), 0, Zone.Industrial); w.roads.setZone(asSeg(s), 1, Zone.Industrial); }
   const sim = new SimNet();
   const enc = encodeOps(ops);
   for (let i = 0; i < ops.length; i++) sim.apply(decodeOp(enc, i));
@@ -56,7 +57,7 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
   const sc = sim.net.segs.cols;
   for (let sg = 0; sg < sim.net.segs.end; sg++) {
     if (!sim.net.segs.alive[sg] || !DOCKS.some(([x, z]) => Math.hypot(sc.mx[sg] - x, sc.mz[sg] - z) < 120)) continue;
-    const q = sim.net.quad(sg), px = (q.x0 + 2 * q.cx + q.x1) / 4, pz = (q.z0 + 2 * q.cz + q.z1) / 4;
+    const q = sim.net.quad(asSeg(sg)), px = (q.x0 + 2 * q.cx + q.x1) / 4, pz = (q.z0 + 2 * q.cz + q.z1) / 4;
     const tx = q.x1 - q.x0, tz = q.z1 - q.z0, tl = Math.hypot(tx, tz);
     for (const side of [1, -1]) {
       const nx = side * tz / tl, nz = -side * tx / tl;

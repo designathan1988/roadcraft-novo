@@ -91,6 +91,7 @@ import { clickTool, type ClickHost } from './app/clicks.ts';
 import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
 import { LotEditing } from './app/lotEditing.ts';
 import { Gesture, bindInput, type InputControl } from './app/input.ts';
+import { asNode, asSeg, type NodeId, type SegId } from './core/ids.ts';
 
 /** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
 const STILL_FRAMES = 40;
@@ -163,7 +164,7 @@ export class Game {
   private occSent = 0;
   private netOps: NetOp[] = [];
   /** Nodes whose hand-adjusted arrows need to be recomputed. */
-  private arrowNodes = new Set<number>();
+  private arrowNodes = new Set<NodeId>();
   private camSent = 0;
   /** Doors sent to the simulation: when, and from where (the camera moving or the city growing sends them again). */
   private doorsSent = 0;
@@ -952,8 +953,8 @@ export class Game {
    */
   private resyncSim(reason: string): void {
     const net = this.world.roads, nc = net.nodes.cols, ops: NetOp[] = [{ t: 'clear' }];
-    for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n]) ops.push({ t: 'addNode', rec: { id: n, x: nc.x[n], z: nc.z[n], y: nc.y[n] } });
-    for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) ops.push({ t: 'addSeg', rec: net.segRec(s) });
+    for (let i = 0; i < net.nodes.end; i++) { const n = asNode(i); if (net.nodes.alive[n]) ops.push({ t: 'addNode', rec: { id: n, x: nc.x[n], z: nc.z[n], y: nc.y[n] } }); }
+    for (let i = 0; i < net.segs.end; i++) { const s = asSeg(i); if (net.segs.alive[s]) ops.push({ t: 'addSeg', rec: net.segRec(s) }); }
     for (const [id, spec] of net.junctions) ops.push({ t: 'junction', id, spec });
     for (const id of [...net.flow.keys()]) net.setFlow(id, 0);
     this.netOps.length = 0;
@@ -1043,7 +1044,7 @@ export class Game {
     for (const t of tiles) {
       const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
       const x0 = tileOriginX(tx), z0 = tileOriginX(tz);
-      const segs: number[] = [];
+      const segs: SegId[] = [];
       net.forSegsNear(x0 - 30, z0 - 30, x0 + TILE_SIZE + 30, z0 + TILE_SIZE + 30, (s) => segs.push(s));
       const graph = net.gather(segs, []);
       this.pool.submit('roadPaint', { graph, tile: t }, (r) => this.terrain.setRoadPaint(r.tile, r.texels, r.coarse),

@@ -14,6 +14,7 @@ import { ImpossibleNodes } from '../roads/impossible.ts';
 import { MAP_CELLS } from '../config.ts';
 import { Fn } from './arch.ts';
 import { MapLook } from './mapLook.ts';
+import type { SegId } from '../core/ids.ts';
 
 /** Buildings. Milestone 1 has only generic boxes; the procedural generator arrives in milestone 4. */
 /** The first day starts at 06:30 (Roadcraft 4.0 sim/city/city.ts:9); minutes in a day. */
@@ -90,7 +91,7 @@ export class World {
   readonly buildings = new Table(buildingSchema, 1 << 16);
   /** Player sign texts, by position (signKey), and street names by segment. */
   readonly signTexts = new Map<string, string>();
-  readonly streetNames = new Map<number, string>();
+  readonly streetNames = new Map<SegId, string>();
   /** The map's look (water, hand-set weather, clouds, fog, road paint), saved with the map. */
   readonly look = new MapLook();
   readonly buildingIndex = new SpatialIndex(1 << 16);

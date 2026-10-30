@@ -4,6 +4,7 @@
 
 import { Flow, warrantedControl } from '../roads/control.ts';
 import type { SimNet } from './lanes.ts';
+import { asNode, type NodeId } from '../core/ids.ts';
 
 /** Média móvel do fluxo (s): o controle só muda por uma tendência, não por um pelotão. */
 export const TREND = 300;
@@ -32,7 +33,7 @@ export class FlowAdvisor {
   /** Trocas feitas (para o diagnóstico). */
   changes = 0;
   /** Nó trocou (para avisar a página). */
-  onChange: (node: number, flow: number) => void = () => {};
+  onChange: (node: NodeId, flow: number) => void = () => {};
 
   constructor(sim: SimNet) {
     this.sim = sim;
@@ -78,10 +79,11 @@ export class FlowAdvisor {
       const want = warrantedControl(major / k, minorMax / k, minorTotal / k, current);
       const flow = want === 'signal' ? Flow.Signal : Flow.Signs;
       if ((want === 'signal') === (current === 'signal')) continue;
-      sim.setFlow(n, flow);
+      const node = asNode(n);
+      sim.setFlow(node, flow);
       this.since[n] = time;
       this.changes++; changes++;
-      this.onChange(n, flow);
+      this.onChange(node, flow);
     }
   }
 }

@@ -10,6 +10,7 @@ import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPr
 import { remapSpec, type JunctionSpec } from '../control.ts';
 import { waterAt } from '../../world/ground.ts';
 import { type ItemRec } from '../../world/items.ts';
+import { NO_SEG, type NodeId, type SegId } from '../../core/ids.ts';
 
 
 // --------------------------------------------------------------- journal
@@ -23,10 +24,10 @@ type Op =
   | { t: 'remNode'; rec: NodeRec }
   | { t: 'addSeg'; rec: SegRec }
   | { t: 'remSeg'; rec: SegRec }
-  | { t: 'profile'; id: number; from: number; to: number }
-  | { t: 'zone'; id: number; side: number; from: number; to: number }
-  | { t: 'junction'; id: number; from: JunctionSpec | null; to: JunctionSpec | null }
-  | { t: 'name'; id: number; from: string | undefined; to: string | undefined }
+  | { t: 'profile'; id: SegId; from: number; to: number }
+  | { t: 'zone'; id: SegId; side: number; from: number; to: number }
+  | { t: 'junction'; id: NodeId; from: JunctionSpec | null; to: JunctionSpec | null }
+  | { t: 'name'; id: SegId; from: string | undefined; to: string | undefined }
   | { t: 'addBld'; rec: number[] }
   | { t: 'remBld'; rec: number[] }
   | { t: 'remItem'; rec: ItemRec }
@@ -65,7 +66,7 @@ export class RoadJournal implements Command {
   }
 
   /** Value of a segment as it stands: length × price of its cross-section × how it is built (`roads/economy.ts`). */
-  private segValue(id: number, profile = this.net.segs.cols.profile[id]): number {
+  private segValue(id: SegId, profile = this.net.segs.cols.profile[id]): number {
     const sc = this.net.segs.cols;
     let kind = kindOfFlags(sc.flags[id]);
     if (kind < 0) kind = this.kindNow(sc.a[id], sc.b[id], this.net.quad(id));
@@ -99,7 +100,7 @@ export class RoadJournal implements Command {
   }
 
   // live operations (recorded)
-  addNode(x: number, z: number, y: number): number {
+  addNode(x: number, z: number, y: number): NodeId {
     const id = this.net.addNode({ x, z, y });
     this.ops.push({ t: 'addNode', rec: this.net.nodeRec(id) });
     return id;
@@ -109,7 +110,7 @@ export class RoadJournal implements Command {
    * through `addSeg`, so their value is counted again with the build kind of the new height: the edit costs (or gives
    * back a share of) only the difference, never the whole value of the roads that stay.
    */
-  moveNodeY(id: number, y: number): void {
+  moveNodeY(id: NodeId, y: number): void {
     const net = this.net;
     const segs = net.segsOf(id, []);
     const recs = segs.map((s) => net.segRec(s));
@@ -120,14 +121,14 @@ export class RoadJournal implements Command {
     this.ops.push({ t: 'addNode', rec: net.nodeRec(id) });
     for (const r of recs) this.addSeg({ ...r, flags: r.flags & ~KIND_MASK });
   }
-  removeNode(id: number): void {
+  removeNode(id: NodeId): void {
     const rec = this.net.nodeRec(id);
     this.net.removeNode(id);
     this.ops.push({ t: 'remNode', rec });
   }
   /** Records a node already placed in the network (move node: same id somewhere else). */
-  recordAddNode(id: number): void { this.ops.push({ t: 'addNode', rec: this.net.nodeRec(id) }); }
-  addSeg(rec: Omit<SegRec, 'id'>): number {
+  recordAddNode(id: NodeId): void { this.ops.push({ t: 'addNode', rec: this.net.nodeRec(id) }); }
+  addSeg(rec: Omit<SegRec, 'id'>): SegId {
     // a new road records how it is built over the terrain before it is conformed (the refund reads the same)
     if (kindOfFlags(rec.flags) < 0) {
       const nc = this.net.nodes.cols;
@@ -139,7 +140,7 @@ export class RoadJournal implements Command {
     this.addValue(id, this.segValue(id));
     return id;
   }
-  removeSeg(id: number): SegRec {
+  removeSeg(id: SegId): SegRec {
     this.addValue(id, -this.segValue(id));
     const rec = this.net.removeSeg(id);
     this.ops.push({ t: 'remSeg', rec });
@@ -149,9 +150,9 @@ export class RoadJournal implements Command {
 
   /** Segments this journal removed, and the pieces that took over from a removed one (split, join, roundabout cut). */
   private gone: SegRec[] = [];
-  private heirs = new Map<number, number[]>();
+  private heirs = new Map<SegId, SegId[]>();
   /** `pieces` took over from the removed segment `from` (its name and its place in the junctions' settings). */
-  inherit(from: number, pieces: number[]): void { this.heirs.set(from, [...(this.heirs.get(from) ?? []), ...pieces]); }
+  inherit(from: SegId, pieces: SegId[]): void { this.heirs.set(from, [...(this.heirs.get(from) ?? []), ...pieces]); }
 
   /**
    * Junction settings and street names are kept by segment id, and ids are reused. After the live operations, every
@@ -163,10 +164,10 @@ export class RoadJournal implements Command {
     const net = this.net, sc = net.segs.cols, names = this.world.streetNames;
     const gone = this.gone;
     this.gone = [];
-    const name = new Map<number, string>();
+    const name = new Map<SegId, string>();
     // the names as they were before this journal, by the first removal of each id
     for (const op of this.ops) if (op.t === 'remSeg' && !name.has(op.rec.id)) { const v = this.nameBefore(op.rec.id); if (v !== undefined) name.set(op.rec.id, v); }
-    const done = new Set<number>();
+    const done = new Set<SegId>();
     for (const rec of gone) {
       if (done.has(rec.id)) continue;
       done.add(rec.id);
@@ -189,7 +190,7 @@ export class RoadJournal implements Command {
         if (!spec) continue;
         const at = net.segsOf(n, []);
         if (at.includes(rec.id)) continue; // the id is at this node again (re-added, or the heir took it)
-        const heir = heirs.find((h) => at.includes(h)) ?? -1;
+        const heir = heirs.find((h) => at.includes(h)) ?? NO_SEG;
         const next = remapSpec(spec, rec.id, heir, at);
         if (next !== spec) this.setJunction(n, next);
       }
@@ -197,33 +198,33 @@ export class RoadJournal implements Command {
   }
 
   /** The street name of segment `id` before this journal's own name changes. */
-  private nameBefore(id: number): string | undefined {
+  private nameBefore(id: SegId): string | undefined {
     let v = this.world.streetNames.get(id);
     for (let i = this.ops.length - 1; i >= 0; i--) { const op = this.ops[i]; if (op.t === 'name' && op.id === id) v = op.from; }
     return v;
   }
 
-  private setName(id: number, to: string | undefined): void {
+  private setName(id: SegId, to: string | undefined): void {
     const names = this.world.streetNames, from = names.get(id);
     if (from === to) return;
     if (to === undefined) names.delete(id); else names.set(id, to);
     this.ops.push({ t: 'name', id, from, to });
   }
-  setProfile(id: number, to: number): void {
+  setProfile(id: SegId, to: number): void {
     const from = this.net.segs.cols.profile[id];
     if (from === to) return;
     this.addValue(id, this.segValue(id, to) - this.segValue(id, from));
     this.net.setProfile(id, to);
     this.ops.push({ t: 'profile', id, from, to });
   }
-  setZone(id: number, side: number, to: number): void {
+  setZone(id: SegId, side: number, to: number): void {
     const sc = this.net.segs.cols;
     const from = (side === 0 ? sc.zl : sc.zr)[id];
     if (from === to) return;
     this.net.setZone(id, side, to);
     this.ops.push({ t: 'zone', id, side, from, to });
   }
-  setJunction(id: number, to: JunctionSpec | null): void {
+  setJunction(id: NodeId, to: JunctionSpec | null): void {
     const from = this.net.junctions.get(id) ?? null;
     this.net.setJunction(id, to);
     this.ops.push({ t: 'junction', id, from, to });

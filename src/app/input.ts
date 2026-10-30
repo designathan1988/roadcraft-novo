@@ -30,6 +30,7 @@ import type { StartMenu } from '../ui/menu.ts';
 import type { VehicleRenderer } from '../render/vehicles.ts';
 import type { World } from '../world/world.ts';
 import type { ZoneTool } from '../features/zones/zoneTool.ts';
+import { NO_SEG } from '../core/ids.ts';
 
 export interface InputHost {
   /** The game's lifecycle: world tools act only while the world is editable (app/lifecycle.ts). */
@@ -296,7 +297,7 @@ export function bindInput(h: InputHost, gs: Gesture = new Gesture()): InputContr
       developer: () => h.developer,
       openMap: () => h.hud.openFile(),
       duplicate: () => {
-        const s = h.inspector.isOpen ? h.inspector.seg : -1;
+        const s = h.inspector.isOpen ? h.inspector.seg : NO_SEG;
         const j = s >= 0 ? duplicateRoad(h.world, s) : null;
         if (!j) return;
         if (typeof j === 'string') { h.hud.toast(loose(j)); return; }

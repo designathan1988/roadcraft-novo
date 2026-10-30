@@ -5,6 +5,7 @@
 import { PROFILE_INFO } from './profiles.ts';
 import { SegFlag } from './flags.ts';
 import type { NetworkView } from './networkView.ts';
+import type { NodeId, SegId } from '../core/ids.ts';
 
 /** Control kind. Auto chooses by the importance of the roads. */
 export const Ctl = { Auto: 0, Signal: 1, Priority: 2, AllStop: 3, YieldAll: 4, Mini: 5, None: 6, Ring: 7, Crossing: 8, Zebra: 9, PedSignal: 10, UTurn: 11 } as const;
@@ -28,18 +29,18 @@ export interface JunctionSpec {
   /** Bus priority (adaptive mode shortens the others' green). */
   bus?: boolean;
   /** Rule picked by hand per arm: [segment, rule]. */
-  legs?: Array<[number, number]>;
+  legs?: Array<[SegId, number]>;
   /** Banned movements: pairs [arriving segment, leaving segment]. */
-  bans?: number[];
+  bans?: SegId[];
   /** Lane connections by hand: [arriving segment, lane (0 = the rightmost), leaving segments]. */
-  lanes?: Array<[number, number, number[]]>;
+  lanes?: Array<[SegId, number, SegId[]]>;
   /** A dead end's shape chosen by the player (Roadcraft node end): a turning bulb, or a plain end; absent = automatic. */
   end?: 'bulb' | 'plain';
 }
 
-export interface Control { ctl: number; /** rule per segment at the node */ legs: Map<number, number>; auto: boolean }
+export interface Control { ctl: number; /** rule per segment at the node */ legs: Map<SegId, number>; auto: boolean }
 
-const tmpSegs: number[] = [];
+const tmpSegs: SegId[] = [];
 
 /** What the measured flow asks for at an automatic junction (roadcraft controlAdvisor). */
 export const Flow = { None: 0, Signal: 1, Signs: 2 } as const;
@@ -61,11 +62,11 @@ export function warrantedControl(major: number, minorMax: number, minorTotal: nu
 }
 
 /** The two arms of the node's main road (the most important; on a tie, the most opposite). */
-export function mainLegs(net: NetworkView, n: number): number[] {
+export function mainLegs(net: NetworkView, n: NodeId): SegId[] {
   const sc = net.segs.cols;
   const segs = net.segsOf(n, tmpSegs).slice();
   if (segs.length < 3) return segs;
-  const pr = (s: number) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
+  const pr = (s: SegId) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
   const sorted = segs.slice().sort((a, b) => pr(b) - pr(a));
   const top = segs.filter((s) => pr(s) === pr(sorted[0]));
   return top.length > 2 ? mostOpposite(net, n, top) : top.length === 2 ? top : [sorted[0], sorted[1]];
@@ -75,10 +76,10 @@ export function mainLegs(net: NetworkView, n: number): number[] {
  * Effective control of node `n` (automatic resolved). `flow`: what the measured flow asks for (Flow), automatic
  * only: Signal puts a traffic light; Signs removes the light the importance of the roads would put (signs stay).
  */
-export function effectiveControl(net: NetworkView, n: number, spec = net.junctions.get(n), flow: number = Flow.None): Control {
+export function effectiveControl(net: NetworkView, n: NodeId, spec = net.junctions.get(n), flow: number = Flow.None): Control {
   const sc = net.segs.cols;
   const segs = net.segsOf(n, tmpSegs).slice();
-  const legs = new Map<number, number>();
+  const legs = new Map<SegId, number>();
   if (segs.length === 2 && spec && spec.ctl === Ctl.UTurn) {
     for (const s of segs) legs.set(s, Rule.Free);
     return { ctl: Ctl.UTurn, legs, auto: false };
@@ -99,7 +100,7 @@ export function effectiveControl(net: NetworkView, n: number, spec = net.junctio
     for (const s of segs) legs.set(s, rails === segs.length ? Rule.Free : PROFILE_INFO[sc.profile[s]].rail ? Rule.Main : Rule.Stop);
     return { ctl: rails === segs.length ? Ctl.None : Ctl.Crossing, legs, auto: true };
   }
-  const pr = (s: number) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
+  const pr = (s: SegId) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
   let ctl = spec?.ctl ?? Ctl.Auto;
   // a mid-block crossing or U-turn that got a third road is an ordinary junction now: automatic
   if (isMidNode(ctl)) ctl = Ctl.Auto;
@@ -142,13 +143,13 @@ export function effectiveControl(net: NetworkView, n: number, spec = net.junctio
 }
 
 /** The two segments are the same road going straight through the node. */
-function throughPair(net: NetworkView, n: number, a: number, b: number): boolean {
+function throughPair(net: NetworkView, n: NodeId, a: SegId, b: SegId): boolean {
   const da = dirOut(net, n, a), db = dirOut(net, n, b);
   return da[0] * db[0] + da[1] * db[1] < -0.8;
 }
 
-function mostOpposite(net: NetworkView, n: number, segs: number[]): number[] {
-  let best: number[] = [segs[0], segs[1]], bd = 2;
+function mostOpposite(net: NetworkView, n: NodeId, segs: SegId[]): SegId[] {
+  let best: SegId[] = [segs[0], segs[1]], bd = 2;
   for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) {
     const a = dirOut(net, n, segs[i]), b = dirOut(net, n, segs[j]);
     const d = a[0] * b[0] + a[1] * b[1];
@@ -158,7 +159,7 @@ function mostOpposite(net: NetworkView, n: number, segs: number[]): number[] {
 }
 
 /** Direction out of the node along the segment (by its control point). */
-export function dirOut(net: NetworkView, n: number, s: number): [number, number] {
+export function dirOut(net: NetworkView, n: NodeId, s: SegId): [number, number] {
   const sc = net.segs.cols, nc = net.nodes.cols;
   let dx = sc.cx[s] - nc.x[n], dz = sc.cz[s] - nc.z[n];
   if (Math.hypot(dx, dz) < 1e-6) { const o = sc.a[s] === n ? sc.b[s] : sc.a[s]; dx = nc.x[o] - nc.x[n]; dz = nc.z[o] - nc.z[n]; }
@@ -202,16 +203,16 @@ export function signalStages(dirs: Array<[number, number]>, out: number[]): numb
  * The settings with segment `from` replaced by `to` (−1: taken out), keeping only segments still in `at` (the
  * node's segments now). Returns the same object when nothing names `from`.
  */
-export function remapSpec(spec: JunctionSpec, from: number, to: number, at: readonly number[]): JunctionSpec {
-  const names = (s: number) => s === from;
+export function remapSpec(spec: JunctionSpec, from: SegId, to: SegId, at: readonly SegId[]): JunctionSpec {
+  const names = (s: SegId) => s === from;
   const hit = spec.legs?.some(([s]) => names(s)) || spec.bans?.some(names) || spec.lanes?.some(([s, , exits]) => names(s) || exits.some(names));
   if (!hit) return spec;
-  const map = (s: number) => (s === from ? to : s);
-  const keep = (s: number) => s >= 0 && at.includes(s);
+  const map = (s: SegId) => (s === from ? to : s);
+  const keep = (s: SegId) => s >= 0 && at.includes(s);
   const next: JunctionSpec = { ...spec };
-  if (spec.legs) next.legs = spec.legs.map(([s, r]) => [map(s), r] as [number, number]).filter(([s]) => keep(s));
+  if (spec.legs) next.legs = spec.legs.map(([s, r]) => [map(s), r] as [SegId, number]).filter(([s]) => keep(s));
   if (spec.bans) {
-    const bans: number[] = [];
+    const bans: SegId[] = [];
     for (let i = 0; i + 1 < spec.bans.length; i += 2) {
       const a = map(spec.bans[i]), b = map(spec.bans[i + 1]);
       if (keep(a) && keep(b)) bans.push(a, b);
@@ -220,7 +221,7 @@ export function remapSpec(spec: JunctionSpec, from: number, to: number, at: read
   }
   if (spec.lanes) {
     // a lane whose chosen exits are all gone goes back to automatic (never a lane with no exit)
-    next.lanes = spec.lanes.map(([s, i, exits]) => [map(s), i, exits.map(map).filter(keep)] as [number, number, number[]])
+    next.lanes = spec.lanes.map(([s, i, exits]) => [map(s), i, exits.map(map).filter(keep)] as [SegId, number, SegId[]])
       .filter(([s, , exits]) => keep(s) && exits.length > 0);
   }
   return next;

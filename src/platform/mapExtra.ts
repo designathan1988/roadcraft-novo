@@ -3,6 +3,8 @@
 // (app/session.ts) and the reader (opening a map): each field is read and checked on its own, so one bad or missing
 // field falls back to its default alone and never takes the others with it (before: one cast, one catch for all).
 
+import type { SegId } from '../core/ids.ts';
+
 export interface ExtraWeather { rain: number; wind: number; dir: number; lightning: number; thunder: number }
 export interface ExtraWater { waves: number; foam: number; current: number }
 export interface ExtraCloud { x: number; z: number; y: number; size: number; density: number }
@@ -14,7 +16,7 @@ export interface MapExtra {
   fog: number;
   terminals: number[];
   signs: Array<[string, string]>;
-  streets: Array<[number, string]>;
+  streets: Array<[SegId, string]>;
   clock: number;
   paint: string | null;
   unlimited: boolean | null;
@@ -38,7 +40,7 @@ export function decodeExtra(text: string | undefined): MapExtra {
     fog: num(raw.fog, 1),
     terminals: list('terminals').filter((v) => typeof v === 'number') as number[],
     signs: list('signs').filter((e) => Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'string') as Array<[string, string]>,
-    streets: list('streets').filter((e) => Array.isArray(e) && typeof e[0] === 'number' && typeof e[1] === 'string') as Array<[number, string]>,
+    streets: list('streets').filter((e) => Array.isArray(e) && typeof e[0] === 'number' && typeof e[1] === 'string') as Array<[SegId, string]>,
     clock: num(raw.clock, 0),
     paint: typeof raw.paint === 'string' ? raw.paint : null,
     unlimited: typeof raw.unlimited === 'boolean' ? raw.unlimited : null,

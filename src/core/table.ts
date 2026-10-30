@@ -1,16 +1,21 @@
 // SoA table: one typed array per field, dense ids and a free list.
 // No object per entity.
 
+import type { IdColumn } from './ids.ts';
+
 type TypedCtor =
   | Float32ArrayConstructor | Float64ArrayConstructor
   | Int32ArrayConstructor | Uint32ArrayConstructor
   | Int16ArrayConstructor | Uint16ArrayConstructor
-  | Int8ArrayConstructor | Uint8ArrayConstructor;
+  | Int8ArrayConstructor | Uint8ArrayConstructor
+  // a column of ids of one kind (core/ids.ts idColumn): an Int32Array
+  | (new (length: number) => IdColumn<number>);
 
 export type Schema = Record<string, TypedCtor>;
 export type Columns<S extends Schema> = { [K in keyof S]: InstanceType<S[K]> };
 
-export class Table<S extends Schema> {
+/** `I`: the table's id type (core/ids.ts), a plain number by default. */
+export class Table<S extends Schema, I extends number = number> {
   readonly schema: S;
   cols: Columns<S>;
   alive: Uint8Array;
@@ -56,7 +61,7 @@ export class Table<S extends Schema> {
    * Reserves an id (reuses one from the free list). Fields are not zeroed here. `fresh`: a never-used id, for
    * entities made outside the undo history (growth): a freed id may still be restored by an undo (`allocAt`).
    */
-  alloc(fresh = false): number {
+  alloc(fresh = false): I {
     let id: number;
     if (this.freeTop > 0 && !fresh) { id = this.free[--this.freeTop]; this.freePos[id] = -1; }
     else {
@@ -65,11 +70,11 @@ export class Table<S extends Schema> {
     }
     this.alive[id] = 1;
     this.size++;
-    return id;
+    return id as I;
   }
 
   /** Reserves a specific id (used when undoing a removal). */
-  allocAt(id: number): void {
+  allocAt(id: I): void {
     if (id >= this.capacity) this.grow(id + 1);
     if (this.alive[id]) throw new Error(`id ${id} already alive`);
     if (id >= this.end) {
@@ -94,7 +99,7 @@ export class Table<S extends Schema> {
     this.free[this.freeTop++] = id;
   }
 
-  release(id: number): void {
+  release(id: I): void {
     if (!this.alive[id]) return;
     this.alive[id] = 0;
     this.size--;

@@ -8,15 +8,17 @@ import { RoadNetwork } from '../src/roads/network.ts';
 import { buildRoadMesh, RMAT } from '../src/jobs/roadMesh.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { DASH_PERIOD, dashPhases } from '../src/roads/dash.ts';
+import type { NodeId, SegId } from '../src/core/ids.ts';
+import { asNode, asSeg } from '../src/core/ids.ts';
 
 const GROUND = 10;
 
 interface Tri { a: [number, number]; b: [number, number]; c: [number, number] }
 
 function mesh(w: World, net: RoadNetwork, extent = 64) {
-  const segs: number[] = [], nodes: number[] = [];
-  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) segs.push(s);
-  for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n]) nodes.push(n);
+  const segs: SegId[] = [], nodes: NodeId[] = [];
+  for (let s = 0; s < net.segs.end; s++) if (net.segs.alive[s]) segs.push(asSeg(s));
+  for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n]) nodes.push(asNode(n));
   const m = buildRoadMesh(w.heights, net.gather(segs, nodes), 0, 0, extent, 0)!;
   const k = m.scale / 32767, p = m.position;
   const tris: Tri[] = [];

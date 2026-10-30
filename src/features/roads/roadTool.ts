@@ -15,6 +15,7 @@ import { demolishTarget, targetAt, type Target } from '../demolition/demolish.ts
 import { lotToWorld } from '../../world/lotEdit.ts';
 import type { World } from '../../world/world.ts';
 import { money, t } from '../../shared/i18n/index.ts';
+import { NO_NODE, NO_SEG } from '../../core/ids.ts';
 
 const p2 = new Float64Array(2);
 
@@ -31,7 +32,7 @@ export class RoadTool {
   private start: Anchor | null = null;
   private control: { x: number; z: number } | null = null;
   private plan: RoadPlan | null = null;
-  private hoverSeg = -1;
+  private hoverSeg = NO_SEG;
   private hoverT = 0.5;
   private target: Target = null;
   /** Snapping: 0 off, 1 angles of 15°, 2 angles and a 1 m grid. */
@@ -45,7 +46,7 @@ export class RoadTool {
   /** Shift is held (the roundabout preview shows whether it may cut roads in). */
   shiftHeld = false;
   /** Move node: the node being dragged (−1 = none). */
-  moving = -1;
+  moving = NO_NODE;
   private world: World;
   private commands: CommandStack;
   private preview: RoadPreview;
@@ -67,7 +68,7 @@ export class RoadTool {
     this.start = null;
     this.control = null;
     this.plan = null;
-    this.moving = -1;
+    this.moving = NO_NODE;
     this.freePts = [];
     this.preview.hideAll();
     this.updateHint();
@@ -125,7 +126,7 @@ export class RoadTool {
     }
     if (this.mode === 'split') {
       const s = net.nearestSeg(hit.x, hit.z, 14);
-      this.hoverSeg = s ? s[0] : -1;
+      this.hoverSeg = s ? s[0] : NO_SEG;
       if (s) { this.hoverT = s[1]; const p = new Float64Array(2); bez(net.quad(s[0]), s[1], p); pv.showMarker(p[0], heightAt(this.world.heights, p[0], p[1]) + 0.3, p[1], 1.4, 'seg'); }
       else pv.marker.visible = false;
       pv.hide();
@@ -147,7 +148,7 @@ export class RoadTool {
     }
     if (this.mode === 'upgrade') {
       const s = net.nearestSeg(hit.x, hit.z, 14);
-      this.hoverSeg = s ? s[0] : -1;
+      this.hoverSeg = s ? s[0] : NO_SEG;
       pv.marker.visible = false;
       if (this.hoverSeg < 0) { pv.hide(); return; }
       const sp = segPreview(net, this.hoverSeg);
@@ -169,7 +170,7 @@ export class RoadTool {
     if (!this.start) { pv.hide(); this.plan = null; return; }
     if (this.mode === 'curve' && !this.control) {
       // still choosing the control point: shows the straight line to the cursor
-      this.plan = planRoad(this.world, this.start, null, { ...a, node: -1, seg: -1 }, this.profile, this.elevation);
+      this.plan = planRoad(this.world, this.start, null, { ...a, node: NO_NODE, seg: NO_SEG }, this.profile, this.elevation);
     } else {
       this.plan = planRoad(this.world, this.start, this.control, a, this.profile, this.elevation);
     }
@@ -287,9 +288,9 @@ export class RoadTool {
     if (Math.hypot(hit.x - lx, hit.z - lz) >= 24) this.freePts.push([hit.x, hit.z]);
     // preview: the last piece up to the cursor
     const net = this.world.roads;
-    const a = { x: lx, z: lz, node: -1, seg: -1, t: 0 };
+    const a = { x: lx, z: lz, node: NO_NODE, seg: NO_SEG, t: 0 };
     const b = snap(net, hit.x, hit.z, this.snapRadius());
-    const plan = planRoad(this.world, a, null, { ...b, node: -1, seg: -1 }, this.profile, this.elevation);
+    const plan = planRoad(this.world, a, null, { ...b, node: NO_NODE, seg: NO_SEG }, this.profile, this.elevation);
     this.preview.show(plan.quad, PROFILE_INFO[this.profile].right, plan.profile.at, plan.profile.y, plan.ok);
   }
 
@@ -351,7 +352,7 @@ export class RoadTool {
   /** Move node: drops it at `hit`. */
   drop(hit: THREE.Vector3 | null): void {
     const n = this.moving;
-    this.moving = -1;
+    this.moving = NO_NODE;
     this.preview.hideAll();
     this.updateHint();
     if (n < 0 || !hit || !this.world.roads.nodes.alive[n]) return;

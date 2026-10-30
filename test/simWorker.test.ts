@@ -8,6 +8,7 @@ import { createPoseBuffers, PoseReader, viewPoseBuffers, POSE_STRIDE } from '../
 import { Traffic } from '../src/sim/traffic.ts';
 import { encodeOps } from '../src/sim/lanes.ts';
 import type { NetOp } from '../src/roads/network.ts';
+import { asNode, asSeg } from '../src/core/ids.ts';
 
 interface FakeScope { postMessage(m: FromSim): void; onmessage: ((e: { data: ToSim }) => void) | null }
 
@@ -57,13 +58,13 @@ test('C13: after a slow step the simulation does not run steps back to back with
 
 test('C14: a network change that fails is reported, the rest of the batch still applies and the page is asked for the whole network', () => {
   posted.length = 0;
-  const node = (id: number, x: number): NetOp => ({ t: 'addNode', rec: { id, x, z: 0, y: 10 } });
-  const seg = (id: number, a: number, b: number, x: number): NetOp => ({ t: 'addSeg', rec: { id, a, b, cx: x, cz: 0, profile: 0, flags: 0, zl: 0, zr: 0 } });
+  const node = (id: number, x: number): NetOp => ({ t: 'addNode', rec: { id: asNode(id), x, z: 0, y: 10 } });
+  const seg = (id: number, a: number, b: number, x: number): NetOp => ({ t: 'addSeg', rec: { id: asSeg(id), a: asNode(a), b: asNode(b), cx: x, cz: 0, profile: 0, flags: 0, zl: 0, zr: 0 } });
   const batch = (ops: NetOp[]) => { const extra: string[] = []; const e = encodeOps(ops, extra); send({ type: 'ops', ops: e, extra }); };
   batch([node(0, 0), node(1, 100), seg(0, 0, 1, 50)]);
   // removing a node that still has a segment throws in the network; the node added after it must still arrive
   let threw: unknown = null;
-  try { batch([{ t: 'remNode', id: 0 }, node(2, 300)]); } catch (e) { threw = e; }
+  try { batch([{ t: 'remNode', id: asNode(0) }, node(2, 300)]); } catch (e) { threw = e; }
   assert.equal(threw, null, `the worker let the error out of its message handler: ${String(threw)}`);
   const errors = posted.filter((m) => m.type === 'error');
   assert.ok(errors.length >= 1, 'the failure was reported to the page');
@@ -104,8 +105,8 @@ test('C30: paused, people and vehicles are published standing (previous pose = c
   try {
     // a straight road of 1.2 km with traffic, the camera on it
     const ops: NetOp[] = [{ t: 'clear' }];
-    for (let i = 0; i <= 6; i++) ops.push({ t: 'addNode', rec: { id: 10 + i, x: i * 200, z: 50, y: 10 } });
-    for (let i = 0; i < 6; i++) ops.push({ t: 'addSeg', rec: { id: 10 + i, a: 10 + i, b: 11 + i, cx: i * 200 + 100, cz: 50, profile: 0, flags: 0, zl: 2, zr: 2 } });
+    for (let i = 0; i <= 6; i++) ops.push({ t: 'addNode', rec: { id: asNode(10 + i), x: i * 200, z: 50, y: 10 } });
+    for (let i = 0; i < 6; i++) ops.push({ t: 'addSeg', rec: { id: asSeg(10 + i), a: asNode(10 + i), b: asNode(11 + i), cx: i * 200 + 100, cz: 50, profile: 0, flags: 0, zl: 2, zr: 2 } });
     const extra: string[] = []; const e = encodeOps(ops, extra);
     send({ type: 'ops', ops: e, extra });
     send({ type: 'camera', x: 600, z: 50 });
@@ -143,11 +144,11 @@ test('C7: drawing the vehicles and people reads only the poses of the part of th
     // a grid city of 10 x 10 streets 150 m apart, the camera over it, busy traffic
     const ops: NetOp[] = [{ t: 'clear' }];
     const id = (i: number, j: number) => 100 + i * 10 + j;
-    for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) ops.push({ t: 'addNode', rec: { id: id(i, j), x: i * 150 - 675, z: j * 150 - 675, y: 10 } });
+    for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) ops.push({ t: 'addNode', rec: { id: asNode(id(i, j)), x: i * 150 - 675, z: j * 150 - 675, y: 10 } });
     let s = 100;
     for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) {
-      if (i < 9) ops.push({ t: 'addSeg', rec: { id: s++, a: id(i, j), b: id(i + 1, j), cx: i * 150 - 600, cz: j * 150 - 675, profile: 0, flags: 0, zl: 2, zr: 1 } });
-      if (j < 9) ops.push({ t: 'addSeg', rec: { id: s++, a: id(i, j), b: id(i, j + 1), cx: i * 150 - 675, cz: j * 150 - 600, profile: 0, flags: 0, zl: 1, zr: 2 } });
+      if (i < 9) ops.push({ t: 'addSeg', rec: { id: asSeg(s++), a: asNode(id(i, j)), b: asNode(id(i + 1, j)), cx: i * 150 - 600, cz: j * 150 - 675, profile: 0, flags: 0, zl: 2, zr: 1 } });
+      if (j < 9) ops.push({ t: 'addSeg', rec: { id: asSeg(s++), a: asNode(id(i, j)), b: asNode(id(i, j + 1)), cx: i * 150 - 675, cz: j * 150 - 600, profile: 0, flags: 0, zl: 1, zr: 2 } });
     }
     const extra: string[] = []; const e = encodeOps(ops, extra);
     send({ type: 'ops', ops: e, extra });

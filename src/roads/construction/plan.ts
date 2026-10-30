@@ -10,6 +10,7 @@ import { segHeightAt } from './snap.ts';
 import type { Anchor } from './snap.ts';
 import { heightProfile, profileY } from './grade.ts';
 import type { Fixed } from './grade.ts';
+import type { SegId } from '../../core/ids.ts';
 
 export interface RoadPlan {
   ok: boolean;
@@ -19,7 +20,7 @@ export interface RoadPlan {
   profile: { at: Float64Array; y: Float64Array };
   len: number;
   /** At-grade junctions: [t on the new road, existing segment, t on the existing one]. */
-  junctions: Array<[number, number, number]>;
+  junctions: Array<[number, SegId, number]>;
 }
 
 const MIN_LEN = 8;
@@ -48,10 +49,10 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
   if (start.node >= 0 && start.node === end.node) return fail('liga o nó a ele mesmo');
 
   // junctions with the roads crossed
-  const junctions: Array<[number, number, number]> = [];
+  const junctions: Array<[number, SegId, number]> = [];
   const minX = Math.min(q.x0, q.cx, q.x1), maxX = Math.max(q.x0, q.cx, q.x1);
   const minZ = Math.min(q.z0, q.cz, q.z1), maxZ = Math.max(q.z0, q.cz, q.z1);
-  const skip = new Set<number>();
+  const skip = new Set<SegId>();
   for (const a of [start, end]) {
     if (a.node >= 0) for (const s of net.segsOf(a.node)) skip.add(s);
     if (a.seg >= 0) skip.add(a.seg);
@@ -115,7 +116,7 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
  */
 function overlapsRoad(net: RoadNetwork, q: Quad, table: Float64Array, profile: number, pr: { at: Float64Array; y: Float64Array }): boolean {
   const len = table[table.length - 1], half = PROFILE_INFO[profile].right;
-  const cands: number[] = [];
+  const cands: SegId[] = [];
   net.forSegsNear(Math.min(q.x0, q.cx, q.x1) - half - 30, Math.min(q.z0, q.cz, q.z1) - half - 30, Math.max(q.x0, q.cx, q.x1) + half + 30, Math.max(q.z0, q.cz, q.z1) + half + 30, (s) => cands.push(s));
   if (!cands.length) return false;
   const p = new Float64Array(2), d = new Float64Array(2), e = new Float64Array(2), oq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };

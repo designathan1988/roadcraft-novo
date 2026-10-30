@@ -41,7 +41,7 @@ export type FromSim =
   | { type: 'manoeuvres'; list: number[]; planned: number; kerbStops: number; docked: number; crossings: number[]; trains: number[] }
   /** Automatic mode switched the node's control based on measured flow (Flow: 1 traffic light, 2 signs). The page can
    *  pass the same `flow` to `effectiveControl` (paint, signs, signal heads, inspector). */
-  | { type: 'autoControl'; node: number; flow: number }
+  | { type: 'autoControl'; node: NodeId; flow: number }
   /** `simTime`: the simulation clock (s), for rates per simulated minute or hour (the speed may be 0, 1, 2 or 4). */
   | { type: 'stats'; cars: number; micro: number; peds: number; arrived: number; lost: number; speed: number; stopped: number; simTime: number;
       lines: Array<{ id: number; buses: number; perHour: number; waiting: number }> }
@@ -51,6 +51,7 @@ export type FromSim =
   | { type: 'resync'; reason: string };
 
 import { setCustomProfiles, type Profile } from '../roads/profiles.ts';
+import type { NodeId } from '../core/ids.ts';
 
 interface SimScope { onmessage: ((e: MessageEvent<ToSim>) => void) | null; postMessage(m: FromSim): void }
 const scope = self as unknown as SimScope;

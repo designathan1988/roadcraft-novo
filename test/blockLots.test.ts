@@ -8,6 +8,7 @@ import { Zone } from '../src/roads/zones.ts';
 import { buildLots } from '../src/jobs/lots.ts';
 import { cellId, cellX } from '../src/core/grid.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
+import type { SegId } from '../src/core/ids.ts';
 
 test('a 120 x 72 m block of the grid is covered by two rows of equal lots, front to the street', () => {
   const w = new World(); w.heights.fill(20);
@@ -19,7 +20,7 @@ test('a 120 x 72 m block of the grid is covered by two rows of equal lots, front
     net.addSeg({ a: u, b: v, cx: (net.nodes.cols.x[u] + net.nodes.cols.x[v]) / 2, cz: (net.nodes.cols.z[u] + net.nodes.cols.z[v]) / 2, profile: p, flags: 0, zl: Z, zr: Z });
   }
   const cell = cellId(cellX(100), cellX(60));
-  const segs: number[] = [];
+  const segs: SegId[] = [];
   net.forSegsNear(-1e4, -1e4, 1e4, 1e4, (s) => segs.push(s));
   const L = buildLots(w.heights, net.gather(segs, []), cell);
   const half = Math.max(PROFILE_INFO[p].left, PROFILE_INFO[p].right);

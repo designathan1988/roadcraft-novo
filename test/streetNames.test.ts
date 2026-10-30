@@ -7,6 +7,7 @@ import { addressAt, streetName, streetOf } from '../src/roads/streetNames.ts';
 import { SIGN_STOP, SIGN_YIELD, signRuleCommand } from '../src/roads/signRule.ts';
 import { Ctl, Rule, effectiveControl } from '../src/roads/control.ts';
 import { PROFILES } from '../src/roads/profiles.ts';
+import { asSeg } from '../src/core/ids.ts';
 
 function flatWorld(): World {
   const w = new World();
@@ -26,10 +27,10 @@ test('rua: a mesma em todos os trechos, nome estável, numeração métrica par 
   road(w, -300, 0, 300, 0); // vários trechos de até 112 m
   const segs = [...Array(w.roads.segs.end).keys()].filter((s) => w.roads.segs.alive[s]);
   assert.ok(segs.length >= 5);
-  const names = new Set(segs.map((s) => streetName(w, s)));
+  const names = new Set(segs.map((s) => streetName(w, asSeg(s))));
   assert.equal(names.size, 1, `nomes ${[...names]}`);
   assert.match([...names][0], /^Rua /);
-  assert.equal(streetOf(w, segs[2]).segs.length, segs.length);
+  assert.equal(streetOf(w, asSeg(segs[2])).segs.length, segs.length);
   // começa na ponta de menor x: 100 m depois dela, número ~100; lado direito (andando para +x, z positivo) é par
   const right = addressAt(w, -200, 15)!, left = addressAt(w, -200, -15)!;
   assert.ok(Math.abs(right.number - 100) <= 2 && Math.abs(left.number - 100) <= 2, `${right.number} ${left.number}`);

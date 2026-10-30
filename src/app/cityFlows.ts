@@ -16,6 +16,7 @@ import { START_MONEY, type World } from '../world/world.ts';
 import type { Hud } from '../ui/hud.ts';
 import { fmtInt, t } from '../shared/i18n/index.ts';
 import { achieve } from '../platform/steam.ts';
+import type { NodeId } from '../core/ids.ts';
 
 export interface CityFlowHost {
   readonly world: World;
@@ -78,7 +79,7 @@ export class CityFlows {
       const city = await h.pool.run('cityGen', { seed: w.seed, medium }, { priority: 0 });
       phase('street grid');
       h.hud.showLoading(t('game.loading.roads'));
-      const ids: number[] = [];
+      const ids: NodeId[] = [];
       for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
       const nc = w.roads.nodes.cols;
       const perTile: number[][] = Array.from({ length: TILE_COUNT }, () => []);
@@ -145,7 +146,7 @@ export class CityFlows {
         nodes.push(r.roadNodes); segs.push(r.roadSegs);
       }));
       // streets: all the nodes first, then the segments (which may link tiles)
-      const key = new Map<number, number>();
+      const key = new Map<number, NodeId>();
       for (const a of nodes) for (let k = 0; k < a.length; k += 5) key.set(a[k] * 1000 + a[k + 1], w.roads.addNode({ x: a[k + 2], z: a[k + 3], y: a[k + 4] }));
       const nc = w.roads.nodes.cols;
       for (const a of segs) for (let k = 0; k < a.length; k += 4) {

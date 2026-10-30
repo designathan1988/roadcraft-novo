@@ -7,6 +7,7 @@
 // the live numbers only rewrite their own text.
 
 import type { CommandStack } from '../core/commands.ts';
+import { NO_NODE, NO_SEG, type NodeId, type SegId } from '../core/ids.ts';
 import { RoadJournal, addCrossing, addHeightPoint, addUTurn, bendRoad, bulbAt, changeProfile, changeProfiles, upgradeStep, roadBetweenJunctions, demolishSeg, duplicateRoad, joinAt, reverseRoad, splitAt, streetChain } from '../roads/build.ts';
 import { Ctl, Rule, dirOut, effectiveControl, signalStages, type JunctionSpec } from '../roads/control.ts';
 import { PROFILES, PROFILE_INFO, Surface, withParking } from '../roads/profiles.ts';
@@ -22,16 +23,16 @@ import { profileName, sectionSvg } from './roadCatalog.ts';
 
 export interface InspectActions {
   /** Asks the simulation for the road's live numbers (the answer comes back in showProbe). */
-  probe(seg: number): void;
+  probe(seg: SegId): void;
   /** Asks for the node's pass counter (answer in showNodeProbe). */
-  probeNode(node: number): void;
+  probeNode(node: NodeId): void;
   /** Draw with this profile (the eyedropper). */
   useProfile(id: number): void;
   toast(text: string): void;
   /** Marks what is inspected (node or road; −1 = nothing). */
-  mark(node: number, seg: number): void;
+  mark(node: NodeId, seg: SegId): void;
   /** Names the whole street of a road (one undo step). */
-  nameStreet(seg: number, name: string): void;
+  nameStreet(seg: SegId, name: string): void;
   /** The street name the gameplay front gives a point (generated names), when it has one. */
   streetName?(x: number, z: number): string;
   /** Opens the section editor on a profile; what it gives back (a registered profile id) goes to `apply`. */
@@ -49,7 +50,7 @@ const DIRS = ['compass.n', 'compass.ne', 'compass.e', 'compass.se', 'compass.s',
 const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
 
 /** A leg named by where it goes (compass: −z is north). */
-function legName(world: World, n: number, s: number, withProfile = false): string {
+function legName(world: World, n: NodeId, s: SegId, withProfile = false): string {
   const [dx, dz] = dirOut(world.roads, n, s);
   const a = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
   const k = Math.round(a / 45) % 8;
@@ -60,8 +61,8 @@ function legName(world: World, n: number, s: number, withProfile = false): strin
 
 export class Inspector {
   readonly el: HTMLElement;
-  node = -1;
-  seg = -1;
+  node = NO_NODE;
+  seg = NO_SEG;
   private world: World;
   private commands: CommandStack;
   private a: InspectActions;
@@ -71,7 +72,7 @@ export class Inspector {
   /** The lane end of the connector plan the keyboard was on, focused again once the panel is built again. */
   private focusEnd: string | null = null;
   /** The incoming lane picked in the connectors: [road, lane]. */
-  private laneIn: [number, number] | null = null;
+  private laneIn: [SegId, number] | null = null;
 
   constructor(world: World, commands: CommandStack, a: InspectActions) {
     this.world = world; this.commands = commands; this.a = a;
@@ -88,19 +89,19 @@ export class Inspector {
     const net = this.world.roads;
     const n = net.nearestNode(x, z, 16);
     const nc = net.nodes.cols;
-    if (n >= 0 && (nc.deg[n] >= 3 || (nc.deg[n] === 2 && Math.hypot(nc.x[n] - x, nc.z[n] - z) < 6))) { this.node = n; this.seg = -1; }
+    if (n >= 0 && (nc.deg[n] >= 3 || (nc.deg[n] === 2 && Math.hypot(nc.x[n] - x, nc.z[n] - z) < 6))) { this.node = n; this.seg = NO_SEG; }
     else {
       const s = net.nearestSeg(x, z, 14);
-      this.node = -1; this.seg = s ? s[0] : -1;
+      this.node = NO_NODE; this.seg = s ? s[0] : NO_SEG;
     }
     this.laneIn = null;
     this.render();
   }
 
   close(): void {
-    this.node = -1; this.seg = -1; this.laneIn = null;
+    this.node = NO_NODE; this.seg = NO_SEG; this.laneIn = null;
     this.el.classList.add('hidden');
-    this.a.mark(-1, -1);
+    this.a.mark(NO_NODE, NO_SEG);
     clearInterval(this.probeTimer);
     this.live = {};
   }
@@ -108,8 +109,8 @@ export class Inspector {
   /** Something changed (undo, an edit): rebuilt if the target still exists. */
   refresh(): void {
     const net = this.world.roads;
-    if (this.node >= 0 && (!net.nodes.alive[this.node] || net.nodes.cols.deg[this.node] < 2)) this.node = -1;
-    if (this.seg >= 0 && !net.segs.alive[this.seg]) this.seg = -1;
+    if (this.node >= 0 && (!net.nodes.alive[this.node] || net.nodes.cols.deg[this.node] < 2)) this.node = NO_NODE;
+    if (this.seg >= 0 && !net.segs.alive[this.seg]) this.seg = NO_SEG;
     if (this.node < 0 && this.seg < 0) { if (!this.el.classList.contains('hidden')) this.close(); return; }
     this.render();
   }
@@ -237,7 +238,7 @@ export class Inspector {
     const eff = effectiveControl(net, n, net.junctions.get(n), net.flow.get(n));
     if (eff.ctl === Ctl.Ring) { box.append(note(t('ui.insp.ring'))); return; }
     const sc = net.segs.cols;
-    const leg = (s: number): string => this.legOf(n, s);
+    const leg = (s: SegId): string => this.legOf(n, s);
     // the signal's fixed cycle as the simulation runs it (sim/traffic.ts: each stage its green, 3 s amber, 1.5 s all red)
     const stageLegs: number[] = [];
     const stageCount = eff.ctl === Ctl.Signal ? signalStages(segs.map((s) => dirOut(net, n, s)), stageLegs) : 0;
@@ -277,7 +278,7 @@ export class Inspector {
       box.append(actions(btn(t('ui.insp.lock'), () => this.apply({ ...this.spec(), ctl: eff.ctl }, 'travar controle'))));
     } else box.append(row(label(t('junction.locked')), btn(t('junction.unlock'), () => this.apply(null))));
     // the flow of each leg, the main road's marked (4.0 :90-106)
-    const prio = (s: number) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
+    const prio = (s: SegId) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
     const top = Math.max(...segs.map(prio));
     const mains = segs.filter((s) => prio(s) === top);
     const flows = el('div', 'rp-flows');
@@ -367,7 +368,7 @@ export class Inspector {
   }
 
   /** The turn from road `from` into road `to` at node n: through within 45°, a U-turn when it doubles back. */
-  private turnOf(n: number, from: number, to: number): string {
+  private turnOf(n: NodeId, from: SegId, to: SegId): string {
     const net = this.world.roads;
     const [ax, az] = dirOut(net, n, from), [bx, bz] = dirOut(net, n, to);
     const dot = -ax * bx - az * bz, cross = -ax * bz + az * bx;
@@ -378,7 +379,7 @@ export class Inspector {
   }
 
   /** A leg named as the player sees it from the camera (4.0 junctionPanel.ts:27-45), or by the compass without one. */
-  private legOf(n: number, s: number): string {
+  private legOf(n: NodeId, s: SegId): string {
     const p = this.a.project;
     if (!p) return legName(this.world, n, s);
     const net = this.world.roads, nc = net.nodes.cols;
@@ -394,7 +395,7 @@ export class Inspector {
    * (or Enter / Space on the focused end) an arriving lane to see where it goes, then a leaving road to link or unlink
    * it. This engine links a lane to a road (the simulation picks the lane on it): a leaving road is one end.
    */
-  private connectorPlan(n: number, segs: number[], spec: JunctionSpec | undefined): HTMLElement {
+  private connectorPlan(n: NodeId, segs: SegId[], spec: JunctionSpec | undefined): HTMLElement {
     const net = this.world.roads, sc = net.segs.cols, nc = net.nodes.cols;
     const root = el('section', 'rp-summary rp-connectors');
     const head = el('div', 'rp-summary-head');
@@ -403,7 +404,7 @@ export class Inspector {
     const view = (x: number, z: number): { x: number; y: number } => this.a.project ? this.a.project(x, z) : { x, y: z };
     const retreat = new Float64Array(16), order: number[] = [];
     junctionRetreats(segs.map((s) => armOf(net.quad(s), sc.profile[s], sc.a[s] === n ? 0 : 1)), segs.map((s) => sc.len[s]), retreat, order);
-    type End = { key: string; x: number; y: number; dx: number; dy: number; seg: number; lane: number; arriving: boolean };
+    type End = { key: string; x: number; y: number; dx: number; dy: number; seg: SegId; lane: number; arriving: boolean };
     const ends: End[] = [];
     segs.forEach((s, i) => {
       const [ox, oz] = dirOut(net, n, s);
@@ -435,7 +436,7 @@ export class Inspector {
       const [x, y] = px(e.x, e.y), len = Math.hypot(e.dx, e.dy) || 1, sg = e.arriving ? 1 : -1;
       parts.push(`<line x1="${(x - (e.dx / len) * 22 * sg).toFixed(1)}" y1="${(y - (e.dy / len) * 22 * sg).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="cn-stub"/>`);
     }
-    const exitsOf = (s: number, li: number) => laneExits(net, n, s, spec)[li]?.exits.map(([o]) => o) ?? [];
+    const exitsOf = (s: SegId, li: number) => laneExits(net, n, s, spec)[li]?.exits.map(([o]) => o) ?? [];
     const [mx, my] = px(cx, cy);
     for (const e of ends) {
       if (!e.arriving) continue;
@@ -497,7 +498,7 @@ export class Inspector {
   }
 
   /** A pedestrian crossing in the middle of the road (one undo step). */
-  private crossing(s: number, ctl: number): void {
+  private crossing(s: SegId, ctl: number): void {
     const r = addCrossing(this.world, s, 0.5, ctl);
     if (typeof r === 'string') { this.a.toast(r); return; }
     this.commands.push(r);
@@ -519,7 +520,7 @@ export class Inspector {
     let main = segs[0];
     for (const s of segs) if ((PROFILE_INFO[sc.profile[s]].priority ?? 0) > (PROFILE_INFO[sc.profile[main]].priority ?? 0)) main = s;
     const chain = streetChain(this.world, main);
-    const nodes = new Set<number>();
+    const nodes = new Set<NodeId>();
     for (const s of chain) { nodes.add(sc.a[s]); nodes.add(sc.b[s]); }
     const base = this.spec();
     const greens = base.greens ?? [20, 20, 20, 20];
@@ -601,12 +602,12 @@ export class Inspector {
     box.append(panel);
 
     // the heights of its two ends as steppers, half a metre a step (4.0 :245-247, :295-301, :514-519)
-    for (const [n, key] of [[sc.a[s], 'inspector.heightStart'], [sc.b[s], 'inspector.heightEnd']] as Array<[number, string]>) {
+    for (const [n, key] of [[sc.a[s], 'inspector.heightStart'], [sc.b[s], 'inspector.heightEnd']] as Array<[NodeId, string]>) {
       const v = nc.y[n];
       box.append(row(label(t(key)), stepper(`${fmtDec(v)} m`, () => this.raiseNode(n, -0.5), () => this.raiseNode(n, 0.5))));
     }
     // a dead end's shape (4.0 :175-181, :248, :302-304): automatic, a turning bulb or plain
-    for (const [n, key] of [[sc.a[s], 'inspector.endStart'], [sc.b[s], 'inspector.endEnd']] as Array<[number, string]>) {
+    for (const [n, key] of [[sc.a[s], 'inspector.endStart'], [sc.b[s], 'inspector.endEnd']] as Array<[NodeId, string]>) {
       if (nc.deg[n] !== 1) continue;
       const now = net.junctions.get(n)?.end ?? 'auto';
       const sel = select([[0, t('insp.end.auto')], [1, t('inspector.end.bulb')], [2, t('insp.end.plain')]], now === 'bulb' ? 1 : now === 'plain' ? 2 : 0, (v) => {
@@ -674,7 +675,7 @@ export class Inspector {
         if (!r.journal.settle()) return;
         this.commands.push(r.journal);
         // the new point's own panel: its height steppers
-        this.node = r.node; this.seg = -1; this.render();
+        this.node = r.node; this.seg = NO_SEG; this.render();
       }),
       btn(t('inspector.demolish'), () => {
         const j = demolishSeg(w, s);
@@ -685,7 +686,7 @@ export class Inspector {
   }
 
   /** A node raised or lowered by `dy` (half a metre a step), from the road's panel. */
-  private raiseNode(n: number, dy: number): void {
+  private raiseNode(n: NodeId, dy: number): void {
     const j = new RoadJournal(this.world, 'altura do nó');
     j.moveNodeY(n, this.world.roads.nodes.cols.y[n] + dy);
     if (j.settle()) this.commands.push(j);
@@ -693,7 +694,7 @@ export class Inspector {
   }
 
   /** The road bent to the curvature and position chosen (roads/build.ts bendRoad). */
-  private bend(s: number, t0: number, h: number): void {
+  private bend(s: SegId, t0: number, h: number): void {
     const r = bendRoad(this.world, s, t0, h);
     if (typeof r === 'string') { this.a.toast(t('ui.insp.noBend', { why: r })); this.render(); return; }
     if (!r.settle()) { this.render(); return; }

@@ -17,6 +17,7 @@ import { Item, ItemsCommand, MAX_RUN, isBarrier, isEffect } from '../../world/it
 import { RoadGround, roadGroundAt } from '../../roads/ground.ts';
 import { t } from '../../shared/i18n/index.ts';
 import type { World } from '../../world/world.ts';
+import { NO_SEG, type SegId } from '../../core/ids.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 
@@ -54,7 +55,7 @@ export class ItemTool {
   /** Text of the next sign (street name, information, direction). */
   signText = '';
   /** Called when a sign with text is placed (text, position, nearest segment). */
-  onText: ((text: string, x: number, z: number, seg: number, street: boolean) => void) | null = null;
+  onText: ((text: string, x: number, z: number, seg: SegId, street: boolean) => void) | null = null;
   barrier: number = Item.Fence;
   /** Lights on the wired poles: 0 none, 1 on alternate poles, 2 on all. */
   poleLights = 0;
@@ -154,11 +155,11 @@ export class ItemTool {
       else { this.commands.push(c); if (rule) this.hud.toast(rule[0].toUpperCase() + rule.slice(1) + '.'); }
       if (this.item === Item.Sign && this.signText.trim()) {
         const near = this.world.roads.nearestSeg(sp.x, sp.z, 30);
-        this.onText?.(this.signText.trim().slice(0, 32), sp.x, sp.z, near ? near[0] : -1, this.sign === 2);
+        this.onText?.(this.signText.trim().slice(0, 32), sp.x, sp.z, near ? near[0] : NO_SEG, this.sign === 2);
       } else if (this.item === Item.Sign && this.sign === 2) {
         // street sign without a typed name: it shows the street's name (generated or the one the player gave)
         const name = addressAt(this.world, sp.x, sp.z, 30)?.name;
-        if (name) this.onText?.(name, sp.x, sp.z, -1, false);
+        if (name) this.onText?.(name, sp.x, sp.z, NO_SEG, false);
       }
       return;
     }

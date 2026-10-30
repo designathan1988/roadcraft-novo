@@ -11,6 +11,7 @@
 
 import { Ctl } from '../roads/control.ts';
 import { laneSpeed, type SimNet } from './lanes.ts';
+import { asNode } from '../core/ids.ts';
 
 /** Timings (s), from roadcraft 4.0 `params.ts`. */
 export const SIGNAL = {
@@ -103,7 +104,7 @@ export class Signals {
     for (let k = 0; k < 8; k++) { this.arms[n * 8 + k] = 0; this.walk[n * 8 + k] = 0; this.call[n * 8 + k] = -1; this.served[n * 8 + k] = this.time; }
     this.cycle[n] = 0;
     if (!sim.net.nodes.alive[n] || ns === 0) return;
-    const deg = sim.net.nodes.cols.deg[n], spec = sim.net.junctions.get(n);
+    const deg = sim.net.nodes.cols.deg[n], spec = sim.net.junctions.get(asNode(n));
     const pedSig = sim.nodeCtl[n] === Ctl.PedSignal;
     const all = (1 << Math.min(8, deg)) - 1;
     for (let k = 0; k < deg && k < 8; k++) if (!pedSig) this.arms[n * 8 + sim.armStage[n * 8 + k]] |= 1 << k;

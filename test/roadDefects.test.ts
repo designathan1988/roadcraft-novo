@@ -19,6 +19,7 @@ import type { LotColumns } from '../src/shared/contracts/worker.ts';
 import { decayTenths } from '../src/world/decay.ts';
 import { Ctl, Rule, type JunctionSpec } from '../src/roads/control.ts';
 import { laneExits } from '../src/roads/laneLinks.ts';
+import { asNode, asSeg } from '../src/core/ids.ts';
 
 function flatWorld(money: number, y = 10): World {
   const w = new World();
@@ -61,7 +62,7 @@ test('D2: demolishing the generated city, which was free, gives no money back', 
   generatedRoad(w, 0, 0, 100, 0);
   generatedRoad(w, 0, -100, 0, 0);
   const start = w.money;
-  const d = demolishSeg(w, s1);
+  const d = demolishSeg(w, asSeg(s1));
   assert.ok(d.settle());
   assert.equal(w.money, start, `demolishing one generated segment changed the money from ${start} to ${w.money}`);
   const box = demolishBox(w, -150, -150, 150, 150)!;
@@ -101,11 +102,11 @@ test('D2: making a free road dearer costs the difference; making it cheaper give
   const w = flatWorld(1e9);
   const s = generatedRoad(w, -50, 0, 50, 0, 0);
   const wide = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
-  const up = changeProfile(w, s, wide);
+  const up = changeProfile(w, asSeg(s), wide);
   const diff = 100 * (PROFILE_INFO[wide].cost - PROFILE_INFO[0].cost);
   assert.ok(Math.abs(up.price - diff) < diff * 0.02, `upgrading costs ${up.price}, the difference is ${diff}`);
   assert.ok(up.settle());
-  const down = changeProfile(w, s, 0);
+  const down = changeProfile(w, asSeg(s), 0);
   assert.equal(down.price, 0, 'downgrading a free road gave money back');
 });
 
@@ -312,7 +313,7 @@ test('A40: setting the clock keeps the minute set and files every building again
 function legToward(w: World, n: number, dx: number, dz: number): number {
   const net = w.roads, nc = net.nodes.cols;
   let best = -1, bd = -2;
-  for (const s of net.segsOf(n, [])) {
+  for (const s of net.segsOf(asNode(n), [])) {
     const o = net.segs.cols.a[s] === n ? net.segs.cols.b[s] : net.segs.cols.a[s];
     const ex = nc.x[o] - nc.x[n], ez = nc.z[o] - nc.z[n], l = Math.hypot(ex, ez) || 1;
     const d = (ex * dx + ez * dz) / l;
@@ -334,7 +335,7 @@ test('D8: junction rules and lane links follow a split leg and forget a removed 
   const c = w.roads.nearestNode(0, 0, 1);
   const east = legToward(w, c, 1, 0), west = legToward(w, c, -1, 0), north = legToward(w, c, 0, -1);
   const set = new RoadJournal(w, 'junction');
-  set.setJunction(c, { ctl: Ctl.Priority, legs: [[east, Rule.Stop]], bans: [north, east], lanes: [[west, 0, [east]]] });
+  set.setJunction(c, { ctl: Ctl.Priority, legs: [[asSeg(east), Rule.Stop]], bans: [asSeg(north), asSeg(east)], lanes: [[asSeg(west), 0, [asSeg(east)]]] });
   assert.ok(set.settle());
   // a new road crosses the east leg 40 m out: the leg at the node is a new piece
   road(w, 40, -60, 40, 60);
@@ -342,22 +343,22 @@ test('D8: junction rules and lane links follow a split leg and forget a removed 
   let spec = w.roads.junctions.get(c);
   for (const s of specSegs(spec)) {
     assert.ok(w.roads.segs.alive[s], `the junction names segment ${s}, which is gone`);
-    assert.ok(w.roads.segsOf(c, []).includes(s), `the junction names segment ${s}, which is not at the node`);
+    assert.ok(w.roads.segsOf(c, []).includes(asSeg(s)), `the junction names segment ${s}, which is not at the node`);
   }
   assert.deepEqual(spec?.legs, [[east2, Rule.Stop]], 'the stop sign stayed with the east leg');
-  assert.equal(laneExits(w.roads, c, west)[0].exits.length, 1, 'the west lane still has its one exit');
-  assert.equal(laneExits(w.roads, c, west)[0].exits[0][0], east2);
+  assert.equal(laneExits(w.roads, c, asSeg(west))[0].exits.length, 1, 'the west lane still has its one exit');
+  assert.equal(laneExits(w.roads, c, asSeg(west))[0].exits[0][0], east2);
   // the east leg is demolished: nothing names it any more, and the west lane has exits again (automatic)
   const commands = new CommandStack();
-  const d = demolishSeg(w, east2);
+  const d = demolishSeg(w, asSeg(east2));
   assert.ok(d.settle());
   commands.push(d);
   spec = w.roads.junctions.get(c);
-  for (const s of specSegs(spec)) assert.ok(w.roads.segsOf(c, []).includes(s), `after the demolition the junction still names segment ${s}`);
-  assert.ok(laneExits(w.roads, c, west)[0].exits.length > 0, 'the west lane was left with no exit: cars stuck');
+  for (const s of specSegs(spec)) assert.ok(w.roads.segsOf(c, []).includes(asSeg(s)), `after the demolition the junction still names segment ${s}`);
+  assert.ok(laneExits(w.roads, c, asSeg(west))[0].exits.length > 0, 'the west lane was left with no exit: cars stuck');
   // a new road elsewhere takes the freed id: it must not inherit anything
   road(w, 500, 500, 600, 500);
-  for (const s of specSegs(w.roads.junctions.get(c))) assert.ok(w.roads.segsOf(c, []).includes(s));
+  for (const s of specSegs(w.roads.junctions.get(c))) assert.ok(w.roads.segsOf(c, []).includes(asSeg(s)));
   commands.push(road(w, 700, 500, 800, 500));
   commands.undo(); commands.undo();
 });
@@ -677,12 +678,12 @@ test('D20: a mid-block crossing or U-turn node that gets a third road becomes an
     assert.ok(typeof r !== 'string', String(r));
     assert.ok(r.settle());
     let mid = -1;
-    for (let n = 0; n < w.roads.nodes.end; n++) if (w.roads.nodes.alive[n] && w.roads.junctions.has(n)) mid = n;
+    for (let n = 0; n < w.roads.nodes.end; n++) if (w.roads.nodes.alive[n] && w.roads.junctions.has(asNode(n))) mid = n;
     assert.ok(mid >= 0);
     const nc = w.roads.nodes.cols;
     road(w, nc.x[mid], nc.z[mid], nc.x[mid], nc.z[mid] - 80);
     assert.equal(nc.deg[mid], 3);
-    const c = effectiveControl(w.roads, mid);
+    const c = effectiveControl(w.roads, asNode(mid));
     assert.equal(c.legs.size, 3, `the ${kind} node with a third road has rules for ${c.legs.size} legs`);
     assert.ok(c.ctl !== Ctl.Zebra && c.ctl !== Ctl.UTurn, `the ${kind} node kept its two-road control (${c.ctl})`);
   }
@@ -713,7 +714,7 @@ test('D22: repainting a street\'s zone leaves the corner buildings that front th
   road(w, -150, 0, 150, 0);
   road(w, 0, -150, 0, 150);
   const z = new RoadJournal(w, 'zone');
-  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && Math.abs(w.roads.segs.cols.mz[s]) < 1) { z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential); }
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s] && Math.abs(w.roads.segs.cols.mz[s]) < 1) { z.setZone(asSeg(s), 0, Zone.Residential); z.setZone(asSeg(s), 1, Zone.Residential); }
   // facing the main street (front towards −z), and on the corner facing the cross street (front towards −x)
   const onMain = w.addBuilding({ x: 60, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
   const onCross = w.addBuilding({ x: 20, z: 30, w: 14, d: 26, h: 0, rot: -Math.PI / 2, color: 0, seed: 2, zone: Zone.Residential, floors: 2, style: 1 });
@@ -984,7 +985,7 @@ test('D36: changing only the density keeps the buildings that fit it; towers go 
   const w = flatWorld(1e9);
   road(w, -150, 0, 150, 0);
   const z = new RoadJournal(w, 'zone');
-  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { z.setZone(s, 0, Zone.Residential); z.setZone(s, 1, Zone.Residential); }
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { z.setZone(asSeg(s), 0, Zone.Residential); z.setZone(asSeg(s), 1, Zone.Residential); }
   const house = w.addBuilding({ x: 30, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
   const tower = w.addBuilding({ x: 60, z: 22, w: 14, d: 26, h: 0, rot: Math.PI, color: 0, seed: 2, zone: Zone.Residential, floors: 12, style: 1 });
   const paint = (zone: number) => { const t = new ZoneTool(w, new CommandStack()); t.zone = zone; t.radius = 60; t.begin(); t.dab(45, 16); t.end(); };

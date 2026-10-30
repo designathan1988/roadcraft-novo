@@ -7,6 +7,7 @@ import type { World } from '../world/world.ts';
 import { RoadJournal } from './build.ts';
 import { closestT, splitQuad } from './geometry.ts';
 import { PROFILE_INFO } from './profiles.ts';
+import { NO_SEG, asNode, type NodeId } from '../core/ids.ts';
 
 /** Ends closer than this to a segment's ends are left alone (they are a near miss, not "inside"). */
 const END_GAP = 4;
@@ -14,15 +15,15 @@ const END_GAP = 4;
 /** Joins every dead end lying inside another road to it. Returns how many were joined. */
 export function repairDanglingEnds(world: World): number {
   const net = world.roads, nc = net.nodes.cols, sc = net.segs.cols;
-  const ends: number[] = [];
-  for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n] && nc.deg[n] === 1) ends.push(n);
+  const ends: NodeId[] = [];
+  for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n] && nc.deg[n] === 1) ends.push(asNode(n));
   let fixed = 0;
   const j = new RoadJournal(world, 'reparar mapa');
   for (const n of ends) {
     if (!net.nodes.alive[n] || nc.deg[n] !== 1) continue;
     const own = net.segsOf(n, [])[0];
     const x = nc.x[n], z = nc.z[n];
-    let best = -1, bt = 0, bd = Infinity;
+    let best = NO_SEG, bt = 0, bd = Infinity;
     net.forSegsNear(x - 30, z - 30, x + 30, z + 30, (s) => {
       if (s === own || sc.a[s] === n || sc.b[s] === n) return;
       const half = PROFILE_INFO[sc.profile[s]]?.asphaltRight ?? 3;

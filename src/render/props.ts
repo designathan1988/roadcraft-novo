@@ -23,6 +23,7 @@ import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
 import { SHADOW_LENGTH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
+import type { SegId } from '../core/ids.ts';
 
 const {
   Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
@@ -520,7 +521,7 @@ export class PropRenderer {
     this.cellParts[c] = parts40 ? 1 : 0;
     const w = this.world, net = w.roads;
     const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
-    const segs: number[] = [];
+    const segs: SegId[] = [];
     net.forSegsNear(x0 - 40, z0 - 40, x0 + 296, z0 + 296, (s) => segs.push(s));
     const boxes = w.gatherBoxes([c], true);
     const graph = net.gather(segs, []);

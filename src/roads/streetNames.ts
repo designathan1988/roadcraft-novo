@@ -12,6 +12,7 @@ import { armOf } from './junction.ts';
 import { PROFILE_INFO } from './profiles.ts';
 import { SegFlag } from './flags.ts';
 import { closestT, type Quad } from './geometry.ts';
+import { NO_SEG, type SegId } from '../core/ids.ts';
 
 const PEOPLE = [
   'Santos Dumont', 'Machado de Assis', 'Tiradentes', 'Anita Garibaldi', 'Chiquinha Gonzaga', 'Rui Barbosa', 'Cecília Meireles',
@@ -47,23 +48,23 @@ function hashName(h: number, profile: number): string {
 }
 
 /** One street in order from its start: the segments, which end each one starts at, and their lengths. */
-export interface Street { segs: number[]; startAt: Array<0 | 1>; lens: number[]; profile: number; key: number }
+export interface Street { segs: SegId[]; startAt: Array<0 | 1>; lens: number[]; profile: number; key: number }
 
 /** The street through segment s0, ordered from the end with the smaller (x, z), with a key from its two ends. */
-export function streetOf(world: World, s0: number): Street {
+export function streetOf(world: World, s0: SegId): Street {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const prof = sc.profile[s0], oneWay = PROFILE_INFO[prof]?.oneWay ?? false;
   const q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
-  const list: number[] = [];
+  const list: SegId[] = [];
   const seen = new Set([s0]);
   /** Walks from segment s leaving by its end `end`; returns [segment, end it is entered by] in order. */
-  const walk = (s: number, end: 0 | 1): Array<[number, 0 | 1]> => {
-    const out: Array<[number, 0 | 1]> = [];
+  const walk = (s: SegId, end: 0 | 1): Array<[SegId, 0 | 1]> => {
+    const out: Array<[SegId, 0 | 1]> = [];
     for (let guard = 0; guard < 4000; guard++) {
       const n = end === 1 ? sc.b[s] : sc.a[s];
       const here = armOf(net.quad(s, q), prof, end);
       const hx = -here.dx, hz = -here.dz;
-      let best = -1, bestDot = Math.cos(35 * Math.PI / 180), bestEnd: 0 | 1 = 0;
+      let best = NO_SEG, bestDot = Math.cos(35 * Math.PI / 180), bestEnd: 0 | 1 = 0;
       for (const t of net.segsOf(n, list)) {
         if (seen.has(t) || sc.profile[t] !== prof || (sc.flags[t] & SegFlag.Ring)) continue;
         const tEnd: 0 | 1 = sc.a[t] === n ? 0 : 1;
@@ -80,7 +81,7 @@ export function streetOf(world: World, s0: number): Street {
   };
   const fwd = walk(s0, 1), back = walk(s0, 0);
   // in order: the backward part reversed (each entered by its other end), s0 entered by a, then forward
-  const segs: number[] = [], startAt: Array<0 | 1> = [];
+  const segs: SegId[] = [], startAt: Array<0 | 1> = [];
   for (let i = back.length - 1; i >= 0; i--) { segs.push(back[i][0]); startAt.push(back[i][1] === 0 ? 1 : 0); }
   segs.push(s0); startAt.push(0);
   for (const [t, e] of fwd) { segs.push(t); startAt.push(e); }
@@ -95,7 +96,7 @@ export function streetOf(world: World, s0: number): Street {
 }
 
 /** Name of the street through segment s: the one the player typed, or the generated one. */
-export function streetName(world: World, s: number, street?: Street): string {
+export function streetName(world: World, s: SegId, street?: Street): string {
   const own = world.streetNames.get(s);
   if (own) return own;
   const st = street ?? streetOf(world, s);
@@ -108,7 +109,7 @@ export function streetName(world: World, s: number, street?: Street): string {
  * generated name shows again (Roadcraft 4.0 world/roads/streetNames.ts:61: a plate without text names nothing).
  * The street is the chain the tools follow and the one streetName reads; `changed` runs after each change.
  */
-export function nameStreetCommand(world: World, seg: number, name: string, changed: () => void): Command {
+export function nameStreetCommand(world: World, seg: SegId, name: string, changed: () => void): Command {
   const segs = [...new Set([...streetChain(world, seg), ...streetOf(world, seg).segs])];
   const before = segs.map((x) => world.streetNames.get(x));
   const text = name.trim();

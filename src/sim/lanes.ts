@@ -4,6 +4,7 @@
 // node) live in an SoA table, rebuilt only at the nodes touched.
 
 import { RoadNetwork, type NetOp } from '../roads/network.ts';
+import { asNode, asSeg, type NodeId, type SegId } from '../core/ids.ts';
 import { Ctl, Rule, banned, effectiveControl, mainLegs, signalStages, type JunctionSpec } from '../roads/control.ts';
 import { PROFILE_INFO, PROFILES, TurnBit } from '../roads/profiles.ts';
 import { arcTable, bez, bezD, type Quad } from '../roads/geometry.ts';
@@ -16,7 +17,7 @@ export const ARC_STEPS = 16;
 /** Arc-length samples of a connection's curve (it is short: a junction's turn). */
 export const CONN_ARC = 8;
 export const laneId = (seg: number, dir: number, idx: number) => seg * 16 + (dir > 0 ? 0 : 8) + idx;
-export const laneSeg = (l: number) => l >> 4;
+export const laneSeg = (l: number): SegId => asSeg(l >> 4);
 export const laneDir = (l: number) => ((l & 8) !== 0 ? -1 : 1);
 export const laneIdx = (l: number) => l & 7;
 
@@ -83,7 +84,7 @@ export class SimNet {
   armMain = new Uint8Array(1 << 14);
   /** The node's control may still be changed by the flow (automatic, an ordinary junction of 3+ arms). */
   nodeAuto = new Uint8Array(1 << 14);
-  private dirtyNodes = new Set<number>();
+  private dirtyNodes = new Set<NodeId>();
   /** Segments removed since the last step (the vehicles on them leave), and the two nodes of each (a, b). */
   readonly removedSegs: number[] = [];
   readonly removedSegEnds: number[] = [];
@@ -180,7 +181,7 @@ export class SimNet {
   onNodeReset: (n: number) => void = () => {};
 
   /** The flow asks for another control at an automatic node: stored, and the node is rebuilt at the next step. */
-  setFlow(n: number, flow: number): void {
+  setFlow(n: NodeId, flow: number): void {
     if (this.nodeFlow[n] === flow) return;
     this.nodeFlow[n] = flow;
     this.dirtyNodes.add(n);
@@ -281,11 +282,11 @@ export class SimNet {
   }
 
   private q: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
-  private quadOf(seg: number): Quad { return this.net.quad(seg, this.q); }
+  private quadOf(seg: SegId): Quad { return this.net.quad(seg, this.q); }
 
   // ------------------------------------------------------------ nodes
 
-  private clearNode(n: number): void {
+  private clearNode(n: NodeId): void {
     const k = this.conns.cols;
     for (let c = this.nodeConn[n]; c >= 0;) {
       const next = k.nextAtNode[c];
@@ -308,20 +309,20 @@ export class SimNet {
   }
 
   /** Can a vehicle that reaches node `n` by segment `sIn` leave by segment `sOut`? (`bus`: bus-only lanes too) */
-  turnOk(n: number, sIn: number, sOut: number, bus: boolean): boolean {
+  turnOk(n: NodeId, sIn: SegId, sOut: SegId, bus: boolean): boolean {
     const sc = this.net.segs.cols;
     const ai = this.segArm[sIn * 2 + (sc.a[sIn] === n ? 0 : 1)], ao = this.segArm[sOut * 2 + (sc.a[sOut] === n ? 0 : 1)];
     return ((bus ? this.turnAll : this.turnCar)[n * 8 + ai] & (1 << ao)) !== 0;
   }
 
   /** A new segment: the dead ends near it redo their turning bulb (it may go, with the road beside it). */
-  private dirtyDeadEndsNear(seg: number): void {
+  private dirtyDeadEndsNear(seg: SegId): void {
     const net = this.net, sc = net.segs.cols, nc = net.nodes.cols;
     const r = sc.len[seg] / 2 + BULB_R + 20;
     net.nodeIndex.query(sc.mx[seg] - r, sc.mz[seg] - r, sc.mx[seg] + r, sc.mz[seg] + r, (n) => { if (nc.deg[n] === 1) this.dirtyNodes.add(n); });
   }
 
-  private rebuildNode(n: number): void {
+  private rebuildNode(n: NodeId): void {
     this.clearNode(n);
     const net = this.net, sc = net.segs.cols;
     const segs = net.segsOf(n, []);
@@ -438,7 +439,7 @@ export class SimNet {
   }
 
   /** Pairs of the node's connections that cross or arrive in the same lane. */
-  private buildConflicts(n: number): void {
+  private buildConflicts(n: NodeId): void {
     const k = this.conns.cols;
     const list: number[] = [];
     for (let c = this.nodeConn[n]; c >= 0; c = k.nextAtNode[c]) list.push(c);
@@ -581,13 +582,13 @@ export function encodeOps(ops: NetOp[], extra: string[] = []): Float64Array {
 export function decodeOp(a: Float64Array, i: number, extra: string[] = []): NetOp {
   const o = i * 8;
   switch (a[o]) {
-    case 1: return { t: 'addNode', rec: { id: a[o + 1], x: a[o + 2], z: a[o + 3], y: a[o + 4] } };
-    case 2: return { t: 'remNode', id: a[o + 1] };
-    case 3: { const f = a[o + 7]; return { t: 'addSeg', rec: { id: a[o + 1], a: a[o + 2], b: a[o + 3], cx: a[o + 4], cz: a[o + 5], profile: a[o + 6], flags: f % 256, zl: Math.floor(f / 256) % 16, zr: Math.floor(f / 4096) % 16 } }; }
-    case 4: return { t: 'remSeg', id: a[o + 1] };
-    case 5: return { t: 'profile', id: a[o + 1], profile: a[o + 2] };
-    case 7: return { t: 'zone', id: a[o + 1], side: a[o + 2], zone: a[o + 3] };
-    case 8: return { t: 'junction', id: a[o + 1], spec: JSON.parse(extra[a[o + 2]] ?? 'null') as JunctionSpec | null };
+    case 1: return { t: 'addNode', rec: { id: asNode(a[o + 1]), x: a[o + 2], z: a[o + 3], y: a[o + 4] } };
+    case 2: return { t: 'remNode', id: asNode(a[o + 1]) };
+    case 3: { const f = a[o + 7]; return { t: 'addSeg', rec: { id: asSeg(a[o + 1]), a: asNode(a[o + 2]), b: asNode(a[o + 3]), cx: a[o + 4], cz: a[o + 5], profile: a[o + 6], flags: f % 256, zl: Math.floor(f / 256) % 16, zr: Math.floor(f / 4096) % 16 } }; }
+    case 4: return { t: 'remSeg', id: asSeg(a[o + 1]) };
+    case 5: return { t: 'profile', id: asSeg(a[o + 1]), profile: a[o + 2] };
+    case 7: return { t: 'zone', id: asSeg(a[o + 1]), side: a[o + 2], zone: a[o + 3] };
+    case 8: return { t: 'junction', id: asNode(a[o + 1]), spec: JSON.parse(extra[a[o + 2]] ?? 'null') as JunctionSpec | null };
     default: return { t: 'clear' };
   }
 }

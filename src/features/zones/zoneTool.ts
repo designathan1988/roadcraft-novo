@@ -10,6 +10,7 @@ import { baseZone, zoneDensity } from '../../roads/zones.ts';
 /** Most floors a low-density zone grows (world/growth.ts floorsFor: houses up to 3, shops up to 4). */
 const LOW_DENSITY_FLOORS = 4;
 import type { World } from '../../world/world.ts';
+import { NO_SEG, type SegId } from '../../core/ids.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 
@@ -49,7 +50,7 @@ export class ZoneTool {
     if (!j) return;
     const net = this.world.roads, sc = net.segs.cols;
     const r = this.radius;
-    const hits: Array<[number, number]> = [];
+    const hits: Array<[SegId, number]> = [];
     net.forSegsNear(x - r - 60, z - r - 60, x + r + 60, z + r + 60, (s) => {
       const info = PROFILE_INFO[sc.profile[s]];
       if (!zonable(sc.profile[s])) return;
@@ -106,7 +107,7 @@ export class ZoneTool {
       const n = fwd ? sc.b[s] : sc.a[s];
       bezD(qs, fwd ? 1 : 0, h);
       if (!fwd) { h[0] = -h[0]; h[1] = -h[1]; }
-      let best = -1, bestA = -Infinity, bestFwd = true;
+      let best = NO_SEG, bestA = -Infinity, bestFwd = true;
       for (const t of net.segsOf(n, [])) {
         const tf = sc.a[t] === n;
         bezD(net.quad(t), tf ? 0 : 1, o);
@@ -126,7 +127,7 @@ export class ZoneTool {
   }
 
   /** Knocks down the buildings of another zone that face this side of the segment. */
-  private clearSide(j: RoadJournal, s: number, side: number, keepZone: number): void {
+  private clearSide(j: RoadJournal, s: SegId, side: number, keepZone: number): void {
     const net = this.world.roads, sc = net.segs.cols, col = this.world.buildings.cols;
     const q = net.quad(s);
     const info = PROFILE_INFO[sc.profile[s]];

@@ -10,6 +10,7 @@ import { cellId, cellOriginX } from '../src/core/grid.ts';
 import { Fn } from '../src/world/arch.ts';
 import { Zone } from '../src/roads/zones.ts';
 import type { JobPool } from '../src/jobs/pool.ts';
+import { asSeg, type SegId } from '../src/core/ids.ts';
 
 function flatWorld(): World {
   const w = new World();
@@ -22,7 +23,7 @@ function road(w: World, ax: number, az: number, bx: number, bz: number, zone: nu
   const p = planRoad(w, a, null, b, 0, 0);
   assert.ok(p.ok, p.reason);
   assert.ok(buildRoad(w, p, a, b, 0).settle());
-  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { w.roads.setZone(s, 0, zone); w.roads.setZone(s, 1, zone); }
+  for (let s = 0; s < w.roads.segs.end; s++) if (w.roads.segs.alive[s]) { w.roads.setZone(asSeg(s), 0, zone); w.roads.setZone(asSeg(s), 1, zone); }
 }
 /** Growth with the lots computed here instead of in the worker pool. */
 function growthOf(w: World): Growth {
@@ -35,7 +36,7 @@ function growthOf(w: World): Growth {
   }
   for (const c of cells) {
     const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
-    const segs: number[] = [];
+    const segs: SegId[] = [];
     w.roads.forSegsNear(x0 - 160, z0 - 160, x0 + CELL_SIZE + 160, z0 + CELL_SIZE + 160, (s) => segs.push(s));
     if (segs.length) G.setLots(c, buildLots(w.heights, w.roads.gather(segs, []), c));
   }
@@ -47,7 +48,7 @@ test('loteamento gerado recusa todo lote sobre água', () => {
   road(w, -100, 0, 100, 0, Zone.Residential);
   w.water.fill(11); // ground is at 10
   const c = cellId(MAP_CELLS >> 1, MAP_CELLS >> 1);
-  const segs: number[] = [];
+  const segs: SegId[] = [];
   const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
   w.roads.forSegsNear(x0 - 160, z0 - 160, x0 + CELL_SIZE + 160, z0 + CELL_SIZE + 160, (s) => segs.push(s));
   const lots = buildLots(w.heights, w.roads.gather(segs, []), c, w.water);

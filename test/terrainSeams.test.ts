@@ -12,6 +12,7 @@ import { heightAt } from '../src/world/heights.ts';
 import { CELL_SIZE, HEIGHT_SPACING, MAP_HALF } from '../src/config.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import type { PackedMesh } from '../src/shared/contracts/worker.ts';
+import type { NodeId, SegId } from '../src/core/ids.ts';
 
 /** Triangles of a packed mesh in world units, with each corner's kind (the `col` alpha). */
 function triangles(m: PackedMesh): { p: number[]; kind: number[] }[] {
@@ -65,7 +66,7 @@ test('terrain seams: the ground meets the footway\'s edge on its height and neve
   const net = w.roads;
   // the road cell holding the origin, on the 4 m grid
   const ox = Math.floor((0 + MAP_HALF) / CELL_SIZE) * CELL_SIZE - MAP_HALF, oz = ox;
-  const segs: number[] = [], nodes: number[] = [];
+  const segs: SegId[] = [], nodes: NodeId[] = [];
   const reach = 100;
   net.segIndex.query(ox - reach, oz - reach, ox + CELL_SIZE + reach, oz + CELL_SIZE + reach, (s) => { segs.push(s); });
   net.nodeIndex.query(ox - reach, oz - reach, ox + CELL_SIZE + reach, oz + CELL_SIZE + reach, (n) => { nodes.push(n); });

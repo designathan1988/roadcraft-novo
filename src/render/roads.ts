@@ -20,6 +20,7 @@ import { CellLayer, type LayerSource } from './cellLayer.ts';
 import { ASPHALT_TEX, ASPHALT_TILE } from './surfaceBake.ts';
 import { COOKED, loadCookedSurfaces } from './cookedSurfaces.ts';
 import { T, useCompactVertex, type Node, lodFadeMask } from './tsl.ts';
+import type { NodeId, SegId } from '../core/ids.ts';
 
 const {
   attribute, vec2, vec3, vec4, float, int, ivec2, abs, mix, clamp, fract, fwidth, max, min, floor, Fn, If, mx_worley_noise_vec2,
@@ -56,7 +57,7 @@ const BRIDGE_GAP = 4.5;
 
 /** Does any segment of these cells run over a bridge (its height over the ground past BRIDGE_GAP)? */
 function hasBridge(net: RoadNetwork, heights: Float32Array, cells: number[]): boolean {
-  const sc = net.segs.cols, nc = net.nodes.cols, segs: number[] = [], nodes: number[] = [];
+  const sc = net.segs.cols, nc = net.nodes.cols, segs: SegId[] = [], nodes: NodeId[] = [];
   for (const c of cells) net.cellContents(c, segs, nodes);
   for (const s of segs) {
     const a = sc.a[s], b = sc.b[s];
@@ -85,7 +86,7 @@ export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, 
     castsShadow: (scope, id) => !!heights && scope !== 'plate' && hasBridge(net, heights, scope === 'cell' ? [id] : tileCells(id)),
     hasContent: (c) => net.cellCount[c] > 0,
     buildCell: (c, level, priority, done) => {
-      const segs: number[] = [], nodes: number[] = [];
+      const segs: SegId[] = [], nodes: NodeId[] = [];
       net.cellContents(c, segs, nodes);
       const graph = net.gather(segs, nodes);
       const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
@@ -94,7 +95,7 @@ export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, 
     },
     buildTile: (t, priority, done) => {
       const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
-      const segs: number[] = [], nodes: number[] = [];
+      const segs: SegId[] = [], nodes: NodeId[] = [];
       for (let j = 0; j < CELLS_PER_TILE; j++) for (let i = 0; i < CELLS_PER_TILE; i++) net.cellContents(cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j), segs, nodes);
       if (segs.length === 0 && nodes.length === 0) { done(null); return; }
       const graph = net.gather(segs, nodes);

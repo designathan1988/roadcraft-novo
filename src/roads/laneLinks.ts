@@ -6,6 +6,7 @@ import { armOf } from './junction.ts';
 import { PROFILE_INFO, TurnBit } from './profiles.ts';
 import { banned, type JunctionSpec } from './control.ts';
 import type { RoadNetwork } from './network.ts';
+import type { NodeId, SegId } from '../core/ids.ts';
 
 /** Faixas de um trecho num sentido (+1 de a para b). */
 export function lanesIn(profile: number, dir: number): number {
@@ -30,7 +31,7 @@ export function turnBit(hx: number, hz: number, ox: number, oz: number): number 
 }
 
 /** Vias de saída escolhidas à mão para a faixa `idx` que chega por `seg`, ou null (automático). */
-export function customExits(spec: JunctionSpec | undefined, seg: number, idx: number): number[] | null {
+export function customExits(spec: JunctionSpec | undefined, seg: SegId, idx: number): SegId[] | null {
   const l = spec?.lanes;
   if (!l) return null;
   for (const [s, i, to] of l) if (s === seg && i === idx) return to;
@@ -38,7 +39,7 @@ export function customExits(spec: JunctionSpec | undefined, seg: number, idx: nu
 }
 
 /** Braços do nó: trecho, ponta (0 = a), direção de saída. */
-export function armsOf(net: RoadNetwork, n: number): Array<{ s: number; end: 0 | 1; dx: number; dz: number }> {
+export function armsOf(net: RoadNetwork, n: NodeId): Array<{ s: SegId; end: 0 | 1; dx: number; dz: number }> {
   const sc = net.segs.cols;
   return net.segsOf(n, []).map((s) => {
     const end: 0 | 1 = sc.a[s] === n ? 0 : 1;
@@ -51,7 +52,7 @@ export function armsOf(net: RoadNetwork, n: number): Array<{ s: number; end: 0 |
  * Saídas automáticas e efetivas de cada faixa que chega por `seg` ao nó `n`: lista por faixa de
  * [trecho de saída, bit da seta]. `custom` diz se a faixa foi ajustada à mão.
  */
-export function laneExits(net: RoadNetwork, n: number, seg: number, spec = net.junctions.get(n)): Array<{ exits: Array<[number, number]>; auto: Array<[number, number]>; custom: boolean }> {
+export function laneExits(net: RoadNetwork, n: NodeId, seg: SegId, spec = net.junctions.get(n)): Array<{ exits: Array<[SegId, number]>; auto: Array<[SegId, number]>; custom: boolean }> {
   const sc = net.segs.cols;
   const arms = armsOf(net, n);
   const me = arms.find((a) => a.s === seg);
@@ -60,9 +61,9 @@ export function laneExits(net: RoadNetwork, n: number, seg: number, spec = net.j
   const m = lanesIn(sc.profile[seg], inDir);
   const info = PROFILE_INFO[sc.profile[seg]];
   const lanes = inDir > 0 ? info.fwd : info.back;
-  const out: Array<{ exits: Array<[number, number]>; auto: Array<[number, number]>; custom: boolean }> = [];
+  const out: Array<{ exits: Array<[SegId, number]>; auto: Array<[SegId, number]>; custom: boolean }> = [];
   for (let a = 0; a < m; a++) {
-    const auto: Array<[number, number]> = [], all: Array<[number, number]> = [];
+    const auto: Array<[SegId, number]> = [], all: Array<[SegId, number]> = [];
     const turns = defaultTurns(lanes[a]?.turns ?? 0, a, m);
     for (const o of arms) {
       if (o.s === seg) continue;
@@ -80,7 +81,7 @@ export function laneExits(net: RoadNetwork, n: number, seg: number, spec = net.j
 }
 
 /** Setas pintadas da ponta (3 bits por faixa, faixa 0 nos bits baixos), ou 0 se nenhuma faixa foi ajustada. */
-export function arrowCode(net: RoadNetwork, n: number, seg: number): number {
+export function arrowCode(net: RoadNetwork, n: NodeId, seg: SegId): number {
   const ex = laneExits(net, n, seg);
   if (!ex.some((e) => e.custom)) return 0;
   let code = 0;

@@ -18,11 +18,12 @@ import type { Anchor } from './snap.ts';
 import { arcAtT } from './plan.ts';
 import type { RoadPlan } from './plan.ts';
 import { profileY } from './grade.ts';
+import type { NodeId, SegId } from '../../core/ids.ts';
 
 // ------------------------------------------------------------ execution
 
 /** Splits a segment at t, returning the new node. */
-export function splitSeg(j: RoadJournal, net: RoadNetwork, s: number, t: number, y: number | null): number {
+export function splitSeg(j: RoadJournal, net: RoadNetwork, s: SegId, t: number, y: number | null): NodeId {
   const q = net.quad(s);
   const rec = net.segRec(s);
   const [a, b] = splitQuad(q, t);
@@ -39,7 +40,7 @@ export function splitSeg(j: RoadJournal, net: RoadNetwork, s: number, t: number,
  * Segment s still runs through (x, z) as it did when the point was taken: a split frees its id and one of the pieces
  * may take it, and the old `t` would cut the piece in the wrong place.
  */
-function stillThere(net: RoadNetwork, s: number, x: number, z: number): boolean {
+function stillThere(net: RoadNetwork, s: SegId, x: number, z: number): boolean {
   if (!net.segs.alive[s]) return false;
   const sc = net.segs.cols, nc = net.nodes.cols;
   const [, d] = closestT(net.quad(s), x, z);
@@ -47,7 +48,7 @@ function stillThere(net: RoadNetwork, s: number, x: number, z: number): boolean 
 }
 
 /** Resolves an anchor to a node (splitting the segment if needed). */
-function anchorNode(j: RoadJournal, net: RoadNetwork, a: Anchor, y: number): number {
+function anchorNode(j: RoadJournal, net: RoadNetwork, a: Anchor, y: number): NodeId {
   if (a.node >= 0 && net.nodes.alive[a.node]) return a.node;
   if (a.seg >= 0 && stillThere(net, a.seg, a.x, a.z)) return splitSeg(j, net, a.seg, closestT(net.quad(a.seg), a.x, a.z)[0], null);
   // the segment may have been split by the other end (and its id taken by a piece): search again
@@ -71,7 +72,7 @@ function buildLive(j: RoadJournal, world: World, plan: RoadPlan, start: Anchor, 
   const pr = plan.profile;
 
   // stops along the road: ends, junctions and length splits
-  const stops: Array<{ t: number; node: number }> = [];
+  const stops: Array<{ t: number; node: NodeId }> = [];
   stops.push({ t: 0, node: anchorNode(j, net, start, pr.y[0]) });
   for (const [tn, s, to] of plan.junctions) {
     // the crossed segment may already have been split by another junction: find the right piece
@@ -84,7 +85,7 @@ function buildLive(j: RoadJournal, world: World, plan: RoadPlan, start: Anchor, 
       seg = near[0]; tt = near[1];
     }
     const sl = net.segs.cols.len[seg];
-    let node: number;
+    let node: NodeId;
     if (tt * sl < 6) node = net.segs.cols.a[seg];
     else if ((1 - tt) * sl < 6) node = net.segs.cols.b[seg];
     else node = splitSeg(j, net, seg, tt, null);

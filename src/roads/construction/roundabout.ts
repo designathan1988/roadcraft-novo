@@ -9,6 +9,7 @@ import { edgeRise } from '../kerb.ts';
 import { RoadJournal } from './journal.ts';
 import { smoothGround } from './grade.ts';
 import { clearAndConform, conformDisc } from './execute.ts';
+import { NO_NODE, type NodeId, type SegId } from '../../core/ids.ts';
 
 export function roundaboutRefusal(world: World, cx: number, cz: number, radius: number, cut = true): string {
   const net = world.roads, p = new Float64Array(2);
@@ -46,7 +47,7 @@ export function buildRoundabout(world: World, cx: number, cz: number, radius: nu
   const cut = radius;
   const p = new Float64Array(2);
   // every road the circle touches, before anything changes: an existing roundabout there refuses it untouched
-  const hits: Array<{ s: number; q: Quad; crossings: number[] }> = [];
+  const hits: Array<{ s: SegId; q: Quad; crossings: number[] }> = [];
   let ringThere = false;
   net.forSegsNear(cx - cut, cz - cut, cx + cut, cz + cut, (s) => {
     const q = net.quad(s);
@@ -78,16 +79,16 @@ const APPROACH = 40;
 const ENTRY_MERGE = 6;
 
 function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, radius: number, y: number,
-  hits: Array<{ s: number; q: Quad; crossings: number[] }>): void {
+  hits: Array<{ s: SegId; q: Quad; crossings: number[] }>): void {
   const net = world.roads;
   const cut = radius;
-  const entries: Array<{ angle: number; node: number }> = [];
-  const approaches: number[] = [];
+  const entries: Array<{ angle: number; node: NodeId }> = [];
+  const approaches: SegId[] = [];
   /**
    * The ring node where a road meets the circle: roads that meet it within ENTRY_MERGE metres share one node, so
    * the ring never gets a piece of almost no length nor goes round twice.
    */
-  const entryNode = (x: number, z: number): number => {
+  const entryNode = (x: number, z: number): NodeId => {
     const angle = Math.atan2(-(z - cz), x - cx);
     for (const e of entries) {
       let d = Math.abs(e.angle - angle);
@@ -99,7 +100,7 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
     return node;
   };
   const p = new Float64Array(2);
-  const created = new Set<number>(); // new ids may reuse victims' ids
+  const created = new Set<SegId>(); // new ids may reuse victims' ids
   for (const { s, q, crossings } of hits) {
     if (!net.segs.alive[s] || created.has(s)) continue;
     const inside = (t: number) => { bez(q, t, p); return Math.hypot(p[0] - cx, p[1] - cz) < cut; };
@@ -115,7 +116,7 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
       let na = t0 === 0 ? rec.a : entryNode(sub.x0, sub.z0);
       let nb = t1 === 1 ? rec.b : entryNode(sub.x1, sub.z1);
       // short piece up to a plain joint of the same road: swallow the joint
-      const outer = t0 === 0 ? rec.a : t1 === 1 ? rec.b : -1;
+      const outer = t0 === 0 ? rec.a : t1 === 1 ? rec.b : NO_NODE;
       const pieceLen = Math.hypot(sub.x1 - sub.x0, sub.z1 - sub.z0);
       if (outer >= 0 && pieceLen < 14 && net.nodes.cols.deg[outer] === 1) {
         const [other] = net.segsOf(outer);
@@ -134,7 +135,7 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
     }
   }
   // nodes left inside and loose
-  const loose: number[] = [];
+  const loose: NodeId[] = [];
   net.nodeIndex.query(cx - cut, cz - cut, cx + cut, cz + cut, (n) => { if (net.nodes.cols.deg[n] === 0) loose.push(n); });
   for (const n of loose) j.removeNode(n);
 
@@ -154,7 +155,7 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
   const ring = entries.map((e) => ({ angle: e.angle, node: e.node }));
   const maxArc = Math.PI * 50 / 180;
   ring.sort((a, b) => a.angle - b.angle);
-  const filled: Array<{ angle: number; node: number }> = [];
+  const filled: Array<{ angle: number; node: NodeId }> = [];
   const nRing = ring.length;
   if (nRing === 0) {
     const k = 6;
@@ -175,7 +176,7 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
       }
     }
   }
-  const ringSegs: number[] = [];
+  const ringSegs: SegId[] = [];
   for (let i = 0; i < filled.length; i++) {
     const a = filled[i], b = filled[(i + 1) % filled.length];
     let span = b.angle - a.angle;

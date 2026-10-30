@@ -12,12 +12,13 @@ import { SEAM_PAD } from '../jobs/terrainSeams.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { CellLayer, type LayerSource } from './cellLayer.ts';
 import { SEAM_REACH, type TerrainRenderer } from './terrain.ts';
+import type { NodeId, SegId } from '../core/ids.ts';
 
 /** How far round a cell the roads that may cut it are looked for (m): its pad, and a segment's half length past it. */
 const REACH = SEAM_PAD * HEIGHT_SPACING + 80;
 
 export function createTerrainSeams(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, terrain: TerrainRenderer): CellLayer {
-  const near = (c: number, out: (s: number) => void): void => {
+  const near = (c: number, out: (s: SegId) => void): void => {
     const x = cellOriginX(c % MAP_CELLS), z = cellOriginX((c / MAP_CELLS) | 0);
     net.segIndex.query(x - REACH, z - REACH, x + CELL_SIZE + REACH, z + CELL_SIZE + REACH, out);
   };
@@ -26,7 +27,7 @@ export function createTerrainSeams(net: RoadNetwork, pool: JobPool, dirty: Dirty
     buildCell: (c, level, priority, done) => {
       // the finest level only: beyond its distance there is no cut
       if (level !== 0) { done(null); return; }
-      const segs: number[] = [], nodes: number[] = [];
+      const segs: SegId[] = [], nodes: NodeId[] = [];
       near(c, (s) => { segs.push(s); });
       const x = cellOriginX(c % MAP_CELLS), z = cellOriginX((c / MAP_CELLS) | 0);
       net.nodeIndex.query(x - REACH, z - REACH, x + CELL_SIZE + REACH, z + CELL_SIZE + REACH, (n) => { nodes.push(n); });

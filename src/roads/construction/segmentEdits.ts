@@ -14,8 +14,9 @@ import { buildRoad, clearAndConform, splitSeg } from './execute.ts';
 import { segHeightAt, snap } from './snap.ts';
 import type { Anchor } from './snap.ts';
 import { planRoad } from './plan.ts';
+import type { NodeId, SegId } from '../../core/ids.ts';
 
-export function segPreview(net: RoadNetwork, s: number): { quad: Quad; ya: number; yb: number; half: number } {
+export function segPreview(net: RoadNetwork, s: SegId): { quad: Quad; ya: number; yb: number; half: number } {
   const sc = net.segs.cols, nc = net.nodes.cols;
   return { quad: net.quad(s), ya: nc.y[sc.a[s]], yb: nc.y[sc.b[s]], half: PROFILE_INFO[sc.profile[s]].right };
 }
@@ -24,11 +25,11 @@ export function segPreview(net: RoadNetwork, s: number): { quad: Quad; ya: numbe
 // ------------------------------------------- move, split, reverse, join, duplicate
 
 /** Segments of the road between two junctions (through degree-2 nodes with the same profile), in order. */
-export function roadBetweenJunctions(world: World, s0: number): number[] {
+export function roadBetweenJunctions(world: World, s0: SegId): SegId[] {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const prof = sc.profile[s0];
-  const walk = (from: number, node: number): number[] => {
-    const out: number[] = [];
+  const walk = (from: SegId, node: NodeId): SegId[] => {
+    const out: SegId[] = [];
     let s = from, n = node;
     for (let guard = 0; guard < 2000 && nc.deg[n] === 2; guard++) {
       const t = net.segsOf(n, []).find((x) => x !== s);
@@ -43,7 +44,7 @@ export function roadBetweenJunctions(world: World, s0: number): number[] {
 }
 
 /** Splits the segment at `t` (0..1) with a new node. */
-export function splitAt(world: World, s: number, t = 0.5): RoadJournal {
+export function splitAt(world: World, s: SegId, t = 0.5): RoadJournal {
   const j = new RoadJournal(world, 'dividir via');
   const L = world.roads.segs.cols.len[s];
   if (t * L < 4 || (1 - t) * L < 4) return j;
@@ -52,7 +53,7 @@ export function splitAt(world: World, s: number, t = 0.5): RoadJournal {
 }
 
 /** Pedestrian crossing mid-segment: a new node at `t` with the control (zebra or traffic light). */
-export function addCrossing(world: World, s: number, t: number, ctl: number): RoadJournal | string {
+export function addCrossing(world: World, s: SegId, t: number, ctl: number): RoadJournal | string {
   const net = world.roads, sc = net.segs.cols;
   if (!PROFILE_INFO[sc.profile[s]].walk) return 'Esta via não tem pedestres.';
   const L = sc.len[s];
@@ -64,7 +65,7 @@ export function addCrossing(world: World, s: number, t: number, ctl: number): Ro
 }
 
 /** U-turn through the median: a new node at `t` where the left lane turns back the other way. */
-export function addUTurn(world: World, s: number, t: number): RoadJournal | string {
+export function addUTurn(world: World, s: SegId, t: number): RoadJournal | string {
   const net = world.roads, sc = net.segs.cols;
   const info = PROFILE_INFO[sc.profile[s]];
   const med = info.edges.find((e) => e.strip.kind === 'median');
@@ -79,7 +80,7 @@ export function addUTurn(world: World, s: number, t: number): RoadJournal | stri
 }
 
 /** Reverses the direction of the one-way road between two junctions (each segment's ends swap). */
-export function reverseRoad(world: World, s: number): RoadJournal {
+export function reverseRoad(world: World, s: SegId): RoadJournal {
   const net = world.roads, j = new RoadJournal(world, 'inverter mão');
   if (!PROFILE_INFO[net.segs.cols.profile[s]].oneWay) return j;
   for (const id of roadBetweenJunctions(world, s)) {
@@ -90,7 +91,7 @@ export function reverseRoad(world: World, s: number): RoadJournal {
 }
 
 /** Joins the two roads of a degree-2 node (same profile) into one segment. Empty if not possible. */
-export function joinAt(world: World, n: number): RoadJournal {
+export function joinAt(world: World, n: NodeId): RoadJournal {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const j = new RoadJournal(world, 'unir vias');
   const segs = net.segsOf(n, []);
@@ -121,7 +122,7 @@ export function joinAt(world: World, n: number): RoadJournal {
 }
 
 /** Moves the node to (x, z): attached roads follow (curves translated by half). Refuses roads that get too short. */
-export function moveNode(world: World, n: number, x: number, z: number): RoadJournal | string {
+export function moveNode(world: World, n: NodeId, x: number, z: number): RoadJournal | string {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const j = new RoadJournal(world, 'mover nó');
   const dx = x - nc.x[n], dz = z - nc.z[n];
@@ -175,7 +176,7 @@ export function moveNode(world: World, n: number, x: number, z: number): RoadJou
  * spatial index holds, running into another road at its level, or leaving a leg sharper than MIN_LEG_ANGLE to its
  * neighbour at either end. What stands in the way goes and the terrain settles under it, like a new road.
  */
-export function bendRoad(world: World, s: number, t: number, h: number): RoadJournal | string {
+export function bendRoad(world: World, s: SegId, t: number, h: number): RoadJournal | string {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   if (sc.flags[s] & SegFlag.Ring) return text('road.bend.ring');
   const a = sc.a[s], b = sc.b[s];
@@ -194,7 +195,7 @@ export function bendRoad(world: World, s: number, t: number, h: number): RoadJou
   });
   if (crosses) return text('road.move.crosses');
   // the leg's new direction at each end against the other roads there
-  for (const [n, tx, tz] of [[a, cx - nc.x[a], cz - nc.z[a]], [b, cx - nc.x[b], cz - nc.z[b]]] as Array<[number, number, number]>) {
+  for (const [n, tx, tz] of [[a, cx - nc.x[a], cz - nc.z[a]], [b, cx - nc.x[b], cz - nc.z[b]]] as Array<[NodeId, number, number]>) {
     const ang = Math.atan2(tz, tx);
     for (const o of net.segsOf(n, [])) {
       if (o === s) continue;
@@ -231,7 +232,7 @@ export function upgradeStep(profile: number): number {
 }
 
 /** A height point on the road (Roadcraft 4.0 ui/inspector.ts:264): the road split in the middle; its new node. */
-export function addHeightPoint(world: World, s: number): { journal: RoadJournal; node: number } | string {
+export function addHeightPoint(world: World, s: SegId): { journal: RoadJournal; node: NodeId } | string {
   const L = world.roads.segs.cols.len[s];
   if (L < 16) return text('road.heightPoint.short');
   const j = new RoadJournal(world, 'ponto de altura');
@@ -240,7 +241,7 @@ export function addHeightPoint(world: World, s: number): { journal: RoadJournal;
 }
 
 /** An identical road parallel to the road between junctions, alongside (to the right of the drawing direction). */
-export function duplicateRoad(world: World, s: number): RoadJournal | string {
+export function duplicateRoad(world: World, s: SegId): RoadJournal | string {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
   const road = roadBetweenJunctions(world, s);
   const prof = sc.profile[s];

@@ -13,6 +13,7 @@ import { generatedBuilt } from './decay.ts';
 import { LANDMARKS, encodeDesign } from './design.ts';
 import { hash2 } from '../core/rng.ts';
 import { World, type BuildingRec } from './world.ts';
+import type { SegId } from '../core/ids.ts';
 
 /** Floors by zone and frontage road (avenues give taller buildings). */
 export function floorsFor(zoneId: number, profile: number, r: Rng): number {
@@ -57,7 +58,7 @@ export class Growth {
     const net = this.world.roads;
     for (const c of cells) {
       const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
-      const segs: number[] = [];
+      const segs: SegId[] = [];
       net.forSegsNear(x0 - 160, z0 - 160, x0 + CELL_SIZE + 160, z0 + CELL_SIZE + 160, (s) => segs.push(s));
       if (segs.length === 0) { this.setLots(c, null); continue; }
       const graph = net.gather(segs, []);

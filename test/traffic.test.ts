@@ -7,6 +7,7 @@ import { SimNet, encodeOps, decodeOp, laneId } from '../src/sim/lanes.ts';
 import { Traffic } from '../src/sim/traffic.ts';
 import { Peds } from '../src/sim/peds.ts';
 import type { NetOp } from '../src/roads/network.ts';
+import { asNode, asSeg } from '../src/core/ids.ts';
 
 function gridCity(n = 4, step = 120): { w: World; sim: SimNet } {
   const w = new World();
@@ -117,7 +118,7 @@ test('demolir trecho com carros não quebra nada', () => {
   const ops: NetOp[] = [];
   w.roads.listeners.push((op) => ops.push(op));
   let s = 0; while (!w.roads.segs.alive[s]) s++;
-  w.roads.removeSeg(s);
+  w.roads.removeSeg(asSeg(s));
   for (const op of ops) sim.apply(op);
   tr.segsRemoved(sim.removedSegs.splice(0));
   tr.nodesRebuilt(sim.rebuild());
@@ -193,7 +194,7 @@ test('ônibus levam pedestres: andam até a parada, embarcam e descem a pé', ()
   let atStop = 0, alighted = 0;
   peds.pickTrip = () => tr.pickTrip();
   peds.onStop = (l, a, b) => { atStop++; tr.pedAtStop(l, a, b); };
-  tr.onAlight = (node, n) => { alighted += n; peds.spawnAt(node, n); };
+  tr.onAlight = (node, n) => { alighted += n; peds.spawnAt(asNode(node), n); };
   tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-120, -189, 189, 0, 0, 189] }]);
   let ran = 0;
   for (let i = 0; i < 20 * 900; i++) {
@@ -234,7 +235,7 @@ test('setas por faixa e faixa de ônibus decidem as conexões', async () => {
   const k = sim.conns.cols;
   let n = 0;
   for (let c = 0; c < sim.conns.end; c++) {
-    if (!sim.conns.alive[c] || sim.net.segsOf(k.node[c]).length < 3) continue; // só o cruzamento
+    if (!sim.conns.alive[c] || sim.net.segsOf(asNode(k.node[c])).length < 3) continue; // só o cruzamento
     n++;
     const idx = k.from[c] & 7;
     const want = idx === 0 ? 0 : idx === 1 ? 1 : 2; // Turn.Right, Straight, Left
@@ -337,20 +338,20 @@ test('conexões de faixa à mão: a simulação usa só as saídas escolhidas e 
   let n = -1;
   for (let i = 0; i < w.roads.nodes.end; i++) if (w.roads.nodes.alive[i] && w.roads.nodes.cols.deg[i] === 4) { n = i; break; }
   assert.ok(n >= 0);
-  const from = w.roads.segsOf(n, [])[0];
-  const before = laneExits(w.roads, n, from);
+  const from = w.roads.segsOf(asNode(n), [])[0];
+  const before = laneExits(w.roads, asNode(n), from);
   assert.ok(before[0].exits.length >= 2);
   // faixa 0 só para a primeira saída automática
   const only = before[0].exits[0][0];
-  w.roads.setJunction(n, { ctl: 0, lanes: [[from, 0, [only]]] });
-  const after = laneExits(w.roads, n, from);
+  w.roads.setJunction(asNode(n), { ctl: 0, lanes: [[from, 0, [only]]] });
+  const after = laneExits(w.roads, asNode(n), from);
   assert.deepEqual(after[0].exits.map(([s]) => s), [only]);
   // seta pintada: os 3 bits da faixa 0 são o bit daquela saída
-  const code = arrowCode(w.roads, n, from);
+  const code = arrowCode(w.roads, asNode(n), from);
   assert.equal(code % 8, after[0].exits[0][1]);
   assert.ok([TurnBit.Left, TurnBit.Straight, TurnBit.Right].includes(code % 8 as 1 | 2 | 4));
   // simulação: espelha a mudança e confere as conexões da faixa 0
-  const ops: import('../src/roads/network.ts').NetOp[] = [{ t: 'junction', id: n, spec: w.roads.junctions.get(n)! }];
+  const ops: import('../src/roads/network.ts').NetOp[] = [{ t: 'junction', id: asNode(n), spec: w.roads.junctions.get(asNode(n))! }];
   const extra: string[] = [];
   const enc = encodeOps(ops, extra);
   sim.apply(decodeOp(enc, 0, extra));
@@ -483,7 +484,7 @@ test('controle automático pelo fluxo: semáforo onde passa muita gente, placas 
   t = run(SETTLE + TREND * 2, t, 120, 60);
   assert.equal(sim.nodePhases[busy], 0, 'fluxo baixo: volta às placas');
   // o jogador escolhe o controle: o automático esquece o que mediu
-  sim.apply({ t: 'junction', id: busy, spec: { ctl: Ctl.AllStop } });
+  sim.apply({ t: 'junction', id: asNode(busy), spec: { ctl: Ctl.AllStop } });
   tr.nodesRebuilt(sim.rebuild());
   assert.equal(sim.nodeAuto[busy], 0);
   assert.equal(tr.advisor.rate[busy * 8], 0);
