@@ -6,7 +6,7 @@ import type { VehAccess } from './state.ts';
 import type { Rng } from '../../core/rng.ts';
 
 /** The vehicle columns the lane-change rules write (every other column they only read). */
-export type LaneChangeWrites = 'lane' | 'lcFrom' | 'lcT' | 'lcCool';
+export type LaneChangeWrites = 'lcFrom' | 'lcT' | 'lcCool';
 export type LaneColumns = VehAccess<LaneChangeWrites>;
 
 /** What the lane-change rules need from Traffic; every field is the owner's state, not a copy. */
@@ -19,6 +19,11 @@ export interface LaneHost {
   idm(v: number, speed: number, v0: number, gap: number, vl: number): number;
   unlink(v: number): void;
   setLaneCount(lane: number, delta: number): void;
+  /** Traffic's transitions of a vehicle between lanes and connections (it keeps the lane counts with the columns). */
+  moveToLane(v: number, from: number, to: number): void;
+  enterConn(v: number, conn: number): void;
+  leaveConn(v: number, cameBy: number): void;
+  placeNew(v: number, lane: number): void;
   insert(v: number, onConn: boolean, lane: number): void;
   nextSeg(v: number): number;
 }
@@ -58,9 +63,7 @@ export class LaneChanges {
   private doChange(v: number, from: number, to: number): void {
     const h = this.host, c = h.cols;
     h.unlink(v);
-    h.setLaneCount(from, -1);
-    h.setLaneCount(to, 1);
-    c.lane[v] = to;
+    h.moveToLane(v, from, to);
     c.lcFrom[v] = from;
     c.lcT[v] = 0;
     c.lcCool[v] = 3;

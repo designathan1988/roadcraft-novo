@@ -12,7 +12,7 @@ import { WAIT_RATE, type Stops } from './stops.ts';
 import { laneSeg } from '../lanes.ts';
 
 /** The vehicle columns the line runtime writes (every other column it only reads). */
-export type BusWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'kind' | 'len' | 'vf' | 'color' | 'line' | 'stopI' | 'load' | 'served'
+export type BusWrites = 's' | 'kind' | 'len' | 'vf' | 'color' | 'line' | 'stopI' | 'load' | 'served'
   | 'dest' | 'rIdx' | 'rLen' | 'phase' | 'why'
   // a bus's driver is drawn when the bus is made (drivers.ts drawDriver)
   | keyof typeof driverSchema;
@@ -32,6 +32,11 @@ export interface BusHost {
   initVehicle(v: number): void;
   enterLane(v: number, s: number): void;
   setLaneCount(lane: number, delta: number): void;
+  /** Traffic's transitions of a vehicle between lanes and connections (it keeps the lane counts with the columns). */
+  moveToLane(v: number, from: number, to: number): void;
+  enterConn(v: number, conn: number): void;
+  leaveConn(v: number, cameBy: number): void;
+  placeNew(v: number, lane: number): void;
   mesoEnter(v: number, lane: number, spawned?: boolean): void;
   despawn(v: number): void;
 }
@@ -177,7 +182,7 @@ export class Buses {
     const o = v * ROUTE_CAP;
     h.routes[o] = sim.laneFrom(lane); h.routes[o + 1] = sim.laneTo(lane);
     c.rLen[v] = 2; c.rIdx[v] = 1; c.dest[v] = sim.laneTo(lane);
-    c.lane[v] = lane; c.conn[v] = -1; c.cameBy[v] = -1;
+    h.placeNew(v, lane);
     c.s[v] = h.rng.next() * Math.max(0, ln.stopV[stop] - 6);
     h.enterLane(v, c.s[v]);
     h.setLaneCount(lane, 1);

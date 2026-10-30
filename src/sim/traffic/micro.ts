@@ -16,7 +16,7 @@ import { CROSSWALK, DWELL, JAM_SECONDS, PED_BODY, PARK_SIDE_S, RELEASE_EVERY, RE
 import { TERMINAL_DWELL } from './buses.ts';
 
 /** The vehicle columns the near model writes (every other column it only reads). */
-export type MicroWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'v' | 'brk' | 'held' | 'wait' | 'dwell' | 'phase' | 'fade' | 'pk' | 'pass'
+export type MicroWrites = 's' | 'v' | 'brk' | 'held' | 'wait' | 'dwell' | 'phase' | 'fade' | 'pk' | 'pass'
   | 'exitC' | 'rIdx' | 'rLen' | 'lcFrom' | 'lcT' | 'lcCool' | 'acc' | 'moved';
 
 export interface MicroHost {
@@ -66,6 +66,11 @@ export interface MicroHost {
   segAfter(v: number, k: number): number;
   segBetween(a: number, b: number): number;
   setLaneCount(lane: number, delta: number): void;
+  /** Traffic's transitions of a vehicle between lanes and connections (it keeps the lane counts with the columns). */
+  moveToLane(v: number, from: number, to: number): void;
+  enterConn(v: number, conn: number): void;
+  leaveConn(v: number, cameBy: number): void;
+  placeNew(v: number, lane: number): void;
   stopBack(lane: number): number;
   tryDock(v: number, lane: number): boolean;
   unlink(v: number): void;
@@ -308,7 +313,7 @@ export class Micro {
       this.h.leaveLane(v, lane);
       this.h.unlink(v);
       c.s[v] -= L;
-      c.conn[v] = conn;
+      this.h.enterConn(v, conn);
       c.wait[v] = 0;
       c.held[v] = 0;
       const k = sim.conns.cols;
@@ -482,11 +487,9 @@ export class Micro {
     if (c.s[v] < L) return;
     // reached the next lane
     this.h.unlink(v);
-    c.conn[v] = -1; c.cameBy[v] = conn;
+    this.h.leaveConn(v, conn);
     const from = c.lane[v];
-    this.h.setLaneCount(from, -1);
-    this.h.setLaneCount(to, 1);
-    c.lane[v] = to;
+    this.h.moveToLane(v, from, to);
     c.s[v] -= L;
     this.h.enterLane(v, c.s[v]);
     // a lane change still under way goes on along the new segment (the lane on the same side of the new one)

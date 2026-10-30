@@ -311,6 +311,11 @@ export class Traffic {
       this.jamAt = grow(this.jamAt, cap, 0);
     });
     const g = this;
+    // the transitions between lanes and connections, for every module
+    const moves = {
+      moveToLane: (v: number, from: number, to: number) => g.moveToLane(v, from, to), enterConn: (v: number, conn: number) => g.enterConn(v, conn),
+      leaveConn: (v: number, cameBy: number) => g.leaveConn(v, cameBy), placeNew: (v: number, lane: number) => g.placeNew(v, lane),
+    };
     this.junctions = new Junctions({
       sim,
       veh: { get cols() { return g.veh.cols; }, get alive() { return g.veh.alive; } },
@@ -339,6 +344,7 @@ export class Traffic {
       insert: (v, onConn, id) => g.insert(v, onConn, id),
       unlink: (v) => g.unlink(v),
       setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      ...moves,
       keptLane: (lane) => g.keptLane(lane),
     });
     this.meso = new Meso({
@@ -377,6 +383,7 @@ export class Traffic {
       insert: (v, onConn, lane) => g.insert(v, onConn, lane),
       leaveLane: (v, lane) => g.leaveLane(v, lane),
       setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      ...moves,
       enterLane: (v, s) => g.enterLane(v, s),
       admit: (node, arm) => g.admit(node, arm),
       reconsider: (v, lane, ns) => g.reconsider(v, lane, ns),
@@ -396,6 +403,7 @@ export class Traffic {
       initVehicle: (v) => g.initVehicle(v),
       enterLane: (v, s) => g.enterLane(v, s),
       setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      ...moves,
       mesoEnter: (v, lane, spawned) => g.meso.enter(v, lane, spawned),
       despawn: (v) => g.despawn(v),
     });
@@ -408,6 +416,7 @@ export class Traffic {
       idm: (v, speed, v0, gap, vl) => g.idm(v, speed, v0, gap, vl),
       unlink: (v) => g.unlink(v),
       setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      ...moves,
       insert: (v, onConn, lane) => g.insert(v, onConn, lane),
       nextSeg: (v) => g.nextSeg(v),
     });
@@ -458,6 +467,7 @@ export class Traffic {
       segAfter: (v, k) => g.segAfter(v, k),
       segBetween: (a, b) => g.segBetween(a, b),
       setLaneCount: (lane, delta) => g.setLaneCount(lane, delta),
+      ...moves,
       stopBack: (lane) => g.stopBack(lane),
       tryDock: (v, lane) => g.tryDock(v, lane),
       unlink: (v) => g.unlink(v),
@@ -797,6 +807,22 @@ export class Traffic {
     c.next[v] = c.prev[v] = -1;
     if (head[id] < 0) (onConn ? this.activeConns : this.activeLanes).delete(id);
   }
+
+  /** From lane `from` to lane `to`; the lane counts follow (the lists are the caller's). */
+  private moveToLane(v: number, from: number, to: number): void {
+    this.setLaneCount(from, -1);
+    this.setLaneCount(to, 1);
+    this.veh.cols.lane[v] = to;
+  }
+
+  /** Onto connection `conn`, at the end of its lane. */
+  private enterConn(v: number, conn: number): void { this.veh.cols.conn[v] = conn; }
+
+  /** Off its connection onto its lane; `cameBy`: the connection it came out of (its rear may be on it), or -1. */
+  private leaveConn(v: number, cameBy: number): void { const c = this.veh.cols; c.conn[v] = -1; c.cameBy[v] = cameBy; }
+
+  /** A new vehicle on `lane`, on no connection. */
+  private placeNew(v: number, lane: number): void { const c = this.veh.cols; c.lane[v] = lane; c.conn[v] = -1; c.cameBy[v] = -1; }
 
   private setLaneCount(lane: number, delta: number): void {
     const n = Math.max(0, this.laneCount[lane] + delta);

@@ -25,7 +25,7 @@ const S0 = 2.2, T_HEAD = 0.9;
 const DWELL = 14;
 
 /** The vehicle columns the far model writes (every other column it only reads). */
-export type MesoWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'v' | 'wait' | 'held' | 'fade' | 'rIdx' | 'tExit' | 'why'
+export type MesoWrites = 's' | 'v' | 'wait' | 'held' | 'fade' | 'rIdx' | 'tExit' | 'why'
   | 'ml' | 'mnext' | 'mprev';
 export type MesoColumns = VehAccess<MesoWrites>;
 
@@ -66,6 +66,11 @@ export interface MesoHost {
   insert(v: number, onConn: boolean, lane: number): void;
   leaveLane(v: number, lane: number): void;
   setLaneCount(lane: number, delta: number): void;
+  /** Traffic's transitions of a vehicle between lanes and connections (it keeps the lane counts with the columns). */
+  moveToLane(v: number, from: number, to: number): void;
+  enterConn(v: number, conn: number): void;
+  leaveConn(v: number, cameBy: number): void;
+  placeNew(v: number, lane: number): void;
   enterLane(v: number, s: number): void;
   admit(node: number, arm: number): void;
   reconsider(v: number, lane: number, ns: number): boolean;
@@ -204,8 +209,8 @@ export class Meso {
       // segment that makes it (the far model changes lanes at the end of the lane), else a new route from here
       const alt = sim.laneToward(laneSeg(lane), laneDir(lane), ns, laneIdx(lane), bus);
       if (alt >= 0 && alt !== lane) {
-        h.setLaneCount(lane, -1); h.setLaneCount(alt, 1);
-        c.lane[v] = lane = alt; this.link(v, alt);
+        h.moveToLane(v, lane, alt);
+        lane = alt; this.link(v, alt);
       } else {
         h.replanFrom(v, node);
         if (c.phase[v]) { h.finish(v); return; }
@@ -254,9 +259,7 @@ export class Meso {
     // counted only once it really goes through (flow inspector, automatic control, jammed-junction detection)
     h.admit(node, sim.segArm[laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 1 : 0)]);
     h.leaveLane(v, lane);
-    h.setLaneCount(lane, -1);
-    h.setLaneCount(to, 1);
-    c.lane[v] = to;
+    h.moveToLane(v, lane, to);
     h.enterLane(v, 0);
     c.rIdx[v]++;
     if (enterMicro) {
@@ -265,7 +268,7 @@ export class Meso {
       c.s[v] = 0;
       c.held[v] = 0;
       c.v[v] = Math.min(laneSpeed(sim.net.segs.cols.profile[ns]) * c.vf[v], tail >= 0 ? Math.max(2, (c.s[tail] - c.len[tail]) / T_HEAD) : 99);
-      c.conn[v] = -1; c.cameBy[v] = -1;
+      h.leaveConn(v, -1);
       c.fade[v] = 0;
       h.addMicro(v);
       h.insert(v, false, to);

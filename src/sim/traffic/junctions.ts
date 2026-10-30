@@ -13,7 +13,7 @@ import { bendSpeed } from '../drivers.ts';
 import { asNode } from '../../core/ids.ts';
 
 /** The vehicle columns the junction rules write (every other column they only read). */
-export type JunctionWrites = 'lane' | 'conn' | 'cameBy' | 's' | 'rIdx' | 'exitC' | 'why';
+export type JunctionWrites = 's' | 'rIdx' | 'exitC' | 'why';
 
 export interface JunctionHost {
   readonly sim: SimNet;
@@ -42,6 +42,11 @@ export interface JunctionHost {
   insert(v: number, onConn: boolean, id: number): void;
   unlink(v: number): void;
   setLaneCount(lane: number, delta: number): void;
+  /** Traffic's transitions of a vehicle between lanes and connections (it keeps the lane counts with the columns). */
+  moveToLane(v: number, from: number, to: number): void;
+  enterConn(v: number, conn: number): void;
+  leaveConn(v: number, cameBy: number): void;
+  placeNew(v: number, lane: number): void;
   keptLane(lane: number): number;
 }
 
@@ -426,7 +431,7 @@ export class Junctions {
     for (let v = this.h.connHead[conn]; v >= 0;) {
       const next = c.next[v];
       this.h.unlink(v);
-      c.conn[v] = -1; c.cameBy[v] = -1;
+      this.h.leaveConn(v, -1);
       c.exitC[v] = sim.conns.cols.to[conn];
       this.inBox.push(v);
       v = next;
@@ -443,15 +448,14 @@ export class Junctions {
       const from = c.lane[v], to = c.exitC[v];
       let conn = -1;
       if (from >= 0 && sim.net.segs.alive[laneSeg(from)]) for (let x = sim.laneConn[from]; x >= 0; x = k.nextFromLane[x]) if (k.to[x] === to) { conn = x; break; }
-      if (conn >= 0) { c.conn[v] = conn; c.s[v] = Math.min(c.s[v], k.len[conn] - 0.1); this.h.insert(v, true, conn); continue; }
+      if (conn >= 0) { this.h.enterConn(v, conn); c.s[v] = Math.min(c.s[v], k.len[conn] - 0.1); this.h.insert(v, true, conn); continue; }
       // that movement is gone: onto the exit lane (the outermost one left, after a new profile), behind whoever is there
       if (!sim.net.segs.alive[laneSeg(to)]) { c.why[v] = End.Lost; this.h.finish(v); continue; }
       const kept = this.h.keptLane(to);
       if (kept < 0) { c.why[v] = End.Lost; this.h.finish(v); continue; }
-      this.h.setLaneCount(c.lane[v], -1);
-      this.h.setLaneCount(kept, 1);
       const tail = this.h.laneTail[kept];
-      c.lane[v] = kept; c.s[v] = tail >= 0 ? Math.max(0, c.s[tail] - c.len[tail] - 1) : 0; c.rIdx[v]++;
+      this.h.moveToLane(v, c.lane[v], kept);
+      c.s[v] = tail >= 0 ? Math.max(0, c.s[tail] - c.len[tail] - 1) : 0; c.rIdx[v]++;
       this.h.enterLane(v, c.s[v]);
       if (c.rIdx[v] >= c.rLen[v] || this.h.routeAt(v, c.rIdx[v]) !== sim.laneTo(kept)) this.h.replanFrom(v, sim.laneTo(kept));
       this.h.insert(v, false, kept);
