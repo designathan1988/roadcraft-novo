@@ -2,7 +2,7 @@
 // the building seen inside. The overlay uniforms are derived from it and written only here; the HUD reads it.
 // The vehicle being followed stays with Vehicles (its single owner: it moves the camera every frame).
 
-import { gridU } from '../render/terrain.ts';
+import { gridU } from '../render/groundOverlays.ts';
 import { trafficOverlayU, zoneOverlayU } from '../render/roads.ts';
 import type { Layers } from '../ui/hudActions.ts';
 

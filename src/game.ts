@@ -786,9 +786,9 @@ export class Game {
     let hit: THREE.Vector3 | null = null;
     if (this.tool !== 'camera' && this.pointer.inside && this.gesture.drag !== 'pan' && this.gesture.drag !== 'rotate') hit = this.rig.pick(this.ndcX(), this.ndcY());
     const terrainTool = TERRAIN_TOOLS.includes(this.tool) || GROUND_TOOLS.includes(this.tool) || (this.tool === 'sky' && this.clouds.tool.fog !== 'none');
-    if (terrainTool && hit) this.terrain.showBrush(hit.x, hit.z, this.brush.radius);
-    else if (this.tool === 'zone' && hit) this.terrain.showBrush(hit.x, hit.z, this.zoneTool.radius);
-    else this.terrain.hideBrush();
+    if (terrainTool && hit) this.terrain.overlays.showBrush(hit.x, hit.z, this.brush.radius);
+    else if (this.tool === 'zone' && hit) this.terrain.overlays.showBrush(hit.x, hit.z, this.zoneTool.radius);
+    else this.terrain.overlays.hideBrush();
     if (this.gesture.drag === 'zone' && hit) this.zoneTool.dab(hit.x, hit.z);
     if (this.tool === 'building') this.hoverLotTool(hit);
     if (this.gesture.drag === 'brush' && this.elemStroke && hit) {

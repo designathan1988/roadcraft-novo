@@ -7,6 +7,7 @@ import * as THREE from 'three/webgpu';
 import { currentU, foamU, waterEnv, waveU } from './scene.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
+import { GroundOverlays } from './groundOverlays.ts';
 import { ROCK_TILE, TERRAIN_NOISE, WATER_TEX } from './surfaceBake.ts';
 import { COOKED, LAND, loadCookedSurfaces } from './cookedSurfaces.ts';
 import { SHADOW_ONLY_LAYER, SHADOW_REACH } from './sun.ts';
@@ -29,8 +30,6 @@ import { heightAt } from '../world/heights.ts';
  */
 export const SEAM_REACH = 440;
 
-/** Grid on the map switched on (0/1). */
-export const gridU = T.uniform(0);
 
 const {
   Fn, attribute, clamp, float, floor, fract, int, ivec2, max, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot, dFdx, dFdy, If,
@@ -135,12 +134,8 @@ export class TerrainRenderer {
   private camPos = new THREE.Vector3();
 
   /** Brush position (x, z, radius, visible). */
-  /** The brush ring under the cursor: centre x, z, radius, shown (1) or not (0). */
-  private readonly brush: Node = uniform(new THREE.Vector4(0, 0, 50, 0));
-
-  /** Shows the brush ring at (x, z), `radius` metres. */
-  showBrush(x: number, z: number, radius: number): void { (this.brush.value as THREE.Vector4).set(x, z, radius, 1); }
-  hideBrush(): void { (this.brush.value as THREE.Vector4).w = 0; }
+  /** The brush ring and the grid drawn over the ground (render/groundOverlays.ts). */
+  readonly overlays = new GroundOverlays();
   readonly camUniform: Node = uniform(new THREE.Vector3());
   /** Centre of the grass field: on the ground ahead of the eye, where the view looks. */
   private grassCentre: Node = uniform(new THREE.Vector2());
@@ -668,21 +663,8 @@ export class TerrainRenderer {
       const paint = mix(fine, coarse, smoothstep(5, 28, pix)).mul(float(1).sub(cut));
       c = mix(c, sRGBTransferEOTF(vec3(0.27, 0.28, 0.3)), paint.x);
       c = mix(c, sRGBTransferEOTF(vec3(0.72, 0.69, 0.64)), paint.y);
-      // brush ring
-      const b = this.brush;
-      const d = length(p.xz.sub(b.xy));
-      const w = max(fwidth(d), float(0.15)).mul(1.5);
-      const ring = smoothstep(b.z.sub(w.mul(2)), b.z.sub(w), d).mul(smoothstep(b.z.add(w), b.z, d)).mul(b.w);
-      const inner = smoothstep(b.z, float(0), d).mul(0.12).mul(b.w);
-      c = mix(c, vec3(1.0, 0.85, 0.35), max(ring, inner));
-      // grid on the map (optional): lines every 64 m, stronger every 256 m; they vanish far away
-      const gl = (stepM: number, wid: number) => {
-        const g2b = abs(fract(p.xz.div(stepM)).sub(0.5)).mul(stepM);
-        const fw = max(fwidth(p.x), float(0.02)).mul(wid);
-        return max(smoothstep(fw.mul(2), fw, g2b.x.sub(stepM / 2).abs()), smoothstep(fw.mul(2), fw, g2b.y.sub(stepM / 2).abs()));
-      };
-      const grid = max(gl(64, 1).mul(0.35), gl(256, 1.6).mul(0.6)).mul(gridU).mul(smoothstep(float(3), float(0.6), pix));
-      c = mix(c, vec3(1, 1, 1), grid);
+      // the tools' overlays: brush ring, grid
+      c = this.overlays.over(c, p, pix);
       // map edge
       const edge = max(abs(p.x), abs(p.z));
       c = select(edge.greaterThan(float(MAP_HALF - 0.5)), c.mul(0.6), c);

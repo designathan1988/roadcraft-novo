@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ViewState } from '../src/app/viewState.ts';
-import { gridU } from '../src/render/terrain.ts';
+import { gridU } from '../src/render/groundOverlays.ts';
 import { trafficOverlayU, zoneOverlayU } from '../src/render/roads.ts';
 
 test('the layers drive their overlays; the zone tool shows the zone colours only while in hand', () => {
