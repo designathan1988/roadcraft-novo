@@ -45,12 +45,13 @@ Atualizado: 2026-10-29, 21h00.
   `ToolHost`), `src/jobs/buildingGen/plan.ts` (plano de célula), `src/sim/traffic/laneChanges.ts`
   (trocas de faixa, `LaneHost`). `game.ts` 2.691 linhas; `buildingGen.ts` 2.591; `arch:check` 237
   arquivos/66.394 linhas, 0 ciclos e 0 vazamentos.
-- Testes rápidos: C11 60 s simulados (≈4 s reais), C25 saída antecipada (≈13 s), ônibus/pedestres
-  2,4 s (antes 122 s), `janela 1b` 3,1 s (antes 38 s). Suíte completa ainda em execução; o
-  `telhado 3` foi corrigido e passa isolado.
-- Budget: passou com `PLATE_DETAIL.drop` de 9 m (city 3.509.510 triângulos; limite 4.044.328),
-  mas a mudança visual ainda **não tem foto da vista city** e não foi commitada. Foto da rua
-  aberta: `test-results/plate9/01-rua.png`.
+- Testes rápidos: C11 120 s simulados (10,7 s reais), C25 2,4 s, ônibus/pedestres 2,4 s (antes
+  122 s), `janela 1b` 1,8 s (antes 38 s). Suíte completa 364/364 em 101,9 s depois das fatias;
+  nova execução após `clicks` em andamento.
+- Budget: a medição estável com `PLATE_DETAIL.drop = 8 m` (sem mudança visual) passou: city
+  3.669.706 triângulos (limite 4.044.328), 151 chamadas; rua 15.013.483, bairro 9.522.297, mapa
+  4.463.170, noite 11.742.022, MB dentro. O medidor agora falha se draws/tris não estabilizarem.
+  Foto da rua aberta: `test-results/plate9/01-rua.png`.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
