@@ -21,17 +21,17 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 | Medida | Valor |
 |---|---:|
 | Arquivos TS | 252 |
-| Bytes / linhas | 3.726.750 / 66.958 |
+| Bytes / linhas | 3.726.864 / 66.962 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 3 |
-| Arestas de import | 1022 (184 só de tipo) |
+| Arestas de import | 1023 (184 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.852),
-`game.ts` (2.645), `jobs/buildingGen.ts` (1.949), `r40/render/buildings/signature.ts` (1.781),
+`game.ts` (2.645), `jobs/buildingGen.ts` (1.905), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
