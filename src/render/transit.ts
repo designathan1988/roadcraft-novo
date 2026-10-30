@@ -8,6 +8,7 @@ import { bez, bezD } from '../roads/geometry.ts';
 import type { RoadNetwork } from '../roads/network.ts';
 import { heightAt } from '../world/heights.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
+import { stopSpot } from '../roads/kerb.ts';
 import type { Transit } from '../world/transit.ts';
 import { PAINTS } from '../shared/vehiclePaints.ts';
 import { colorOnly } from './tsl.ts';
@@ -36,6 +37,7 @@ export class TransitRenderer {
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
+  private spot = new Float64Array(3);
   private built = -1;
   /** Road edits since the last build (its own list of dirty road cells). */
   private roadEdits: DirtyReader | null = null;
@@ -150,7 +152,8 @@ export class TransitRenderer {
         let y = heightAt(heights, x, z) + 0.15;
         // facing the nearest road (station: aligned with the track)
         let yaw = 0;
-        const hit = net.nearestSeg(x, z, 40);
+        // (the road the simulation puts the stop on: an ordinary one for a bus, a railway for a station)
+        const hit = net.nearestSeg(x, z, 40, (sg) => PROFILE_INFO[sc.profile[sg]].rail === rail);
         if (hit) {
           const q = net.quad(hit[0]);
           bez(q, hit[1], p2); bezD(q, hit[1], d2);
@@ -181,10 +184,13 @@ export class TransitRenderer {
             continue;
           }
         }
+        // the shelter on the sidewalk on the stop's side, where its people wait (`stopSpot`, the simulation's too)
+        let sx = x, sz = z;
+        if (hit) { stopSpot(net.quad(hit[0]), sc.profile[hit[0]], hit[1], x, z, this.spot); sx = this.spot[0]; sz = this.spot[1]; yaw = this.spot[2]; y = heightAt(heights, sx, sz) + 0.15; }
         this.q.setFromAxisAngle(this.up, yaw);
         // terminal: long shelter (three times) and taller
         const term = transit.terminalNear(x, z, 9) >= 0;
-        this.m.compose(new THREE.Vector3(x, y, z), this.q, term ? new THREE.Vector3(3.2, 1.35, 1.4) : new THREE.Vector3(1, 1, 1));
+        this.m.compose(new THREE.Vector3(sx, y, sz), this.q, term ? new THREE.Vector3(3.2, 1.35, 1.4) : new THREE.Vector3(1, 1, 1));
         this.shelters.setMatrixAt(n, this.m);
         this.markers.setMatrixAt(n, this.m);
         this.markers.setColorAt(n, col);

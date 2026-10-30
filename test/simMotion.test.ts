@@ -228,3 +228,36 @@ test('people turn as people do: the body never snaps round between two publicati
   assert.ok(steps > 100000, `published steps ${steps}`);
   assert.equal(snaps, 0, `${snaps} bodies turned faster than 6 rad/s (worst ${(worst * 180 / Math.PI).toFixed(0)} degrees in 50 ms)`);
 });
+
+test('bus riders walk to the stop along the sidewalks and wait there: nobody on the carriageway away from the crosswalks', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 1 / 40;
+  const peds = new Peds(sim);
+  peds.density = 1 / 5;
+  peds.transitShare = 0.6;
+  const P = inner(peds), T = inner(tr);
+  P.walkOk = (n: number, a: number) => T.walkOk(n, a);
+  P.onWait = (n: number, a: number) => T.pedCall(n, a);
+  tr.pedCrossing = (n) => peds.crossing(n);
+  P.carsOn = (n: number, a: number) => T.carsOnCrossing(n, a);
+  P.pickTrip = () => tr.pickTrip();
+  P.onStop = (l: number, a: number, b: number) => tr.pedAtStop(l, a, b);
+  // stops put by clicks on the street's centre line and either side of it
+  tr.setLines([{ id: 1, color: 3, buses: 3, stops: [-180, -120, -60, -183, 60, -177, 180, 0] }]);
+  let riders = 0, off = 0, example = '';
+  for (let i = 0; i < 20 * 150; i++) {
+    tr.step(0.05); peds.setBodies(tr.bodyBuf, tr.writeBodies(0, 0, 180)); peds.step(0.05);
+    if (i % 10 === 0) { tr.checkWindow(); peds.checkWindow(); }
+    if (i % 5 !== 0 || i < 20 * 30) continue;
+    const r = peds.inspect(0, 0, 400);
+    for (let k = 0; k < r.length; k += 12) {
+      if (r[k + 8] || peds.t.cols.tLine[r[k]] < 0) continue;
+      riders++;
+      // a lane, a parking strip or a bike lane further than the crosswalks reach from the junction's edge
+      if ((r[k + 9] === 1 || r[k + 9] === 2 || r[k + 9] === 3) && r[k + 10] > 4.5) { off++; if (!example) example = `rider ${r[k]} at ${r[k + 1].toFixed(1)},${r[k + 2].toFixed(1)} on strip ${r[k + 9]}, ${r[k + 10].toFixed(1)} m past the junction`; }
+    }
+  }
+  assert.ok(riders > 2000, `bus riders seen ${riders}`);
+  assert.equal(off, 0, `${off} sightings of riders on the carriageway: ${example}`);
+});

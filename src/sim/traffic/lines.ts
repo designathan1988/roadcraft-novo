@@ -3,6 +3,7 @@
 import { MAP_HALF } from '../../config.ts';
 import { PROFILE_INFO } from '../../roads/profiles.ts';
 import { bez, bezD } from '../../roads/geometry.ts';
+import { stopSpot } from '../../roads/kerb.ts';
 import { laneCount, laneId, type SimNet } from '../lanes.ts';
 
 export interface SimLine {
@@ -70,8 +71,12 @@ export function resolveLine(sp: LineSpec, sim: SimNet, time: number): SimLine {
     ln.waiting.push(0); ln.lastT.push(time);
     const lp = new Float64Array(4);
     sim.lanePoint(lane, ln.stopV[ln.stopV.length - 1], lp);
-    ln.stopX.push(x); ln.stopZ.push(z); ln.stopY.push(lp[1] + 0.15);
-    ln.stopYaw.push(Math.atan2(lp[0] - x, lp[2] - z)); // facing the road
+    // the people wait on the sidewalk on the stop's side (where the shelter is drawn, `stopSpot`), not where the
+    // click landed: on the carriageway the riders walked out into the road to wait there
+    const spot = new Float64Array(3);
+    if (rail) { spot[0] = x; spot[1] = z; } else stopSpot(q, sc.profile[seg], t, x, z, spot);
+    ln.stopX.push(spot[0]); ln.stopZ.push(spot[1]); ln.stopY.push(lp[1] + 0.15);
+    ln.stopYaw.push(Math.atan2(lp[0] - spot[0], lp[2] - spot[1])); // facing the road
     return true;
   };
   const kept: number[] = [];

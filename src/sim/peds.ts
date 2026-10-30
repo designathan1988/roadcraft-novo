@@ -8,7 +8,7 @@
 
 import { Table } from '../core/table.ts';
 import { Rng } from '../core/rng.ts';
-import { armAngle, bez, bezD } from '../roads/geometry.ts';
+import { armAngle, bez, bezD, closestT } from '../roads/geometry.ts';
 import { armOf } from '../roads/junction.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { baseZone } from '../roads/zones.ts';
@@ -377,7 +377,10 @@ export class Peds {
         const net = this.sim.net, nc = net.nodes.cols;
         if (!net.nodes.alive[stopNode]) return;
         const a = this.nodeAround(nc.x[stopNode], nc.z[stopNode], 60, 500);
-        if (a >= 0 && a !== stopNode) { const p = this.spawnRoute(a, stopNode, li, from, to); if (p >= 0) { this.t.cols.tx[p] = sx; this.t.cols.tz[p] = sz; } }
+        // the last stretch is the stop's own segment, walked on the stop's side up to the stop
+        const seg = this.stopSegment(stopNode, sx, sz);
+        const far = seg < 0 ? -1 : net.segs.cols.a[seg] === stopNode ? net.segs.cols.b[seg] : net.segs.cols.a[seg];
+        if (a >= 0 && a !== stopNode && far >= 0) this.spawnRoute(a, stopNode, li, from, to, 0, sx, sz, far);
         return;
       }
     }
@@ -515,17 +518,25 @@ export class Peds {
     this.spawnRoute(a, b, li, from, to, frac);
   }
 
-  /** A person walking from `a` to `b` (for a bus trip when `li` >= 0); returns its id, or −1. */
-  private spawnRoute(a: number, b: number, li: number, from: number, to: number, frac = 0): number {
+  /**
+   * A person walking from `a` to `b` (for a bus trip when `li` >= 0, to the stop at (`sx`, `sz`) on the segment from `b`
+   * to `far`: the route ends along it); returns its id, or −1.
+   */
+  private spawnRoute(a: number, b: number, li: number, from: number, to: number, frac = 0, sx = NaN, sz = NaN, far = -1): number {
     const p = this.t.alloc();
     const c = this.t.cols;
-    const len = this.router.route(a, b, this.routes, p * ROUTE, ROUTE, true);
+    let len = this.router.route(a, b, this.routes, p * ROUTE, ROUTE, true);
     if (len < 2 || this.routes[p * ROUTE + len - 1] !== b) { this.t.release(p); return -1; }
+    // to a stop: on along its segment unless the route already came along it
+    if (far >= 0 && this.routes[p * ROUTE + len - 2] !== far) {
+      if (len >= ROUTE) { this.t.release(p); return -1; }
+      this.routes[p * ROUTE + len++] = far;
+    }
     c.rLen[p] = len; c.rIdx[p] = 0; c.node[p] = -1; c.has[p] = 0;
     c.speed[p] = PACE[this.rng.int(0, 2)];
     c.color[p] = this.nextColor >= 0 ? this.nextColor : this.rng.int(0, 16); c.look[p] = this.rng.int(0, 65536);
     c.side[p] = this.rng.next() < 0.5 ? 1 : -1;
-    c.tLine[p] = li; c.tFrom[p] = from; c.tTo[p] = to; c.tx[p] = NaN; c.tz[p] = NaN;
+    c.tLine[p] = li; c.tFrom[p] = from; c.tTo[p] = to; c.tx[p] = sx; c.tz[p] = sz;
     c.bike[p] = 0; c.enter[p] = 0; c.lat[p] = c.latT[p] = c.hold[p] = 0; c.pace[p] = 1; c.vNow[p] = c.speed[p]; c.aimAt[p] = -1e9;
     // `frac` > 0: starts part-way along the first segment, so the city starts out full
     if (!this.startSidewalk(p, frac)) { this.kill(p); return -1; }
@@ -614,6 +625,9 @@ export class Peds {
     if (!sim.net.nodes.alive[n0] || !sim.net.nodes.alive[n1]) return false;
     const s = this.segBetween(n0, n1);
     if (s < 0 || (c.bike[p] ? Number.isNaN(bikeU(sc.profile[s], 1)) : !PROFILE_INFO[sc.profile[s]].walk)) return false;
+    // a bus rider's last stretch: the stop's side, up to the stop
+    const toStop = this.toStop(p, s) ? this.stopAt : null;
+    if (toStop) c.side[p] = toStop[1];
     if (!c.bike[p]) {
       const [, side] = this.sideU(sc.profile[s], c.side[p]);
       c.side[p] = side;
@@ -626,7 +640,7 @@ export class Peds {
     c.enter[p] = 0;
     c.seg[p] = s;
     c.da[p] = fromA ? r0 : r1;
-    c.db[p] = fromA ? r1 : r0;
+    c.db[p] = toStop ? Math.max(r0, Math.min(r1, toStop[0])) : fromA ? r1 : r0;
     c.mode[p] = 0;
     const dur = Math.abs(c.db[p] - c.da[p]) / c.speed[p];
     c.dur[p] = Math.max(0.1, dur);
@@ -637,6 +651,33 @@ export class Peds {
     this.schedule(p, c.t0[p] + c.dur[p]);
     return true;
   }
+
+  /** The segment of node `n` the stop at (x, z) stands beside (its curve nearest), or −1. */
+  private stopSegment(n: number, x: number, z: number): number {
+    const net = this.sim.net;
+    let best = -1, bd = Infinity;
+    for (const s of net.segsOf(n, [])) {
+      const [, d] = closestT(net.quad(s), x, z);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+
+  /**
+   * Is segment `s` the last of bus rider `p`'s way, to its stop? If so `stopAt` holds the stop's distance along it (m
+   * from node a) and the side of its sidewalk (+1: u+, the left of a → b).
+   */
+  private toStop(p: number, s: number): boolean {
+    const c = this.t.cols;
+    if (c.tLine[p] < 0 || Number.isNaN(c.tx[p]) || c.rIdx[p] + 2 !== c.rLen[p] || s < 0) return false;
+    const net = this.sim.net, q = net.quad(s), [t] = closestT(q, c.tx[p], c.tz[p]);
+    bez(q, t, p2); bezD(q, t, d2);
+    this.stopAt[0] = this.sim.sAlong(s, t);
+    // u+ lies along (dz, −dx) of the curve's direction (`posNow`)
+    this.stopAt[1] = (c.tx[p] - p2[0]) * d2[1] - (c.tz[p] - p2[1]) * d2[0] >= 0 ? 1 : -1;
+    return true;
+  }
+  private stopAt = new Float64Array(2);
 
   /** Reached node route[rIdx + 1]: builds the waypoints to go around/cross to the next segment. */
   private atNode(p: number): boolean {
@@ -697,7 +738,13 @@ export class Peds {
     // tie: fixed per-person draw (half cross before, half after); at a mid-block crosswalk, half cross
     const mid = deg === 2 && (sim.nodeCtl[n] === 9 || sim.nodeCtl[n] === 10);
     const want = mid && ((p + n) & 1) === 0;
-    const pick = mid ? (opts.find((o) => (o.steps > 0) === want) ?? opts[0]) : opts[0].steps < opts[1].steps || (opts[0].steps === opts[1].steps && (p & 1) === 0) ? opts[0] : opts[1];
+    let pick = mid ? (opts.find((o) => (o.steps > 0) === want) ?? opts[0]) : opts[0].steps < opts[1].steps || (opts[0].steps === opts[1].steps && (p & 1) === 0) ? opts[0] : opts[1];
+    // a bus rider onto the stop's segment: the corner on the stop's side (it crosses here, at the crosswalk, not to
+    // the stop over the carriageway)
+    if (i + 2 === c.rLen[p] && this.toStop(p, sOut)) {
+      const endOut0 = sc.a[sOut] === n, leftOut = endOut0 ? this.stopAt[1] > 0 : this.stopAt[1] < 0;
+      pick = opts.find((o) => o.cj === (leftOut ? aj : (aj - 1 + deg) % deg)) ?? pick;
+    }
     let w = 0;
     const base = p * WAYS * 4;
     const put = (x: number, y: number, z: number, cross: number) => {
