@@ -4,7 +4,8 @@
 
 import { PoseWriter, POSE_STRIDE, MAX_AGENTS, TILES, sortByTile, tileOrigin, viewPoseBuffers } from '../shared/contracts/poses.ts';
 import { SimNet, decodeOp } from './lanes.ts';
-import { Traffic, type LineSpec } from './traffic.ts';
+import { Traffic } from './traffic.ts';
+import type { LineSpec } from './traffic/lines.ts';
 import { Peds } from './peds.ts';
 
 export type ToSim =
