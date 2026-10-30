@@ -658,7 +658,7 @@ export class Game {
   }
 
   /** Waits for the workers to drain (for photos and tests). */
-  async settle(frames = 20): Promise<void> { await settlePool(this.pool, frames); }
+  async settle(frames = 20): Promise<void> { await settlePool(this.pool, frames, () => this.layers.every((l) => !l.changed)); }
 
   /** Generates the base terrain from the seed, one tile per job. */
   /** Terrain of every tile from the seed, in the workers; rejects if any tile fails. */

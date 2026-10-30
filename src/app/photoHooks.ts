@@ -14,11 +14,21 @@ export async function photoView(
   await settle(4);
 }
 
-/** Waits until the worker pool has been idle for `frames` consecutive animation frames. */
-export async function settlePool(pool: JobPool, frames = 20): Promise<void> {
+/**
+ * Waits until the worker pool has been idle, and `steady()` held (nothing the layers draw changing: no mesh coming,
+ * going or fading), for `frames` consecutive animation frames. With the pool alone the counts were read mid-change:
+ * the same build measured 122 and 234 draws in one view (an outgoing level and the incoming one drawn together).
+ */
+export async function settlePool(pool: JobPool, frames = 20, steady: () => boolean = () => true): Promise<void> {
   let quiet = 0;
+  const t0 = performance.now();
   while (quiet < frames) {
     await new Promise((r) => requestAnimationFrame(r));
-    quiet = pool.isIdle() ? quiet + 1 : 0;
+    quiet = pool.isIdle() && steady() ? quiet + 1 : 0;
+    // never waits for ever: a scene that keeps changing is said so (the meter flags its counts)
+    if (performance.now() - t0 > SETTLE_LIMIT_MS) { console.warn('settle: the scene kept changing for ' + SETTLE_LIMIT_MS / 1000 + ' s'); return; }
   }
 }
+
+/** Longest `settlePool` waits for the scene to stop changing (ms). */
+const SETTLE_LIMIT_MS = 30000;
