@@ -86,7 +86,7 @@ import { Clock } from './app/clock.ts';
 import { clickTool, type ClickHost } from './app/clicks.ts';
 import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
 import { LotEditing } from './app/lotEditing.ts';
-import { bindInput, type InputControl } from './app/input.ts';
+import { Gesture, bindInput, type InputControl } from './app/input.ts';
 
 /** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
 const STILL_FRAMES = 40;
@@ -179,8 +179,10 @@ export class Game {
   /** Trees: one per click instead of the brush. */
   private forestOne = false;
   private pointer = { x: 0, y: 0, inside: false };
-  /** The page's input: the pointer gesture under way (app/input.ts owns it) and how to leave it. */
-  private input!: InputControl;
+  /** The pointer gesture under way (app/input.ts drives it): none until the input is bound, and while nothing is dragged. */
+  private readonly gesture = new Gesture();
+  /** The page's input, bound once the parts it drives exist (the first tool is set before: there is no gesture yet to leave). */
+  private input: InputControl | null = null;
   private roadTool: RoadTool;
   private inspector!: Inspector;
   private itemTool!: ItemTool;
@@ -777,18 +779,18 @@ export class Game {
 
     // tool under the cursor
     let hit: THREE.Vector3 | null = null;
-    if (this.tool !== 'camera' && this.pointer.inside && this.input.gesture.drag !== 'pan' && this.input.gesture.drag !== 'rotate') hit = this.rig.pick(this.ndcX(), this.ndcY());
+    if (this.tool !== 'camera' && this.pointer.inside && this.gesture.drag !== 'pan' && this.gesture.drag !== 'rotate') hit = this.rig.pick(this.ndcX(), this.ndcY());
     const terrainTool = TERRAIN_TOOLS.includes(this.tool) || GROUND_TOOLS.includes(this.tool) || (this.tool === 'sky' && this.clouds.tool.fog !== 'none');
     if (terrainTool && hit) this.terrain.brush.value.set(hit.x, hit.z, this.brush.radius, 1);
     else if (this.tool === 'zone' && hit) this.terrain.brush.value.set(hit.x, hit.z, this.zoneTool.radius, 1);
     else this.terrain.brush.value.w = 0;
-    if (this.input.gesture.drag === 'zone' && hit) this.zoneTool.dab(hit.x, hit.z);
+    if (this.gesture.drag === 'zone' && hit) this.zoneTool.dab(hit.x, hit.z);
     if (this.tool === 'building') this.hoverLotTool(hit);
-    if (this.input.gesture.drag === 'brush' && this.elemStroke && hit) {
+    if (this.gesture.drag === 'brush' && this.elemStroke && hit) {
       if (this.tool === 'sky') this.elemStroke.dab(hit.x, hit.z, this.brush.radius, Item.Mist, 0.25, this.clouds.tool.fogHeight, this.clouds.tool.fog === 'erase' ? 'eraseKind' : 'lay', dt, 22);
       else this.elemStroke.dab(hit.x, hit.z, this.brush.radius, this.elem.kind, this.elem.density, this.elem.size, this.elem.mode, dt);
     }
-    if (this.input.gesture.drag === 'brush' && this.stroke && hit) {
+    if (this.gesture.drag === 'brush' && this.stroke && hit) {
       if (this.stroke instanceof GroundStroke) this.stroke.dab(hit.x, hit.z, this.brush.radius, this.tool === 'paint' ? 'paint' : this.forestCut ? 'cut' : 'forest', this.groundKind, this.brush.strength, dt, this.forestSpecies);
       else {
         this.stroke.dab(hit.x, hit.z, this.brush, dt);
@@ -797,15 +799,15 @@ export class Game {
       }
     }
     if (this.tool === 'river') this.river.hover(hit);
-    if (this.input.gesture.drag === 'free') this.roadTool.freeMove(hit);
-    else if (this.input.gesture.drag === 'row' && this.input.gesture.boxStart) this.itemTool.hoverRow(this.input.gesture.boxStart.x, this.input.gesture.boxStart.z, hit);
-    else if (this.input.gesture.drag === 'box' && this.input.gesture.boxStart && hit) {
+    if (this.gesture.drag === 'free') this.roadTool.freeMove(hit);
+    else if (this.gesture.drag === 'row' && this.gesture.boxStart) this.itemTool.hoverRow(this.gesture.boxStart.x, this.gesture.boxStart.z, hit);
+    else if (this.gesture.drag === 'box' && this.gesture.boxStart && hit) {
       // drag rectangle on the ground (red)
-      const a = this.input.gesture.boxStart, cz = (a.z + hit.z) / 2, H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.8;
+      const a = this.gesture.boxStart, cz = (a.z + hit.z) / 2, H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.8;
       this.preview.marker.visible = false;
       this.preview.show({ x0: (a.x + hit.x) / 2, z0: a.z, cx: (a.x + hit.x) / 2, cz, x1: (a.x + hit.x) / 2, z1: hit.z }, Math.abs(hit.x - a.x) / 2, [0, 1], [H(a.x, a.z), H(hit.x, hit.z)], true, 0xe2564b);
-    } else if (ROAD_TOOLS.includes(this.tool) && this.tool !== 'free' && this.input.gesture.drag !== 'pan' && this.input.gesture.drag !== 'rotate') this.roadTool.hover(hit);
-    if ((this.tool === 'streetscape' || this.tool === 'barrier') && this.input.gesture.drag !== 'pan' && this.input.gesture.drag !== 'rotate' && this.input.gesture.drag !== 'row') this.itemTool.hover(hit);
+    } else if (ROAD_TOOLS.includes(this.tool) && this.tool !== 'free' && this.gesture.drag !== 'pan' && this.gesture.drag !== 'rotate') this.roadTool.hover(hit);
+    if ((this.tool === 'streetscape' || this.tool === 'barrier') && this.gesture.drag !== 'pan' && this.gesture.drag !== 'rotate' && this.gesture.drag !== 'row') this.itemTool.hover(hit);
     pr?.lap(PART.tools, performance.now());
 
     // Drawn only when something visible can change: the camera, the simulation or the clock running, input, meshes
@@ -1105,7 +1107,7 @@ export class Game {
       toolKey: (e) => g.toolKey(e),
       history: (r) => g.history(r),
       save: () => g.saving.save(),
-    });
+    }, this.gesture);
   }
 
   private removePole(hit: THREE.Vector3 | null): void {
@@ -1250,7 +1252,7 @@ export class Game {
   /** Undo (false) or redo (true), with sound. */
   private history(redo: boolean): void {
     // a brush, zoning or free road still being dragged is recorded on release: undo waits for it
-    if (this.input.gesture.drag === 'brush' || this.input.gesture.drag === 'zone' || this.input.gesture.drag === 'free' || this.input.gesture.drag === 'node' || this.input.gesture.drag === 'lots') return;
+    if (this.gesture.drag === 'brush' || this.gesture.drag === 'zone' || this.gesture.drag === 'free' || this.gesture.drag === 'node' || this.gesture.drag === 'lots') return;
     if (redo ? this.commands.redo() : this.commands.undo()) this.ambient.sfx('undo');
   }
 
@@ -1266,7 +1268,7 @@ export class Game {
       get insideId() { return g.insideId; }, set insideId(v) { g.insideId = v; },
       hud: g.hud, health: g.health, canvas: g.canvas, ambient: g.ambient,
       select: (id) => g.select(id), setLotMode: (mode) => g.setLotMode(mode),
-      cancelGesture: () => g.input.cancel(), exitLots: () => g.editing.exit(),
+      cancelGesture: () => g.input?.cancel(), exitLots: () => g.editing.exit(),
     };
   }
 
@@ -1512,7 +1514,7 @@ export class Game {
     this.startMenu = new StartMenu(document.getElementById('hud')!, this.parts.maxLayers, {
       newCity: (seed, tiles) => {
         if (!this.discardOk()) { this.startMenu?.show(); return; }
-        if (tiles !== MAP_TILES) { reloadWithMap(tiles, `cidade&seed=${seed}`); return; }
+        if (tiles !== MAP_TILES) { reloadWithMap(tiles, `city&seed=${seed}`); return; }
         this.world.seed = seed; void this.generatedCity();
       },
       empty: (tiles) => {

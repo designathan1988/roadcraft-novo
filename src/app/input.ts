@@ -105,8 +105,8 @@ export interface InputControl {
   cancel(): void;
 }
 
-export function bindInput(h: InputHost): InputControl {
-  const gs = new Gesture();
+/** Binds the page's input; `gs` is the gesture it drives (made by the caller, `none` until a pointer goes down). */
+export function bindInput(h: InputHost, gs: Gesture = new Gesture()): InputControl {
     const c = h.canvas;
     const down = { x: 0, y: 0, button: -1 };
     c.addEventListener('contextmenu', (e) => e.preventDefault());
