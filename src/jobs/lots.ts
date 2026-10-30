@@ -192,6 +192,8 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
     // fit is tried narrower, as before
     const q = quads[s], straight = Math.hypot(q.cx - (q.x0 + q.x1) / 2, q.cz - (q.z0 + q.z1) / 2) < 0.5;
     const span = endS - startS, aim = (size.w[0] + size.w[1]) / 2;
+    // no room for the least lot (the corners' setbacks can pass the segment's length: span < 0): no lot on this side
+    if (span < size.w[0]) continue;
     const equal = span >= size.w[0] ? span / Math.max(1, Math.round(span / aim)) : span;
     let at = startS;
     let narrowTried = false;
