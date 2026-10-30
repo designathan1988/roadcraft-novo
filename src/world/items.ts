@@ -28,6 +28,15 @@ export const isBarrier = (t: number) => t >= 20 && t <= 25;
 /** Smoke, steam, fire, fountain, dust, soot, sparks and spray: particle emitters. */
 export const isEffect = (t: number) => (t >= 13 && t <= 16) || (t >= 26 && t <= 29) || t === 42;
 export const isGroundElement = (t: number) => t >= 30 && t <= 40;
+/**
+ * What a sidewalk may hold (the owner, 2026-10-30): power and lamp poles, benches, bins and the rest of the street
+ * furniture, the guard rails and bollards along it, and people. Trees only where the player plants them; nothing at
+ * all on a carriageway.
+ */
+export const isSidewalkFurniture = (t: number) =>
+  (t >= Item.Bench && t <= Item.Sign) || t === Item.Guardrail || t === Item.Railing || t === Item.PoleLine || t === Item.Person;
+/** Planted by the player: trees, palms and shrubs (a sidewalk takes them; a road built over them clears them). */
+export const isPlant = (t: number) => t === Item.Tree || t === Item.Bush || t === Item.Conifer || t === Item.Palm;
 
 const schema = { x0: Float32Array, z0: Float32Array, x1: Float32Array, z1: Float32Array, type: Uint8Array, variant: Uint8Array };
 /** Flat record: [id, x0, z0, x1, z1, type, variant]. */

@@ -378,6 +378,7 @@ export const ENGINE_PT: Record<string, string> = {
   'game.hint.sky': 'Espalhe nuvens ou ponha neblina.',
   'game.toast.noCloud': 'Nenhuma nuvem aqui: clique embaixo de uma.',
   'game.toast.bombGround': 'Impacto no chão.',
+  'tools.item.notOnRoad': 'Nada fica no meio da via: ponha na calçada.',
   'game.toast.bombHit': 'Atingido: continue batendo para derrubar.',
   'game.toast.bombDown': 'Construção desabou.',
   'game.toast.hit': 'Atingido.',

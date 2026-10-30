@@ -14,6 +14,8 @@ import type { Hud } from '../ui/hud.ts';
 import { heightAt } from '../world/heights.ts';
 import { waterAt } from '../world/ground.ts';
 import { Item, ItemsCommand, MAX_RUN, isBarrier, isEffect } from '../world/items.ts';
+import { RoadGround, roadGroundAt } from '../roads/ground.ts';
+import { t } from '../shared/i18n/index.ts';
 import type { World } from '../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
@@ -138,6 +140,7 @@ export class ItemTool {
     }
     if (this.mode === 'streetscape') {
       const sp = this.spot(hit.x, hit.z, false);
+      if (this.onCarriageway(sp)) { this.hud.toast(t('tools.item.notOnRoad')); return; }
       const c = new ItemsCommand(items, 'pôr item');
       // objects: x1 = heading, z1 = height (0 = from the ground)
       // elements (smoke, fire…): variant = strength
@@ -221,6 +224,11 @@ export class ItemTool {
     return true;
   }
 
+  /** Nothing stands on a carriageway (the owner, 2026-10-30): only a spot off the sidewalk can fall there. */
+  private onCarriageway(sp: { x: number; z: number; onWalk: boolean }): boolean {
+    return !sp.onWalk && roadGroundAt(this.world.roads, sp.x, sp.z) === RoadGround.Carriageway;
+  }
+
   /** Row of the chosen item from a to b, each snapped to the sidewalk (a single command). */
   row(ax: number, az: number, bx: number, bz: number): number {
     const L = Math.hypot(bx - ax, bz - az);
@@ -230,7 +238,7 @@ export class ItemTool {
     for (let i = 0; i < n; i++) {
       const t = n === 1 ? 0 : i * step / L;
       const sp = this.spot(ax + (bx - ax) * t, az + (bz - az) * t, false);
-      if (this.world.items.nearest(sp.x, sp.z, Math.min(1.5, step * 0.5)) >= 0) continue;
+      if (this.world.items.nearest(sp.x, sp.z, Math.min(1.5, step * 0.5)) >= 0 || this.onCarriageway(sp)) continue;
       c.add([sp.x, sp.z, sp.yaw, sp.onWalk ? sp.y : 0, this.item, this.item === Item.Sign ? this.sign : isElement(this.item) ? 4 : 0]);
     }
     if (!c.empty) { this.commands.push(c); this.hud.toast('Fileira posta ao longo da calçada.'); }

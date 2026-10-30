@@ -22,6 +22,8 @@ import { MIN_LEG_ANGLE } from './impossible.ts';
 import { ROAD_TUNING, TUNNEL } from './tuning.ts';
 import { ARCHES, archFor, eraAt } from '../world/arch.ts';
 import { NO_WATER, waterAt } from '../world/ground.ts';
+import { Item, isBarrier, isSidewalkFurniture, type ItemRec } from '../world/items.ts';
+import { RoadGround, stripOfRoad } from './ground.ts';
 
 // --------------------------------------------------------------- journal
 
@@ -36,6 +38,7 @@ type Op =
   | { t: 'name'; id: number; from: string | undefined; to: string | undefined }
   | { t: 'addBld'; rec: number[] }
   | { t: 'remBld'; rec: number[] }
+  | { t: 'remItem'; rec: ItemRec }
   | { t: 'terrain'; idx: Int32Array; before: Float32Array; after: Float32Array; x0: number; z0: number; x1: number; z1: number; cells?: number[]; near?: number[] };
 
 export class RoadJournal implements Command {
@@ -244,6 +247,11 @@ export class RoadJournal implements Command {
     this.world.removeBuilding(id);
     this.ops.push({ t: 'remBld', rec });
   }
+  removeItem(id: number): void {
+    const rec = this.world.items.rec(id);
+    this.world.items.remove(id);
+    this.ops.push({ t: 'remItem', rec });
+  }
   terrain(idx: Int32Array, before: Float32Array, after: Float32Array, box: [number, number, number, number]): void {
     const op: Op = { t: 'terrain', idx, before, after, x0: box[0], z0: box[1], x1: box[2], z1: box[3] };
     this.writeTerrain(op, after);
@@ -282,6 +290,7 @@ export class RoadJournal implements Command {
       case 'name': { const v = doAdd ? op.to : op.from; if (v === undefined) this.world.streetNames.delete(op.id); else this.world.streetNames.set(op.id, v); break; }
       case 'addBld': if (doAdd) this.world.restoreBuilding(op.rec); else this.world.removeBuilding(op.rec[0]); break;
       case 'remBld': if (doAdd) this.world.removeBuilding(op.rec[0]); else this.world.restoreBuilding(op.rec); break;
+      case 'remItem': if (doAdd) this.world.items.remove(op.rec[0]); else this.world.items.add(op.rec, op.rec[0]); break;
       case 'terrain': this.writeTerrain(op, doAdd ? op.after : op.before); break;
     }
   }
@@ -864,6 +873,30 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
     doomed.push(id);
   });
   for (const id of doomed) j.removeBuilding(id);
+
+  // what stands on its ground: everything within the construction limits is cleared (Ohio DOT Item 201, Toronto TS
+  // 2.00: the trees within the clearing limits are removed); the footway keeps its street furniture (the owner,
+  // 2026-10-30), a carriageway keeps nothing; over a tunnel everything stays
+  const items = world.items, ic = items.t.cols, cleared: number[] = [];
+  items.index.query(minX - half, minZ - half, maxX + half, maxZ + half, (id) => {
+    const type = ic.type[id], keepOnFoot = isSidewalkFurniture(type);
+    // a run (fence, wall, hedge, rail) by its metres; a power line by its two poles; anything else by its point (an
+    // object's x1/z1 are its heading and height, not a place)
+    const run = isBarrier(type);
+    const x0 = ic.x0[id], z0 = ic.z0[id], x1 = run ? ic.x1[id] : x0, z1 = run ? ic.z1[id] : z0;
+    const len = type === Item.PoleLine ? 0 : Math.hypot(x1 - x0, z1 - z0);
+    const steps = Math.ceil(len), ends = type === Item.PoleLine ? 2 : 1;
+    for (let e = 0; e < ends; e++) for (let k = 0; k <= steps; k++) {
+      const f = steps ? k / steps : e, x = x0 + (x1 - x0) * f, z = z0 + (z1 - z0) * f;
+      const strip = stripOfRoad(q, profile, x, z);
+      if (strip === RoadGround.None || (strip === RoadGround.Footway && keepOnFoot)) continue;
+      const [, i] = nearest(x, z);
+      if (py[i] < heightAt(world.heights, x, z) - TUNNEL.portalDepth) continue;
+      cleared.push(id);
+      return;
+    }
+  });
+  for (const id of cleared) j.removeItem(id);
 
   // terrain
   const h = world.heights;

@@ -378,6 +378,7 @@ export const ENGINE_EN: Record<string, string> = {
   'game.hint.sky': 'Scatter clouds or lay fog.',
   'game.toast.noCloud': 'No cloud here: click under one.',
   'game.toast.bombGround': 'Hit the ground.',
+  'tools.item.notOnRoad': 'Nothing stands on the road: put it on the sidewalk.',
   'game.toast.bombHit': 'Hit: keep striking to bring it down.',
   'game.toast.bombDown': 'The building collapsed.',
   'game.toast.hit': 'Hit.',

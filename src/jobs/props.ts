@@ -7,7 +7,7 @@ import { MAP_CELLS, SEA_LEVEL } from '../config.ts';
 import { cellId, cellOriginX, cellX } from '../core/grid.ts';
 import { Rng, fbm, hash2 } from '../core/rng.ts';
 import { arcTable, bez, bezD, tAtLength, type Quad } from '../roads/geometry.ts';
-import { NODE_BULB, armOf, bulbRetreat, junctionRetreats } from '../roads/junction.ts';
+import { CURB_R_MAX, NODE_BULB, armOf, bulbRetreat, junctionRetreats } from '../roads/junction.ts';
 import { Ctl, Rule } from '../roads/control.ts';
 import { SegFlag, furnOf } from '../roads/flags.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
@@ -146,6 +146,15 @@ function placeItems(heights: Float32Array, a: Float32Array, out: Out): void {
 /** Escala guardada em 6 bits: 0,5 a 2,0. */
 export function propScale(q: number): number { return 0.5 + q / 42; }
 
+/**
+ * The crown's reach of each wild tree kind at scale 1 (m), measured on its model (render/treeMeshes.ts: the mixed
+ * broadleaf and the oak have the ipê as a variant, 3.34 m; the cypress 2.48; the palm's fronds 5.36; the flowering
+ * bush 1.05). A wild tree stands only where this, times its scale, keeps off the road ground.
+ */
+const CROWN_R = new Float32Array(PROP_TYPES);
+CROWN_R[PROP.Tree] = 3.34; CROWN_R[PROP.Oak] = 3.34; CROWN_R[PROP.Conifer] = 2.48; CROWN_R[PROP.Palm] = 5.36; CROWN_R[PROP.Bush] = 1.05;
+/** The widest crown a wild tree has: the palm at its largest scale (1.3 × the Amazon's 1.4). */
+const CROWN_REACH = 5.36 * 1.3 * 1.4;
 /** Trees by biome: [base chance, share of shrubs, share of cypresses, scale, share of palms]. */
 const BIOME_TREES: Array<[number, number, number, number, number]> = [
   [0.18, 0.15, 0.27, 1, 0.02], // no ecosystem
@@ -281,22 +290,22 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
       lampVs.push(v);
       const f = frame(v);
       const lx = f.tz, lz = -f.tx;
-      if (median && (median.u1 - median.u0) >= 1.2) {
-        const u = (median.u0 + median.u1) / 2;
-        const x = f.px + lx * u, z = f.pz + lz * u;
-        out.add(PROP.LampDouble, x, f.y + CURB_H, z, Math.atan2(lx, lz), 0, 1, k);
-        continue;
-      }
-      // sem canteiro: poste de concreto com luminária e fiação, sempre do mesmo lado (direito, se houver calçada)
+      // the lamp columns stand on the sidewalk, never in the middle of the road (the owner, 2026-10-30): one side with
+      // the wires, always the same (the right one if it has a sidewalk); a road with a median lights its other
+      // carriageway from the opposite sidewalk
       const right = !!swR;
       const e = right ? swR : swL;
       if (!e) continue;
       const u = right ? e.u0 + 0.5 : e.u1 - 0.5;
       const x = f.px + lx * u, z = f.pz + lz * u;
-      // o braço aponta para a via
+      // the arm points at the road
       const ax = right ? lx : -lx, az = right ? lz : -lz;
       const y = f.y + CURB_H;
       out.add(PROP.Lamp, x, y, z, Math.atan2(ax, az), 0, 1, k);
+      if (median && right && swL && median.u1 - median.u0 >= 1.2) {
+        const uo = swL.u1 - 0.5;
+        out.add(PROP.Lamp, f.px + lx * uo, y, f.pz + lz * uo, Math.atan2(-lx, -lz), 0, 1, k);
+      }
       // vão de fios do poste anterior até este (fica na célula do poste anterior)
       if (prevPole && !ring) {
         const [px, py, pz] = prevPole;
@@ -383,23 +392,12 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         if (zone !== Zone.Industrial && s1 - s0 > 24) put(PROP.Bin, 0, s0 + 3.2, wallU, true);
       }
     }
-    // árvores de calçada (largas o bastante) e de canteiro; básico = só postes e placas
+    // benches and bins on the commercial sidewalks (trees are not born with the roads: the player plants them,
+    // the owner 2026-10-30); basic = lamp columns and signs only
     for (const [e, side] of [[swR, 1], [swL, 0]] as const) {
       if (!e || ring || furn === 1 || e.u1 - e.u0 < 2.3) continue;
       const zone = zoneOf(side);
       if (zone === Zone.Industrial) continue;
-      const step = zone === Zone.Residential ? 10 : 12;
-      for (let v = s0 + 14 + (side === 0 ? 5 : 0); v < s1 - 6; v += step) {
-        if (nearLamp(v) || rng.next() < 0.15) continue;
-        const f = frame(v);
-        const lx = f.tz, lz = -f.tx;
-        const u = side === 1 ? e.u1 - 0.9 : e.u0 + 0.9; // perto do meio-fio
-        const x = f.px + lx * u, z = f.pz + lz * u;
-        if (!onGround(x, z, f.y)) continue;
-        // street trees: the mixed broadleaf, a third of them oaks (shade trees)
-        out.add(rng.next() < 0.33 ? PROP.Oak : PROP.Tree, x, f.y + CURB_H, z, rng.next() * 6.283, rng.int(0, 4), rng.range(0.75, 1.2), rng.nextU32());
-      }
-      // bancos e lixeiras na calçada do comércio
       if (zone === Zone.Commercial || zone === Zone.Mixed) {
         for (let v = s0 + 20 + rng.range(0, 10); v < s1 - 10; v += rng.range(28, 46)) {
           if (nearLamp(v)) continue;
@@ -414,20 +412,6 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
           const x2 = f2.px + lx * u, z2 = f2.pz + lz * u;
           out.add(PROP.Bin, x2, f2.y + CURB_H, z2, face, 0, 1, rng.nextU32());
         }
-      }
-    }
-    if (furn === 0 && median && median.strip.kind === 'median' && median.u1 - median.u0 >= 2.5) {
-      for (let v = s0 + 9; v < s1 - 9; v += 9) {
-        if (nearLamp(v)) continue;
-        const f = frame(v);
-        const lx = f.tz, lz = -f.tx;
-        const u = (median.u0 + median.u1) / 2;
-        const x = f.px + lx * u, z = f.pz + lz * u;
-        if (!onGround(x, z, f.y)) continue;
-        // medians: palms on the wide avenues (Brazilian style), cypresses and broadleaves elsewhere
-        const pick = rng.next();
-        const kind = median.u1 - median.u0 >= 4 && pick < 0.45 ? PROP.Palm : pick < 0.6 ? PROP.Conifer : PROP.Tree;
-        out.add(kind, x, f.y + CURB_H, z, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.15), rng.nextU32());
       }
     }
   }
@@ -468,7 +452,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     } : undefined);
   lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot, grounds40);
 
-  // miolo de quadra e terreno vazio: árvores e arbustos onde não há via nem prédio
+  // the inside of the blocks and the open land: trees and shrubs where there is no road nor building
   {
     const RES = 2, W = 128;
     const x0 = cellOriginX(cell % MAP_CELLS), z0 = cellOriginX((cell / MAP_CELLS) | 0);
@@ -478,17 +462,50 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
       const j0 = Math.max(0, Math.floor((z - r - z0) / RES)), j1 = Math.min(W - 1, Math.floor((z + r - z0) / RES));
       for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) busy[j * W + i] = 1;
     };
+    // the road ground itself (carriageway and sidewalks, junction plates), with a border as wide as the widest
+    // crown: no tree's crown hangs over a road (the owner, 2026-10-30; street clearance codes ask 14 ft over the
+    // street and 8 ft over the sidewalk, which a wild tree's low crown never gives)
+    const RB = Math.ceil(CROWN_REACH / RES), RW = W + RB * 2, rx0 = x0 - RB * RES, rz0 = z0 - RB * RES;
+    const road = new Uint8Array(RW * RW);
+    const markRoad = (x: number, z: number, r: number) => {
+      const i0 = Math.max(0, Math.floor((x - r - rx0) / RES)), i1 = Math.min(RW - 1, Math.floor((x + r - rx0) / RES));
+      const j0 = Math.max(0, Math.floor((z - r - rz0) / RES)), j1 = Math.min(RW - 1, Math.floor((z + r - rz0) / RES));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const cx = rx0 + (i + 0.5) * RES, cz = rz0 + (j + 0.5) * RES;
+        if ((cx - x) ** 2 + (cz - z) ** 2 <= r * r) road[j * RW + i] = 1;
+      }
+    };
+    const nodeHalf = new Float32Array(g.nodeCount);
     for (let s = 0; s < g.segCount; s++) {
       const info = PROFILE_INFO[g.sprofile[s]];
-      const half = Math.max(info.left, info.right) + 2;
+      const ground = Math.max(info.left, info.right), half = ground + 2, reach = ground + CROWN_REACH;
+      nodeHalf[g.sa[s]] = Math.max(nodeHalf[g.sa[s]], ground); nodeHalf[g.sb[s]] = Math.max(nodeHalf[g.sb[s]], ground);
       const n = Math.max(2, Math.ceil(lens[s] / 2) + 1);
       for (let i = 0; i < n; i++) {
         bez(quads[s], tAtLength(tables[s], (lens[s] * i) / (n - 1)), p2);
+        if (p2[0] < x0 - reach || p2[0] > x0 + 256 + reach || p2[1] < z0 - reach || p2[1] > z0 + 256 + reach) continue;
+        markRoad(p2[0], p2[1], ground);
         if (p2[0] < x0 - half || p2[0] > x0 + 256 + half || p2[1] < z0 - half || p2[1] > z0 + 256 + half) continue;
         mark(p2[0], p2[1], half);
       }
     }
-    for (let n = 0; n < g.nodeCount; n++) if (deg[n] >= 3) mark(g.nx[n], g.nz[n], 22);
+    for (let n = 0; n < g.nodeCount; n++) if (deg[n] >= 3) { mark(g.nx[n], g.nz[n], 22); markRoad(g.nx[n], g.nz[n], nodeHalf[n] + CURB_R_MAX); }
+    /** Whether a crown of radius r round (x, z) stays off the road ground. */
+    const crownClear = (x: number, z: number, r: number) => {
+      const i0 = Math.max(0, Math.floor((x - r - rx0) / RES)), i1 = Math.min(RW - 1, Math.floor((x + r - rx0) / RES));
+      const j0 = Math.max(0, Math.floor((z - r - rz0) / RES)), j1 = Math.min(RW - 1, Math.floor((z + r - rz0) / RES));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        if (!road[j * RW + i]) continue;
+        const cx = rx0 + (i + 0.5) * RES, cz = rz0 + (j + 0.5) * RES;
+        if ((cx - x) ** 2 + (cz - z) ** 2 < r * r) return false;
+      }
+      return true;
+    };
+    // a wild tree drawn as ever (the same draws, the forest away from the roads unchanged), kept only when its crown
+    // is clear of the road ground
+    const plant = (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => {
+      if (crownClear(x, z, CROWN_R[kind] * scale)) out.add(kind, x, y, z, yaw, variant, scale, key);
+    };
     for (let i = 0; i < b.count; i++) {
       // the whole lot is taken (building, yard, walls); a polygon lot only inside its outline
       const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
@@ -526,11 +543,11 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         if (y < SEA_LEVEL + 0.6) continue;
         if (env?.water && waterAt(env.water, px, pz) > y - 0.3) continue;
         const r = rng.next();
-        if (species === 1 && forest > 0.2) { out.add(PROP.Tree, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.3) * B[3], rng.nextU32()); continue; }
-        if (species === 2 && forest > 0.2) { out.add(PROP.Conifer, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.4) * B[3], rng.nextU32()); continue; }
-        if (species === 3 && forest > 0.2) { out.add(PROP.Palm, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.2), rng.nextU32()); continue; }
-        if (r < B[1]) out.add(PROP.Bush, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.5), rng.nextU32());
-        else out.add(r < B[1] + B[2] ? PROP.Conifer : r < B[1] + B[2] + B[4] ? PROP.Palm : (rng.next() < 0.4 ? PROP.Oak : PROP.Tree), px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.7, 1.3) * B[3], rng.nextU32());
+        if (species === 1 && forest > 0.2) { plant(PROP.Tree, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.3) * B[3], rng.nextU32()); continue; }
+        if (species === 2 && forest > 0.2) { plant(PROP.Conifer, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.4) * B[3], rng.nextU32()); continue; }
+        if (species === 3 && forest > 0.2) { plant(PROP.Palm, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.2), rng.nextU32()); continue; }
+        if (r < B[1]) plant(PROP.Bush, px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.8, 1.5), rng.nextU32());
+        else plant(r < B[1] + B[2] ? PROP.Conifer : r < B[1] + B[2] + B[4] ? PROP.Palm : (rng.next() < 0.4 ? PROP.Oak : PROP.Tree), px, y, pz, rng.next() * 6.283, rng.int(0, 4), rng.range(0.7, 1.3) * B[3], rng.nextU32());
       }
     }
   }

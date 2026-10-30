@@ -59,8 +59,10 @@ export function junctionRetreats(arms: Arm[], lens: number[], out: Float64Array,
   for (let k = 0; k < n; k++) out[order[k]] = Math.max(0, Math.min(tmp[k], 60, lens[order[k]] * 0.45));
 }
 
+/** The largest kerb return radius (m): a junction's plate reaches no further past its roads' sides. */
+export const CURB_R_MAX = 7.2;
 /** Kerb return radius bounds (m) and the angles under which a corner is not rounded (Roadcraft corners.ts). */
-const CURB_R_MIN = 2.8, CURB_R_MAX = 7.2, TAPER_ANGLE = (12 * Math.PI) / 180, ACUTE = (12 * Math.PI) / 180, CORNER_MITER = 2.5;
+const CURB_R_MIN = 2.8, TAPER_ANGLE = (12 * Math.PI) / 180, ACUTE = (12 * Math.PI) / 180, CORNER_MITER = 2.5;
 
 /** The corner between arm `a` and the next arm counter-clockwise, `b`, where a's left kerb meets b's right kerb. */
 export interface Corner {
