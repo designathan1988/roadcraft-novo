@@ -222,7 +222,6 @@ function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
 /** Parts of a frame: the top, the underside of the overhang, the inside walls. */
 const FR_TOP = 1, FR_BOTTOM = 2, FR_INNER = 4;
 /** Level of the building being generated (0 near; 1 far cell: a frame keeps only what reads at a pixel). */
-let genLod = 0;
 
 /**
  * A rectangular frame from y0 to y1: the band between the outer rectangle (`out` past x0..x1 × z0..z1) and the inner
@@ -254,7 +253,7 @@ function frame(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1
  */
 function parapet(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, t: number, col: number,
   inner = shadeHex(col, 0.85), coping = 0xd6d3cc): void {
-  if (genLod > 0) { frame(mb, f, x0, x1, z0, z1, y, y + h, 0, t, col, BMAT.Plain, FR_TOP | FR_INNER, inner); return; }
+  if (mb.lod > 0) { frame(mb, f, x0, x1, z0, z1, y, y + h, 0, t, col, BMAT.Plain, FR_TOP | FR_INNER, inner); return; }
   // the wall (its top hidden under the coping), then the coping: 6 cm, 5 cm proud on both sides so the rain drips clear
   // (4.0 buildingMesh.ts:3458-3465)
   frame(mb, f, x0, x1, z0, z1, y, y + h - 0.06, 0, t, col, BMAT.Plain, FR_INNER, inner);
@@ -386,7 +385,7 @@ function pitchedRoof(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
   face([[x0 - o, eave, z1 + o], [x1 + o, eave, z1 + o], [r1, ridge, cm], [r0, ridge, cm]], roofCol, RT, [0, 1, 1]);
   face([[x1 + o, eave, z0 - o], [x0 - o, eave, z0 - o], [r0, ridge, cm], [r1, ridge, cm]], roofCol, RT, [0, 1, -1]);
   // far (level 1 and up) the slopes and the gables only: the body and the cap are under a pixel there (4.0 far level)
-  const body = genLod === 0;
+  const body = mb.lod === 0;
   // the body along the eaves: fascia and soffit
   if (body) for (const [ze, zw, sz] of [[z1 + o, z1, 1], [z0 - o, z0, -1]] as const) {
     face([[x0 - o, eave - T, ze], [x1 + o, eave - T, ze], [x1 + o, eave, ze], [x0 - o, eave, ze]], fascia, PL, [0, 0, sz]);
@@ -737,7 +736,8 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     if (lod === -1) detailOut = mb;
     g.mb = NO_MESH; g.lod = 0;
   }
-  genLod = g.lod;
+  mb.lod = g.lod; NO_MESH.lod = g.lod;
+  if (detailOut) detailOut.lod = g.lod;
   const v0 = mb.v;
   const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
   const cat = ds?.catalog ? ds.catalog : plan.landmark[i];
@@ -949,7 +949,7 @@ function emptyLot(mb: MeshBuilder, heights: Float32Array, W: number, D: number, 
  */
 function ring(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, out: number, col: number, overRoof = true): void {
   blank(mb);
-  const parts = overRoof ? FR_TOP | FR_INNER | (genLod > 0 ? 0 : FR_BOTTOM) : genLod > 0 ? 0 : FR_TOP | FR_BOTTOM;
+  const parts = overRoof ? FR_TOP | FR_INNER | (mb.lod > 0 ? 0 : FR_BOTTOM) : mb.lod > 0 ? 0 : FR_TOP | FR_BOTTOM;
   frame(mb, f, x0, x1, z0, z1, y0, y1, out, 0, col, BMAT.Plain, parts);
 }
 

@@ -5,6 +5,8 @@ import { octEncode } from './boxMesh.ts';
 import type { PackedMesh } from '../shared/contracts/worker.ts';
 
 export class MeshBuilder {
+  /** Detail level of the pass that owns this builder (0 near, >0 far); set by the building generator. */
+  lod = 0;
   pos = new Float32Array(3 * 4096);
   nrm = new Float32Array(3 * 4096);
   col = new Uint32Array(4096); // 0xRRGGBB
