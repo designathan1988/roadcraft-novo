@@ -20,8 +20,8 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 237 |
-| Bytes / linhas | 3.701.600 / 66.394 |
+| Arquivos TS | 239 |
+| Bytes / linhas | 3.704.294 / 66.464 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
@@ -30,8 +30,8 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
-Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.120 linhas), `sim/traffic.ts` (≈3.030),
-`jobs/buildingGen.ts` (2.591), `game.ts` (2.691), `r40/render/buildings/signature.ts` (1.781),
+Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.120 linhas), `sim/traffic.ts` (2.940),
+`jobs/buildingGen.ts` (2.521), `game.ts` (2.644), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
@@ -194,8 +194,11 @@ Ordem por risco e valor (não por tamanho):
   `ToolHost`) e `jobs/buildingGen/plan.ts` (plano de célula, `catalogExtent`, `freeSides`). `game.ts` caiu de 2.807
   para 2.691 linhas; `buildingGen.ts` de 2.650 para 2.591. `tsc` limpo e `arch:check` com 237 arquivos, 0 ciclos e 0
   vazamentos.
-- Em andamento: `sim/traffic/laneChanges.ts` (MOBIL, obrigatória, escape e discricionária) com `LaneHost`; o teste de
-  trânsito corre separado. Depois: `sim/traffic.ts` por micro/meso/sinais/ônibus, `buildingGen` com `GenContext` e
+- Feito em 2026-10-29: `sim/traffic/laneChanges.ts` (MOBIL, obrigatória, escape e discricionária) com `LaneHost`;
+  `sim/traffic/lines.ts` (`LineSpec`, `SimLine`, `resolveLine`, `indexStops`) e
+  `jobs/buildingGen/polygon.ts` (`lotFit`, `lotPolygon`, `inPolygon`), com `props` importando direto.
+- Em andamento: `app/session.ts` já cobre salvar/abrir/novo mapa; `game.ts` ainda tem entrada/pointer, seleção e
+  cliques de lote/edifício. Depois: `sim/traffic.ts` por micro/meso/sinais/ônibus, `buildingGen` com `GenContext` e
   `r40/api.ts` (imports externos de r40 estão concentrados em `jobs/building40.ts` e `render/propMeshes.ts`).
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
   usa saída antecipada (≈13 s reais). A suíte completa deu 363/364 antes do ajuste do telhado 3; o caso foi corrigido
