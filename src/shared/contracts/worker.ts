@@ -216,5 +216,5 @@ export interface RoadGraph {
 }
 
 export function roadGraphTransfer(g: RoadGraph): ArrayBuffer[] {
-  return [g.nx, g.nz, g.ny, g.nodeOwn, g.sa, g.sb, g.scx, g.scz, g.sprofile, g.sflags, g.segOwn, g.sid, g.szl, g.szr, g.nid, g.nctl, g.srule].map((a) => a.buffer as ArrayBuffer);
+  return [g.nx, g.nz, g.ny, g.nodeOwn, g.sa, g.sb, g.scx, g.scz, g.sprofile, g.sflags, g.segOwn, g.sid, g.szl, g.szr, g.nid, g.nctl, g.njoint, g.srule].map((a) => a.buffer as ArrayBuffer);
 }

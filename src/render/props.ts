@@ -180,8 +180,11 @@ export class PropRenderer {
         If(type.lessThan(uint(PROP_FREE)), () => {
           const pose = poolC.element(i).toVar();
           const p = pose.xyz;
-          // the kind: the type, or the type's variant when its variants are different meshes
-          const variant = uint(pose.w).shiftRight(uint(12)).bitAnd(uint(15));
+          // the kind: the type, or the type's variant when its variants are different meshes. A 4.0 building part keeps
+          // its variant in its key (extra bits 29-31, jobs/parts40.ts partKey): its w's high bits are its colour (partW)
+          let isVar = uint(0).toVar();
+          for (const t of VARIANT_TYPES) isVar = select(type.equal(uint(t)), uint(1), isVar);
+          const variant = select(isVar.equal(uint(1)), extraC.element(i).shiftRight(uint(29)).bitAnd(uint(7)), uint(pose.w).shiftRight(uint(12)).bitAnd(uint(15)));
           const kind = kindOfC.element(type.mul(VARIANTS).add(variant)).toVar();
           // the kind's reach times the instance's scale (or plus the span, for wires and walls): a fixed radius cut
           // big trees and long wires at the edge of the screen
@@ -600,7 +603,7 @@ export class PropRenderer {
     for (let i = 0; i < p.count; i++) {
       const type = p.extra[i] & 31;
       if (type >= PROP_TYPES) continue;
-      const k = this.kindOf[type * VARIANTS + ((p.data[i * 4 + 3] >>> 12) & 15)];
+      const k = this.kindOf[type * VARIANTS + propVariant(type, p.data[i * 4 + 3], p.extra[i])];
       n[k]++;
       top = Math.max(top, p.data[i * 4 + 1] + propCullRadius(this.kinds[k], p.data[i * 4 + 3]));
     }
@@ -787,4 +790,9 @@ export class PropRenderer {
     this.pending.clear();
     this.residencyDue = true;
   }
+}
+
+/** An instance's variant: a 4.0 building part's from its key (extra bits 29-31), any other prop's from w bits 12-15. */
+function propVariant(type: number, w: number, extra: number): number {
+  return VARIANT_TYPES.has(type) ? (extra >>> 29) & 7 : (w >>> 12) & 15;
 }

@@ -13,6 +13,7 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { waterAt } from '../world/ground.ts';
 import type { LotColumns, RoadGraph } from '../shared/contracts/worker.ts';
+import { blockLots } from './blockLots.ts';
 
 const RES = 2;
 const MARGIN = 120;
@@ -131,6 +132,46 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
   sides.sort((a, b) => a.key - b.key);
 
   const out = { x: [] as number[], z: [] as number[], w: [] as number[], d: [] as number[], rot: [] as number[], zone: [] as number[], seed: [] as number[], profile: [] as number[] };
+  // closed blocks first, cut as Roadcraft 4.0 cuts them (blockLots.ts): lots from street to street, two rows back to
+  // back; the street-side cutting below fills only the open land left
+  const facing = (fx: number, fz: number, ox: number, oz: number): [number, number] => {
+    const qx = fx + ox * 4, qz = fz + oz * 4;
+    let best = -1, bd = Infinity;
+    for (let s = 0; s < g.segCount; s++) {
+      const r = roads[s];
+      if (qx < r.x0 - 8 || qx > r.x1 + 8 || qz < r.z0 - 8 || qz > r.z1 + 8) continue;
+      const d = curveDistance(r.q, qx, qz);
+      if (d < bd) { bd = d; best = s; }
+    }
+    if (best < 0 || bd > roads[best].half + 4) return [0, 0];
+    const q = quads[best];
+    let t = 0, td = Infinity;
+    for (let k = 0; k <= 32; k++) { bez(q, k / 32, p2); const d = (p2[0] - qx) ** 2 + (p2[1] - qz) ** 2; if (d < td) { td = d; t = k / 32; } }
+    bez(q, t, p2); bezD(q, t, d2);
+    const u = (qx - p2[0]) * d2[1] - (qz - p2[1]) * d2[0]; // + left of the road (geometry.ts)
+    return [u > 0 ? g.szl[best] : g.szr[best], g.sprofile[best]];
+  };
+  for (const b of blockLots(g, quads, lens, cx0, cz0, MARGIN, facing)) {
+    const lx = -Math.sin(b.rot), lz = -Math.cos(b.rot), tx = lz, tz = -lx;
+    // water or a steep lot: no lot (as the street-side cutting)
+    const hc = heightAt(heights, b.x, b.z);
+    if (hc < SEA_LEVEL + 0.5) continue;
+    let lo = hc, hi = hc, wet = false;
+    for (let a = -b.w / 2; a <= b.w / 2 + 1e-6 && !wet; a += 4) for (let c = -b.d / 2; c <= b.d / 2 + 1e-6; c += 4) {
+      const px = b.x + tx * a + lx * c, pz = b.z + tz * a + lz * c, y = heightAt(heights, px, pz);
+      lo = Math.min(lo, y); hi = Math.max(hi, y);
+      if (water && waterAt(water, px, pz) > y - 0.5) { wet = true; break; }
+    }
+    if (wet || hi - lo > 10) continue;
+    markLot(grid, W, ax, az, b.x, b.z, tx, tz, lx, lz, b.w, b.d);
+    taken.push(...corners(b.x, b.z, tx, tz, lx, lz, b.w - 0.6, b.d, 0.15));
+    if (Math.floor((b.x - cx0) / CELL_SIZE) === 0 && Math.floor((b.z - cz0) / CELL_SIZE) === 0) {
+      out.x.push(b.x); out.z.push(b.z); out.w.push(b.w - 0.6); out.d.push(b.d); out.zone.push(b.zone);
+      out.rot.push(b.rot);
+      out.seed.push(hash2(Math.round(b.x * 2), Math.round(b.z * 2), b.zone));
+      out.profile.push(b.profile);
+    }
+  }
   for (const { s, side, zone } of sides) {
     const info = PROFILE_INFO[g.sprofile[s]];
     const sign = side === 0 ? 1 : -1; // esquerda = u positivo
