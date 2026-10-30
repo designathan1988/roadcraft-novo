@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const keysOf = (file) => new Set([...fs.readFileSync(path.join(root, file), 'utf8').matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1]));
-const pt = new Set([...keysOf('data/textos-roadcraft/pt-BR.ts'), ...keysOf('src/ui/lang/engine.pt-BR.ts')]);
-const en = new Set([...keysOf('data/textos-roadcraft/en.ts'), ...keysOf('src/ui/lang/engine.en.ts')]);
+const pt = new Set([...keysOf('data/textos-roadcraft/pt-BR.ts'), ...keysOf('src/shared/i18n/lang/engine.pt-BR.ts')]);
+const en = new Set([...keysOf('data/textos-roadcraft/en.ts'), ...keysOf('src/shared/i18n/lang/engine.en.ts')]);
 
 const files = [...fs.readdirSync(path.join(root, 'src/ui')).filter((f) => f.endsWith('.ts')).map((f) => `src/ui/${f}`), 'src/main.ts', 'src/game.ts'];
 const wanted = new Map();

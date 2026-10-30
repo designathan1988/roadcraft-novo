@@ -1,5 +1,5 @@
 /// <reference types="node" />
-// Text the player reads lives only in the dictionaries (src/ui/lang/engine.*.ts, data/textos-roadcraft): the
+// Text the player reads lives only in the dictionaries (src/shared/i18n/lang/engine.*.ts, data/textos-roadcraft): the
 // interface's files and game.ts must not write a sentence of their own (B57, B58 in DEFEITOS-roadcraft-novo.md).
 // The scan reads the source: every string literal that looks like a phrase (two words or more, or Portuguese
 // letters) is reported, except where the code names it as not for the player (comments, log lines, undo labels).
