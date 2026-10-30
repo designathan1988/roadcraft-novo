@@ -10,7 +10,7 @@ import { Rng, hash2 } from '../core/rng.ts';
 import { Zone, zoneDensity } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { MeshBuilder } from './meshBuilder.ts';
-import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, PANE_ROW, Pattern, Win, chimneyOf, pickArch, type Arch } from '../world/arch.ts';
+import { ARCHES, ARCH_COUNT, ArchId, Balcony, Crown, Fn, PANE_ROW, Pattern, Win, chimneyOf, pickArch } from '../world/arch.ts';
 import { type BoxColumns, type PackedMesh } from '../shared/contracts/worker.ts';
 import { CIVIC_DESIGNS, GEAR, decodeDesign, footprint, hasDesign, type Design } from '../world/design.ts';
 import { CAT_ELEMENTS, CAT_FINISHES, CAT_ROOFS, CAT_SURFACES, CAT_UNIT, catalogProjects, type CatElement, type CatProject, type CatStorey, type CatVolume } from '../world/catalog.ts';
@@ -25,8 +25,9 @@ import { AWNINGS, FR_INNER, FR_TOP, GOURMET_OUT, PARAPET_H, PARAPET_T, awning, b
 import { newOutputs, type GenOutputs, type PartEmit, type Volume } from './buildingGen/outputs.ts';
 import { DESIGN_ARCH, DESIGN_METAL_ROOF, DESIGN_SLATE, applyFinishes, finishTable } from './buildingGen/finishes.ts';
 import { R40_ZONES, catalogLevels } from './buildingGen/heights.ts';
-import { BAND_H, BAND_OUT, CORNICE_OUT, LEDGE_JAMB, PLINTH_COL, PLINTH_GROW, ledge, setFac, windowDetailWall } from './buildingGen/windows.ts';
-import { PART, balconyLife, captureFoot, captureVolume, door, frame, opensWindows, parapet, part, piers, prism, railing, ring } from './buildingGen/shell.ts';
+import { LEDGE_JAMB, ledge, setFac, windowDetailWall } from './buildingGen/windows.ts';
+import { PART, balconyLife, captureFoot, captureVolume, door, facadeRelief, frame, opensWindows, parapet, part, piers, prism, railing, ring } from './buildingGen/shell.ts';
+import type { GenContext } from './buildingGen/context.ts';
 export { FRAME_BAR, WIN_REVEAL, WIN_REVEAL_SHADE } from './buildingGen/windows.ts';
 export { PART } from './buildingGen/shell.ts';
 export { BMAT, Facade };
@@ -583,17 +584,6 @@ function parkingLotsTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, row
   }
 }
 
-/** Tudo o que um gerador de prédio precisa. */
-interface GenContext {
-  mb: MeshBuilder; heights: Float32Array; f: Frame; W: number; D: number; floors: number;
-  arch: number; a: Arch; r: Rng; hi: number; lod: number; seed: number; zone: number;
-  /** Vagas do estacionamento (`lotParking`). */
-  rows: number[];
-  /** Facade pattern picked by the cell plan (Pattern). */
-  pattern: number;
-  /** Free sides of the lot (corner): 1 = -x, 2 = +x. */
-  side: number;
-}
 
 
 function legacyBox(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number, f: Frame): void {
@@ -1457,53 +1447,6 @@ function wallSeg(mb: MeshBuilder, f: Frame, ax: number, az: number, bx: number, 
   }
 }
 
-/** Luma of an sRGB hex colour, 0..1. */
-function lum(rgb: number): number { return (0.2126 * ((rgb >> 16) & 255) + 0.7152 * ((rgb >> 8) & 255) + 0.0722 * (rgb & 255)) / 255; }
-
-
-/**
- * Relevo da fachada no nível 0 (prédio baixo de apartamentos ou misto): friso de laje em cada andar, brises verticais
- * nos contemporâneos, pilastras entre as vitrines das lojas antigas e a porta de entrada dos prédios de moradia.
- */
-function facadeRelief(g: GenContext, x0: number, x1: number, z0: number, z1: number, y0: number, groundH: number, fh: number,
-  lower: number, colW: number, wallCol: number, shop: boolean): void {
-  const { mb, f, a, seed } = g;
-  blank(mb);
-  const h = hash2(seed, 0xfa);
-  // Roadcraft 4.0 relief (detail layer only: under a pixel past 220 m, where the shader paints the bands and the
-  // plinth): a storey band at every floor line (band(): BAND_H 22 cm, BAND_OUT 7 cm, its lower tier 45 % out in the
-  // trim x 0.94) where the style has no bands of its own, the cornice under the parapet (emitCornice: 16 cm out,
-  // 36 cm, 20 cm under the roof line) and the stone plinth 12 cm proud up to the floor (emitPlinth)
-  const dm = f.out?.detail;
-  if (dm) {
-    // a dark trim (black frames) bands in the wall's own render, darker (4.0 flushBand)
-    const bandCol = lum(a.trim) < 0.3 ? shadeHex(wallCol, 0.86) : a.trim, t2 = shadeHex(bandCol, 0.94);
-    const band40 = (y: number, out: number, h: number): void => {
-      ring(dm, f, x0, x1, z0, z1, y - h / 2, y - h * 0.1, out * 0.45, t2, false);
-      ring(dm, f, x0, x1, z0, z1, y - h * 0.1, y + h / 2, out, bandCol, false);
-    };
-    if (!a.bands && a.win !== Win.Curtain) for (let fl = 1; fl < lower; fl++) band40(y0 + groundH + (fl - 1) * fh, BAND_OUT, BAND_H);
-    const top = y0 + groundH + (lower - 1) * fh;
-    if (a.crown === Crown.Parapet && g.pattern !== Pattern.ArtDecoCrown) band40(top - 0.2, CORNICE_OUT, 0.36);
-    blank(dm);
-    frame(dm, f, x0, x1, z0, z1, f.base, y0 + 0.012, PLINTH_GROW, 0, PLINTH_COL, BMAT.Plain | (FIN.Stone << 4), FR_TOP);
-  }
-  // brise vertical (lâminas de concreto) na frente dos contemporâneos, metade deles
-  if (g.arch === ArchId.Contemporary && h % 2 === 0 && lower >= 3) {
-    const cols = Math.max(1, Math.round((x1 - x0) / colW)), cw = (x1 - x0) / cols, bc = shadeHex(wallCol, 1.08);
-    for (let c = 0; c <= cols; c++) {
-      const x = x0 + c * cw;
-      prism(mb, f, x - 0.05, x + 0.05, z1 - 0.02, z1 + 0.55, y0 + groundH, y0 + groundH + (lower - 1) * fh, bc, BMAT.Plain, 50, bc, BMAT.Plain);
-    }
-  }
-  // pilastras entre as vitrines (ruas antigas)
-  const classic = g.arch === ArchId.Colonial || g.arch === ArchId.Brick || g.arch === ArchId.ArtDeco;
-  if (shop && classic) {
-    const bays = Math.max(1, Math.round((x1 - x0) / colW)), bwid = (x1 - x0) / bays, pc = shadeHex(a.trim, 0.94);
-    for (let k = 0; k <= bays; k++) { const x = x0 + k * bwid; prism(mb, f, x - 0.18, x + 0.18, z1 - 0.02, z1 + 0.16, f.base, y0 + groundH - 0.3, pc, BMAT.Plain, 50, pc, BMAT.Plain); }
-  }
-  if (!shop) door(mb, f, 0, z1, y0, a.trim, true);
-}
 
 
 

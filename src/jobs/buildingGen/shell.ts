@@ -2,11 +2,14 @@
 // mesh, frame and GenOutputs are the whole context; no generator state lives here.
 
 import { hash2 } from '../../core/rng.ts';
+import { ArchId, Crown, Pattern, Win } from '../../world/arch.ts';
+import { FIN } from '../buildingFinishes.ts';
 import type { MeshBuilder } from '../meshBuilder.ts';
 import { BMAT, Facade } from './materials.ts';
 import { FR_BOTTOM, FR_INNER, FR_TOP, blank, nx, nz, shadeHex, wx, wz, type Frame } from './geometry.ts';
-import { CURTAIN_MULLIONS, LEDGE_JAMB, curtainFins, ledge, windowDetail } from './windows.ts';
+import { BAND_H, BAND_OUT, CORNICE_OUT, CURTAIN_MULLIONS, LEDGE_JAMB, PLINTH_COL, PLINTH_GROW, curtainFins, ledge, windowDetail } from './windows.ts';
 import type { GenOutputs } from './outputs.ts';
+import type { GenContext } from './context.ts';
 
 /** Variantes de peça de fachada (mobiliário 8..15 no pool de props). */
 export const PART = { WallAc: 8, RoofAc: 9, Vase: 10, Clothesline: 11, Dish: 12, Vent: 13, Chair: 14, Tank: 15 } as const;
@@ -194,4 +197,51 @@ export function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: nu
     const x = x0 + (x1 - x0) * k / m;
     ledge(det, f, x0, z - 0.05, 1, 0, 0, 1, x - x0 - 0.012, x - x0 + 0.012, y + 0.15, y + 0.98, 0.024, col, LEDGE_JAMB);
   }
+}
+
+/** Luma of an sRGB hex colour, 0..1. */
+function lum(rgb: number): number { return (0.2126 * ((rgb >> 16) & 255) + 0.7152 * ((rgb >> 8) & 255) + 0.0722 * (rgb & 255)) / 255; }
+
+/**
+ * Relevo da fachada no nível 0 (prédio baixo de apartamentos ou misto): friso de laje em cada andar, brises verticais
+ * nos contemporâneos, pilastras entre as vitrines das lojas antigas e a porta de entrada dos prédios de moradia.
+ */
+export function facadeRelief(g: GenContext, x0: number, x1: number, z0: number, z1: number, y0: number, groundH: number, fh: number,
+  lower: number, colW: number, wallCol: number, shop: boolean): void {
+  const { mb, f, a, seed } = g;
+  blank(mb);
+  const h = hash2(seed, 0xfa);
+  // Roadcraft 4.0 relief (detail layer only: under a pixel past 220 m, where the shader paints the bands and the
+  // plinth): a storey band at every floor line (band(): BAND_H 22 cm, BAND_OUT 7 cm, its lower tier 45 % out in the
+  // trim x 0.94) where the style has no bands of its own, the cornice under the parapet (emitCornice: 16 cm out,
+  // 36 cm, 20 cm under the roof line) and the stone plinth 12 cm proud up to the floor (emitPlinth)
+  const dm = f.out?.detail;
+  if (dm) {
+    // a dark trim (black frames) bands in the wall's own render, darker (4.0 flushBand)
+    const bandCol = lum(a.trim) < 0.3 ? shadeHex(wallCol, 0.86) : a.trim, t2 = shadeHex(bandCol, 0.94);
+    const band40 = (y: number, out: number, h: number): void => {
+      ring(dm, f, x0, x1, z0, z1, y - h / 2, y - h * 0.1, out * 0.45, t2, false);
+      ring(dm, f, x0, x1, z0, z1, y - h * 0.1, y + h / 2, out, bandCol, false);
+    };
+    if (!a.bands && a.win !== Win.Curtain) for (let fl = 1; fl < lower; fl++) band40(y0 + groundH + (fl - 1) * fh, BAND_OUT, BAND_H);
+    const top = y0 + groundH + (lower - 1) * fh;
+    if (a.crown === Crown.Parapet && g.pattern !== Pattern.ArtDecoCrown) band40(top - 0.2, CORNICE_OUT, 0.36);
+    blank(dm);
+    frame(dm, f, x0, x1, z0, z1, f.base, y0 + 0.012, PLINTH_GROW, 0, PLINTH_COL, BMAT.Plain | (FIN.Stone << 4), FR_TOP);
+  }
+  // brise vertical (lâminas de concreto) na frente dos contemporâneos, metade deles
+  if (g.arch === ArchId.Contemporary && h % 2 === 0 && lower >= 3) {
+    const cols = Math.max(1, Math.round((x1 - x0) / colW)), cw = (x1 - x0) / cols, bc = shadeHex(wallCol, 1.08);
+    for (let c = 0; c <= cols; c++) {
+      const x = x0 + c * cw;
+      prism(mb, f, x - 0.05, x + 0.05, z1 - 0.02, z1 + 0.55, y0 + groundH, y0 + groundH + (lower - 1) * fh, bc, BMAT.Plain, 50, bc, BMAT.Plain);
+    }
+  }
+  // pilastras entre as vitrines (ruas antigas)
+  const classic = g.arch === ArchId.Colonial || g.arch === ArchId.Brick || g.arch === ArchId.ArtDeco;
+  if (shop && classic) {
+    const bays = Math.max(1, Math.round((x1 - x0) / colW)), bwid = (x1 - x0) / bays, pc = shadeHex(a.trim, 0.94);
+    for (let k = 0; k <= bays; k++) { const x = x0 + k * bwid; prism(mb, f, x - 0.18, x + 0.18, z1 - 0.02, z1 + 0.16, f.base, y0 + groundH - 0.3, pc, BMAT.Plain, 50, pc, BMAT.Plain); }
+  }
+  if (!shop) door(mb, f, 0, z1, y0, a.trim, true);
 }
