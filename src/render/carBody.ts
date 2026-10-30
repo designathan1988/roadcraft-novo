@@ -124,6 +124,32 @@ const STYLES: Record<CarStyle, Style> = {
   },
 };
 
+/** Hip point over the floor (roadcraft 4.0 `carBody.ts` seating package), and a van cab's. */
+const CAR_HIP_OVER_FLOOR = 0.27, CAB_HIP_OVER_FLOOR = 0.45;
+
+/** The simulation's five car styles, with the sizes the bodies and the seats are built at (metres). */
+export const CAR_SIZES: Readonly<Record<Exclude<CarStyle, 'wagon'>, CarArchetype>> = {
+  sedan: { length: 4.4, width: 1.84, height: 1.45, wheelRadius: 0.33 },
+  hatch: { length: 3.9, width: 1.72, height: 1.48, wheelRadius: 0.31 },
+  suv: { length: 4.6, width: 1.95, height: 1.78, wheelRadius: 0.37 },
+  van: { length: 4.9, width: 2.0, height: 2.2, wheelRadius: 0.35 },
+  pickup: { length: 5.3, width: 1.95, height: 1.8, wheelRadius: 0.37 },
+};
+
+/** Seats of a car style in the renderer's frame (+z forward, +x the driver's left): hip points (m). */
+export function carSeatPoints(style: Exclude<CarStyle, 'wagon'>): Array<[number, number, number]> {
+  const s = STYLES[style], a = CAR_SIZES[style];
+  const hipY = s.floor + (s.cab ? CAB_HIP_OVER_FLOOR : CAR_HIP_OVER_FLOOR);
+  const z = a.width / 2 - M(0.46);
+  const rows = s.doors.length - 1;
+  const out: Array<[number, number, number]> = [];
+  // Numbered as the simulation numbers them: the driver's (left) side front to back, then the kerb side.
+  for (const side of [-1, 1] as const) {
+    for (let row = 0; row < rows; row++) out.push([side < 0 ? z : -z, hipY, s.hip * a.length - row * s.couple]);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- small helpers
 
 type P2 = readonly [number, number];

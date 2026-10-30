@@ -1,24 +1,26 @@
 // Where people sit in each vehicle of `src/render/vehicles.ts` (model frame: +z forward, +x the driver's left,
-// metres from the ground under the vehicle's centre). No three.js here.
+// metres from the ground under the vehicle's centre). No three.js here. The cars follow the same seating package the
+// bodies are built from (render/carBody.ts), so a hip point lands on its seat's cushion.
+
+import { carSeatPoints, type CarStyle } from '../carBody.ts';
 
 /** A seat: hip point x, y, z. */
 export type Seat = readonly [number, number, number];
 
-const car = (frontZ: number, hipY: number, rearZ: number | null): Seat[] => [
-  [0.37, hipY, frontZ], [-0.37, hipY, frontZ],
-  ...(rearZ === null ? [] : [[0.37, hipY + 0.02, rearZ] as Seat, [-0.37, hipY + 0.02, rearZ] as Seat]),
-];
+const CAR_STYLES: readonly Exclude<CarStyle, 'wagon'>[] = ['sedan', 'hatch', 'suv', 'van', 'pickup'];
+const CAR_SEATS: readonly (readonly Seat[])[] = CAR_STYLES.map((s) => carSeatPoints(s));
 
-/** Seats per car style (0 sedan, 1 hatch, 2 SUV, 3 van, 4 pickup), driver first; from the bodies' glass lines. */
-const CAR_SEATS: Seat[][] = [
-  car(-0.05, 0.58, -0.95), car(-0.15, 0.6, -1.05), car(0.12, 0.78, -0.85), car(1.25, 0.8, 0.1), car(0.45, 0.82, null),
+/** The bus (roadcraft 4.0 heavyBody): floor at 0.38 m; the driver over the pedals, passengers down the sides. */
+const BUS_FLOOR = 0.38;
+const BUS_SEATS: Seat[] = [
+  [0.655, BUS_FLOOR + 0.45, 4.8],
+  ...Array.from({ length: 15 }, (_, i) => {
+    const row = Math.floor(i / 2), side = i % 2 === 0 ? 1 : -1;
+    return [side * 0.985, BUS_FLOOR + 0.55, 3.9 - row * 0.78] as Seat;
+  }),
 ];
-/** The bus: the driver, then pairs of seats down the sides, front to back (16 places as the windows). */
-const BUS_SEATS: Seat[] = [[0.75, 1.05, 5.0], ...Array.from({ length: 15 }, (_, i) => {
-  const k = i + 2, side = k % 2 ? 1 : -1, row = Math.floor((k - 1) / 2);
-  return [side * 0.75, 1.05, 4.2 - row * 1.25] as Seat;
-})];
-const TRUCK_SEATS: Seat[] = [[0.55, 1.35, 3.85], [-0.55, 1.35, 3.85]];
+/** The lorry's cab: floor at 1.15 m, seats 0.62 m behind the cab's front; driver left, passenger right. */
+const TRUCK_SEATS: Seat[] = [[0.70, 1.15 + 0.45, 3.09], [-0.70, 1.15 + 0.45, 3.09]];
 
 /** Seats of a vehicle by its pose kind (0 car, 1 bus, 2 truck) and car style. */
 export function seatsOf(kind: number, style: number): readonly Seat[] {

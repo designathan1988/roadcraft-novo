@@ -11,7 +11,7 @@ import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
 import { PeopleRenderer } from './people/crowd.ts';
-import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
+import { CAR_SIZES, buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
 import { buildBusBody, buildTruckBody, type HeavyArchetype, type HeavyBody } from './heavyBody.ts';
 
 const {
@@ -172,11 +172,7 @@ function personModel(): THREE.BufferGeometry {
  * sizes from sim/vehicles/archetypes.ts; lengths kept at the simulation's), metres.
  */
 const CAR_BODIES: Array<[CarStyle, CarArchetype]> = [
-  ['sedan', { length: 4.4, width: 1.84, height: 1.45, wheelRadius: 0.33 }],
-  ['hatch', { length: 3.9, width: 1.72, height: 1.48, wheelRadius: 0.31 }],
-  ['suv', { length: 4.6, width: 1.95, height: 1.78, wheelRadius: 0.37 }],
-  ['van', { length: 4.9, width: 2.0, height: 2.2, wheelRadius: 0.35 }],
-  ['pickup', { length: 5.3, width: 1.95, height: 1.8, wheelRadius: 0.37 }],
+  ['sedan', CAR_SIZES.sedan], ['hatch', CAR_SIZES.hatch], ['suv', CAR_SIZES.suv], ['van', CAR_SIZES.van], ['pickup', CAR_SIZES.pickup],
 ];
 
 /**
