@@ -3,8 +3,9 @@
 
 import type { MeshBuilder } from '../meshBuilder.ts';
 import { BMAT } from './materials.ts';
+import type { GenOutputs } from './outputs.ts';
 
-interface Frame { cx: number; cz: number; c: number; s: number; base: number }
+interface Frame { cx: number; cz: number; c: number; s: number; base: number; out?: GenOutputs }
 export type { Frame };
 
 /** Local (x along the front, z towards the street) → world. */
