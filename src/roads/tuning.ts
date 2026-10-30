@@ -19,6 +19,17 @@ export const ROAD_TUNING = {
      * road is drawn with piers or buried), not Roadcraft's 2.8 m piers: the price follows what the player sees.
      */
     bridgeFrom: 4.5,
-    tunnelFrom: 7,
+    /** The tunnel's own rule (TUNNEL.portalDepth): the price follows where the portal stands. */
+    tunnelFrom: 7.4,
   },
 } as const;
+
+/**
+ * Road tunnels (sources in tunel/ANALISE.md). The portal stands where the ground covers the tunnel's roof: FHWA-NHI-10-034
+ * §1.3.5, "located at a point where the depth of the tunnel is suitably covered", in a cut-and-cover tunnel as close to
+ * the surface as the roof allows; before it the road runs in an open cut (§5.2.1). Clear height 5.8 m (over AASHTO's
+ * 4.9 m for highways, FHWA §2.3) and a 1.6 m roof slab: a road is in a tunnel where the ground is at least 7.4 m over
+ * it, and only there; the terrain is cut down to the road everywhere shallower. Grade in a tunnel at most 5 % (FHWA
+ * §2.2.1: preferably 4 %, up to 6 %; EU Directive 2004/54/EC Annex I 2.2.2: over 5 % not allowed in new tunnels).
+ */
+export const TUNNEL = { clearance: 5.8, roof: 1.6, portalDepth: 7.4, maxGrade: 0.05 } as const;

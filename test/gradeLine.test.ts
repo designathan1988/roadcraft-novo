@@ -44,3 +44,12 @@ test('fixed stations are held and the floor is respected', () => {
   for (let i = 31; i < 40; i++) assert.ok(y[i] >= 11 - 1e-6, `floor at ${i}: ${y[i]}`);
   for (let i = 1; i < y.length; i++) assert.ok(Math.abs(y[i] - y[i - 1]) <= 0.5 + 1e-6);
 });
+
+test('a grade per station: the steps of a tighter stretch stay within its own limit', () => {
+  const ground = hill(61, 30);
+  const y = Float64Array.from(ground);
+  const g = new Float64Array(61).fill(0.5);
+  for (let i = 20; i <= 40; i++) g[i] = 0.2;
+  gradeLine(y, g, new Uint8Array(61), new Float64Array(61).fill(-Infinity));
+  for (let i = 1; i < 61; i++) assert.ok(Math.abs(y[i] - y[i - 1]) <= g[i] + 1e-9, `step ${i}: ${y[i] - y[i - 1]} over ${g[i]}`);
+});

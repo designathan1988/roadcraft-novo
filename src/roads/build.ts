@@ -19,7 +19,7 @@ import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
 import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPrice, withKind } from './economy.ts';
 import { dirOut, remapSpec, type JunctionSpec } from './control.ts';
 import { MIN_LEG_ANGLE } from './impossible.ts';
-import { ROAD_TUNING } from './tuning.ts';
+import { ROAD_TUNING, TUNNEL } from './tuning.ts';
 import { ARCHES, archFor, eraAt } from '../world/arch.ts';
 import { NO_WATER, waterAt } from '../world/ground.ts';
 
@@ -376,6 +376,7 @@ export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, off
   const n = Math.max(2, Math.ceil(len / step) + 1);
   const at = new Float64Array(n), y = new Float64Array(n);
   const isFixed = new Uint8Array(n);
+  const groundOf = new Float64Array(n);
   // over water a road on or above the ground never dips below the bridge clearance (narrow rivers are not smoothed away)
   const floor = new Float64Array(n).fill(-Infinity);
   const p = new Float64Array(2);
@@ -383,6 +384,7 @@ export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, off
     at[i] = len * i / (n - 1);
     bez(q, tAtLength(table, at[i]), p);
     const g = smoothGround(h, p[0], p[1]);
+    groundOf[i] = g;
     // over the sea or a river or lake of the player's: a bridge 7 m over the water
     const wl = water ? waterAt(water, p[0], p[1]) : NO_WATER;
     y[i] = g < SEA_LEVEL + 0.5 ? SEA_LEVEL + 7 + offset : wl > g ? wl + 7 + offset : g + offset;
@@ -402,7 +404,21 @@ export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, off
     }
   }
   const d = len / (n - 1);
-  gradeLine(y, maxGrade * d, isFixed, floor);
+  // The grade limit per station: the road's own, and the tunnel's (TUNNEL.maxGrade) where the line runs deeper than a
+  // portal. Which stations are in a tunnel depends on the line itself: solved again until that set stays the same.
+  const wanted = Float64Array.from(y);
+  const grade = new Float64Array(n).fill(maxGrade * d);
+  const inTunnel = new Uint8Array(n);
+  for (let round = 0; round < 6; round++) {
+    y.set(wanted);
+    gradeLine(y, grade, isFixed, floor);
+    let changed = false;
+    for (let i = 0; i < n; i++) {
+      const t = groundOf[i] - y[i] >= TUNNEL.portalDepth ? 1 : 0;
+      if (t && !inTunnel[i]) { inTunnel[i] = 1; grade[i] = Math.min(maxGrade, TUNNEL.maxGrade) * d; changed = true; }
+    }
+    if (!changed) break;
+  }
   return { at, y };
 }
 
@@ -416,7 +432,9 @@ export function heightProfile(h: Float32Array, q: Quad, table: Float64Array, off
  * does) depends on the sweeps' order: over a hill the road climbed late in a cut and came down late on fill, its crest
  * ~40 m downhill and the far side marked a bridge. `wanted` is replaced by the line in place.
  */
-export function gradeLine(wanted: Float64Array, g: number, fixed: Uint8Array, floor: Float64Array): void {
+export function gradeLine(wanted: Float64Array, grade: number | Float64Array, fixed: Uint8Array, floor: Float64Array): void {
+  // grade[i]: the most the height may change between stations i - 1 and i (one number: the same everywhere)
+  const g = (i: number) => (typeof grade === 'number' ? grade : grade[i]);
   const n = wanted.length;
   const HARD = 1e6;
   // breakpoints with multiplicities: L a max-heap (left of the minimum), R a min-heap, each with its pending shift
@@ -428,7 +446,7 @@ export function gradeLine(wanted: Float64Array, g: number, fixed: Uint8Array, fl
   // f += w·max(0, c − y)
   const addLeft = (c: number, w: number) => { R.push(c - shiftR, w); moveTop(R, shiftR, L, shiftL, w); };
   for (let i = 0; i < n; i++) {
-    if (i > 0) { shiftL -= g; shiftR += g; }
+    if (i > 0) { shiftL -= g(i); shiftR += g(i); }
     const w = fixed[i] ? HARD : 1;
     addRight(wanted[i], w); addLeft(wanted[i], w);
     if (floor[i] > -Infinity) addLeft(floor[i], HARD);
@@ -441,7 +459,7 @@ export function gradeLine(wanted: Float64Array, g: number, fixed: Uint8Array, fl
   wanted[n - 1] = clamp(wanted[n - 1], lo[n - 1], hi[n - 1]);
   for (let i = n - 2; i >= 0; i--) {
     const next = wanted[i + 1];
-    wanted[i] = clamp(clamp(next, lo[i], hi[i]), next - g, next + g);
+    wanted[i] = clamp(clamp(next, lo[i], hi[i]), next - g(i + 1), next + g(i + 1));
   }
 }
 
@@ -842,7 +860,7 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
     // a deck that passes over the roof, or a tunnel deep under the lot, leaves the building standing
     const g = heightAt(world.heights, col.x[id], col.z[id]);
     if (py[i] - DECK_DEPTH > g + buildingTop(col, id)) return;
-    if (py[i] < g - ROAD_TUNING.economy.tunnelFrom) return;
+    if (py[i] < g - TUNNEL.portalDepth) return;
     doomed.push(id);
   });
   for (const id of doomed) j.removeBuilding(id);
@@ -865,7 +883,7 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
       const old = h[k];
       const under = py[i] - UNDER_DROP;
       const gap = under - old; // + fill, - cut
-      if (gap > 4.5 || gap < -7) continue; // bridge or tunnel: the terrain stays
+      if (gap > 4.5 || gap < -TUNNEL.portalDepth) continue; // bridge or tunnel: the terrain stays
       if (old < SEA_LEVEL + 0.3 || waterAt(world.water, x, z) > old) continue; // never fills water: it becomes a bridge
       // cut with a retaining wall: the ground rises right at the edge (the wall covers it); embankment: 7 m slope
       const bl = wallCut && gap < 0 ? 1.2 : blend;

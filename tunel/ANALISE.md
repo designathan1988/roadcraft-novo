@@ -42,3 +42,21 @@ Defeitos, cada um contra a fonte:
 2. Greide do túnel limitado a 5 % (o resto do desnível nas rampas de aproximação a céu aberto).
 3. Achar a causa do buraco (1970) e das manchas (topo) por medição, cada uma com a fonte do mecanismo.
 4. Fotos antes/depois nas mesmas vistas (`test-results/tunel-2026-10-30/`).
+
+## Feito (itens 1 e 2 do plano)
+- `roads/tuning.ts` `TUNNEL`: gabarito 5,8 m (4,9 m + folga), laje 1,6 m, portal a 7,4 m de profundidade
+  (gabarito + laje), rampa 5 %. Um só limiar em `jobs/roadMesh.ts` (portal, testada, ombreiras, muros de ala),
+  `jobs/roadPaint.ts` e `roads/build.ts` (`clearAndConform`: o terreno e os prédios ficam sobre o túnel).
+- `roads/build.ts` `heightProfile`: as estações que ficam a ≥ 7,4 m sob o chão passam a ter rampa máxima de 5 %
+  e o greide é refeito (`gradeLine` aceita um limite por estação; teste novo em `test/gradeLine.test.ts`).
+- Medido no mesmo morro: rampa dentro do túnel ~5,4 % entre nós (antes 8 %); o portal saiu de onde a cobertura era
+  −1,8/−2,1 m para onde o chão cobre a laje (fotos `depois/02-portal-west.png`, `03-portal-east.png`: portal
+  dentro do morro, face de corte visível).
+- Contagens (`npm run budget`, mesma build antes/depois): idênticas, cidade 264 chamadas / 6,28 M tri antes e
+  depois (a cidade gerada não tem túnel; o estouro da vista cidade já existia).
+
+## Ainda aberto
+- Defeito 3 (muros de arrimo na aproximação sem a opção "Muro") e defeito 4: a x 1970 a via já ficava 4,9 m sobre
+  o chão antes desta mudança; com o limite de aterro de 4,5 m ela vira um tabuleiro curto sobre chão plano
+  (`depois/06-west-side.png`, `07-west-side-b.png`), com uma mancha avermelhada junto ao encontro. Causa a medir.
+- Defeito 5 (manchas marrons do pincel de terreno), sem relação com túneis.

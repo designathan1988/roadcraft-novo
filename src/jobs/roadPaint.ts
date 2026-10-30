@@ -7,6 +7,7 @@ import { tileOriginX } from '../core/grid.ts';
 import { arcTable, bez, tAtLength, type Quad } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { heightAt } from '../world/heights.ts';
+import { TUNNEL } from '../roads/tuning.ts';
 import type { RoadGraph } from '../shared/contracts/worker.ts';
 
 const p2 = new Float64Array(2);
@@ -71,7 +72,7 @@ export function paintRoadTile(heights: Float32Array, g: RoadGraph, tile: number)
         const d = Math.sqrt(bd);
         if (d > reach) continue;
         const ground = heightAt(heights, x, z);
-        if (by - ground > 2 || ground - by > 3) continue; // ponte ou túnel
+        if (by - ground > 2 || ground - by >= TUNNEL.portalDepth) continue; // a bridge, or a tunnel (roads/tuning.ts)
         const a = Math.min(1, Math.max(0, (ah - d) / S + 0.5));
         const o = Math.min(1, Math.max(0, (half - d) / S + 0.5));
         const k = j * R + i;

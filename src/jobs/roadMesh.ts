@@ -13,6 +13,7 @@ import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, cornerFillet, junctio
 import { DASH_PERIOD, DASH_STEPS, dashPhases } from '../roads/dash.ts';
 import { PROFILE_INFO, Paving, Surface, packRoadTag, type ProfileInfo, type Strip } from '../roads/profiles.ts';
 import { SegFlag } from '../roads/flags.ts';
+import { TUNNEL } from '../roads/tuning.ts';
 import { heightAt } from '../world/heights.ts';
 import { ZONE_COLORS } from '../roads/zones.ts';
 import { MeshBuilder } from './meshBuilder.ts';
@@ -212,7 +213,8 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
   }
   const slope = (g.ny[g.sb[s]] - g.ny[g.sa[s]]) / Math.max(1, len);
   const elevated = (k: number) => F[k * 5 + 4] - ground[k] > 1.2;
-  const buried = (k: number) => ground[k] - F[k * 5 + 4] > 4;
+  // in a tunnel only where the ground covers its roof (roads/tuning.ts TUNNEL): shallower, an open cut to the portal
+  const buried = (k: number) => ground[k] - F[k * 5 + 4] >= TUNNEL.portalDepth;
 
   /**
    * Dropped kerb at the crossings (Roadcraft curbRamps.ts): across the zebra's width the kerb comes down to 2 cm and
@@ -473,9 +475,9 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
     const half = (last.u1 - first.u0) / 2 + 0.6;
     const cu = (last.u1 + first.u0) / 2;
     const cx = px + dz * cu, cz = pz - dx * cu;
-    mb.box(cx, cz, y + 5.8, y + 7.4, dx, dz, 0.6, half, COLOR.concrete, RMAT.Concrete, true);
+    mb.box(cx, cz, y + TUNNEL.clearance, y + TUNNEL.portalDepth, dx, dz, 0.6, half, COLOR.concrete, RMAT.Concrete, true);
     for (const sgn of [-1, 1]) {
-      mb.box(cx + dz * sgn * half, cz - dx * sgn * half, y - 0.5, y + 5.8, dx, dz, 0.6, 0.6, COLOR.concrete, RMAT.Concrete);
+      mb.box(cx + dz * sgn * half, cz - dx * sgn * half, y - 0.5, y + TUNNEL.clearance, dx, dz, 0.6, 0.6, COLOR.concrete, RMAT.Concrete);
     }
     // wing walls: from each side of the portal, splayed 30° out toward the open side, falling from the headwall
     // to 1.2 m over 7 m (they hold back the slope cut around the mouth)
@@ -492,11 +494,11 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
         const a = mb.vert(x0 + sx, y - 0.5, z0 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
         const b = mb.vert(x1 + sx, y - 0.5, z1 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
         const c = mb.vert(x1 + sx, y + 1.2, z1 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
-        const d = mb.vert(x0 + sx, y + 7.4, z0 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
+        const d = mb.vert(x0 + sx, y + TUNNEL.portalDepth, z0 + sz, nx * side, 0, nz * side, COLOR.concrete, RMAT.Concrete);
         mb.quad(a, b, c, d, nx * side, 0, nz * side);
       }
-      const ta = mb.vert(x0 + ox, y + 7.4, z0 + oz, 0, 1, 0, COLOR.curb, RMAT.Concrete), tb = mb.vert(x1 + ox, y + 1.2, z1 + oz, 0, 1, 0, COLOR.curb, RMAT.Concrete);
-      const tc = mb.vert(x1 - ox, y + 1.2, z1 - oz, 0, 1, 0, COLOR.curb, RMAT.Concrete), td = mb.vert(x0 - ox, y + 7.4, z0 - oz, 0, 1, 0, COLOR.curb, RMAT.Concrete);
+      const ta = mb.vert(x0 + ox, y + TUNNEL.portalDepth, z0 + oz, 0, 1, 0, COLOR.curb, RMAT.Concrete), tb = mb.vert(x1 + ox, y + 1.2, z1 + oz, 0, 1, 0, COLOR.curb, RMAT.Concrete);
+      const tc = mb.vert(x1 - ox, y + 1.2, z1 - oz, 0, 1, 0, COLOR.curb, RMAT.Concrete), td = mb.vert(x0 - ox, y + TUNNEL.portalDepth, z0 - oz, 0, 1, 0, COLOR.curb, RMAT.Concrete);
       mb.quad(ta, tb, tc, td, 0, 1, 0);
     }
   }
