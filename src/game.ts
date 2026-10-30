@@ -48,11 +48,11 @@ import { BOMB_START } from './shared/contracts/bomb.ts';
 import { Demolition } from './features/demolition/demolition.ts';
 import { demandFactor, zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './features/streetscape/itemTool.ts';
-import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type Tool, type WeatherCtl } from './ui/hud.ts';
-import type { Cloud } from './render/cloudPuffs.ts';
+import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type Tool } from './ui/hud.ts';
 import { Clouds } from './features/sky/clouds.ts';
 import { RiverTool } from './features/terrain/riverTool.ts';
 import { TransitTool } from './features/transit/transitTool.ts';
+import { decodeExtra } from './platform/mapExtra.ts';
 import { WeatherControl, weatherPreset } from './features/sky/weatherControl.ts';
 import { DEFAULT_WATER, WaterControl } from './features/water/waterControl.ts';
 import { InsideView } from './render/inside.ts';
@@ -1867,7 +1867,6 @@ export class Game {
     this.transit.clear();
     this.commands.clear();
     try { setCustomProfiles(meta.profiles ? JSON.parse(meta.profiles) as Profile[] : []); } catch { setCustomProfiles([]); }
-    w.clearGround();
     this.setBiome(meta.biome ?? 0);
     // the balance is saved even with unlimited money on (older saves wrote NaN then: the starting cash comes back)
     w.unlimited = meta.money !== undefined && Number.isNaN(meta.money);
@@ -1877,22 +1876,20 @@ export class Game {
     w.gameId = meta.gameId;
     if (meta.hour !== undefined) this.hour = meta.hour;
     if (meta.transit) this.transit.decode(meta.transit); else this.transit.clear();
-    try {
-      const extra = meta.extra ? JSON.parse(meta.extra) as { sky?: SkyMode; weather?: WeatherCtl | null; water?: { waves: number; foam: number; current: number } } : {};
-      this.water.set(extra.water ?? DEFAULT_WATER, false);
-      const ex = extra as { clouds?: Cloud[]; fog?: number; terminals?: number[]; signs?: Array<[string, string]>; streets?: Array<[number, string]>; clock?: number; paint?: string; unlimited?: boolean };
-      w.clock = ex.clock ?? 0;
-      if (ex.unlimited !== undefined) w.unlimited = ex.unlimited;
-      // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
-      if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
-      w.signTexts.clear(); for (const [k, v] of ex.signs ?? []) w.signTexts.set(k, v);
-      w.streetNames.clear(); for (const [k, v] of ex.streets ?? []) w.streetNames.set(k, v);
-      this.textSigns.version++;
-      this.transit.terminals = ex.terminals ?? []; this.transit.version++;
-      this.clouds.load(ex.clouds ?? []); fogLevel.value = ex.fog ?? 1;
-      this.skyMode = extra.sky ?? 'ciclo'; this.hud.setSky(this.skyMode);
-      this.sky.set(extra.weather ?? null, false);
-    } catch { /* old save */ }
+    // the map's extra, field by field (platform/mapExtra.ts): a bad field falls back alone
+    const ex = decodeExtra(meta.extra);
+    this.water.set(ex.water ?? DEFAULT_WATER, false);
+    w.clock = ex.clock;
+    if (ex.unlimited !== null) w.unlimited = ex.unlimited;
+    // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
+    if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
+    w.signTexts.clear(); for (const [k, v] of ex.signs) w.signTexts.set(k, v);
+    w.streetNames.clear(); for (const [k, v] of ex.streets) w.streetNames.set(k, v);
+    this.textSigns.version++;
+    this.transit.terminals = ex.terminals; this.transit.version++;
+    this.clouds.load(ex.clouds); fogLevel.value = ex.fog;
+    this.skyMode = ex.sky === 'dia' || ex.sky === 'noite' ? ex.sky : 'ciclo'; this.hud.setSky(this.skyMode);
+    this.sky.set(ex.weather, false);
     w.tileInSave.fill(0);
     for (const t of g.tiles.keys()) w.tileInSave[t] = 1;
     const unreadable: number[] = [];

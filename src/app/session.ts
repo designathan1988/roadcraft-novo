@@ -7,6 +7,7 @@ import { WATER_TILE_RES } from '../world/ground.ts';
 import { customProfiles } from '../roads/profiles.ts';
 import { fogLevel } from '../render/scene.ts';
 import { MapSizeError, decodeMeta, encodeMeta } from '../platform/save.ts';
+import { encodeExtra } from '../platform/mapExtra.ts';
 import { QUARANTINE_UNREADABLE_TILES, quarantineSlot } from '../platform/mapFile.ts';
 import { KeptFileMissing, type Generation, type Opened, type SaveSlot } from '../platform/saveFiles.ts';
 import { boxTransfer } from '../shared/contracts/worker.ts';
@@ -194,7 +195,7 @@ export async function saveSession(host: SaveHost, auto = false): Promise<boolean
   });
   for (const p of packs) p.catch(() => { /* reported below */ });
   const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: listed, camera: host.rig.state(), hour: host.hour, transit: host.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
-    extra: JSON.stringify({ sky: host.skyMode, weather: host.weatherCtl, water: host.waterCtl, clouds: host.clouds, fog: fogLevel.value, terminals: host.transit.terminals,
+    extra: encodeExtra({ sky: host.skyMode, weather: host.weatherCtl, water: host.waterCtl, clouds: [...host.clouds], fog: fogLevel.value, terminals: host.transit.terminals,
       signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: host.settings.paint ?? 'br', unlimited: w.unlimited }) });
   try {
     const writer = await slot.begin();
