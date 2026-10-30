@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 22h54.
+Atualizado: 2026-10-29, 22h59.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,20 +39,26 @@ Atualizado: 2026-10-29, 22h54.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `c522b73` (ferramenta de ônibus), com `80bfefc`/`917e88f`
-  (pessoas), `e89f6ed` (vidro, ocupantes e entre-eixos) e `8fb94b2`/`066b047`/`0965073`/`b6f4857`/
-  `084425c` antes. Sem push e sem merge em main; nenhum agente ativo.
+- Branch `port/roadcraft-features`; HEAD `2cbc606` (GenOutputs), com `81655fa`/`c522b73` (ônibus),
+  `80bfefc`/`917e88f` (pessoas), `e89f6ed` (vidro, ocupantes e entre-eixos) e `8fb94b2`/`066b047`/
+  `0965073`/`b6f4857`/`084425c` antes. Sem push e sem merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
   `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
-  `polygon.ts`, `geometry.ts` e `materials.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts`
-  2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 2.379; `arch:check` 247 arquivos/
-  66.891 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos.
+  `polygon.ts`, `geometry.ts`, `materials.ts` e `outputs.ts`, `src/r40/api.ts` e `src/roads/dash.ts`.
+  `game.ts` 2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 2.368; `arch:check` 248
+  arquivos/66.911 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos. Os quatro sinks do gerador
+  (`detailOut`/`layoutOut`/`footOut`/`partsOut`) deixaram de ser globais: viajam em `GenOutputs`.
 - Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
   `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget com o vidro: street 418 draws/
   11.483.609 tris, district 175/7.103.905, city 123/**4.002.312** (limite 4.044.328), map
   178/4.463.246, night 494/14.492.808; MB 611/591/301/261/731, todos dentro.
 - Testes: suíte **371/371 em 98,7 s** com o vidro; trânsito/defeitos/movimento **61/61 em 58,3 s**
-  na extração de regiões; prédios 50/50 em 5,5 s; tsc/build limpos.
+  na extração de regiões; prédios **50/50 em 5,2 s** depois do GenOutputs; tsc/build limpos.
+- Save/reabertura: `generated-reopens-same` deu **4 ok, 0 falhas** (cidade gerada, salva e recarregada
+  no mesmo processo, mesmas vias/prédios, sem reparo); `close-saves` deu **2 ok, 0 falhas** (fecha o
+  app de verdade e reabre, mapa pequeno); `check-user-data.mjs` manteve a pasta do jogador intacta
+  (14.340 arquivos). Os três rodaram antes de `2cbc606`. A cidade de 10 km **com processo fechado**
+  ainda não foi provada.
 - Carros: `test-results/carros-qa-2026-10-29/01..09` (20/100/500 m, dia/noite, seguindo) mostra a
   carroceria opaca; `test-results/carros-vidro-perto-2026-10-29/01,07` mostra o motorista no carro
   preto a 8 m e passageiros brancos dentro do ônibus, com o vidro separado e transparente. O LOD
@@ -64,8 +70,10 @@ Atualizado: 2026-10-29, 22h54.
 - Ônibus: `test-results/onibus-qa-3-2026-10-29/01..14` segue um ônibus por 14 quadros numa linha de
   quatro cantos; ele aparece opaco e centrado na faixa, mas nenhuma curva foi capturada. O heading pelo
   acorde e o entre-eixos 6,2 m estão no código/testes; a prova visual da curva continua em aberto.
-- Pendente: sinks do `GenContext` e o resto de `traffic`/`r40/buildingMesh`, bomba real, construtor
-  completo, multidão/ônibus em curva, cidade organizada/250 mil, reabertura de 10 km.
+- Pendente: extrair shell/fachada/cívico do `buildingGen` (agora sem sinks), o resto de `traffic`/
+  `r40/buildingMesh`, bomba real, construtor completo, multidão/ônibus em curva, cidade organizada/250 mil.
+  A recarga da cidade gerada e o fechar/reabrir de um mapa pequeno estão provados; a cidade de 10 km
+  fechada e reaberta sem cache ainda não.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades

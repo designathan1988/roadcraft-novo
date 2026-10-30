@@ -48,7 +48,8 @@ aqui; antes de ler estado de outro módulo, use a API/porta/snapshot, nunca a c�
   `app/buildings.ts` e `app/photoHooks.ts` já receberam as portas; a edição de lote/entrada continua nele.
 - O nível de detalhe do gerador viaja em `MeshBuilder.lod`; não há mais `genLod` global. A geometria pura
   (quadro do lote, telhados, toldos, `shadeHex`) está em `buildingGen/geometry.ts`; `BMAT`/`Facade` em
-  `buildingGen/materials.ts`, reexportados pelo gerador.
+  `buildingGen/materials.ts`, reexportados pelo gerador. As saídas de um passe (detalhe, volumes, footprints,
+  peças) viajam em `GenOutputs` no `Frame` do lote (`buildingGen/outputs.ts`); não há sink de módulo.
 - O r40 é uma dependência de geração/render atrás de `r40/api.ts`; nenhum consumidor externo importa seus módulos
   internos. O pipeline de `buildingMesh.ts` ainda precisa ser dividido por responsabilidade.
 - `props` tem pool/cap e blocos por célula; o cap não pode virar corte silencioso nem mudar a cada quadro (E24).
@@ -56,7 +57,7 @@ aqui; antes de ler estado de outro módulo, use a API/porta/snapshot, nunca a c�
 
 ## Portão
 
-- `npm run arch:check` no HEAD: **247 arquivos/66.891 linhas, 0 ciclos de runtime, 0 de tipos, 0 vazamentos**.
+- `npm run arch:check` no HEAD: **248 arquivos/66.911 linhas, 0 ciclos de runtime, 0 de tipos, 0 vazamentos**.
 - Cada nova feature atualiza esta matriz; nenhum estado novo sem dono.
 - O `MeshBuilder` é contexto de geração passado por prédio; `vehSchema`/`End` são vocabulário puro do worker, não
   estado de jogo.

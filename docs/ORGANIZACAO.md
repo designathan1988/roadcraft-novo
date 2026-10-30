@@ -20,18 +20,18 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 247 |
-| Bytes / linhas | 3.725.879 / 66.891 |
+| Arquivos TS | 248 |
+| Bytes / linhas | 3.726.767 / 66.911 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
-| Arestas de import | 994 (177 só de tipo) |
+| Arestas de import | 997 (179 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.852),
-`game.ts` (2.645), `jobs/buildingGen.ts` (2.379), `r40/render/buildings/signature.ts` (1.781),
+`game.ts` (2.645), `jobs/buildingGen.ts` (2.368), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
@@ -211,8 +211,11 @@ Ordem por risco e valor (não por tamanho):
 - Feito em 2026-10-29: `sim/traffic/regions.ts` (ocupação de 400 m, `regionOf`, governador de frota); `Traffic`
   publica getters/setters para scripts e testes e caiu de 2.894 para 2.852 linhas. A passagem continua a cada
   `REGION_EVERY` s, uma vez pelos segmentos; a otimização incremental fica pendente de medição.
-- Em andamento: `sim/traffic.ts` por micro/meso/ônibus; `buildingGen` ainda tem os sinks globais; `r40/buildingMesh.ts`
-  continua por último.
+- Feito em 2026-10-29: `buildingGen/outputs.ts` (`GenOutputs`) tirou `detailOut`, `layoutOut`, `footOut` e
+  `partsOut` do escopo do módulo; o passe leva as saídas no `Frame` do lote e `buildBuildings`/`buildBuildingParts`/
+  `buildingVolumes` criam o objeto. O gerador caiu de 2.379 para 2.368 linhas sem mudar as chamadas de `prism`.
+- Em andamento: extrair shell/fachada/cívico do `buildingGen` agora que os sinks saíram; `sim/traffic.ts` por
+  micro/meso/ônibus; `r40/buildingMesh.ts` continua por último.
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
   usa saída antecipada (≈13 s reais). A suíte completa fechou **370/370 em 66,0 s** antes da extração de regiões;
   depois dela, trânsito/defeitos/movimento 61/61 em 58,3 s. Não declarar a suíte completa verde depois de `b6f4857`
