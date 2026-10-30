@@ -4,13 +4,7 @@
 import * as THREE from 'three/webgpu';
 import { MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
 
-/** Changes the map size: the world arrays are sized to the map, so the page reloads. */
 const FLASH_COLOR = new THREE.Color(0xdde6ff);
-
-function reloadWithMap(tiles: number, then: string): void {
-  try { localStorage.setItem('cidade.mapa', String(tiles)); } catch { /* no storage: it goes through the URL */ }
-  location.href = `${location.pathname}?mapa=${tiles}&${then}`;
-}
 import { CommandStack } from './core/commands.ts';
 import { CELL_COUNT, Dirty, TILE_COUNT, cellsOfTile, tileId, tileOfCell, tileOriginX, tileX } from './core/grid.ts';
 import { JobPool } from './jobs/pool.ts';
@@ -81,11 +75,11 @@ import { START_MONEY, World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { lineProfile } from './jobs/debugCity.ts';
 import { FLAT_BIT } from './jobs/terrainGen.ts';
-import { MapFileError, QUARANTINE_UNREADABLE_TILES, keepPreviousCity, packSlot, previousCities, quarantineSlot, readPackage, restorePrevious, savedIn, type SaveActions } from './platform/mapFile.ts';
-import { SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation, type Opened } from './platform/saveFiles.ts';
+import { MapFileError, keepPreviousCity, packSlot, previousCities, readPackage, restorePrevious, savedIn, type SaveActions } from './platform/mapFile.ts';
+import { SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation } from './platform/saveFiles.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
 import { photoView, settlePool } from './app/photoHooks.ts';
-import { saveSession, type SaveHost } from './app/session.ts';
+import { loadSession, reloadWithMap, saveSession, type LoadHost, type SaveHost } from './app/session.ts';
 import { setTool as setGameTool, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
 import { errorText } from './shared/errors.ts';
 
@@ -2394,49 +2388,15 @@ export class Game {
    * opening and touches nothing. True when the city opened.
    */
   private async load(): Promise<boolean> {
-    if (this.busy) return false;
-    this.busy = true;
-    let slot: SaveSlot, opened: Opened;
-    try { slot = await this.slot(); opened = await slot.open(); } catch (err) {
-      this.busy = false;
-      this.hud.toast(t('save.storageFailed', { message: errorText(err) }));
-      return false;
-    }
-    if (!opened.found) { this.busy = false; this.hud.toast(t('save.none')); return false; }
-    for (const p of opened.problems) console.warn('save:', p);
-    const gens = opened.generations;
-    // a save of another map size: the page reloads at that size and opens it there
-    try { if (gens[0]) decodeMeta(gens[0].metaBytes); } catch (err) {
-      if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { this.busy = false; reloadWithMap(err.tiles, 'carregar'); return false; }
-    }
-    if (!gens.length) {
-      this.busy = false;
-      const q = await quarantineSlot(slot, opened.problems.join('; '));
-      this.hud.toast(t('save.damaged', { folder: q ?? '—' }));
-      return false;
-    }
-    // generations whose every tile file is there first (newest first), then the others as a last resort
-    const order = [...gens.filter((g) => !g.missing.size), ...gens.filter((g) => g.missing.size)];
-    this.hud.showLoading(t('save.loading'));
-    try {
-      let report: { missing: number; damaged: number; repaired: number; cut: number } | null = null, used = order[0];
-      // each generation in turn; when none opens whole, the newest opens with what of it can be read
-      if (order.length > 1) for (let k = 0; k < order.length && !report; k++) report = await this.openGeneration(slot, (used = order[k]), false);
-      if (!report) report = await this.openGeneration(slot, (used = order[0]), true);
-      const fellBack = used.gen !== opened.newest;
-      const q = fellBack || report!.missing || report!.damaged ? await quarantineSlot(slot, opened.problems.join('; ') || QUARANTINE_UNREADABLE_TILES) : null;
-      if (fellBack) this.hud.toast(t('save.fallback', { folder: q ?? '—' }));
-      if (report!.damaged) this.hud.toast(plural('save.tilesUnreadable', report!.damaged, { folder: q ?? '—' }));
-      if (report!.missing) this.hud.toast(plural('save.tilesMissing', report!.missing, { folder: q ?? '—' }));
-      if (report!.cut) this.hud.toast(plural('save.roadsCut', report!.cut));
-      if (report!.repaired) this.hud.toast(plural('save.repaired', report!.repaired));
-      this.endRebuild(null, '');
-      this.hud.toast(t('save.loaded'));
-      return true;
-    } catch (err) {
-      this.endRebuild(err, t('game.flow.load'));
-      return false;
-    }
+    const g = this;
+    const host: LoadHost = {
+      get busy() { return g.busy; }, set busy(v) { g.busy = v; },
+      hud: g.hud,
+      slot: () => g.slot(),
+      openGeneration: (slot, gen, last) => g.openGeneration(slot, gen, last),
+      endRebuild: (err, what) => g.endRebuild(err, what),
+    };
+    return loadSession(host);
   }
 
   /**

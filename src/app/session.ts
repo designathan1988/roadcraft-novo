@@ -1,14 +1,16 @@
 // Saving the city: one generation of the save (the changed tiles, the map description and the manifest), built on the
 // last committed generation. The game owns the state; this module only reads it through SaveHost.
+import { MAP_SIZES } from '../config.ts';
 import { TILE_COUNT, cellsOfTile, tileId, tileX } from '../core/grid.ts';
 import { packTileHeights } from '../jobs/storage.ts';
 import { WATER_TILE_RES } from '../world/ground.ts';
 import { customProfiles } from '../roads/profiles.ts';
 import { fogLevel } from '../render/scene.ts';
-import { encodeMeta } from '../platform/save.ts';
-import { KeptFileMissing, type Generation, type SaveSlot } from '../platform/saveFiles.ts';
+import { MapSizeError, decodeMeta, encodeMeta } from '../platform/save.ts';
+import { QUARANTINE_UNREADABLE_TILES, quarantineSlot } from '../platform/mapFile.ts';
+import { KeptFileMissing, type Generation, type Opened, type SaveSlot } from '../platform/saveFiles.ts';
 import { boxTransfer } from '../shared/contracts/worker.ts';
-import { t } from '../shared/i18n/index.ts';
+import { plural, t } from '../shared/i18n/index.ts';
 import { errorText } from '../shared/errors.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import type { World } from '../world/world.ts';
@@ -18,6 +20,76 @@ import type { CameraRig } from '../render/cameraRig.ts';
 import type { SkyMode, WeatherCtl } from '../ui/hudActions.ts';
 
 export interface SaveWater { waves: number; foam: number; current: number }
+
+/** Changes the map size: the world arrays are sized to the map, so the page reloads. */
+export function reloadWithMap(tiles: number, then: string): void {
+  try { localStorage.setItem('cidade.mapa', String(tiles)); } catch { /* no storage: it goes through the URL */ }
+  location.href = `${location.pathname}?mapa=${tiles}&${then}`;
+}
+
+export interface LoadReport { missing: number; damaged: number; repaired: number; cut: number }
+
+/** What opening a city needs from the Game; the world itself stays the Game's. */
+export interface LoadHost {
+  busy: boolean;
+  readonly hud: { toast(message: string): void; showLoading(message: string): void };
+  slot(): Promise<SaveSlot>;
+  openGeneration(slot: SaveSlot, g: Generation, last: boolean): Promise<LoadReport | null>;
+  endRebuild(err: unknown, what: string): void;
+}
+
+/**
+ * Opens the saved city: its committed generation, or the one before it when that one cannot be used (a file gone or
+ * damaged); when no generation can be fully read, the newest is opened and its unreadable tiles come back from the
+ * seed. Any failure after the world was cleared ends the flow (no hung loading screen) and blocks saving until
+ * another city is opened or made, so the half-built world never overwrites the save. A storage that fails stops the
+ * opening and touches nothing. True when the city opened.
+ */
+export async function loadSession(host: LoadHost): Promise<boolean> {
+  if (host.busy) return false;
+  host.busy = true;
+  let slot: SaveSlot, opened: Opened;
+  try { slot = await host.slot(); opened = await slot.open(); } catch (err) {
+    host.busy = false;
+    host.hud.toast(t('save.storageFailed', { message: errorText(err) }));
+    return false;
+  }
+  if (!opened.found) { host.busy = false; host.hud.toast(t('save.none')); return false; }
+  for (const p of opened.problems) console.warn('save:', p);
+  const gens = opened.generations;
+  // a save of another map size: the page reloads at that size and opens it there
+  try { if (gens[0]) decodeMeta(gens[0].metaBytes); } catch (err) {
+    if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { host.busy = false; reloadWithMap(err.tiles, 'carregar'); return false; }
+  }
+  if (!gens.length) {
+    host.busy = false;
+    const q = await quarantineSlot(slot, opened.problems.join('; '));
+    host.hud.toast(t('save.damaged', { folder: q ?? '—' }));
+    return false;
+  }
+  // generations whose every tile file is there first (newest first), then the others as a last resort
+  const order = [...gens.filter((g) => !g.missing.size), ...gens.filter((g) => g.missing.size)];
+  host.hud.showLoading(t('save.loading'));
+  try {
+    let report: LoadReport | null = null, used = order[0];
+    // each generation in turn; when none opens whole, the newest opens with what of it can be read
+    if (order.length > 1) for (let k = 0; k < order.length && !report; k++) report = await host.openGeneration(slot, (used = order[k]), false);
+    if (!report) report = await host.openGeneration(slot, (used = order[0]), true);
+    const fellBack = used.gen !== opened.newest;
+    const q = fellBack || report!.missing || report!.damaged ? await quarantineSlot(slot, opened.problems.join('; ') || QUARANTINE_UNREADABLE_TILES) : null;
+    if (fellBack) host.hud.toast(t('save.fallback', { folder: q ?? '—' }));
+    if (report!.damaged) host.hud.toast(plural('save.tilesUnreadable', report!.damaged, { folder: q ?? '—' }));
+    if (report!.missing) host.hud.toast(plural('save.tilesMissing', report!.missing, { folder: q ?? '—' }));
+    if (report!.cut) host.hud.toast(plural('save.roadsCut', report!.cut));
+    if (report!.repaired) host.hud.toast(plural('save.repaired', report!.repaired));
+    host.endRebuild(null, '');
+    host.hud.toast(t('save.loaded'));
+    return true;
+  } catch (err) {
+    host.endRebuild(err, t('game.flow.load'));
+    return false;
+  }
+}
 
 /** What saving needs from the game; no field here is a second owner of the state. */
 export interface SaveHost {
