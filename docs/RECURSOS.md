@@ -1,6 +1,6 @@
 # Recursos: o que o jogo tem que ter (a lista do Roadcraft) e o estado aqui
 
-Fonte da lista: o Roadcraft 4.0 (`C:\Users\Jonathan\Documents\Projects\roadcraft\roadcraft-4.0-main`, só leitura),
+Fonte da lista: o Roadcraft 4.0 (`C:\Users\Jonathan\Documents\Projects\lab\roadcraft`, só leitura),
 seus dicionários (`data/textos-roadcraft/pt-BR.ts`, 1.760 linhas: cada chave é um recurso) e o inventário feito em
 2026-10-18. `docs/PARIDADE-roadcraft-3.md` tem o critério de pronto de cada linha ("clico X, vejo Y") e o estado em
 que o motor chegou. Estado aqui: ✅ existe e foi visto · 🟡 existe, mas abaixo do Roadcraft · ❌ falta.
@@ -97,7 +97,7 @@ Quem termina um item põe ✅, o commit e o nome da foto.
 - Vias: meio-fio, calçada em painéis, sarjeta, rampas 1:12, piso tátil, pilares e parapeitos de viaduto, portais
   de túnel, muros de corte; placas em atlas; semáforos com lentes; postes e fios.
 - Pessoas: corpos MakeHuman cozidos (PCA), roupas, cabelo, chapéu, expressão, objetos na mão, ocupantes sentados;
-  LOD por altura na tela; paletas de osso na GPU. Assets em `roadcraft-4.0-main/public/models/{people,citizens}`.
+  LOD por altura na tela; paletas de osso na GPU. Assets em `roadcraft/public/models/{people,citizens}`.
 - Veículos: carrocerias por perfil, rodas que rolam e esterçam, portas, faróis, escapamento.
 - Mundo: árvores low-poly com cards de folhas, grama em tufos, relevo fino de erosão, paredões de rocha, florestas
   como impostores, jardins; luz PMREM do céu, ACES, GTAO, SMAA/TRAA, CAS, vinheta, bloom à noite; luz do cânion.

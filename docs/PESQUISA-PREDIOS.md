@@ -7,7 +7,7 @@ prédio, 0,6 MB de GPU cada, ~43 chamadas por célula, ~7 ms de emissão por pr�
 7-9,5 KB guardado duas vezes como texto.
 
 Convenções deste documento:
-- "RC4" = Roadcraft 4.0 (`C:\Users\Jonathan\Documents\Projects\roadcraft\roadcraft-4.0-main`, só leitura).
+- "RC4" = Roadcraft 4.0 (`C:\Users\Jonathan\Documents\Projects\lab\roadcraft`, só leitura).
 - "Motor" = este repositório, ramo `main` (`989d4b3`) mais o commit não integrado `1e58ca2` do ramo
   `claude/predios-roadcraft-f42ed6` onde dito.
 - Todo número sem fonte é **estimativa** e está marcado como tal. Contagens de triângulos de um quad: o

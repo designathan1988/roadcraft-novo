@@ -56,7 +56,7 @@ Atualizado: 2026-10-29, 21h00.
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
   de 10 a 24 km) + a aparência, a interface e todos os recursos do Roadcraft 4.0
-  (`C:\Users\Jonathan\Documents\Projects\roadcraft\roadcraft-4.0-main`, referência SÓ LEITURA; nunca copiar a
+  (`C:\Users\Jonathan\Documents\Projects\lab\roadcraft`, referência SÓ LEITURA; nunca copiar a
   arquitetura dele: objeto por entidade e tudo na thread principal foi o que o matou; ver `docs/LICOES.md`).
 - Decisão do jogador (2026-10-18): não continuar nenhuma das quatro versões anteriores do Roadcraft. Este
   repositório é o único que anda. Prazo dele: ter o jogo funcionando com visual, interface e recursos do Roadcraft.
