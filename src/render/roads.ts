@@ -24,7 +24,7 @@ import { T, useCompactVertex, type Node, lodFadeMask } from './tsl.ts';
 const {
   attribute, vec2, vec3, vec4, float, int, ivec2, abs, mix, clamp, fract, fwidth, max, min, floor, Fn, If, mx_worley_noise_vec2,
   textureLoad, sRGBTransferEOTF, positionWorld, transformNormalToView, normalize, mx_noise_float, select, mod, step, uniform, length, smoothstep, time, sin,
-  exp, texture,
+  exp, texture, varying,
 } = T;
 
 /** What the road shader needs from the traffic for the density cars. */
@@ -163,7 +163,11 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   const matId = floor(col.w.mul(255).add(0.5));
   const road = attribute('road', 'vec4');
   const u = road.x, v = road.y, toEnd = road.z;
-  const code = floor(road.w.add(0.5));
+  // the code (segment id × 256 + dash phase × 16 + flags) is whole and the same at a surface's vertices: passed flat
+  // (three r186 VaryingNode.setInterpolation; WGSL @interpolate(flat, either)). Interpolated, a code of a few million
+  // (any road built in a large city: ids ~20,000) came out ±1 fragment by fragment (float32 steps 0.5 there), its flag
+  // bits flipped and the zebra, the stop line and other segments' wear showed through as specks.
+  const code = floor(varying(road.w).setInterpolation('flat', 'either').add(0.5));
   const segId = int(floor(code.div(16 * DASH_STEPS)));
   const dashPhase = mod(floor(code.div(16)), float(DASH_STEPS)).mul(DASH_PERIOD / DASH_STEPS);
   const tag = floor(attribute('position', 'vec4').w.mul(32767).add(0.5));
