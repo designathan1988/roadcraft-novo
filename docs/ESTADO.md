@@ -67,13 +67,14 @@ Atualizado: 2026-10-29, 23h03.
 - Pessoas: `test-results/pessoas-qa-2026-10-29/01..05` (2/20/100 m dia, 2/20 m noite) mostra o grupo
   de 8 + 4 andando criado pelo `api.people`: corpo inteiro, roupas/cabelo e sombra, sem buraco ou
   transparência no grupo. A multidão e a animação de skinning não foram isoladas nesta prova.
-- Ônibus: `test-results/onibus-qa-3-2026-10-29/01..14` segue um ônibus por 14 quadros numa linha de
-  quatro cantos; ele aparece opaco e centrado na faixa, mas nenhuma curva foi capturada. O heading pelo
-  acorde e o entre-eixos 6,2 m estão no código/testes; a prova visual da curva continua em aberto.
+- Ônibus: `test-results/onibus-curva-3-2026-10-29/01..04` mostra o ônibus entrando, atravessando e saindo
+  de uma curva de 90° numa quadra vazia, com o corpo na faixa e sem salto visível (câmera fixa,
+  `tools/fotos-onibus-curva.mjs`). A rodada anterior (`onibus-qa-3`) pegou só reta. Ainda faltam pose/yaw
+  numéricos por passo e passageiros embarcando/descendo; não há rotatória na cena.
 - Pendente: extrair shell/fachada/cívico do `buildingGen` (agora sem sinks), o resto de `traffic`/
-  `r40/buildingMesh`, bomba real, construtor completo, multidão/ônibus em curva, cidade organizada/250 mil.
-  A cidade de 10 km fechada e reaberta em outro processo está provada; a de semente aleatória sem cache
-  ainda não foi isolada (o cenário usa a geração padrão e a pasta de teste).
+  `r40/buildingMesh`, bomba real, construtor completo, multidão, passageiros do ônibus, yaw numérico/rotatória,
+  cidade organizada/250 mil. A cidade de 10 km fechada e reaberta em outro processo está provada; a de
+  semente aleatória sem cache ainda não foi isolada (o cenário usa a geração padrão e a pasta de teste).
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
