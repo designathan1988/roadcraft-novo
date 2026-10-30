@@ -31,6 +31,11 @@ Data: 2026-10-29. Toda mudança visual precisa de foto nas mesmas vistas, 1:1 na
 
 - 2 m, 20 m, 100 m e multidão; corpo inteiro, skinning, roupas/cabelo, sombra.
 - Sem transparência/buraco/corte; LOD do mesmo modelo; grupos do criador visíveis.
+- **Estado em 2026-10-29 (HEAD `80bfefc`):** `node tools/fotos-pessoas-qa.mjs test-results/pessoas-qa-2026-10-29`
+  colocou 8 pessoas em roda e 4 andando pelo `api.people` e gerou `01..05` (2/20/100 m dia, 2/20 m noite).
+  A 2 m o corpo inteiro, roupas/cabelo e mãos aparecem opacos, sem buraco/transparência; a 20 m o grupo
+  continua legível; a 100 m são silhuetas pequenas, sem caixa ou corte grosseiro. A multidão e a animação
+  de skinning em movimento não foram isoladas; o cenário completo ainda não está provado.
 
 ### Ônibus e trânsito
 

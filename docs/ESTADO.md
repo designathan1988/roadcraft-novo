@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 22h44.
+Atualizado: 2026-10-29, 22h47.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,9 +39,9 @@ Atualizado: 2026-10-29, 22h44.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `e89f6ed` (vidro transparente, ocupantes e entre-eixos),
-  com `066b047`/`0965073`/`b6f4857`/`084425c` antes. Sem push e sem merge em main; nenhum agente
-  ativo.
+- Branch `port/roadcraft-features`; HEAD `80bfefc` (ferramenta de pessoas), com `e89f6ed` (vidro,
+  ocupantes e entre-eixos) e `8fb94b2`/`066b047`/`0965073`/`b6f4857`/`084425c` antes. Sem push e sem
+  merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
   `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
   `polygon.ts`, `geometry.ts` e `materials.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts`
@@ -58,8 +58,11 @@ Atualizado: 2026-10-29, 22h44.
   preto a 8 m e passageiros brancos dentro do ônibus, com o vidro separado e transparente. O LOD
   distante mantém o modelo fundido. Caminhão/moto ainda não isolados em foto; ônibus em curva ainda
   sem foto de rota.
+- Pessoas: `test-results/pessoas-qa-2026-10-29/01..05` (2/20/100 m dia, 2/20 m noite) mostra o grupo
+  de 8 + 4 andando criado pelo `api.people`: corpo inteiro, roupas/cabelo e sombra, sem buraco ou
+  transparência no grupo. A multidão e a animação de skinning não foram isoladas nesta prova.
 - Pendente: sinks do `GenContext` e o resto de `traffic`/`r40/buildingMesh`, bomba real, construtor
-  completo, ônibus/pessoas visuais, cidade organizada/250 mil, reabertura de 10 km.
+  completo, multidão/ônibus em curva, cidade organizada/250 mil, reabertura de 10 km.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
