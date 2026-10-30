@@ -210,8 +210,9 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
     yellow = max(yellow, line.mul(step(float(0.5), color)));
   }
   const off = float(1).sub(inZone);
-  white = white.mul(off);
-  yellow = yellow.mul(off);
+  // junction fans have no road coordinates (roadUV = 0): their profile lines must not be painted across the junction
+  white = white.mul(off).mul(roadUV);
+  yellow = yellow.mul(off).mul(roadUV);
 
   // pedestrian crossing and stop line at the junctions, in the regional style
   const zoneCross = max(crossA.mul(windowAt(v, 0.7, 3.6, fv)), crossB.mul(windowAt(toEnd, 0.7, 3.6, fv)));
