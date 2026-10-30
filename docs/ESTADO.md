@@ -39,19 +39,19 @@ Atualizado: 2026-10-29, 21h00.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; commits locais `525d963`, `44bc36b`, `cf044bd`, `d47cdb7`,
-  `3aefa27`, `ca893a9`, `e157ca6`, `e24878a`. Sem push e sem merge em main.
-- Extraídos: `src/app/session.ts` (gravação, `SaveHost`), `src/app/tools.ts` (`setTool`/`skyHint`,
-  `ToolHost`), `src/jobs/buildingGen/plan.ts` (plano de célula), `src/sim/traffic/laneChanges.ts`
-  (trocas de faixa, `LaneHost`). `game.ts` 2.691 linhas; `buildingGen.ts` 2.591; `arch:check` 237
-  arquivos/66.394 linhas, 0 ciclos e 0 vazamentos.
-- Testes rápidos: C11 120 s simulados (10,7 s reais), C25 2,4 s, ônibus/pedestres 2,4 s (antes
-  122 s), `janela 1b` 1,8 s (antes 38 s). Suíte completa 364/364 em 101,9 s depois das fatias;
-  nova execução após `clicks` em andamento.
-- Budget: a medição estável com `PLATE_DETAIL.drop = 8 m` (sem mudança visual) passou: city
-  3.669.706 triângulos (limite 4.044.328), 151 chamadas; rua 15.013.483, bairro 9.522.297, mapa
-  4.463.170, noite 11.742.022, MB dentro. O medidor agora falha se draws/tris não estabilizarem.
-  Foto da rua aberta: `test-results/plate9/01-rua.png`.
+- Branch `port/roadcraft-features`; commits locais desta rodada até `735220f`/`c0db187`. Sem push
+  e sem merge em main; nenhum agente ativo.
+- Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
+  `src/sim/traffic/laneChanges.ts`, `src/sim/traffic/lines.ts`, `src/jobs/buildingGen/plan.ts` e
+  `polygon.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts` 2.645, `traffic.ts` 2.949,
+  `buildingGen.ts` 2.521; `arch:check` 243 arquivos/66.759 linhas, 0 ciclos e 0 vazamentos.
+- Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
+  `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget válido: city 3.507.096
+  (limite 4.044.328), as 5 vistas não vazias; medidor recusa vista com 0 draws/tris.
+- Testes: suíte **370/370 em 61,6 s** na última execução; tsc limpo. Fotos: `vias-fix.png`,
+  `survey3/06..07`, `bomba-nova/01..06` (bomba nova reprovada).
+- Pendente: GenContext e divisão de `traffic`/`r40/buildingMesh`, bomba real, construtor completo,
+  carros/ônibus visuais, cidade organizada/250 mil, reabertura de 10 km.
 
 ## O que é este projeto e de onde veio
 - Roadcraft 5 = o motor do "Cidade" (`C:\Users\Jonathan\Documents\Projects\city-game\city-game`, que abre cidades
