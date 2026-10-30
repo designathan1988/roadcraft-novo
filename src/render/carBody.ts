@@ -921,7 +921,10 @@ export function buildCarSilhouette(a: CarArchetype, styleName: CarStyle, station
     for (const side of [-1, 1]) for (let j = 0; j + 1 < H; j++) {
       const c = j === 0 ? under : j === glassRow && glassX(xm) ? dark : j >= 4 && (isScreen(xm) || isRear(xm)) ? dark : white;
       const q = [[x0, r0[j]!], [x1, r1[j]!], [x1, r1[j + 1]!], [x0, r0[j + 1]!]] as const;
-      const tri = side > 0 ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
+      // counter-clockwise seen from outside (three's front face): the ring runs up from the bottom centre, so on the
+      // right (+z) side the quad goes along x then up. The opposite order built the whole silhouette inside out: the
+      // far side's inner face and all four wheels were drawn, the near side culled (a car seen lying on its side)
+      const tri = side > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2];
       for (const k of tri) put(q[k]![0], q[k]![1] as [number, number], side, c);
     }
   }
@@ -931,7 +934,7 @@ export function buildCarSilhouette(a: CarArchetype, styleName: CarStyle, station
     for (const side of [-1, 1]) for (let j = 0; j + 1 < H; j++) {
       const c = j >= glassRow + 1 && sgn > 0 ? dark : white;
       const tri: Array<[number, [number, number]]> = [[x, [0, cy]], [x, r[j]!], [x, r[j + 1]!]];
-      const order = (sgn * side > 0) ? [0, 1, 2] : [0, 2, 1];
+      const order = (sgn * side > 0) ? [0, 2, 1] : [0, 1, 2];
       for (const k of order) put(tri[k]![0], tri[k]![1], side, c);
     }
   }

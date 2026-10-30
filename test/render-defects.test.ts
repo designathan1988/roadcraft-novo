@@ -854,3 +854,46 @@ test('cars: seen at a slant through the glass, the near car is closed (cabin, an
     assert.equal(road, 0, `${style}: ${road} of ${through} slanting rays through the glass reach the road under the car`);
   }
 });
+
+test('cars: every level of a car is built facing outward (the far silhouette was inside out: a car seen on its side)', async () => {
+  const { CAR_SIZES, buildCarBody, buildCarCabin, buildCarSilhouette } = await import('../src/render/carBody.ts');
+  // rays from all round; the first triangle each meets must face it (met from behind, the GPU culls it)
+  const backShare = (g: THREE.BufferGeometry): number => {
+    const p = g.getAttribute('position').array, idx = g.index?.array, n = idx ? idx.length : p.length / 3;
+    const T = new Float64Array(n * 3);
+    for (let i = 0; i < n; i++) { const k = idx ? idx[i] : i; T[i * 3] = p[k * 3]; T[i * 3 + 1] = p[k * 3 + 1]; T[i * 3 + 2] = p[k * 3 + 2]; }
+    g.computeBoundingBox();
+    const b = g.boundingBox!;
+    let hits = 0, back = 0;
+    for (let pitch = 10; pitch <= 70; pitch += 30) for (let yaw = 0; yaw < 360; yaw += 45) {
+      const pr = pitch * Math.PI / 180, yr = yaw * Math.PI / 180, d = [-Math.cos(pr) * Math.cos(yr), -Math.sin(pr), -Math.cos(pr) * Math.sin(yr)];
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++) {
+        // (off the stations: a ray exactly on the edge two triangles share can miss both in floating point)
+        const tx = b.min.x + (i + 0.43) * (b.max.x - b.min.x) / 6, tz = b.min.z + (j + 0.57) * (b.max.z - b.min.z) / 4, ty = (b.min.y + b.max.y) / 2;
+        const o = [tx - d[0] * 50, ty - d[1] * 50, tz - d[2] * 50];
+        let best = Infinity, face = 0;
+        for (let k = 0; k < T.length; k += 9) {
+          const e1 = [T[k + 3] - T[k], T[k + 4] - T[k + 1], T[k + 5] - T[k + 2]], e2 = [T[k + 6] - T[k], T[k + 7] - T[k + 1], T[k + 8] - T[k + 2]];
+          const q = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+          const det = e1[0] * q[0] + e1[1] * q[1] + e1[2] * q[2];
+          if (Math.abs(det) < 1e-12) continue;
+          const s = [o[0] - T[k], o[1] - T[k + 1], o[2] - T[k + 2]];
+          const u = (s[0] * q[0] + s[1] * q[1] + s[2] * q[2]) / det; if (u < 0 || u > 1) continue;
+          const r = [s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0]];
+          const v = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / det; if (v < 0 || u + v > 1) continue;
+          const t = (e2[0] * r[0] + e2[1] * r[1] + e2[2] * r[2]) / det;
+          if (t > 1e-4 && t < best) { best = t; face = (e1[1] * e2[2] - e1[2] * e2[1]) * d[0] + (e1[2] * e2[0] - e1[0] * e2[2]) * d[1] + (e1[0] * e2[1] - e1[1] * e2[0]) * d[2]; }
+        }
+        if (best < Infinity) { hits++; if (face > 0) back++; }
+      }
+    }
+    return back / Math.max(1, hits);
+  };
+  for (const style of ['sedan', 'hatch', 'suv', 'van', 'pickup'] as const) {
+    const a = CAR_SIZES[style], b = buildCarBody(a, style, 24, 8, 3);
+    for (const [part, g] of [['silhouette', buildCarSilhouette(a, style)], ['far', b.far], ['trim', b.trim], ['cabin', buildCarCabin(a, style)]] as const) {
+      const share = backShare(g);
+      assert.ok(share < 0.03, `${style} ${part}: ${(share * 100).toFixed(0)}% of what is seen from outside is a face's back`);
+    }
+  }
+});
