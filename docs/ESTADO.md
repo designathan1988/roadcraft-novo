@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 23h24.
+Atualizado: 2026-10-29, 23h28.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,22 +39,22 @@ Atualizado: 2026-10-29, 23h24.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `784ca8c` (select acessível do inspetor), com `6482ca0`
-  (finishes), `f195c9b`/`b13594d` (curva do ônibus), `8defbcf`/`61800d7` (10 km), `126b262`/`2cbc606`
-  (GenOutputs), `81655fa`/`c522b73` (ônibus), `80bfefc`/`917e88f` (pessoas), `e89f6ed` (vidro,
-  ocupantes e entre-eixos) e os commits anteriores. Sem push e sem merge em main; nenhum agente ativo.
+- Branch `port/roadcraft-features`; HEAD `fabd483` (alturas), com `0fa5281`/`784ca8c` (inspetor),
+  `6482ca0` (finishes), `f195c9b`/`b13594d` (curva do ônibus), `8defbcf`/`61800d7` (10 km), `126b262`/
+  `2cbc606` (GenOutputs), `81655fa`/`c522b73` (ônibus), `80bfefc`/`917e88f` (pessoas), `e89f6ed` (vidro,
+  ocupantes e entre-eixos) e os anteriores. Sem push e sem merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
   `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
-  `polygon.ts`, `geometry.ts`, `materials.ts`, `outputs.ts` e `finishes.ts`, `src/r40/api.ts` e
-  `src/roads/dash.ts`. `game.ts` 2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 2.311;
-  `arch:check` 249 arquivos/66.923 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos. Os quatro sinks
-  do gerador deixaram de ser globais: viajam em `GenOutputs`; os acabamentos saíram para `finishes.ts`.
+  `polygon.ts`, `geometry.ts`, `materials.ts`, `outputs.ts`, `finishes.ts` e `heights.ts`, `src/r40/api.ts`
+  e `src/roads/dash.ts`. `game.ts` 2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 2.259;
+  `arch:check` 250 arquivos/66.944 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos. Os quatro sinks
+  do gerador deixaram de ser globais: viajam em `GenOutputs`; acabamentos e alturas saíram do gerador.
 - Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
   `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget com o vidro: street 418 draws/
   11.483.609 tris, district 175/7.103.905, city 123/**4.002.312** (limite 4.044.328), map
   178/4.463.246, night 494/14.492.808; MB 611/591/301/261/731, todos dentro.
-- Testes: suíte **371/371 em 59,8 s** depois do select do inspetor; trânsito/defeitos/movimento
-  **61/61 em 58,3 s** na extração de regiões; prédios **50/50 em 5,7 s**; tsc/build limpos.
+- Testes: suíte **371/371 em 59,7 s** depois das alturas; trânsito/defeitos/movimento **61/61 em
+  58,3 s** na extração de regiões; prédios **50/50 em 5,3 s**; tsc/build limpos.
 - Save/reabertura: `generated-close-reopens` deu **5 ok, 0 falhas**: cidade gerada de 10 km, salva,
   app **encerrado e reaberto em outro processo**, mesmas vias/nós/prédios/ladrilhos. `close-saves`
   deu **2 ok, 0 falhas** (mapa pequeno) e `check-user-data.mjs` manteve a pasta do jogador intacta
