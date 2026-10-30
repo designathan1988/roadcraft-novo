@@ -87,9 +87,7 @@ export class Hud {
   private popId: PopId | null = null;
   private popAnchor: HTMLElement | null = null;
   private metrics: HTMLElement | null = null;
-  private layers = { grid: false, zones: false, traffic: false };
   /** The map layers the Layers menu shows as on. */
-  get layersShown(): Readonly<{ grid: boolean; zones: boolean; traffic: boolean }> { return { ...this.layers }; }
   private insideFloor = -1;
   private about = new AboutBox();
   private readoutTimer = 0;
@@ -507,6 +505,7 @@ export class Hud {
         this.row(t('action.about'), () => this.about.open(), 'm_about'),
       );
     } else if (id === 'layers') {
+      const shown = this.read.layers();
       const layer = (key: string, tip: string, icon: string, on: boolean, flip: () => void): HTMLButtonElement => {
         const b = button(`v2-row v2-switch${on ? ' on' : ''}`, t(key), () => { flip(); this.fillPop('layers'); }, svg(icon, 18));
         b.setAttribute('role', 'switch');
@@ -515,9 +514,9 @@ export class Hud {
         return b;
       };
       body.append(
-        layer('v2.layer.grid', 'v2.grid.toggle', 'grid', this.layers.grid, () => a.grid()),
-        layer('zone.colours', 'zone.colours', 'zones', this.layers.zones, () => { this.layers.zones = !this.layers.zones; a.zoneLayer(this.layers.zones); }),
-        layer('sim.congestionLabel', 'sim.congestion', 'heat', this.layers.traffic, () => a.trafficView()),
+        layer('v2.layer.grid', 'v2.grid.toggle', 'grid', shown.grid, () => a.grid()),
+        layer('zone.colours', 'zone.colours', 'zones', shown.zones, () => a.zoneLayer(!this.read.layers().zones)),
+        layer('sim.congestionLabel', 'sim.congestion', 'heat', shown.traffic, () => a.trafficView()),
         layer('v2.layer.inside', 'inside.toggle', 'interiorView', this.insideFloor >= 0, () => a.inside('toggle')),
       );
     } else if (id === 'sim') {
@@ -751,8 +750,8 @@ export class Hud {
     }
   }
 
-  setTrafficView(on: boolean): void { this.layers.traffic = on; if (this.popId === 'layers') this.fillPop('layers'); }
-  setGrid(on: boolean): void { this.layers.grid = on; if (this.popId === 'layers') this.fillPop('layers'); }
+  /** The layers shown changed (HudReads.layers): the Layers panel shows them again. */
+  layersChanged(): void { if (this.popId === 'layers') this.fillPop('layers'); }
 
   /** Camera heading (rad): the needle points to north on the screen. */
   setCompass(yaw: number): void { this.compass.point(yaw); }

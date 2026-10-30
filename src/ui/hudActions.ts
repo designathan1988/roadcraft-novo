@@ -63,11 +63,15 @@ export interface LotToolView {
   readonly newFn: number;
 }
 
-/** What the HUD reads from the state owners (the tool in hand, the camera mode, the lot tool). */
+/** The Layers panel's switches. */
+export interface Layers { grid: boolean; zones: boolean; traffic: boolean }
+
+/** What the HUD reads from the state owners (the tool in hand, the camera mode, the lot tool, the layers shown). */
 export interface HudReads {
   tool(): Tool;
   view(): 'persp' | 'iso';
   lots(): LotToolView;
+  layers(): Readonly<Layers>;
 }
 
 export interface HudActions extends OptionalActions {

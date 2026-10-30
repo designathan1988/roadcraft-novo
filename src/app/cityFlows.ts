@@ -10,7 +10,7 @@ import type { JobPool } from '../jobs/pool.ts';
 import { lineProfile } from '../jobs/debugCity.ts';
 import { BULB_R, BULB_WALK, bulbAt } from '../roads/junction.ts';
 import { FOOTWAY_RISE, edgeRise } from '../roads/kerb.ts';
-import { PROFILE_INFO } from '../roads/profiles.ts';
+import { PROFILE_INFO, setCustomProfiles } from '../roads/profiles.ts';
 import { Zone } from '../roads/zones.ts';
 import { START_MONEY, type World } from '../world/world.ts';
 import type { Hud } from '../ui/hud.ts';
@@ -50,6 +50,8 @@ export class CityFlows {
     w.roads.clear();
     // a new map's look (water, weather, clouds, fog, road paint), shown by clearPage
     w.look.reset();
+    // the road profiles made in the editor are the map's (saved in its meta): a new map has none (the workers are told)
+    setCustomProfiles([]);
     this.h.clearPage();
     w.signTexts.clear(); w.streetNames.clear();
     w.money = START_MONEY;

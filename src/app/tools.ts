@@ -1,7 +1,7 @@
 // The tool in hand: its owner (ToolState: the tool, the landform it raises) and the switch, which leaves what the
 // previous tool had open (the gesture under way, the lot points, a wall being traced) and sets the new tool's hint.
 // The other tools' parts are reached through an explicit host (audit §13.4: tool → sub-mode → drag).
-import { zoneOverlayU } from '../render/roads.ts';
+import type { ViewState } from './viewState.ts';
 import { ROAD_TOOLS, TERRAIN_TOOLS } from '../ui/hudActions.ts';
 import { t } from '../shared/i18n/index.ts';
 import type { BrushMode, BrushParams } from '../world/brush.ts';
@@ -19,7 +19,8 @@ import type { Ambient } from '../platform/audio.ts';
 
 /** What switching tools needs from the Game; every mutable field is an accessor, never a copy. */
 export interface ToolHost {
-  readonly zoneLayer: boolean;
+  /** What the player chose to see: the zone colours, the building seen inside. */
+  readonly view: ViewState;
   readonly brush: BrushParams;
   readonly lotMode: LotMode;
   readonly skyTool: SkyToolState;
@@ -31,7 +32,6 @@ export interface ToolHost {
   readonly preview: RoadPreview;
   readonly creator?: Creator;
   readonly inside: InsideView;
-  insideId: number;
   readonly hud: Hud;
   readonly health?: HealthPanel;
   readonly canvas: HTMLCanvasElement;
@@ -72,7 +72,7 @@ export class ToolState {
 
 /** The new tool's state and hint. */
 function enter(host: ToolHost, tool: Tool, landform: BrushMode): void {
-  zoneOverlayU.value = tool === 'zone' || host.zoneLayer ? 1 : 0;
+  host.view.zoneToolInHand(tool === 'zone');
   if (TERRAIN_TOOLS.includes(tool)) host.brush.mode = tool === 'landform' ? landform : tool as BrushParams['mode'];
   if (ROAD_TOOLS.includes(tool)) host.roadTool.setMode(tool);
   else { host.roadTool.cancel(); host.hud.setHint(''); }
@@ -97,7 +97,7 @@ function enter(host: ToolHost, tool: Tool, landform: BrushMode): void {
   if (tool !== 'building') {
     host.preview.circle.visible = false;
     if (host.creator) host.creator.el.style.display = 'none';
-    if (host.inside.on) { host.inside.hide(); host.insideId = -1; host.hud.setInside(-1); }
+    if (host.inside.on) { host.inside.hide(); host.view.insideId = -1; host.hud.setInside(-1); }
   }
   host.hud.toolChanged();
   if (host.health) host.health.context = `ferramenta ${tool}`;

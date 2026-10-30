@@ -13,11 +13,11 @@ import { wallsHeightOf } from './jobs/buildingGen.ts';
 import { roadGraphTransfer } from './shared/contracts/worker.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
-import { createRoads, createTrafficLook, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
+import { createRoads, createTrafficLook, type TrafficLook } from './render/roads.ts';
 import type { CellLayer } from './render/cellLayer.ts';
 import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
 import { GpuTiming } from './render/gpuTiming.ts';
-import { TerrainRenderer, gridU } from './render/terrain.ts';
+import { TerrainRenderer } from './render/terrain.ts';
 import { createPoseBuffers, PoseReader, viewPoseBuffers } from './shared/contracts/poses.ts';
 import { encodeOps } from './sim/lanes.ts';
 import { VehicleRenderer } from './render/vehicles.ts';
@@ -59,6 +59,7 @@ import { CityFlows } from './app/cityFlows.ts';
 import { insertBoxes } from './app/insertBoxes.ts';
 import { WeatherControl } from './features/sky/weatherControl.ts';
 import { WaterControl } from './features/water/waterControl.ts';
+import { ViewState } from './app/viewState.ts';
 import { chooseRoadPaint, showRoadPaint } from './features/roads/roadPaint.ts';
 import { InsideView } from './render/inside.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
@@ -141,7 +142,6 @@ export class Game {
   private get settings(): Readonly<Settings> { return this.prefs!.now; }
   private optionsPanel!: OptionsPanel;
   /** Simulation speed (1, 2, 4), the zone colours shown with any tool, stops clicked as terminals. */
-  private zoneLayer = false;
   private transitTerminal = false;
   /** Clicks with the street item tools remove instead of placing (Remove poles; Shift+click does the same). */
   private itemRemove = false;
@@ -230,7 +230,8 @@ export class Game {
   private personSpec = { color: 3, height: 7, walk: false, count: 1 };
   private bombForce = BOMB_START;
   private hitKind: 'pistol' | 'bomb' | null = null;
-  private insideId = -1;
+  /** What the player chose to see (layers, the building seen inside): app/viewState.ts. */
+  private readonly viewState = new ViewState();
   private insideFloor = 0;
   /** Loading, ready, an operation under way, or failed; and what changed since the last save (app/lifecycle.ts). */
   readonly life: Lifecycle;
@@ -351,7 +352,7 @@ export class Game {
       get growth() { return ge.growth; },
       get selected() { return ge.selected; },
       rig: this.rig, inside: this.inside,
-      get insideId() { return ge.insideId; }, set insideId(v) { ge.insideId = v; },
+      get insideId() { return ge.viewState.insideId; }, set insideId(v) { ge.viewState.insideId = v; },
       get insideFloor() { return ge.insideFloor; }, set insideFloor(v) { ge.insideFloor = v; },
       get transit() { return ge.transit; },
       set unsaved(v: boolean) { ge.unsaved = v; },
@@ -414,7 +415,7 @@ export class Game {
       help: () => this.hud.toggleHelp(),
       trafficView: () => this.toggleTrafficView(),
       follow: () => this.toggleFollow(),
-      grid: () => { gridU.value = gridU.value > 0.5 ? 0 : 1; this.hud.setGrid(gridU.value > 0.5); },
+      grid: () => { this.viewState.set('grid', !this.viewState.layers.grid); this.hud.layersChanged(); },
       north: () => this.rig.turnTo(0),
       line: (id) => { this.lines.selected = id; },
       newLine: () => this.lines.newLine(),
@@ -453,7 +454,7 @@ export class Game {
       orbit: (dx, dy) => this.rig.rotate(dx, dy),
       turn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 4), // left (−1) turns as Q does
       tilt: (d) => this.rig.rotate(0, d * 60),
-      zoneLayer: (on) => { this.zoneLayer = on; zoneOverlayU.value = on || this.tool === 'zone' ? 1 : 0; },
+      zoneLayer: (on) => { this.viewState.set('zones', on); this.hud.layersChanged(); },
       simulation: (sim) => { this.prefs!.update(sim); this.demandSent = 0; },
       settings: () => {
         const st = this.prefs?.now;
@@ -485,7 +486,7 @@ export class Game {
         this.rig.restore(new Float64Array([nc.x[n], nc.z[n], this.rig.yaw, Math.max(0.5, this.rig.pitch), Math.min(this.rig.dist, 160), this.rig.mode === 'iso' ? 1 : 0]));
         this.inspector.pick(nc.x[n], nc.z[n]);
       },
-    } satisfies HudActions), { tool: () => this.tools.current, view: () => this.rig.mode, lots: () => this.editing });
+    } satisfies HudActions), { tool: () => this.tools.current, view: () => this.rig.mode, lots: () => this.editing, layers: () => this.viewState.layers });
     this.roadTool = new RoadTool(this.world, this.commands, this.preview, this.hud);
     this.itemTool = new ItemTool(this.world, this.commands, this.preview, this.hud);
     this.zoneTool = new ZoneTool(this.world, this.commands);
@@ -746,9 +747,9 @@ export class Game {
       this.rig.camera.updateMatrixWorld();
     }
     // inside view: gone with its building (demolished, undone, another city), laid out again when it is edited
-    if (this.insideId >= 0) {
+    if (this.viewState.insideId >= 0) {
       this.inside.follow(this.world);
-      if (!this.inside.on) { this.insideId = -1; this.hud.setInside(-1); }
+      if (!this.inside.on) { this.viewState.insideId = -1; this.hud.setInside(-1); }
     }
     const cam = this.rig.camera;
     // always day (or night) fixes the light only: the clock, and the traffic demand that follows it, go on
@@ -871,8 +872,8 @@ export class Game {
   }
 
   private toggleTrafficView(): void {
-    trafficOverlayU.value = trafficOverlayU.value > 0.5 ? 0 : 1;
-    this.hud.setTrafficView(trafficOverlayU.value > 0.5);
+    this.viewState.set('traffic', !this.viewState.layers.traffic);
+    this.hud.layersChanged();
   }
 
   /** Trips completed and given up per minute (from the simulation's running totals). */
@@ -1086,7 +1087,7 @@ export class Game {
       get homeView() { return g.homeView; },
       riverPts: this.river.points,
       editing: this.editing,
-      get insideId() { return g.insideId; },
+      get insideId() { return g.viewState.insideId; },
       get cloudGrab() { return g.clouds.grabbed; },
       get pointer() { return g.pointer; },
       get stroke() { return g.stroke; }, set stroke(v) { g.stroke = v; },
@@ -1263,10 +1264,9 @@ export class Game {
   private toolHost(): ToolHost {
     const g = this;
     return {
-      zoneLayer: g.zoneLayer, brush: g.brush, lotMode: g.editing.lotMode, skyTool: g.clouds.tool,
+      view: g.viewState, brush: g.brush, lotMode: g.editing.lotMode, skyTool: g.clouds.tool,
       riverPts: g.river.points, roadTool: g.roadTool, itemTool: g.itemTool, inspector: g.inspector, transitView: g.transitView,
       preview: g.preview, creator: g.creator, inside: g.inside,
-      get insideId() { return g.insideId; }, set insideId(v) { g.insideId = v; },
       hud: g.hud, health: g.health, canvas: g.canvas, ambient: g.ambient,
       select: (id) => g.select(id), setLotMode: (mode) => g.setLotMode(mode),
       cancelGesture: () => g.input?.cancel(), exitLots: () => g.editing.exit(),
@@ -1378,7 +1378,7 @@ export class Game {
       hitKind: () => g.hitKind,
       bombForce: () => g.bombForce,
       boltShown: () => g.weather.boltShown,
-      layers: () => g.hud.layersShown,
+      layers: () => ({ ...g.viewState.layers }),
       insideOn: () => g.inside.on,
       clouds: () => g.clouds.list.length,
       terminals: () => g.transit.terminals,
@@ -1387,7 +1387,7 @@ export class Game {
       setHour: (h) => g.world.setHour(h),
       weather: () => ({ clouds: g.weather.fixed?.clouds ?? cloudsU.value, rain: g.weather.fixed?.rain ?? rainU.value, storm: g.weather.fixed?.storm ?? 0, wind: g.weather.windFixed }),
       inspector: () => ({ open: g.inspector.isOpen, seg: g.inspector.seg }),
-      insideId: () => g.insideId,
+      insideId: () => g.viewState.insideId,
       audioStart: () => g.ambient.start(),
       audioState: () => g.ambient.state,
       green: () => g.green,
