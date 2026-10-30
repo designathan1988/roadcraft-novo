@@ -14,6 +14,7 @@ import { MAX_DEG, MAX_SEG_LEN, type NodeRec, type RoadNetwork, type SegRec } fro
 import { t as text } from '../shared/i18n/index.ts';
 import { SegFlag } from './flags.ts';
 import { PROFILE_INFO, RING_PROFILE } from './profiles.ts';
+import { BESIDE_DROP, FOOTWAY_RISE, UNDER_DROP, edgeRise } from './kerb.ts';
 import { BULB_R, BULB_WALK, armOf, bulbAt } from './junction.ts';
 import { KIND_MASK, buildKindAt, chargeFor, dominantKind, kindOfFlags, segmentPrice, withKind } from './economy.ts';
 import { dirOut, remapSpec, type JunctionSpec } from './control.ts';
@@ -712,7 +713,7 @@ function buildLive(j: RoadJournal, world: World, plan: RoadPlan, start: Anchor, 
   };
   clearAndConform(j, world, q, profile, yLinear, table, (flags & SegFlag.Wall) !== 0);
   // dead ends with a turning bulb: the terrain settles under the circle
-  for (const n of [stops[0].node, stops[stops.length - 1].node]) if (bulbAt(net, n)) conformDisc(j, world, nc.x[n], nc.z[n], BULB_R + BULB_WALK + 6, nc.y[n]);
+  for (const n of [stops[0].node, stops[stops.length - 1].node]) if (bulbAt(net, n)) conformDisc(j, world, nc.x[n], nc.z[n], BULB_R + BULB_WALK + 6, nc.y[n], BULB_R + BULB_WALK, FOOTWAY_RISE);
 }
 
 export { bulbAt };
@@ -782,20 +783,44 @@ function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: number,
       if (i === n - 1 && (x - px[n - 1]) * (px[n - 2] - px[n - 1]) + (z - pz[n - 1]) * (pz[n - 2] - pz[n - 1]) < 0) continue;
       const k = heightIndex(gx, gz);
       const old = h[k];
-      const target = py[i] - 0.06;
-      const gap = target - old; // + fill, - cut
+      const under = py[i] - UNDER_DROP;
+      const gap = under - old; // + fill, - cut
       if (gap > 4.5 || gap < -7) continue; // bridge or tunnel: the terrain stays
       if (old < SEA_LEVEL + 0.3 || waterAt(world.water, x, z) > old) continue; // never fills water: it becomes a bridge
       // cut with a retaining wall: the ground rises right at the edge (the wall covers it); embankment: 7 m slope
       const bl = wallCut && gap < 0 ? 1.2 : blend;
       if (d >= half + bl) continue;
+      // under the road below its surface; beside it level with its outer strip's top on that side (roads/kerb.ts),
+      // unless the point is under another road (a junction's other arm, a road beside): under wins, never raised there
+      let target = under;
+      if (d >= half && !underARoad(world, x, z)) {
+        const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+        const left = (x - px[i]) * (pz[b] - pz[a]) - (z - pz[i]) * (px[b] - px[a]) > 0;
+        target = py[i] + edgeRise(profile, left) - BESIDE_DROP;
+      }
       const w = d <= half + 0.5 ? 1 : 1 - smooth((d - half - 0.5) / (bl - 0.5));
-      const v = Math.max(TERRAIN_MIN_Y, Math.min(TERRAIN_MAX_Y, old + gap * w));
+      const v = Math.max(TERRAIN_MIN_Y, Math.min(TERRAIN_MAX_Y, old + (target - old) * w));
       if (Math.abs(v - old) < 0.005) continue;
       idx.push(k); before.push(old); after.push(v);
     }
   }
   if (idx.length) j.terrain(new Int32Array(idx), new Float32Array(before), new Float32Array(after), [minX - reach, minZ - reach, maxX + reach, maxZ + reach]);
+}
+
+/**
+ * Is (x, z) under a road of the network (within its half width)? Asked only for a point beside the road being settled,
+ * so that road itself never counts; its continuation or a crossing road does.
+ */
+function underARoad(world: World, x: number, z: number): boolean {
+  const net = world.roads, sc = net.segs.cols;
+  const r = MAX_SEG_LEN / 2 + 20;
+  let hit = false;
+  net.segIndex.query(x - r, z - r, x + r, z + r, (s) => {
+    if (hit || !net.segs.alive[s]) return;
+    const [, d] = closestT(net.quad(s), x, z);
+    if (d < PROFILE_INFO[sc.profile[s]].right) hit = true;
+  });
+  return hit;
 }
 
 /** How far into the next cell a building's base may reach from its centre's cell (m): heights there move it too. */
@@ -1109,7 +1134,7 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
     ringSegs.push(j.addSeg({ a: a.node, b: b.node, cx: cx + Math.cos(mid) * r, cz: cz - Math.sin(mid) * r, profile: RING_PROFILE, flags: SegFlag.Ring }));
   }
   // terrain under the ring, then the ring clears what stands in its way like any road
-  conformDisc(j, world, cx, cz, radius + PROFILE_INFO[RING_PROFILE].right + 6, y);
+  conformDisc(j, world, cx, cz, radius + PROFILE_INFO[RING_PROFILE].right + 6, y, radius + PROFILE_INFO[RING_PROFILE].right, Math.max(edgeRise(RING_PROFILE, true), edgeRise(RING_PROFILE, false)));
   for (const s of ringSegs) { const sq = net.quad(s); clearAndConform(j, world, sq, RING_PROFILE, () => y, arcTable(sq, 32)); }
   // the entries settle on top of the disc
   for (const s of approaches) {
@@ -1122,7 +1147,12 @@ function roundaboutLive(j: RoadJournal, world: World, cx: number, cz: number, ra
   }
 }
 
-function conformDisc(j: RoadJournal, world: World, cx: number, cz: number, r: number, y: number): void {
+/**
+ * The ground under a disc of road (a turning bulb, a roundabout) whose paved edge is `edge` m from (cx, cz): below its
+ * surface under it, level with its outer strip's top (`rise` over the surface) beside it unless under another road,
+ * blending back to the ground by `r`.
+ */
+function conformDisc(j: RoadJournal, world: World, cx: number, cz: number, r: number, y: number, edge = r - 6, rise = 0): void {
   const h = world.heights;
   const gx0 = Math.max(0, Math.floor(sampleCoord(cx - r))), gx1 = Math.min(HEIGHT_MAP_RES - 1, Math.ceil(sampleCoord(cx + r)));
   const gz0 = Math.max(0, Math.floor(sampleCoord(cz - r))), gz1 = Math.min(HEIGHT_MAP_RES - 1, Math.ceil(sampleCoord(cz + r)));
@@ -1132,10 +1162,11 @@ function conformDisc(j: RoadJournal, world: World, cx: number, cz: number, r: nu
     if (d > r) continue;
     const k = heightIndex(gx, gz);
     // as under a road: water is never filled, and a disc high above or deep below the ground leaves it alone
-    const gap = y - 0.06 - h[k];
+    const gap = y - UNDER_DROP - h[k];
     if (h[k] < SEA_LEVEL + 0.3 || gap > ROAD_TUNING.economy.bridgeFrom || gap < -ROAD_TUNING.economy.tunnelFrom) continue;
-    const w = d < r - 6 ? 1 : 1 - smooth((d - (r - 6)) / 6);
-    const v = h[k] + gap * w;
+    const target = d < edge || underARoad(world, worldOfSample(gx), worldOfSample(gz)) ? y - UNDER_DROP : y + rise - BESIDE_DROP;
+    const w = d < edge + 0.5 ? 1 : 1 - smooth((d - edge - 0.5) / Math.max(0.5, r - edge - 0.5));
+    const v = h[k] + (target - h[k]) * w;
     idx.push(k); before.push(h[k]); after.push(v);
   }
   if (idx.length) j.terrain(new Int32Array(idx), new Float32Array(before), new Float32Array(after), [cx - r, cz - r, cx + r, cz + r]);

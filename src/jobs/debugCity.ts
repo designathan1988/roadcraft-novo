@@ -10,6 +10,7 @@ import { heightIndex, worldOfSample } from '../world/heights.ts';
 import { baseHeight, waterLevelAt } from './terrainGen.ts';
 import { SHAPE_STRIDE, emptyBoxes, type BoxColumns } from '../shared/contracts/worker.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
+import { BESIDE_DROP, UNDER_DROP, edgeRise } from '../roads/kerb.ts';
 
 export const BLOCK = 88; // grid spacing (m)
 export const DEBUG_PROFILE = 1; // street with parking, ~16 m
@@ -109,10 +110,15 @@ export function conformTileToGrid(heights: Float32Array, tile: number, seed: num
         if (edgeOk(ha, hb)) { best = dZ; target = ha + (hb - ha) * t; }
       }
       let v = old;
-      const half = best === dX ? halfOf(i) : halfOf(j);
+      const line = best === dX ? i : j, half = halfOf(line);
+      // under either street wins over beside the other (a junction's corner)
+      const underOne = dX < halfOf(i) || dZ < halfOf(j);
       if (best < half + blend) {
-        const k = best <= half ? 1 : 1 - smooth((best - half) / blend);
-        v = old + (target - 0.05 - old) * k;
+        const k = underOne || best <= half + 0.5 ? 1 : 1 - smooth((best - half - 0.5) / (blend - 0.5));
+        // under the street below its surface; beside it level with its outer strip's top (roads/kerb.ts; the grid's
+        // profiles are symmetric)
+        const want = underOne ? target - UNDER_DROP : target + edgeRise(lineProfile(line), true) - BESIDE_DROP;
+        v = old + (want - old) * k;
         heights[idx] = v;
       }
       if (v < min) min = v;

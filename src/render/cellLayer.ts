@@ -24,6 +24,11 @@ export interface LayerSource {
    * bridges and viaducts)? Asked when its mesh arrives.
    */
   castsShadow?(scope: SlotScope, id: number): boolean;
+  /**
+   * A cell's mesh at `level` was put in (the mesh) or taken out (null: rebuilt empty, or evicted): for a source that
+   * keeps something of its own in step with what the layer holds (the terrain seams' holes).
+   */
+  installed?(c: number, level: number, m: PackedMesh | null): void;
 }
 
 /** What a slot holds: a cell (L0/L1), a tile (L2) or a plate (L3). */
@@ -97,7 +102,7 @@ export class CellLayer {
   private camPos = new THREE.Vector3();
   private src: LayerSource;
   /** This layer's own list of dirty cells (the detail layer reads the same kind). */
-  private dirty: DirtyReader;
+  private dirty: DirtyReader[];
   private opt: LayerOptions;
   private extra: boolean;
   private facade: boolean;
@@ -123,9 +128,10 @@ export class CellLayer {
   /** Shrinks the eviction radius when memory passes the ceiling. */
   private evictScale = 1;
 
-  constructor(src: LayerSource, dirty: DirtyCells, kind: DirtyKind, material: THREE.Material, opt: LayerOptions, extra = false, facade = false) {
+  /** `kind`: the dirty cells it rebuilds (several kinds: a cell dirty in any of them). */
+  constructor(src: LayerSource, dirty: DirtyCells, kind: DirtyKind | DirtyKind[], material: THREE.Material, opt: LayerOptions, extra = false, facade = false) {
     this.src = src;
-    this.dirty = dirty.reader(kind);
+    this.dirty = (Array.isArray(kind) ? kind : [kind]).map((k) => dirty.reader(k));
     this.material = material;
     this.opt = opt;
     this.extra = extra;
@@ -159,7 +165,7 @@ export class CellLayer {
 
   /** Takes this kind's dirty cells and asks for the new meshes. */
   processDirty(): void {
-    const cells = this.dirty.drain();
+    const cells = this.dirty.length === 1 ? this.dirty[0].drain() : [...new Set(this.dirty.flatMap((r) => r.drain()))];
     if (cells.length) this.events++;
     for (const c of cells) {
       this.cellVer[c]++;
@@ -191,7 +197,7 @@ export class CellLayer {
     const v = this.cellVer[c];
     if (s.requested === v) return;
     s.requested = v;
-    if (!this.src.hasContent(c)) { this.setMesh(s, null, v); return; }
+    if (!this.src.hasContent(c)) { this.setMesh(s, null, v, c, level); return; }
     const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
     const pr = this.distTo(cellOriginX(cx), cellOriginX(cz), CELL_SIZE) + level * 300;
     this.src.buildCell(c, level, pr, (m) => { if (s.requested === v) this.setMesh(s, m, v, c, level); });
@@ -218,6 +224,7 @@ export class CellLayer {
 
   private setMesh(s: Slot, m: PackedMesh | null, version: number, cell = -1, level = -1): void {
     this.events++;
+    if (cell >= 0) this.src.installed?.(cell, level, m);
     const replacing = s.mesh !== null && m !== null;
     if (s.mesh) {
       (s.mesh.userData as FadeData).dead = true;
@@ -401,7 +408,7 @@ export class CellLayer {
           // L0 far from the camera leaves the GPU (L1 covers it)
           if (levels > 1 && cd3 > detail * 1.6) {
             const s0 = this.cells[0][c];
-            if (s0.mesh || s0.requested) { this.setMesh(s0, null, 0); s0.requested = 0; }
+            if (s0.mesh || s0.requested) { this.setMesh(s0, null, 0, c, 0); s0.requested = 0; }
           }
         }
       }
@@ -411,7 +418,7 @@ export class CellLayer {
           const c = cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j);
           for (let l = 0; l < levels; l++) {
             const s = this.cells[l][c];
-            if (s.mesh || s.requested) { this.setMesh(s, null, 0); s.requested = 0; }
+            if (s.mesh || s.requested) { this.setMesh(s, null, 0, c, l); s.requested = 0; }
           }
         }
       }

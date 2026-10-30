@@ -15,10 +15,19 @@ import {
 } from '../config.ts';
 import { tileX, tileId } from '../core/grid.ts';
 import { PAINT_COARSE } from '../jobs/roadPaint.ts';
+import { POINT_EDGE_X, POINT_EDGE_Z, POINT_GROUND, SEAM_CELLS, SEAM_SUB } from '../jobs/terrainSeams.ts';
 import { ECO_RES } from './ecology.ts';
 import { GROUND_COLORS, NO_WATER, WATER_SPACING, WATER_TILE_RES } from '../world/ground.ts';
 import type { World } from '../world/world.ts';
 import { heightAt } from '../world/heights.ts';
+
+/**
+ * Farthest the terrain is cut along the roads (render/terrainSeams.ts, jobs/terrainSeams.ts): the 4 m cells the seams
+ * hold are not drawn and nothing sinks under the roads within it. The seam layer draws its cells up to here; the
+ * terrain applies the cut within `seamReachU`, never past the finest level's unmorphed band (0.7 of LEAF × lodFactor),
+ * so the seams always meet unmorphed 4 m vertices.
+ */
+export const SEAM_REACH = 440;
 
 /** Grid on the map switched on (0/1). */
 export const gridU = T.uniform(0);
@@ -26,7 +35,7 @@ export const gridU = T.uniform(0);
 const {
   Fn, attribute, clamp, float, floor, fract, int, ivec2, max, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot, dFdx, dFdy, If,
   transformNormalToView, uniform, varyingProperty, vec2, vec3, vec4, length, abs, sRGBTransferEOTF,
-  positionWorld, fwidth, mx_noise_float, select, texture, instanceIndex, hash, sin, cos, time, positionLocal, step,
+  positionWorld, fwidth, mx_noise_float, select, texture, instanceIndex, hash, sin, cos, time, positionLocal, step, modelWorldMatrix,
 } = T;
 
 /** Colour of each ground kind (sRGB). */
@@ -134,6 +143,8 @@ export class TerrainRenderer {
   readonly rangeBase: Node = uniform(0);
   /** Distance factor of the LOD bands (larger = more detail). */
   lodFactor = 5;
+  /** How far the seams are applied now (`SEAM_REACH`, within the finest level's unmorphed band). */
+  private seamReachU = uniform(SEAM_REACH);
 
   constructor(world: World) {
     this.world = world;
@@ -216,6 +227,7 @@ export class TerrainRenderer {
     this.geometry = g;
 
     this.mesh = new THREE.Mesh(g, this.createMaterial());
+    this.seamMaterial = this.createMaterial(true);
     this.mesh.frustumCulled = false;
     this.mesh.receiveShadow = true;
 
@@ -282,6 +294,7 @@ export class TerrainRenderer {
     this.lodFactor = f;
     for (let l = 0; l <= LEVELS; l++) this.ranges[l] = LEAF * (1 << l) * f;
     this.rangeBase.value = LEAF * f;
+    this.seamReachU.value = Math.min(SEAM_REACH, LEAF * f * 0.7);
   }
 
   /** Height texture read: global sample (gx, gz) → height. */
@@ -354,7 +367,37 @@ export class TerrainRenderer {
     return max(max(fineV.x, fineV.y), smoothstep(0, 0.25, max(coarseV.x, coarseV.y)));
   }
 
-  private createMaterial(): THREE.MeshStandardNodeMaterial {
+  /**
+   * The terrain seams' state of the 4 m cell (gx, gz) (global cell = its lower corner's height sample), kept in the
+   * fine road paint's blue channel (`setSeams`): 0 nothing known, ~0.5 a seam cell that the terrain draws, 1 a hole.
+   */
+  private seamState(gx: N, gz: N): N {
+    const RES = HEIGHT_TILE_RES * MAP_TILES;
+    const cx = clamp(gx, int(0), int(RES - 1)), cz = clamp(gz, int(0), int(RES - 1));
+    const layer = cz.shiftRight(int(8)).mul(int(MAP_TILES)).add(cx.shiftRight(int(8)));
+    return textureLoad(this.paintFine, ivec2(cx.bitAnd(int(255)), cz.bitAnd(int(255)))).depth(layer).z;
+  }
+
+  /**
+   * The seams of the road cell at (originX, originZ) arrived (`holes`: SEAM_CELLS a side, 1 = the terrain does not draw
+   * that 4 m cell) or left (null): written into the fine paint's blue channel, the cell's layer sent again.
+   */
+  setSeams(originX: number, originZ: number, holes: Uint8Array | null): void {
+    const data = this.paintFine.image.data as Uint8Array, R = HEIGHT_TILE_RES;
+    const gx0 = Math.round((originX + MAP_HALF) / HEIGHT_SPACING), gz0 = Math.round((originZ + MAP_HALF) / HEIGHT_SPACING);
+    let tile = -1;
+    for (let j = 0; j < SEAM_CELLS; j++) for (let i = 0; i < SEAM_CELLS; i++) {
+      const gx = gx0 + i, gz = gz0 + j;
+      tile = (gz >> 8) * MAP_TILES + (gx >> 8);
+      data[(tile * R * R + (gz & 255) * R + (gx & 255)) * 4 + 2] = holes ? (holes[j * SEAM_CELLS + i] ? 255 : 128) : 0;
+    }
+    if (tile >= 0) { this.paintFine.addLayerUpdate(tile); this.paintFine.needsUpdate = true; }
+  }
+
+  /** The terrain cut along the roads near the camera (render/terrainSeams.ts), drawn with the terrain's own look. */
+  readonly seamMaterial: THREE.MeshStandardNodeMaterial;
+
+  private createMaterial(seam = false): THREE.MeshStandardNodeMaterial {
     const heightAt = this.heightFn();
     const vNormal = varyingProperty('vec3', 'vTerrainNormal');
     const vMorph = varyingProperty('float', 'vTerrainMorph');
@@ -383,7 +426,14 @@ export class TerrainRenderer {
       const spacing = step.mul(morph.add(1));
       // and 0.4 m at the finest level too: the 4 m grid does not follow the junction fans and corners, and it surfaced
       // through the asphalt in the middle of junctions (the road skirts reach 0.7 m)
-      const sink = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3).add(smoothstep(0.35, 0.7, cover).mul(0.8)));
+      const sinkAll = cover.mul(clamp(spacing.sub(float(HEIGHT_SPACING)).mul(0.08), 0, 3).add(smoothstep(0.35, 0.7, cover).mul(0.8)));
+      // within SEAM_REACH, where the seams are in (any of the 4 cells round the vertex known), nothing sinks: the cells
+      // under a road are holes there (not drawn) and the cut cells meet this vertex on its own height
+      const gv = ivec2(int(floor(mxz.x.add(float(MAP_HALF)).div(float(HEIGHT_SPACING)).add(0.5))), int(floor(mxz.y.add(float(MAP_HALF)).div(float(HEIGHT_SPACING)).add(0.5))));
+      const known = max(max(this.seamState(gv.x, gv.y), this.seamState(gv.x.sub(1), gv.y)), max(this.seamState(gv.x, gv.y.sub(1)), this.seamState(gv.x.sub(1), gv.y.sub(1))));
+      // (`step` is the grid's spacing in here: comparisons by select)
+      const seamed = select(known.greaterThan(float(0.25)).and(dist.lessThan(this.seamReachU)), float(1), float(0));
+      const sink = sinkAll.mul(float(1).sub(seamed));
       const y = heightAt(mxz).sub(sink);
       // normal by central differences at the level's scale
       const e = max(step, float(HEIGHT_SPACING));
@@ -394,9 +444,39 @@ export class TerrainRenderer {
       return vec3(mxz.x, y, mxz.y);
     });
 
+    // a seam's point (jobs/terrainSeams.ts), placed by its layer (origin and scale in the model matrix): its lattice
+    // coordinates snapped to 0.5 m (the packed position is quantised), a point of the terrain itself at the height the
+    // terrain draws there; the normal as the finest level's
+    const seamPosition = Fn(() => {
+      const world = modelWorldMatrix.mul(vec4(positionLocal, 1)).xyz;
+      const kind = floor(attribute('col', 'vec4').w.mul(255).add(0.5));
+      const snap = (v: N) => floor(v.mul(SEAM_SUB / HEIGHT_SPACING).add(0.5)).div(SEAM_SUB / HEIGHT_SPACING);
+      const isEdgeX = step(abs(kind.sub(POINT_EDGE_X)), float(0.5)), isEdgeZ = step(abs(kind.sub(POINT_EDGE_Z)), float(0.5));
+      // an edge point on a side along x keeps its x (its z is on the lattice), one on a side along z its z
+      const x = mix(snap(world.x), world.x, isEdgeX);
+      const z = mix(snap(world.z), world.z, isEdgeZ);
+      const xz = vec2(x, z);
+      const y = select(kind.lessThan(float(POINT_GROUND + 0.5)), heightAt(xz), world.y);
+      const e = float(HEIGHT_SPACING);
+      const hl = heightAt(xz.sub(vec2(e, 0))), hr = heightAt(xz.add(vec2(e, 0)));
+      const hd = heightAt(xz.sub(vec2(0, e))), hu = heightAt(xz.add(vec2(0, e)));
+      vNormal.assign(normalize(vec3(hl.sub(hr), e.mul(2), hd.sub(hu))));
+      vMorph.assign(float(0));
+      // back to the mesh's own space: the layer's matrix is a translation and a uniform scale
+      const t = modelWorldMatrix.element(3).xyz, s = length(modelWorldMatrix.element(0).xyz);
+      return vec3(x, y, z).sub(t).div(s);
+    });
+
     const m = new THREE.MeshStandardNodeMaterial();
-    m.positionNode = position();
+    m.positionNode = seam ? seamPosition() : position();
     withPrevious(m);
+    // the 4 m cells the seams hold, within SEAM_REACH: not drawn here (the road covers them, or the seam draws the part
+    // off the road)
+    if (!seam) {
+      const pw = positionWorld;
+      const cell = this.seamState(int(floor(pw.x.add(float(MAP_HALF)).div(float(HEIGHT_SPACING)))), int(floor(pw.z.add(float(MAP_HALF)).div(float(HEIGHT_SPACING)))));
+      m.maskNode = cell.lessThan(float(0.75)).or(length(pw.sub(cameraPosition)).greaterThan(this.seamReachU));
+    }
 
     // rock, dirt and grass weights as Roadcraft 4.0's (terrain.ts:834-896): by the slope in degrees, wandering with
     // noise at four scales and a fine break-up, rock also above 168-232 m; scree (talus) in a band at the rock's fringe
@@ -577,7 +657,11 @@ export class TerrainRenderer {
       const fine = texture(this.paintFine, uvT).depth(layer);
       const coarse = texture(this.paintCoarse, uvT).depth(layer);
       const pix = fwidth(p.x).add(fwidth(p.z)).mul(0.5);
-      const paint = mix(fine, coarse, smoothstep(5, 28, pix));
+      // (not where the terrain is cut along the roads: there the road itself is drawn, and the 4 m paint, bilinear, bled
+      // the footway's tone onto the ground beside it)
+      const cut = seam ? float(1) : select(this.seamState(int(floor(p.x.add(float(MAP_HALF)).div(float(HEIGHT_SPACING)))), int(floor(p.z.add(float(MAP_HALF)).div(float(HEIGHT_SPACING))))).greaterThan(float(0.25))
+        .and(length(p.sub(cameraPosition)).lessThan(this.seamReachU)), float(1), float(0));
+      const paint = mix(fine, coarse, smoothstep(5, 28, pix)).mul(float(1).sub(cut));
       c = mix(c, sRGBTransferEOTF(vec3(0.27, 0.28, 0.3)), paint.x);
       c = mix(c, sRGBTransferEOTF(vec3(0.72, 0.69, 0.64)), paint.y);
       // brush ring
@@ -829,7 +913,9 @@ export class TerrainRenderer {
 
   /** Writes a tile's road paint and re-sends only that layer. */
   setRoadPaint(tile: number, fine: Uint8Array, coarse: Uint8Array): void {
-    (this.paintFine.image.data as Uint8Array).set(fine, tile * fine.length);
+    // the blue channel is the terrain seams' (`setSeams`): kept
+    const data = this.paintFine.image.data as Uint8Array, o = tile * fine.length;
+    for (let k = 0; k < fine.length; k += 4) { data[o + k] = fine[k]; data[o + k + 1] = fine[k + 1]; data[o + k + 3] = fine[k + 3]; }
     (this.paintCoarse.image.data as Uint8Array).set(coarse, tile * coarse.length);
     this.paintFine.addLayerUpdate(tile);
     this.paintCoarse.addLayerUpdate(tile);

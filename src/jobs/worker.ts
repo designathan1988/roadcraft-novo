@@ -1,7 +1,7 @@
 // Pool worker: receives jobs, returns transferred buffers.
 
 import { setCustomProfiles } from '../roads/profiles.ts';
-import { HEIGHT_TILE_RES } from '../config.ts';
+import { CELL_SIZE, HEIGHT_TILE_RES } from '../config.ts';
 import { NO_WATER, WATER_TILE_RES } from '../world/ground.ts';
 import type { FromWorker, JobKind, JobPayloads, JobResults, ToWorker } from '../shared/contracts/worker.ts';
 import { boxTransfer, lotTransfer, meshTransfer, propTransfer } from '../shared/contracts/worker.ts';
@@ -9,6 +9,7 @@ import { generateTerrainTile } from './terrainGen.ts';
 import { conformTileToGrid, debugTileRoads } from './debugCity.ts';
 import { buildBuildings } from './buildingGen.ts';
 import { buildRoadMesh } from './roadMesh.ts';
+import { buildTerrainSeams } from './terrainSeams.ts';
 import { coarsen, paintRoadTile } from './roadPaint.ts';
 import { buildLots } from './lots.ts';
 import { buildProps } from './props.ts';
@@ -48,6 +49,13 @@ const handlers: { [K in JobKind]: Handler<K> } = {
   roadMesh: (p) => {
     const mesh = buildRoadMesh(H(), p.graph, p.originX, p.originZ, p.extent, p.lod);
     return [{ mesh }, mesh ? meshTransfer(mesh) : []];
+  },
+  terrainSeams: (p) => {
+    // the roads' own lod 0 surfaces round the cell, packed as the road layer packs a cell's (render/roads.ts: same
+    // origin and extent, so the same quantised edge), then the cut
+    const road = buildRoadMesh(H(), p.graph, p.originX, p.originZ, CELL_SIZE * 2, 0);
+    const r = buildTerrainSeams(H(), road, p.originX, p.originZ);
+    return [r, [...(r.mesh ? meshTransfer(r.mesh) : []), r.holes.buffer as ArrayBuffer]];
   },
   roadPaint: (p) => {
     const texels = paintRoadTile(H(), p.graph, p.tile);

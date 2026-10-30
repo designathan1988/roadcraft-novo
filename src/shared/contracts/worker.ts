@@ -77,6 +77,8 @@ export interface JobPayloads {
   debugTile: { seed: number; tile: number };
   buildingMesh: { boxes: BoxColumns; originX: number; originZ: number; extent: number; lod: number };
   roadMesh: { graph: RoadGraph; originX: number; originZ: number; extent: number; lod: number };
+  /** The terrain cut along the roads of a road cell (jobs/terrainSeams.ts): the roads reaching within its pad. */
+  terrainSeams: { graph: RoadGraph; originX: number; originZ: number };
   roadPaint: { graph: RoadGraph; tile: number };
   lots: { graph: RoadGraph; cell: number };
   props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number; parts40?: boolean };
@@ -96,6 +98,8 @@ export interface JobResults {
   debugTile: { tile: number; roadNodes: Float32Array; roadSegs: Int32Array; min: number; max: number };
   buildingMesh: { mesh: PackedMesh | null };
   roadMesh: { mesh: PackedMesh | null };
+  /** `holes`: per 4 m cell of the road cell, 1 where the terrain does not draw its own cell. */
+  terrainSeams: { mesh: PackedMesh | null; holes: Uint8Array };
   roadPaint: { tile: number; texels: Uint8Array; coarse: Uint8Array };
   lots: { cell: number; lots: LotColumns };
   props: { cell: number; props: PropColumns };

@@ -1,6 +1,7 @@
 // Ties everything together: world, workers, camera, rendering, tools, saving and loading.
 // The page only does input, interface, choosing what to draw, and drawing.
 
+import { createTerrainSeams } from './render/terrainSeams.ts';
 import * as THREE from 'three/webgpu';
 import { MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
 
@@ -38,6 +39,7 @@ import { currentU, fogLevel, foamU, nightU, waveU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
 import type { JunctionSpec } from './roads/control.ts';
 import { PROFILES, PROFILE_INFO, customProfiles, onProfileAdded, setCustomProfiles, type Profile } from './roads/profiles.ts';
+import { FOOTWAY_RISE, edgeRise } from './roads/kerb.ts';
 import { bez, bezD } from './roads/geometry.ts';
 import { arrowCode } from './roads/laneLinks.ts';
 import type { NetOp } from './roads/network.ts';
@@ -110,6 +112,8 @@ export class Game {
   private city: CellLayer;
   private cityDetail: CellLayer;
   private roads: CellLayer;
+  /** The terrain cut along the roads near the camera. */
+  private seams: CellLayer;
   private layers: CellLayer[];
   private sim: Worker;
   private poses: PoseReader;
@@ -264,7 +268,9 @@ export class Game {
     this.occupancySab = new SharedArrayBuffer(OCCUPANCY_SEGS * 4);
     this.trafficLook = createTrafficLook(this.occupancySab);
     this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook, this.world.heights);
-    this.layers = [this.roads, this.city, this.cityDetail];
+    // the terrain cut along the roads near the camera (render/terrainSeams.ts)
+    this.seams = createTerrainSeams(this.world.roads, this.pool, this.world.dirty, this.terrain);
+    this.layers = [this.roads, this.city, this.cityDetail, this.seams];
     // the near levels are chosen by the 3D distance (from high up the cells under the camera are far)
     for (const l of this.layers) l.groundAt = (x, z) => heightAt(this.world.heights, x, z);
 
@@ -770,7 +776,7 @@ export class Game {
 
     const pf = this.perfLog, T0 = pf ? performance.now() : 0;
     for (const l of this.layers) l.processDirty();
-    this.world.dirty.drain(Dirty.Terrain); // nothing but rendering depends on this yet
+    // (the terrain's dirty cells are read by the seam layer, render/terrainSeams.ts)
     this.processRoadPaint();
     if (this.arrowNodes.size) this.updateArrows();
     const T1 = pf ? performance.now() : 0;
@@ -1170,7 +1176,8 @@ export class Game {
   private updatePixelScale(): void {
     const res = (this.settings ? this.settings.resolution * this.settings.detail : 1) * this.detailAuto;
     const k = Math.min(3, Math.max(0.3, window.innerHeight * window.devicePixelRatio * res / 1080));
-    for (const l of this.layers) l.pixelScale = k;
+    // (the seams keep their reach: the terrain cuts within a fixed distance, render/terrain.ts SEAM_REACH)
+    for (const l of this.layers) if (l !== this.seams) l.pixelScale = k;
     if (this.props) this.props.pixelScale = k;
   }
 
@@ -1824,8 +1831,8 @@ export class Game {
           w.roads.addSeg({ a, b, cx: mx, cz: mz, profile, flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
         } catch { continue; }
         // straight segment to conform the terrain to, in every tile it touches
-        const half = PROFILE_INFO[profile].right + 0.5;
-        const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half];
+        const half = PROFILE_INFO[profile].right;
+        const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half, edgeRise(profile, true), edgeRise(profile, false)];
         const r = half + 8;
         const tx0 = tileX(Math.min(nc.x[a], nc.x[b]) - r), tx1 = tileX(Math.max(nc.x[a], nc.x[b]) + r);
         const tz0 = tileX(Math.min(nc.z[a], nc.z[b]) - r), tz1 = tileX(Math.max(nc.z[a], nc.z[b]) + r);
@@ -1834,8 +1841,9 @@ export class Game {
       // dead ends with a turning bulb: a disc when conforming the terrain
       for (const n of ids) {
         if (!bulbAt(w.roads, n)) continue;
-        const half = BULB_R + BULB_WALK + 1, r = half + 8;
-        const rec = [nc.x[n], nc.z[n], nc.y[n], nc.x[n], nc.z[n], nc.y[n], half];
+        // (the bulb's footway ring ends at BULB_R + BULB_WALK: beside it, the ground at its top)
+        const half = BULB_R + BULB_WALK, r = half + 8;
+        const rec = [nc.x[n], nc.z[n], nc.y[n], nc.x[n], nc.z[n], nc.y[n], half, FOOTWAY_RISE, FOOTWAY_RISE];
         for (let tz = tileX(nc.z[n] - r); tz <= tileX(nc.z[n] + r); tz++) for (let tx = tileX(nc.x[n] - r); tx <= tileX(nc.x[n] + r); tx++) perTile[tileId(tx, tz)].push(...rec);
       }
       phase('vias inseridas');

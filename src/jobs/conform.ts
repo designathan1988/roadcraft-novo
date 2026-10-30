@@ -4,9 +4,14 @@
 
 import { HEIGHT_TILE_RES, MAP_TILES, SEA_LEVEL } from '../config.ts';
 import { heightIndex, worldOfSample } from '../world/heights.ts';
+import { BESIDE_DROP, UNDER_DROP } from '../roads/kerb.ts';
 
-/** Por trecho: x0, z0, y0, x1, z1, y1, meia largura. */
-export const CONFORM_REC = 7;
+/**
+ * Per segment: x0, z0, y0, x1, z1, y1, half width (the outer edge), and the outer strip's rise over the road on its left
+ * (u+) and right sides (roads/kerb.ts edgeRise): under the road the ground goes below the surface, beside it level with
+ * that strip's top (roadcraft 4.0 world/elevation.ts roadShapeAt); under any road wins over beside another.
+ */
+export const CONFORM_REC = 9;
 const BLEND = 7;
 const BUCKET = 32;
 
@@ -36,7 +41,8 @@ export function conformTile(heights: Float32Array, tile: number, segs: Float32Ar
       const idx = heightIndex(gx, gz);
       const old = heights[idx];
       const list = buckets[Math.floor((z - z0) / BUCKET) * nb + Math.floor((x - x0) / BUCKET)];
-      let bestK = 0, target = 0;
+      // the road it is under (the nearest centre line), else the road it is beside with the most weight
+      let underD = Infinity, underY = 0, bestK = 0, besideY = 0, besideSurface = 0;
       for (const s of list) {
         const o = s * CONFORM_REC;
         const ax = segs[o], az = segs[o + 1], bx = segs[o + 3], bz = segs[o + 4];
@@ -46,15 +52,23 @@ export function conformTile(heights: Float32Array, tile: number, segs: Float32Ar
         const d = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
         const half = segs[o + 6];
         if (d >= half + BLEND) continue;
-        const k = d <= half ? 1 : 1 - smooth((d - half) / BLEND);
-        if (k > bestK) { bestK = k; target = segs[o + 2] + (segs[o + 5] - segs[o + 2]) * t; }
+        const surface = segs[o + 2] + (segs[o + 5] - segs[o + 2]) * t;
+        if (d < half) { if (d < underD) { underD = d; underY = surface; } continue; }
+        const k = d <= half + 0.5 ? 1 : 1 - smooth((d - half - 0.5) / (BLEND - 0.5));
+        if (k > bestK) {
+          bestK = k; besideSurface = surface;
+          // u+ (the left of a to b) lies along (dz, -dx)
+          const left = (x - ax) * dz - (z - az) * dx > 0;
+          besideY = surface + segs[o + (left ? 7 : 8)] - BESIDE_DROP;
+        }
       }
+      const under = underD < Infinity;
+      const k = under ? 1 : bestK, surface = under ? underY : besideSurface, want = under ? underY - UNDER_DROP : besideY;
       let v = old;
-      if (bestK > 0 && old > SEA_LEVEL + 0.3) {
-        const want = target - 0.05;
-        // aterro alto = ponte; corte fundo = deixa (túnel não é gerado)
-        if (want - old < 6 && old - want < 14) {
-          v = old + (want - old) * bestK;
+      if (k > 0 && old > SEA_LEVEL + 0.3) {
+        // a high fill is a bridge, a deep cut is left (no tunnel is generated): judged on the road's surface
+        if (surface - old < 6 && old - surface < 14) {
+          v = old + (want - old) * k;
           heights[idx] = v;
         }
       }

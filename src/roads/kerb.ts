@@ -1,6 +1,9 @@
-// Where a bus stop's people wait: on the sidewalk beside the road the stop was put by. The point the player clicked
-// may land on the carriageway; the shelter (the page) and the waiting place, where the riders walk to (the
-// simulation), both come from this one rule, so they stand together on the sidewalk.
+// The road's edges against what is beside them. Where a bus stop's people wait: on the sidewalk beside the road the
+// stop was put by (the shelter, on the page, and the waiting place, in the simulation, from this one rule). And where
+// the ground meets a road (`edgeRise`): under it the terrain is pulled below the surface, beside it held level with
+// the outer strip's top, so the footway's edge meets the ground (roadcraft 4.0 world/elevation.ts roadShapeAt: "beside
+// it, held level with the footway's top, so the terrain meets the footway's edge on its own height"); the cells the
+// edge crosses are cut along it near the camera (jobs/terrainSeams.ts).
 
 import { bez, bezD, type Quad } from './geometry.ts';
 import { PROFILE_INFO } from './profiles.ts';
@@ -24,4 +27,21 @@ export function stopSpot(q: Quad, profile: number, t: number, x: number, z: numb
   out[0] = p2[0] + dz * u; out[1] = p2[1] - dx * u;
   out[2] = Math.atan2(p2[0] - out[0], p2[1] - out[1]);
   return side;
+}
+
+/** The footway's top over the carriageway (roadcraft 4.0 world/roadTypes.ts FOOTWAY_RISE), m. */
+export const FOOTWAY_RISE = 0.15;
+/** Below the road's surface, where the ground under a road is held (m): the road's own mesh covers it. */
+export const UNDER_DROP = 0.06;
+/** Below the outer strip's top, where the ground beside a road is held (m). */
+export const BESIDE_DROP = 0.01;
+
+/**
+ * Height over the road's surface of the top of its outermost strip on its left (u+, `left`) or right side: a raised
+ * footway's FOOTWAY_RISE, 0 for anything laid at the road's level (a flush footway, a shoulder, grass, a barrier's foot).
+ */
+export function edgeRise(profile: number, left: boolean): number {
+  const edges = PROFILE_INFO[profile].edges;
+  const e = left ? edges[edges.length - 1] : edges[0];
+  return e && e.strip.kind === 'sidewalk' && !e.strip.flush ? FOOTWAY_RISE : 0;
 }

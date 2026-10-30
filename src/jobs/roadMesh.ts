@@ -6,6 +6,7 @@
 // zebra crossings. High segments become bridges (deck, parapet, piers) and
 // buried segments become tunnels with a portal.
 
+import { FOOTWAY_RISE } from '../roads/kerb.ts';
 import { SEA_LEVEL } from '../config.ts';
 import { arcTable, bez, bezD, tAtLength, type Arm, type Quad } from '../roads/geometry.ts';
 import { armOf, BULB_R, BULB_WALK, NODE_BULB, bulbRetreat, cornerFillet, junctionRetreats } from '../roads/junction.ts';
@@ -18,7 +19,8 @@ import { MeshBuilder } from './meshBuilder.ts';
 import type { PackedMesh, RoadGraph } from '../shared/contracts/worker.ts';
 
 export const RMAT = { Asphalt: 2, Plain: 3, Sidewalk: 4, Grass: 5, Concrete: 6, Curb: 7, Zone: 8, Pavers: 9, Stone: 10 } as const;
-export const CURB_H = 0.15;
+/** The footway's top over the carriageway: one figure with the ground's shaping (roads/kerb.ts). */
+export const CURB_H = FOOTWAY_RISE;
 /** Roadcraft 4.0 (render/roadSurfaceReads.ts KERB_RISE, MEDIAN_KERB, MEDIAN_PLANTING): the kerb stone stands 1 cm proud of
  *  the footway; a median's kerb is at the footway's height and its planting 2 cm over it, so they are never one plane. */
 export const KERB_TOP = CURB_H + 0.01, MEDIAN_TOP = CURB_H + 0.02;
