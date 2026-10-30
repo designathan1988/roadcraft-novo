@@ -182,7 +182,6 @@ export class Weather {
     // bolt: zigzag ribbon rebuilt on every strike (64 pieces), brightness above 1 so the bloom catches it
     const bg = new THREE.BufferGeometry();
     this.boltPos = new THREE.BufferAttribute(new Float32Array(BOLT_VERTS * 3), 3);
-    this.boltPos.setUsage(THREE.DynamicDrawUsage);
     bg.setAttribute('position', this.boltPos);
     // core (1) and edge (0) of each vertex: the same pattern in every piece
     const core = new Float32Array(BOLT_VERTS);

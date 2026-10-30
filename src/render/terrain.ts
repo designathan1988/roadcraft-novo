@@ -220,8 +220,9 @@ export class TerrainRenderer {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setIndex(new THREE.BufferAttribute(idx, 1));
     this.instArray = new Float32Array(MAX_NODES * 4);
+    // uploaded once per frame by update()'s range (DynamicDrawUsage re-uploaded it in every render call: three r186
+    // renderers/common/Attributes.js); the same for the water and shadow copies below
     this.inst = new THREE.InstancedBufferAttribute(this.instArray, 4);
-    this.inst.setUsage(THREE.DynamicDrawUsage);
     g.setAttribute('node', this.inst);
     g.instanceCount = 0;
     this.geometry = g;
@@ -245,7 +246,6 @@ export class TerrainRenderer {
       wg.setAttribute('position', new THREE.BufferAttribute(wpos, 3));
       wg.setIndex(new THREE.BufferAttribute(widx, 1));
       const inst = new THREE.InstancedBufferAttribute(new Float32Array(MAP_TILES * MAP_TILES), 1);
-      inst.setUsage(THREE.DynamicDrawUsage);
       wg.setAttribute('wtile', inst);
       wg.instanceCount = 0;
       return { wg, inst };
@@ -277,7 +277,6 @@ export class TerrainRenderer {
       sg.setIndex(new THREE.BufferAttribute(si, 1));
     }
     this.shadowInst = new THREE.InstancedBufferAttribute(this.shadowArray, 4);
-    this.shadowInst.setUsage(THREE.DynamicDrawUsage);
     sg.setAttribute('node', this.shadowInst);
     sg.instanceCount = 0;
     this.shadowGeo = sg;

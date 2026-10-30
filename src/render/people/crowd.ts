@@ -119,7 +119,9 @@ export class PeopleRenderer {
       // only its count matters: the vertex shader pulls everything from the storage buffers
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tris * 3 * 3), 3));
       const cap = CAP[lod];
-      const mk = () => new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage) as THREE.InstancedBufferAttribute;
+      // uploaded once per frame by end()'s update range (a DynamicDrawUsage attribute is re-uploaded whole in every
+      // render call that draws it, shadow cascades included: three r186 renderers/common/Attributes.js)
+      const mk = () => new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
       const a = { pos: mk(), prev: mk(), info: mk(), anim: mk() };
       g.setAttribute('ipos', a.pos); g.setAttribute('iprev', a.prev); g.setAttribute('iinfo', a.info); g.setAttribute('ianim', a.anim);
       g.instanceCount = 0;

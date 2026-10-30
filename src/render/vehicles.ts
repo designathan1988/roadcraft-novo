@@ -417,11 +417,13 @@ class Batch {
     this.pos = new Float32Array(cap * 4);
     this.info = new Float32Array(cap * 4);
     this.prev = new Float32Array(cap * 4);
-    this.prevAttr = new THREE.InstancedBufferAttribute(this.prev, 4).setUsage(THREE.DynamicDrawUsage) as THREE.InstancedBufferAttribute;
+    // uploaded once per frame by commit()'s update range: three r186 re-uploads a DynamicDrawUsage attribute in every
+    // render call that draws it (renderers/common/Attributes.js), the whole array after the first (the range is spent)
+    this.prevAttr = new THREE.InstancedBufferAttribute(this.prev, 4);
     // people: the limbs already take the 8th vertex buffer (WebGPU's limit); at 1.4 m/s the current pose is enough
     if (!animated) g.setAttribute('iprev', this.prevAttr);
-    this.posAttr = new THREE.InstancedBufferAttribute(this.pos, 4).setUsage(THREE.DynamicDrawUsage) as THREE.InstancedBufferAttribute;
-    this.infoAttr = new THREE.InstancedBufferAttribute(this.info, 4).setUsage(THREE.DynamicDrawUsage) as THREE.InstancedBufferAttribute;
+    this.posAttr = new THREE.InstancedBufferAttribute(this.pos, 4);
+    this.infoAttr = new THREE.InstancedBufferAttribute(this.info, 4);
     g.setAttribute('ipos', this.posAttr);
     g.setAttribute('iinfo', this.infoAttr);
     g.instanceCount = 0;
