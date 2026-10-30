@@ -275,7 +275,7 @@ const PARAPET_H = 0.85, PARAPET_T = 0.25;
  * ones from the props pool (condensers, fibreglass tanks, dishes, vents), the thin ones near only (doors, lids,
  * ladders, fans, masts, drains).
  */
-function roofPlant(g: Gen, items: readonly RoofPlantItem[], x0: number, x1: number, z0: number, z1: number, y: number, trim: number): void {
+function roofPlant(g: GenContext, items: readonly RoofPlantItem[], x0: number, x1: number, z0: number, z1: number, y: number, trim: number): void {
   const { mb, f } = g;
   const dm = detailOut;
   const PLANT = BMAT.Plain | (FIN.Concrete << 4), METAL = BMAT.Metal | (FIN.Metal << 4), GLASS = BMAT.Plain | (FIN.Glass << 4);
@@ -728,7 +728,7 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
   footI = i; footGround = hi;
   const floors = Math.max(1, b.floors[i]);
   const arch = pickArch(zone, floors, b.x[i], b.z[i], b.style[i]);
-  const g: Gen = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows, pattern: plan.pattern[i], side: plan.side[i] };
+  const g: GenContext = { mb, heights, f, W, D, floors, arch, a: ARCHES[arch], r, hi, lod, seed: b.seed[i], zone, rows, pattern: plan.pattern[i], side: plan.side[i] };
   if (lod < 0) {
     // one pass, the outputs this job asks for: the parts (lod -2, part -> partsOut) or the detail layer (lod -1,
     // prism -> windowDetail into the real mesh); the main geometry goes to a builder that keeps nothing
@@ -885,7 +885,7 @@ function parkingLotsTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, row
 }
 
 /** Tudo o que um gerador de prédio precisa. */
-interface Gen {
+interface GenContext {
   mb: MeshBuilder; heights: Float32Array; f: Frame; W: number; D: number; floors: number;
   arch: number; a: Arch; r: Rng; hi: number; lod: number; seed: number; zone: number;
   /** Vagas do estacionamento (`lotParking`). */
@@ -971,9 +971,9 @@ export function hip(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numbe
 }
 
 /** Facha da (estilo, semente, tipo) para o volume principal. */
-function facade(g: Gen, kind: number, colW: number, fh: number): void { setFac(g.mb, g.arch + ARCH_COUNT * g.pattern, g.seed, kind, colW, fh); }
+function facade(g: GenContext, kind: number, colW: number, fh: number): void { setFac(g.mb, g.arch + ARCH_COUNT * g.pattern, g.seed, kind, colW, fh); }
 
-function house(g: Gen): void {
+function house(g: GenContext): void {
   const { mb, heights, f, W, D, floors, a, r, hi, lod } = g;
   const wallCol = a.walls[r.int(0, a.walls.length)];
   const roofCol = TILE[r.int(0, TILE.length)];
@@ -1064,7 +1064,7 @@ function house(g: Gen): void {
 }
 
 /** Prédio de apartamentos ou de uso misto, na gramática do estilo. */
-function block(g: Gen): void {
+function block(g: GenContext): void {
   const { mb, heights, f, W, D, floors, a, r, hi, lod, zone } = g;
   const shop = zone === Zone.Commercial || zone === Zone.Mixed;
   const wallCol = a.walls[r.int(0, a.walls.length)];
@@ -1412,7 +1412,7 @@ function treeGeo(_mb: MeshBuilder, f: Frame, x: number, z: number, y: number, h:
 }
 
 /** Prédios especiais (escola, igreja, hospital, praça, parque, posto…), cada um com a sua forma. */
-function civic(g: Gen, fn: number): void {
+function civic(g: GenContext, fn: number): void {
   const { mb, heights, f, W, D, r, hi, lod } = g;
   const y0 = hi + 0.2;
   mb.curBase = y0;
@@ -1600,7 +1600,7 @@ function civic(g: Gen, fn: number): void {
 }
 
 /** Torre de escritórios: pódio de lojas, torre recuada (vidro, contemporânea ou art déco) e coroa. */
-function tower(g: Gen): void {
+function tower(g: GenContext): void {
   const { mb, heights, f, W, D, floors, a, r, hi, lod } = g;
   const skin = a.walls[r.int(0, a.walls.length)];
   const podiumCol = a.base >= 0 ? a.base : PLASTER[r.int(0, PLASTER.length)];
@@ -1791,7 +1791,7 @@ function sawtooth(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number,
 }
 
 /** Cemitério (muro, caminhos, túmulos em fileiras, capela) e parquinho (piso, brinquedos). */
-function openLot(g: Gen, fn: number): void {
+function openLot(g: GenContext, fn: number): void {
   const { mb, heights, f, W, D, hi, lod } = g;
   const y0 = hi + 0.2;
   mb.curBase = y0;
@@ -1825,7 +1825,7 @@ function openLot(g: Gen, fn: number): void {
   sol(-0.2, 0.2, D / 4 - 0.2, D / 4 + 0.2, y0, y0 + 0.55, 0x555b61);
 }
 
-function design(g: Gen, ds: Design): void {
+function design(g: GenContext, ds: Design): void {
   const { mb, f, W, D, floors, hi, lod, zone, seed } = g;
   const shop = zone === Zone.Commercial || zone === Zone.Mixed;
   const fh = ds.finish === 2 ? 3.6 : 3.2;
@@ -2037,7 +2037,7 @@ function balconyLife(f: Frame, seed: number, c: number, fl: number, x0: number, 
  * Relevo da fachada no nível 0 (prédio baixo de apartamentos ou misto): friso de laje em cada andar, brises verticais
  * nos contemporâneos, pilastras entre as vitrines das lojas antigas e a porta de entrada dos prédios de moradia.
  */
-function facadeRelief(g: Gen, x0: number, x1: number, z0: number, z1: number, y0: number, groundH: number, fh: number,
+function facadeRelief(g: GenContext, x0: number, x1: number, z0: number, z1: number, y0: number, groundH: number, fh: number,
   lower: number, colW: number, wallCol: number, shop: boolean): void {
   const { mb, f, a, seed } = g;
   blank(mb);
@@ -2175,7 +2175,7 @@ function facadeWall(mb: MeshBuilder, f: Frame, ax: number, az: number, bx: numbe
  * fences, railings, gates, slabs, pavements, parking, planters, pillars, canopies in the mesh) with its height,
  * elevation and facing. Scaled in plan to the lot (heights kept); the storeys follow the record's floors.
  */
-function catalogBuilding(g: Gen, p: CatProject, wallOverride: number): void {
+function catalogBuilding(g: GenContext, p: CatProject, wallOverride: number): void {
   const { mb, heights, f, W, D, hi, lod, seed } = g;
   const U = CAT_UNIT, ext = catalogExtent(p);
   const s = Math.min(1.15, W / ((ext.x1 - ext.x0) * U), D / (ext.y1 * U));
@@ -2309,7 +2309,7 @@ function catalogBuilding(g: Gen, p: CatProject, wallOverride: number): void {
 }
 
 /** A balcony at bay c of a face, on the floor at y: a slab 1.1 m out and a railing (balusters on the front, near). */
-function catalogBalcony(g: Gen, face: number, corners: Array<[number, number]>, colW: number, c: number, y: number, key: number): void {
+function catalogBalcony(g: GenContext, face: number, corners: Array<[number, number]>, colW: number, c: number, y: number, key: number): void {
   const { mb, f, seed } = g;
   const [ax, az] = corners[face], [bx, bz] = corners[(face + 1) & 3];
   const len = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / len, dz = (bz - az) / len;
@@ -2336,7 +2336,7 @@ function catalogBalcony(g: Gen, face: number, corners: Array<[number, number]>, 
  * Parapets of a volume's roof: on each edge, the stretches no other volume stands against (a taller block on the
  * roof, a neighbour block of the same height): a parapet there would sit inside its wall, both faces in one plane.
  */
-function catalogParapets(g: Gen, boxes: Array<{ x0: number; x1: number; z0: number; z1: number; lo: number; hiL: number }>, self: number,
+function catalogParapets(g: GenContext, boxes: Array<{ x0: number; x1: number; z0: number; z1: number; lo: number; hiL: number }>, self: number,
   x0: number, x1: number, z0: number, z1: number, level: number, y: number, h: number, col: number, rail: boolean): void {
   const { mb, f } = g;
   const t = 0.22, eps = 0.06;
@@ -2370,7 +2370,7 @@ function catalogParapets(g: Gen, boxes: Array<{ x0: number; x1: number; z0: numb
 }
 
 /** One element of a catalog project: its kind, size, height, elevation and facing (facing 1 and 3 turn it). */
-function catalogElement(g: Gen, p: CatProject, e: CatElement, index: number, X: (x: number) => number, Z: (y: number) => number, s: number): void {
+function catalogElement(g: GenContext, p: CatProject, e: CatElement, index: number, X: (x: number) => number, Z: (y: number) => number, s: number): void {
   const { mb, heights, f, W, D } = g;
   const U = CAT_UNIT, x = X(e.x), z = Z(e.y);
   if (Math.abs(x) > W / 2 + 0.5 || Math.abs(z) > D / 2 + 0.5) return;
@@ -2464,7 +2464,7 @@ function gateTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number
 }
 
 /** Side garden of a corner lot: lawn strip, two trees, a low wall with planters along the side street. */
-function sideGarden(g: Gen, corner: number, x0: number, x1: number, z0: number, bd: number, fence: number): void {
+function sideGarden(g: GenContext, corner: number, x0: number, x1: number, z0: number, bd: number, fence: number): void {
   const { mb, heights, f, W, D } = g;
   const gx0 = corner < 0 ? -W / 2 + 0.3 : x1 + 0.4, gx1 = corner < 0 ? x0 - 0.4 : W / 2 - 0.3;
   groundPatch(mb, heights, f, W, D, gx0, gx1, z0, D / 2 - 0.4, 0x5f8a3e, BMAT.Grass, 0.06);
@@ -2479,7 +2479,7 @@ function sideGarden(g: Gen, corner: number, x0: number, x1: number, z0: number, 
  * Hillside house: on a lot that drops to the street, a garage under the house with its door and drive; on one that
  * rises at the back, a half-level wing; on a steep lot, a stone retaining wall across the back yard.
  */
-function hillside(g: Gen, x0: number, x1: number, z0: number, z1: number, wallCol: number, fh: number, fl: number, plainBox: boolean): void {
+function hillside(g: GenContext, x0: number, x1: number, z0: number, z1: number, wallCol: number, fh: number, fl: number, plainBox: boolean): void {
   const { mb, heights, f, W, D, hi } = g;
   const at = (lx: number, lz: number) => heightAt(heights, wx(f, lx, lz), wz(f, lx, lz));
   const gx = x0 + 1.9, front = at(gx, z1 + 0.6), back = at((x0 + x1) / 2, -D / 2 + 1);
