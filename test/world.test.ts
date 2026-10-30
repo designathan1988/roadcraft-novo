@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { TILE_COUNT, tileId, tileX } from '../src/core/grid.ts';
 import { HEIGHT_TILE_RES, MAP_HALF } from '../src/config.ts';
 import { NO_WATER, WATER_SPACING, waterCoord, waterIndex } from '../src/world/ground.ts';
-import { waterLevelAt } from '../src/jobs/terrainGen.ts';
+import { waterLevelAt, courseZ } from '../src/jobs/terrainGen.ts';
 import { World } from '../src/world/world.ts';
 import { BrushStroke } from '../src/world/brush.ts';
 import { CommandStack } from '../src/core/commands.ts';
@@ -57,7 +57,8 @@ test('traço de pincel desfaz e refaz exatamente', () => {
 
 test('pincel de terreno seca a água quando levanta o leito e o desfazer a devolve', () => {
   const w = new World();
-  const gx = Math.round(waterCoord(0)), gz = Math.round(waterCoord(0));
+  // a point on the river's middle (the canal's course, jobs/terrainGen.ts courseZ)
+  const gx = Math.round(waterCoord(0)), gz = Math.round(waterCoord(courseZ(0, 1)));
   const wx = gx * WATER_SPACING - MAP_HALF, wz = gz * WATER_SPACING - MAP_HALF;
   const t = tileId(tileX(wx), tileX(wz));
   generateTerrainTile(w.heights, t, 1, w.water);

@@ -13,7 +13,7 @@ import { PROFILES, PROFILE_INFO } from '../roads/profiles.ts';
 import { MIN_LEG_ANGLE } from '../roads/impossible.ts';
 import { blockLines, districtField, districtLevels, simplifyLine, traceStreets, type CityStyle, type P2 } from './cityField.ts';
 
-export const GEN = { Local: 1, Avenue: 3, AvenueBike: 4, Expressway: 5 } as const;
+export const GEN = { Local: 1, Avenue: 3, AvenueBike: 4, Expressway: 5, Collector: 7 } as const;
 
 export interface CityRoads {
   /** x, z, y per node. */
@@ -39,7 +39,7 @@ const MAX_ART_GRADE = 0.08;
  * a straight grid of 120 × 72 m blocks). The arterials, the water and slope rules and the zones are the same for all.
  */
 /** `medium`: one town round the map's middle (Roadcraft 2.0 and 4.0's medium city, about 4 km across), not the whole map. */
-export function generateCity(seed: number, style: CityStyle = 'classic', medium = false): CityRoads {
+export function generateCity(seed: number, style: CityStyle = 'blocks', medium = false): CityRoads {
   const rng = new Rng(seed * 7919 + 13);
   const H = (x: number, z: number) => baseHeight(x, z, seed);
   const land = (x: number, z: number) => { const h = H(x, z); return h > SEA_LEVEL + 1.2 && waterLevelAt(x, z, seed) < h - 1.2; };
@@ -116,6 +116,24 @@ export function generateCity(seed: number, style: CityStyle = 'classic', medium 
     flush();
   };
 
+  // Roadcraft 4.0's city (largeCity.ts: "the same 'blocks' style, the same straight grid ... Every block is built"):
+  // ONE straight grid of 120 x 72 m blocks over the whole city, avenues every 4 blocks, collectors between, local
+  // streets the rest; no expressway, radials or rings. Its span is 1.7 radii (4.0: ~8.85 km at radius 5,200 m on
+  // the 10 km map); water is bridged by the avenues and collectors, the local streets stop at it.
+  if (style === 'blocks' && !medium) {
+    const R = Math.min(5200, ((MAP_HALF - 420) * 2) / 1.7);
+    // centred on the map's middle, as 4.0 lays its city round the origin
+    const at: [number, number] = [0, 0];
+    for (const l of blockLines(at[0], at[1], R)) {
+      const profile = l.level === 0 ? GEN.Avenue : l.level === 1 ? GEN.Collector : GEN.Local;
+      const first = polys.length;
+      march(l.points.map((p) => [p.x, p.z] as [number, number]), profile, l.level < 2, l.level < 2 ? MAX_ART_GRADE : MAX_LOCAL_GRADE);
+      // a grid line is straight: march walked its dense points for water and slope, the street keeps only its ends,
+      // so its nodes are the crossings (every point would be a node, a block side cut in 30 m pieces)
+      for (let k = first; k < polys.length; k++) { const q = polys[k].pts; polys[k].pts = [q[0], q[1], q[q.length - 2], q[q.length - 1]]; }
+    }
+    return withoutSpurs(buildGraph(polys, [{ ...centers[0], x: at[0], z: at[1], r: R * 0.85 }], H, seed));
+  }
   // the medium town (Roadcraft 2.0's): only its straight block grid, no expressway, radials or rings
   if (!medium) {
   // expressway: along the river, moved to one side, from edge to edge
@@ -254,6 +272,36 @@ export function generateCity(seed: number, style: CityStyle = 'classic', medium 
     const lines = traceStreets(field, insideP, { x0: c.x - R, z0: c.z - R, x1: c.x + R, z1: c.z + R }, districtLevels(c.r), rng);
     for (const l of lines) lay(l.level, l.points);
   }
+}
+
+/**
+ * The grid without its spurs: a street cut by water or a steep slope ends at the bank, a dead end the grid never
+ * has (4.0's blocks: every street a whole line between crossings). Ends of one arm are taken away until none is
+ * left; the nodes left are renumbered.
+ */
+export function withoutSpurs(r: CityRoads): CityRoads {
+  const nn = r.nodes.length / 3, ns = r.segs.length / 5;
+  const deg = new Int32Array(nn), gone = new Uint8Array(ns);
+  const at: number[][] = Array.from({ length: nn }, () => []);
+  for (let s = 0; s < ns; s++) { const a = r.segs[s * 5], b = r.segs[s * 5 + 1]; deg[a]++; deg[b]++; at[a].push(s); at[b].push(s); }
+  const ends: number[] = [];
+  for (let n = 0; n < nn; n++) if (deg[n] === 1) ends.push(n);
+  while (ends.length) {
+    const n = ends.pop()!;
+    if (deg[n] !== 1) continue;
+    const s = at[n].find((k) => !gone[k])!;
+    gone[s] = 1;
+    const a = r.segs[s * 5], b = r.segs[s * 5 + 1], o = a === n ? b : a;
+    deg[n]--; deg[o]--;
+    if (deg[o] === 1) ends.push(o);
+  }
+  const map = new Int32Array(nn).fill(-1), nodes: number[] = [], segs: number[] = [];
+  for (let n = 0; n < nn; n++) if (deg[n] > 0) { map[n] = nodes.length / 3; nodes.push(r.nodes[n * 3], r.nodes[n * 3 + 1], r.nodes[n * 3 + 2]); }
+  for (let s = 0; s < ns; s++) {
+    if (gone[s]) continue;
+    segs.push(map[r.segs[s * 5]], map[r.segs[s * 5 + 1]], r.segs[s * 5 + 2], r.segs[s * 5 + 3], r.segs[s * 5 + 4]);
+  }
+  return { nodes: new Float32Array(nodes), segs: new Int32Array(segs), centers: r.centers };
 }
 
 // ---------------------------------------------------------------- planar graph

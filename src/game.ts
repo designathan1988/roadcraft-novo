@@ -59,7 +59,7 @@ import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
 import { CITY_STYLES, type CityStyle } from './jobs/cityField.ts';
-import { Ground, GroundStroke, RiverCommand, WATER_MAP_RES, waterCoord, waterIndex } from './world/ground.ts';
+import { Ground, GroundStroke, RiverCommand, WATER_MAP_RES, waterAt, waterCoord, waterIndex } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
 import { ZoneTool } from './tools/zoneTool.ts';
@@ -641,7 +641,7 @@ export class Game {
     this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
-    else if (params.has('cidade')) await this.generatedCity((CITY_STYLES as readonly string[]).includes(params.get('estilo') ?? '') ? params.get('estilo') as CityStyle : 'classic', params.has('media'));
+    else if (params.has('cidade')) await this.generatedCity((CITY_STYLES as readonly string[]).includes(params.get('estilo') ?? '') ? params.get('estilo') as CityStyle : this.cityStyle, params.has('media'));
     else if (params.has('carregar')) await this.load();
     else if (params.has('inicio')) this.showStart();
     // straight into a medium town of straight streets, blocks and lots (Roadcraft 2.0's start): the start screen stays
@@ -1282,6 +1282,8 @@ export class Game {
       if (s.finish()) this.commands.push(s);
     },
     item: (x: number, z: number, kind: number, variant = 0) => { this.itemTool.item = kind; this.itemTool.sign = variant; this.itemTool.mode = 'streetscape'; this.itemTool.click({ x, z } as THREE.Vector3, false); },
+    /** The water's level at (x, z) (NO_WATER where dry). */
+    water: (x: number, z: number) => waterAt(this.world.water, x, z),
     poleLine: (ax: number, az: number, bx: number, bz: number, lights = 0) => this.itemTool.placePoleLine(ax, az, bx, bz, lights),
     /** Drawn lot: front A→B, back out to C. */
     lot: (ax: number, az: number, bx: number, bz: number, cx: number, cz: number, use = 1, floors?: number) => {
@@ -1830,7 +1832,7 @@ export class Game {
 
   /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
   /** How the generator lays each district's local streets (`jobs/cityField.ts`; ?estilo= in the address, or api). */
-  cityStyle: CityStyle = 'classic';
+  cityStyle: CityStyle = 'blocks';
 
   async generatedCity(style: CityStyle = this.cityStyle, medium = false): Promise<void> {
     if (this.busy) return;

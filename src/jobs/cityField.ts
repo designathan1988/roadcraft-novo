@@ -301,7 +301,14 @@ export function blockLines(cx: number, cz: number, R: number): Array<{ level: nu
   const along = 120, across = 72, AVENUE_EVERY = 4;
   const nx = Math.max(2, Math.floor((R * 1.7) / along)), nz = Math.max(2, Math.floor((R * 1.7) / across));
   const x0 = cx - (nx * along) / 2, z0 = cz - (nz * across) / 2;
-  const levelOf = (k: number, n: number) => (k === 0 || k === n || k % AVENUE_EVERY === 0 ? 0 : 1);
+  // 4.0 plan.ts blockGrid levelOf: the edges and every AVENUE_EVERY-th line avenues, every other one between them a
+  // collector, the rest local streets (a small grid: one collector down the middle)
+  const levelOf = (k: number, n: number) => {
+    if (k === 0 || k === n) return 0;
+    if (n < AVENUE_EVERY * 2) return k === Math.floor(n / 2) ? 1 : 2;
+    if (k % AVENUE_EVERY === 0) return 0;
+    return k % (AVENUE_EVERY / 2) === 0 ? 1 : 2;
+  };
   const out: Array<{ level: number; points: P2[] }> = [];
   for (let j = 0; j <= nz; j++) {
     const pts: P2[] = [];

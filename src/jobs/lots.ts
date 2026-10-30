@@ -137,15 +137,28 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
     const front = (side === 0 ? info.left : info.right) + 0.3;
     const size = LOT_SIZE[baseZone(zone)];
     if (!size) continue;
-    const startS = retreat[s * 2] + 2, endS = lens[s] - retreat[s * 2 + 1] - 2;
+    // a corner's margin only where the street meets others or ends: a straight joint of one street (two arms in line)
+    // is not a corner, and lots run on across it
+    const joint = (n: number) => {
+      if (arms[n].length !== 2) return false;
+      // the two arms' directions out of the node: in line when opposite within 3 degrees
+      const [a, b] = arms[n];
+      const da = armOf(quads[a.s], g.sprofile[a.s], a.end), db = armOf(quads[b.s], g.sprofile[b.s], b.end);
+      return da.dx * db.dx + da.dz * db.dz < -0.9986;
+    };
+    const startS = retreat[s * 2] + (joint(g.sa[s]) ? 0 : 2), endS = lens[s] - retreat[s * 2 + 1] - (joint(g.sb[s]) ? 0 : 2);
     bez(quads[s], 0, p2);
     const rng = new Rng(hash2(Math.round(p2[0] * 2), Math.round(p2[1] * 2), side * 31 + zone));
+    // the street's strip cut into equal lots of about the zone's middle frontage, none left over (4.0 world/lots.ts:
+    // "a block's rows and a street's strip are cut into equal lots of about this width")
+    const span = endS - startS, aim = (size.w[0] + size.w[1]) / 2;
+    const equal = span >= size.w[0] ? span / Math.max(1, Math.round(span / aim)) : span;
     let at = startS;
     let narrowTried = false;
-    while (endS - at >= size.w[0]) {
-      // segunda tentativa no mesmo ponto: a largura mínima
-      let w = narrowTried ? size.w[0] : rng.range(size.w[0], size.w[1]);
-      if (endS - at - w < size.w[0] * 0.5) w = endS - at; // o resto vai para o último
+    while (endS - at >= Math.min(size.w[0], equal) - 1e-6) {
+      // a lot that did not fit is tried again narrower (its first half), then skipped
+      let w = narrowTried ? equal / 2 : equal;
+      if (endS - at - w < equal * 0.5) w = endS - at; // the rest to the last
       const mid = at + w / 2;
       const t = tAtLength(tables[s], mid);
       bez(quads[s], t, p2); bezD(quads[s], t, d2);
@@ -202,7 +215,7 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
         placed = true;
         break;
       }
-      if (!placed && w > size.w[0] + 1 && !narrowTried) { narrowTried = true; continue; }
+      if (!placed && equal / 2 >= size.w[0] * 0.6 && !narrowTried) { narrowTried = true; continue; }
       narrowTried = false;
       at += placed ? w : Math.max(2, w / 4);
     }

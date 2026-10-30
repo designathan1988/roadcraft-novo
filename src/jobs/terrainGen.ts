@@ -16,8 +16,12 @@ import { NO_WATER, WATER_SPACING, WATER_TILE_RES, waterIndex } from '../world/gr
 // 4.0's river brush and water (metres; 4.0's unit is the metre, `core/units.ts`)
 /** Default brush radius and strength (`main.ts:372-373`). */
 const RIVER_RADIUS = 80, RIVER_STRENGTH = 24;
+/** How far in from the map's edge the canal runs (m). */
+const CANAL_FROM_EDGE = 300;
 /** `world/terrain.ts:42`, `:53`, `:55`, `:58`. */
 const RIVER_CARVE = 1.45, RIVER_BED_DEPTH = 0.42, RIVER_BED_FLOOR = 0.72, ROUGH_REACH_MIN = 0.78;
+/** The canal's banks: one width all along (the mean of 4.0's rough reach), not a ragged river's. */
+const CANAL_REACH = RIVER_RADIUS * (1 + ROUGH_REACH_MIN) / 2;
 /** The carve under the banks at the bed's floor: 24 × 1.45 × 0.42 = 14.6 m. */
 const BED_CARVE = RIVER_STRENGTH * RIVER_CARVE * RIVER_BED_DEPTH;
 /** `render/terrain.ts:87-89`: share of a channel's depth the water fills, its margin under the banks. */
@@ -64,16 +68,16 @@ function valueNoise(x: number, y: number): number {
 }
 /** `world/terrain.ts:45`. */
 const influence = (u: number) => u * u * (3 - 2 * u);
-/** A rough river dab's reach at a point (`world/terrain.ts:251-252`). */
-const roughReach = (x: number, z: number, radius = RIVER_RADIUS) => {
-  const lobe = radius * 0.6;
-  return radius * (ROUGH_REACH_MIN + (1 - ROUGH_REACH_MIN) * (0.5 + 0.5 * valueNoise(x / lobe + 23.9, z / lobe + 31.4)));
-};
 /** The bed's section, 1 on the floor to 0 at the reach (`world/terrain.ts:272`). */
 const bedProfile = (d: number, reach: number) => influence(Math.min(1, (1 - d / reach) / RIVER_BED_FLOOR));
 
 /** The river's course: z of its middle at x. */
-export const courseZ = (x: number, seed: number) => 900 * fbm(x / 4000, 0.5, seed + 31, 2) + 600 * Math.sin(x / 2300);
+/**
+ * The river's course: a straight canal along x, outside the city (the owner, 2026-10-30: "tire o rio do meio da
+ * cidade, faça o rio reto como um canal"). The generated city's grid reaches 4,420 m from the middle (cityGen.ts,
+ * 4.0's 1.7 radii of 5,200 m), so the canal runs CANAL_FROM_EDGE in from the map's north edge, past its last avenue.
+ */
+export const courseZ = (_x: number, _seed: number) => MAP_HALF - CANAL_FROM_EDGE;
 
 /** The land before the river and lakes cut it: broad hills, the river's valley, ranges at the map's edge. */
 function land(x: number, z: number, seed: number): number {
@@ -155,7 +159,7 @@ function riverAt(x: number, z: number, seed: number): { level: number; floor: nu
   // across the course, not along z: the course's slope shortens the distance
   const slope = (P.z[i + 1] - P.z[i]) / WATER_SPACING;
   const d = Math.abs(z - zc) / Math.sqrt(1 + slope * slope);
-  const reach = roughReach(x, z);
+  const reach = CANAL_REACH;
   return { level, floor: level - depth, section: d < reach ? bedProfile(d, reach) : 0, d, reach };
 }
 
