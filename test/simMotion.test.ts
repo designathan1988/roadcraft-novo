@@ -198,3 +198,33 @@ test('vehicles go round a turn on their path: the drawn body\'s ends stay on it 
   assert.ok(looked > 5000, `vehicle-steps in turns ${looked}`);
   assert.ok(worst <= 0, `the drawn body's front or rear left its path ${worst.toFixed(2)} m beyond a rigid body's sag: ${example}`);
 });
+
+test('people turn as people do: the body never snaps round between two publications (3.5 rad/s walking, 6 standing)', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = traffic(sim);
+  tr.density = 1 / 40;
+  const peds = new Peds(sim);
+  peds.density = 1 / 6;
+  const P = inner(peds), T = inner(tr);
+  P.walkOk = (n: number, a: number) => T.walkOk(n, a);
+  P.onWait = (n: number, a: number) => T.pedCall(n, a);
+  tr.pedCrossing = (n) => peds.crossing(n);
+  P.carsOn = (n: number, a: number) => T.carsOnCrossing(n, a);
+  const buf = new Float32Array(11 * 8192);
+  let steps = 0, snaps = 0, worst = 0;
+  for (let i = 0; i < 20 * 90; i++) {
+    tr.step(0.05); peds.setBodies(tr.bodyBuf, tr.writeBodies(0, 0, 180)); peds.step(0.05);
+    if (i % 10 === 0) { tr.checkWindow(); peds.checkWindow(); }
+    const n = peds.writePoses(buf, 11, 0, buf.length / 11);
+    if (i < 20 * 20) continue;
+    for (let k = 0; k < n; k++) {
+      let dy = buf[k * 11 + 7] - buf[k * 11 + 3];
+      dy -= Math.round(dy / (2 * Math.PI)) * 2 * Math.PI;
+      steps++;
+      worst = Math.max(worst, Math.abs(dy));
+      if (Math.abs(dy) > 6 * 0.05 + 1e-4) snaps++;
+    }
+  }
+  assert.ok(steps > 100000, `published steps ${steps}`);
+  assert.equal(snaps, 0, `${snaps} bodies turned faster than 6 rad/s (worst ${(worst * 180 / Math.PI).toFixed(0)} degrees in 50 ms)`);
+});

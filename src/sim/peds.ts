@@ -62,6 +62,8 @@ const STARTS = 1 << 17;
 const NEAR_R = 160;
 const STRIPE = 0.65, BODY_R = 0.27, SHOULDERS = 0.5, LOOK = 8, MOVING = 0.1, KEEP = 0.45, HEADWAY = 0.5;
 const PED_ACCEL = 1.2, PED_BRAKE = 2.5, SWITCH_GAIN = 1.2, AIM_HOLD = 0.6, HELD_SWITCH = 0.5;
+/** Fastest a body turns walking and standing, rad/s (roadcraft walk.ts TURN_RATE, TURN_STANDING). */
+const TURN_RATE = 3.5, TURN_STANDING = 6;
 const LATERAL_PENALTY = 1 / STRIPE, LATERAL_SHARE = 0.4, SIDESTEP_RATE = 0.45;
 const JAM_AFTER = 20, JAM_AFTER_CROSSING = 10, JAM_SHARE = 0.25, ONCOMING_CONFLICT = 50;
 /** Closer than this (m, centre to centre) two walkers are one inside the other: they move apart across their ways. */
@@ -99,8 +101,9 @@ const schema = {
   speed: Float32Array, color: Uint8Array,
   // appearance id (16 bits) for the people renderer: drawn when the pedestrian is born, published at pose index 10
   look: Uint16Array,
-  // last published position (for interpolation) and the publication it was in
-  px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array, wf: Uint32Array,
+  // last published position (for interpolation) and the publication it was in; `pyaw` is the heading it stands with
+  // (waiting, standing), `syaw` the body's heading as last published (it turns at a person's rate, `writePoses`)
+  px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, syaw: Float32Array, has: Uint8Array, wf: Uint32Array,
   // bus trip: line (-1 = on foot only), boarding stop and alighting stop, and the boarding stop on the sidewalk
   tLine: Int16Array, tFrom: Uint8Array, tTo: Uint8Array, tx: Float32Array, tz: Float32Array,
   // by bicycle (rides on the bike lane)
@@ -1254,9 +1257,14 @@ export class Peds {
   /** Writes the poses of the people nearby, starting at `start`. Returns how many it wrote. */
   /** Publications so far (a person not in the previous one starts from where it is now, not where it was last seen). */
   private frame = 0;
+  /** The simulated time of the last publication. */
+  private pubTime = 0;
 
   writePoses(data: Float32Array, stride: number, start: number, max: number): number {
     const c = this.t.cols, frame = ++this.frame;
+    // the simulated time since the last publication: the turn a body may make in it (paused: none)
+    const dt = Math.max(0, this.time - this.pubTime);
+    this.pubTime = this.time;
     let n = 0;
     for (const node of this.windowNodes) {
       if (!this.sim.net.nodes.alive[node]) continue;
@@ -1265,14 +1273,20 @@ export class Peds {
         if (c.mode[p] === 0 && !this.sim.net.segs.alive[c.seg[p]]) continue;
         const q = this.posShown(p);
         const o = (start + n) * stride;
-        if (!c.has[p] || c.wf[p] !== frame - 1) { c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.pyaw[p] = q[3]; c.has[p] = 1; }
+        if (!c.has[p] || c.wf[p] !== frame - 1) { c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.syaw[p] = q[3]; c.has[p] = 1; }
         c.wf[p] = frame;
-        data[o] = c.px[p]; data[o + 1] = c.py[p]; data[o + 2] = c.pz[p]; data[o + 3] = c.pyaw[p];
-        data[o + 4] = q[0]; data[o + 5] = q[1]; data[o + 6] = q[2]; data[o + 7] = q[3];
+        // the body turns towards the way it goes at a person's rate (the way bends at once at a corner or a waypoint:
+        // drawn as it is, the body snapped round, 60-180 degrees in one publication)
+        const walking = (c.mode[p] === 0 || c.mode[p] === 1) && c.pace[p] > 0.2;
+        let turn = q[3] - c.syaw[p];
+        turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
+        const most = (walking ? TURN_RATE : TURN_STANDING) * dt, yaw = c.syaw[p] + Math.max(-most, Math.min(most, turn));
+        data[o] = c.px[p]; data[o + 1] = c.py[p]; data[o + 2] = c.pz[p]; data[o + 3] = c.syaw[p];
+        data[o + 4] = q[0]; data[o + 5] = q[1]; data[o + 6] = q[2]; data[o + 7] = yaw;
         data[o + 8] = (c.bike[p] ? 5 : 3) * 256 + c.color[p];
         data[o + 9] = c.mode[p] === 4 ? Math.max(0, 1 - (this.time - c.t0[p]) / c.dur[p]) : 1;
         data[o + 10] = c.look[p];
-        c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.pyaw[p] = q[3];
+        c.px[p] = q[0]; c.py[p] = q[1]; c.pz[p] = q[2]; c.syaw[p] = yaw;
         n++;
       }
     }
