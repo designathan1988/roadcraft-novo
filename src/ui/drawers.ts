@@ -369,10 +369,10 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
   const builder = (id: BuilderTab): (() => void) | null => (h.builderTabs.has(id) ? () => { s.buildTab = id; if (s.lotMode !== 'edit') { s.lotMode = 'edit'; a.lotMode('edit'); } h.render(); } : null);
   const tabs: Array<[string, string, (() => void) | null, boolean]> = [
     ['builder.category.models', 'models', builder('models'), bt === 'models'],
-    ['ui.build.edit', 'mass', () => { s.buildTab = null; s.lotMode = 'edit'; a.lotMode('edit'); h.render(); }, editing],
     ['builder.category.draw', 'draw', () => { s.buildTab = null; s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, !bt && (s.lotMode === 'rect' || s.lotMode === 'poly')],
-    ['builder.category.facade', 'face', builder('facade'), bt === 'facade'], ['builder.category.roof', 'roof', builder('roof'), bt === 'roof'],
-    ['builder.category.parts', 'components', builder('parts'), bt === 'parts'],
+    ['builder.category.mass', 'mass', () => { s.buildTab = null; s.lotMode = 'edit'; a.lotMode('edit'); h.render(); }, editing],
+    ['builder.category.facade', 'face', builder('facade'), bt === 'facade'], ['builder.category.parts', 'components', builder('parts'), bt === 'parts'],
+    ['builder.category.roof', 'roof', builder('roof'), bt === 'roof'],
     ['builder.category.interior', 'interiorView', () => a.inside('toggle'), h.insideFloor() >= 0], ['builder.category.paint', 'paint', builder('paint'), bt === 'paint'],
   ];
   for (const [key, icon, run, on] of tabs) p.tabs.append(tab(t(key), on, run ?? (() => undefined), svg(icon, 18), run ? undefined : t('ui.soon.buildings')));
