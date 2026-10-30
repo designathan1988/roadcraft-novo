@@ -4,6 +4,10 @@ import { driverSchema } from '../drivers.ts';
 
 export const ROUTE_CAP = 96;
 export const MAX_VEHICLES = 1 << 16;
+/** Dwell at a bus stop (s) and the detour's rejoin distance (nodes). */
+export const DWELL = 14, REJOIN = 6;
+/** Parking: how far into the bay the vehicle slides (m). */
+export const PARK_SIDE_S = 2.4;
 /** Jammed junction: someone waiting at the line and nobody has gone through for this long (s). */
 export const JAM_SECONDS = 20;
 /** Controlled release of a jammed junction: one vehicle every this many seconds. */
