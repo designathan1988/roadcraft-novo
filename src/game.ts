@@ -58,7 +58,6 @@ import { lotAt, lotToWorld, polygonLot } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
-import { CITY_STYLES, type CityStyle } from './jobs/cityField.ts';
 import { Ground, GroundStroke, RiverCommand, WATER_MAP_RES, waterAt, waterCoord, waterIndex } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
@@ -641,12 +640,12 @@ export class Game {
     this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
     if (params.has('teste')) await this.testCity();
-    else if (params.has('cidade')) await this.generatedCity((CITY_STYLES as readonly string[]).includes(params.get('estilo') ?? '') ? params.get('estilo') as CityStyle : this.cityStyle, params.has('media'));
+    else if (params.has('cidade')) await this.generatedCity(params.has('media'));
     else if (params.has('carregar')) await this.load();
     else if (params.has('inicio')) this.showStart();
     // straight into a medium town of straight streets, blocks and lots (Roadcraft 2.0's start): the start screen stays
     // on the menu (and ?inicio)
-    else if (!params.has('cam') && !params.has('vazio')) await this.generatedCity('blocks', true);
+    else if (!params.has('cam') && !params.has('vazio')) await this.generatedCity(true);
     await this.settle();
     this.homeView ??= this.rig.state();
     status.value = 'pronto';
@@ -1320,7 +1319,6 @@ export class Game {
     },
     grow: async () => { this.growth.processDirty(); await this.pool.whenIdle(); return this.growth.fillAll(); },
     /** The style the next generated city lays its local streets in (Roadcraft's grid, organic, radial, mixed, blocks; or classic). */
-    cityStyle: (style: CityStyle) => { if (CITY_STYLES.includes(style)) this.cityStyle = style; return this.cityStyle; },
     /** Road edits at the point (x, z): split, reverse, duplicate, join (node) and move node to (tx, tz). */
     edit: (what: 'split' | 'reverse' | 'duplicate' | 'join' | 'move', x: number, z: number, tx = 0, tz = 0) => {
       const net = this.world.roads;
@@ -1831,10 +1829,8 @@ export class Game {
   }
 
   /** Whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
-  /** How the generator lays each district's local streets (`jobs/cityField.ts`; ?estilo= in the address, or api). */
-  cityStyle: CityStyle = 'blocks';
 
-  async generatedCity(style: CityStyle = this.cityStyle, medium = false): Promise<void> {
+  async generatedCity(medium = false): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     // the medium town is laid on a level plain (Roadcraft 2.0's flat map); the whole map keeps its relief
@@ -1848,7 +1844,7 @@ export class Game {
       this.generating = true;
       await this.generateTerrain();
       phase('relevo');
-      const city = await this.pool.run('cityGen', { seed: w.seed, style, medium }, { priority: 0 });
+      const city = await this.pool.run('cityGen', { seed: w.seed, medium }, { priority: 0 });
       phase('malha viária');
       this.hud.showLoading(t('game.loading.roads'));
       const ids: number[] = [];

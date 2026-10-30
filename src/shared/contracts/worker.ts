@@ -1,6 +1,5 @@
 // Contract between the page and the worker pool. Types and plain data only.
 
-import type { CityStyle } from '../../jobs/cityField.ts';
 import type { Profile } from '../../roads/profiles.ts';
 
 export interface SharedWorld {
@@ -82,7 +81,7 @@ export interface JobPayloads {
   roadPaint: { graph: RoadGraph; tile: number };
   lots: { graph: RoadGraph; cell: number };
   props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number; parts40?: boolean };
-  cityGen: { seed: number; style?: CityStyle; medium?: boolean };
+  cityGen: { seed: number; medium?: boolean };
   conform: { tile: number; segs: Float32Array };
   /**
    * A tile's save file made from the page's snapshot (the page writes it). ground and water: the tile's painted ground
