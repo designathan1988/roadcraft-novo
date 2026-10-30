@@ -14,7 +14,8 @@ const {
   positionLocal, uv, length, mix, floor, sRGBTransferEOTF, mx_noise_float, clamp,
 } = T;
 
-export interface Cloud { x: number; z: number; y: number; size: number; density: number }
+import type { Cloud } from '../world/mapLook.ts';
+export type { Cloud };
 
 export { MAX_CLOUDS } from './cloudShadow.ts';
 const PUFFS = 64;
@@ -72,7 +73,7 @@ export class CloudPuffs {
   }
 
   /** Replaces the cloud list (only when the player changes it). */
-  set(clouds: Cloud[]): void {
+  set(clouds: readonly Cloud[]): void {
     const d = this.data;
     d.fill(0);
     const n = Math.min(MAX_CLOUDS, clouds.length);

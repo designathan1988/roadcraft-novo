@@ -501,7 +501,7 @@ export class Hud {
         this.seg(t('menu.quality'), (['baixo', 'medio', 'alto', 'ultra'] as const).map((q) => [q, t(`quality.${q === 'baixo' ? 'low' : q === 'medio' ? 'medium' : q === 'alto' ? 'high' : 'ultra'}`)] as const), st.preset, (v) => a.quality(v)),
         this.row(t('menu.graphicsOptions'), () => a.options(), 'm_quality'),
         this.seg(t('menu.language'), LANGUAGES, lang(), (v) => setLang(v as 'pt-BR' | 'en')),
-        this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => { a.paint(v); a.mapPaint?.(v); }),
+        this.seg(t('menu.paint'), (['br', 'us', 'eu', 'classic'] as const).map((p) => [p, t(`paint.${p}`)] as const), st.paint, (v) => a.paint(v)),
         el('hr'),
         ...(a.developer() ? [this.row(t('ui.menu.testCity'), () => a.testCity(), 'generate')] : []),
         this.row(t('action.about'), () => this.about.open(), 'm_about'),

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FAST = ['lotsShortSide', 'blockLots', 'roadGround', 'citySpurs', 'gradeLine', 'mapExtra'];
+const FAST = ['lotsShortSide', 'blockLots', 'roadGround', 'citySpurs', 'gradeLine', 'mapExtra', 'mapLook'];
 const steps = [
   ['types', 'npx tsc --noEmit'],
   ['architecture', 'node tools/arch-audit.mjs --check tools/arch-baseline.json'],

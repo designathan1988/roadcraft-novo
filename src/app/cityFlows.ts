@@ -48,6 +48,8 @@ export class CityFlows {
     w.items.clear();
     w.clearGround();
     w.roads.clear();
+    // a new map's look (water, weather, clouds, fog, road paint), shown by clearPage
+    w.look.reset();
     this.h.clearPage();
     w.signTexts.clear(); w.streetNames.clear();
     w.money = START_MONEY;

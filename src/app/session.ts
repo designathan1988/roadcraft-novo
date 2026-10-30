@@ -6,7 +6,6 @@ import { Dirty, TILE_COUNT, cellsOfTile, tileId, tileX } from '../core/grid.ts';
 import { packTileHeights } from '../jobs/storage.ts';
 import { WATER_TILE_RES } from '../world/ground.ts';
 import { customProfiles } from '../roads/profiles.ts';
-import { fogLevel } from '../render/scene.ts';
 import { MapSizeError, decodeMeta, encodeMeta } from '../platform/save.ts';
 import { encodeExtra } from '../platform/mapExtra.ts';
 import { QUARANTINE_UNREADABLE_TILES, quarantineSlot } from '../platform/mapFile.ts';
@@ -17,11 +16,8 @@ import { errorText } from '../shared/errors.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import type { World } from '../world/world.ts';
 import type { Transit } from '../world/transit.ts';
-import type { Cloud } from '../render/cloudPuffs.ts';
 import type { CameraRig } from '../render/cameraRig.ts';
-import type { WeatherCtl } from '../ui/hudActions.ts';
 
-export interface SaveWater { waves: number; foam: number; current: number }
 
 /** Changes the map size: the world arrays are sized to the map, so the page reloads. */
 export function reloadWithMap(tiles: number, then: string): void {
@@ -129,10 +125,6 @@ export interface SaveHost {
   readonly hud: { toast(message: string): void };
   readonly rig: Pick<CameraRig, 'state'>;
   readonly transit: Transit;
-  readonly settings: { paint?: string };
-  readonly weatherCtl: WeatherCtl | null;
-  readonly waterCtl: SaveWater;
-  readonly clouds: readonly Cloud[];
   readonly hour: number;
   readonly life: Lifecycle;
   slotBase: Generation | null;
@@ -191,8 +183,8 @@ export async function saveSession(host: SaveHost, auto = false): Promise<boolean
   });
   for (const p of packs) p.catch(() => { /* reported below */ });
   const meta = encodeMeta({ seed: w.seed, gameId: w.gameId, tiles: listed, camera: host.rig.state(), hour: host.hour, transit: host.transit.encode(), profiles: JSON.stringify(customProfiles()), money: w.money, junctions: JSON.stringify([...w.roads.junctions]), biome: w.biome,
-    extra: encodeExtra({ weather: host.weatherCtl, water: host.waterCtl, clouds: [...host.clouds], fog: fogLevel.value, terminals: host.transit.terminals,
-      signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: host.settings.paint ?? 'br', unlimited: w.unlimited }) });
+    extra: encodeExtra({ weather: w.look.weather, water: w.look.water, clouds: [...w.look.clouds], fog: w.look.fog, terminals: host.transit.terminals,
+      signs: [...w.signTexts], streets: [...w.streetNames], clock: w.clock, paint: w.look.paint, unlimited: w.unlimited }) });
   try {
     const writer = await slot.begin();
     let bytes = 0;

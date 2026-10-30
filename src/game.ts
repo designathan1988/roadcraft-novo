@@ -13,7 +13,7 @@ import { wallsHeightOf } from './jobs/buildingGen.ts';
 import { roadGraphTransfer } from './shared/contracts/worker.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
-import { createRoads, createTrafficLook, setPaintStyle, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
+import { createRoads, createTrafficLook, trafficOverlayU, zoneOverlayU, type TrafficLook } from './render/roads.ts';
 import type { CellLayer } from './render/cellLayer.ts';
 import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
 import { GpuTiming } from './render/gpuTiming.ts';
@@ -56,7 +56,8 @@ import { SaveFlow } from './app/saveFlow.ts';
 import { CityFlows } from './app/cityFlows.ts';
 import { insertBoxes } from './app/insertBoxes.ts';
 import { WeatherControl, weatherPreset } from './features/sky/weatherControl.ts';
-import { DEFAULT_WATER, WaterControl } from './features/water/waterControl.ts';
+import { WaterControl } from './features/water/waterControl.ts';
+import { chooseRoadPaint, showRoadPaint } from './features/roads/roadPaint.ts';
 import { InsideView } from './render/inside.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { lotToWorld } from './world/lotEdit.ts';
@@ -248,7 +249,7 @@ export class Game {
       get hud() { return gs.hud; },
       get settings() { return gs.settings; },
       life,
-      extras: () => ({ weather: gs.sky.ctl, water: gs.water.ctl, clouds: gs.clouds.list, hour: gs.hour }),
+      get hour() { return gs.hour; },
       clearForOpen: () => gs.clearPage(),
       applyExtra: (ex) => gs.applyExtra(ex),
       setHour: (h) => gs.world.setHour(h),
@@ -269,8 +270,8 @@ export class Game {
       grow: async () => { gs.growth.processDirty(); await gs.pool.whenIdle(); return gs.growth.fillAll(); },
       endRebuild: (err, what) => gs.endRebuild(err, what),
     });
-    this.water = new WaterControl(() => { this.unsaved = true; });
-    this.sky = new WeatherControl({ weather: this.weather, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.settings?.weather, changed: () => { this.unsaved = true; } });
+    this.water = new WaterControl(this.world.look, () => { this.unsaved = true; });
+    this.sky = new WeatherControl({ weather: this.weather, look: this.world.look, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.settings?.weather, changed: () => { this.unsaved = true; } });
     this.lines = new TransitTool({
       transit: this.transit, roads: this.world.roads, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
       lineMade: () => achieve('PRIMEIRA_LINHA'), sendLines: (lines) => this.sim.postMessage({ type: 'lines', lines } satisfies ToSim),
@@ -278,7 +279,7 @@ export class Game {
     });
     this.river = new RiverTool({ world: this.world, preview: this.preview, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text) });
     this.clouds = new Clouds({
-      heights: this.world.heights, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
+      heights: this.world.heights, look: this.world.look, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
       changed: () => { this.unsaved = true; }, target: () => this.rig.target,
     });
     // the camera never enters a building (roadcraft): core of the lot (70% × 60%) up to the top given by the floors
@@ -387,7 +388,7 @@ export class Game {
       skyTool: (s) => { this.clouds.tool = s; this.skyHint(); },
       scatterClouds: (n, v) => this.clouds.scatter(n, v),
       clearClouds: () => this.clouds.clear(),
-      fogLevel: (v) => { fogLevel.value = v; this.unsaved = true; },
+      fogLevel: (v) => { this.world.look.fog = v; fogLevel.value = v; this.unsaved = true; },
       radius: (r) => { this.brush.radius = r; },
       strength: (s) => { this.brush.strength = s; },
       undo: () => this.history(false),
@@ -454,9 +455,9 @@ export class Game {
       simulation: (sim) => { Object.assign(this.settings, sim); saveSettings(this.settings); this.demandSent = 0; },
       settings: () => {
         const st = this.settings;
-        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: st?.paint ?? 'br', furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', roadAlign: st?.roadAlign ?? 'KeyV', preset: st?.preset ?? 'alto', webgpu: !!this.parts?.isWebGPU };
+        return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: this.world.look.paint, furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', roadAlign: st?.roadAlign ?? 'KeyV', preset: st?.preset ?? 'alto', webgpu: !!this.parts?.isWebGPU };
       },
-      paint: (style) => { this.settings.paint = style; saveSettings(this.settings); setPaintStyle(style); },
+      paint: (style) => chooseRoadPaint({ look: this.world.look, run: (cmd) => this.commands.run(cmd), changed: () => { this.unsaved = true; } }, style),
       furniture: (n) => { this.settings.furniture = n; saveSettings(this.settings); this.roadTool.furniture = n; },
       ring: (f) => { this.roadTool.ringBy(f); this.hud.setRing(this.roadTool.ringRadius); },
       terminal: (on) => { this.transitTerminal = on; },
@@ -472,7 +473,7 @@ export class Game {
         void this.applySettings(s);
       },
       resetView: () => { if (this.homeView) this.rig.restore(this.homeView); },
-      environment: () => ({ water: { ...this.water.ctl }, weather: this.sky.ctl ? { ...this.sky.ctl } : null, fog: fogLevel.value }),
+      environment: () => ({ water: { ...this.water.ctl }, weather: this.sky.ctl ? { ...this.sky.ctl } : null, fog: this.world.look.fog }),
       showImpossible: () => {
         // the next one after the last visited (the set is small: only the nodes under 25°)
         const ids = [...this.world.impossible.nodes.keys()];
@@ -633,6 +634,7 @@ export class Game {
       !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.cities.testCity(); }],
         [t('game.options.unlimited'), t('game.options.unlimitedTip'), () => { this.world.unlimited = !this.world.unlimited; this.hud.toast(this.world.unlimited ? t('game.toast.unlimitedOn') : t('game.toast.unlimitedOff')); }]], () => this.gpuName());
     await this.applySettings(this.settings, false);
+    this.showLook();
     await renderer.compileAsync(scene, this.rig.persp);
     await renderer.compileAsync(scene, this.rig.ortho);
     await this.warmPost();
@@ -1172,10 +1174,9 @@ export class Game {
     renderer.setPixelRatio(window.devicePixelRatio * s.resolution);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.updatePixelScale();
-    // the option's weather; weather set by hand in the Sky panel (saved with the map) stays
-    this.sky.optionChanged();
+    // the option's weather; weather set by hand in the Sky panel (the map's) stays
+    this.sky.show();
     this.ambient.setVolume(s.volume ?? 0.6);
-    setPaintStyle(s.paint ?? 'br');
     this.roadTool.furniture = s.furniture ?? 0;
     const want = this.parts.isWebGPU && (s.shadows || s.ao || s.bloom);
     const same = this.post && want && this.post.opts.shadows === s.shadows && this.post.opts.ao === s.ao && this.post.opts.bloom === s.bloom;
@@ -1619,8 +1620,15 @@ export class Game {
     this.demolition.clear();
     this.transit.clear();
     this.commands.clear();
-    this.clouds.load([]);
+    this.showLook();
     this.textSigns.version++;
+  }
+
+  /** Shows the map's look (World.look): water, weather, clouds, fog and road paint. */
+  private showLook(): void {
+    this.water.show(); this.sky.show(); this.clouds.show();
+    fogLevel.value = this.world.look.fog;
+    showRoadPaint(this.world.look);
   }
 
   /**
@@ -1635,19 +1643,16 @@ export class Game {
   /** An opened map's extra (platform/mapExtra.ts) into the page's state: water, clock, money mode, paint, signs, names, terminals, clouds, fog, sky, weather. */
   private applyExtra(ex: MapExtra): void {
     const w = this.world;
-    this.water.set(ex.water ?? DEFAULT_WATER, false);
     // the save's city clock (decay filed again); the time of day it set stays
     w.setClock(ex.clock);
     if (ex.unlimited !== null) w.unlimited = ex.unlimited;
-    // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
-    if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
     w.signTexts.clear(); for (const [k, v] of ex.signs) w.signTexts.set(k, v);
     w.streetNames.clear(); for (const [k, v] of ex.streets) w.streetNames.set(k, v);
     this.textSigns.version++;
     this.transit.terminals = ex.terminals; this.transit.version++;
-    this.clouds.load(ex.clouds); fogLevel.value = ex.fog;
-    // the sky mode is the player's, not the map's: an older save's sky is not read
-    this.sky.set(ex.weather, false);
+    // the map's look (water, hand-set weather, clouds, fog, road paint); the sky mode is the player's, not the map's
+    w.look.load(ex);
+    this.showLook();
   }
 
   /** Ends a flow that rebuilds the world: the loading screen goes, the game is free; on failure, says why. */

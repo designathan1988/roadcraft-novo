@@ -3,6 +3,7 @@
 import type { LaneChoice, ParkingPreset } from '../roads/roadVariant.ts';
 import type { PersonOptions } from '../shared/contracts/people.ts';
 import type { creatorCatalog } from '../render/people/creator.ts';
+import type { WeatherCtl } from '../world/mapLook.ts';
 export interface RoadKeys { roadUp: string; roadDown: string; roadAlign: string }
 
 export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
@@ -15,8 +16,7 @@ export const ROAD_TOOLS: Tool[] = ['road', 'curve', 'free', 'roundabout', 'upgra
 /** Always day, always night, or the light following the clock (the player's choice, kept between games). */
 export type SkyMode = 'day' | 'night' | 'cycle';
 export interface SkyToolState { cloud: 'none' | 'add' | 'move' | 'edit' | 'remove'; fog: 'none' | 'lay' | 'erase'; size: number; base: number; density: number; fogHeight: number }
-/** Rain 0..1, wind in m/s, direction in degrees (where it blows to), lightning per minute, thunder 0..1. */
-export interface WeatherCtl { rain: number; wind: number; dir: number; lightning: number; thunder: number }
+export type { WeatherCtl };
 export type LotMode = 'edit' | 'rect' | 'poly' | 'split' | 'join' | 'delete' | 'front' | 'corner';
 /** The simulation's settings the Simulation panel changes. */
 export interface SimSettings { traffic: number; people: number; demand: 'baixa' | 'normal' | 'pico' }
@@ -42,7 +42,6 @@ export interface OptionalActions {
   decayOf?(): number;
   addressOf?(): string;
   streetNameAt?(x: number, z: number): string;
-  mapPaint?(style: string): void;
   lineColor?(color: number): void;
   lineLoop?(loop: boolean): void;
   showImpossible?(): void;
@@ -147,6 +146,7 @@ export interface HudActions extends OptionalActions {
   settings(): SimSettings & { paint: string; furniture: number; roadUp: string; roadDown: string; roadAlign: string; preset: string; webgpu: boolean };
   quality(preset: string): void;
   resetView(): void;
+  /** The map's road paint ('br', 'us', 'eu', 'classic'): an undoable edit of the map, saved with it. */
   paint(style: string): void;
   furniture(n: number): void;
   ring(f: number): void;

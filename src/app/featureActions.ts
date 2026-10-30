@@ -17,8 +17,6 @@ export interface FeatureActions {
   addressOf(): string;
   /** Name of the street nearest (x, z) (generated or typed by the player), '' away from streets. For name plates. */
   streetNameAt(x: number, z: number): string;
-  /** Regional road paint of this map ('br', 'us', 'eu', 'classic'); saved with the map and restored when it opens. */
-  mapPaint(style: string): void;
   /** Colour of the selected line (index into the vehicle palette, world/transit.ts LINE_COLORS). Undoable. */
   lineColor(color: number): void;
   /** Selected bus line as a ring (true) or out and back (false, Roadcraft's default: return trip on the other side). */

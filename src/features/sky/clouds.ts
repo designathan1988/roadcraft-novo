@@ -1,15 +1,18 @@
-// The player's clouds: the list (saved with the map), its view, the sky tool's state and every edit (add, remove,
-// adjust, move, scatter, clear) as an undoable command. The feature owns this state; the page only wires the tool's
-// clicks and drags to it and reads `list` when saving.
+// The player's clouds: their view, the sky tool's state and every edit (add, remove, adjust, move, scatter, clear) as
+// an undoable command. The list is the map's (World.look.clouds, saved with it); the page only wires the tool's
+// clicks and drags here.
 
 import type { Command } from '../../core/commands.ts';
-import { CloudPuffs, MAX_CLOUDS, type Cloud } from '../../render/cloudPuffs.ts';
+import { CloudPuffs, MAX_CLOUDS } from '../../render/cloudPuffs.ts';
+import type { Cloud, MapLook } from '../../world/mapLook.ts';
 import { heightAt } from '../../world/heights.ts';
 import { t } from '../../shared/i18n/index.ts';
 import type { SkyToolState } from '../../ui/hudActions.ts';
 
 export interface CloudHost {
   readonly heights: Float32Array;
+  /** The map's look: its clouds. */
+  readonly look: MapLook;
   /** Runs a command and records it (CommandStack.run). */
   run(cmd: Command): void;
   toast(text: string): void;
@@ -22,19 +25,19 @@ export interface CloudHost {
 export class Clouds {
   readonly view = new CloudPuffs();
   tool: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
-  private items: Cloud[] = [];
   private held = -1;
   private host: CloudHost;
 
   constructor(host: CloudHost) { this.host = host; }
 
-  /** The clouds as saved with the map. */
-  get list(): readonly Cloud[] { return this.items; }
+  /** The map's clouds. */
+  get list(): readonly Cloud[] { return this.host.look.clouds; }
+  private get items(): readonly Cloud[] { return this.host.look.clouds; }
   /** The cloud being dragged, or -1. */
   get grabbed(): number { return this.held; }
 
-  /** The clouds of a map just opened (or none for a new one): not an edit, no command. */
-  load(list: readonly Cloud[]): void { this.items = list.map((c) => ({ ...c })); this.view.set(this.items); }
+  /** Shows the map's clouds (after a map is opened or made). */
+  show(): void { this.view.set(this.items); }
 
   /** A click of the sky tool on the ground at (x, z). */
   click(x: number, z: number): void {
@@ -81,7 +84,7 @@ export class Clouds {
   /** Replaces the list as a command: undo brings the previous one back. */
   private replace(next: Cloud[], label: string): void {
     const before = this.items.map((c) => ({ ...c })), after = next.map((c) => ({ ...c }));
-    const set = (l: Cloud[]) => { this.load(l); this.host.changed(); };
+    const set = (l: Cloud[]) => { this.host.look.clouds = l.map((c) => ({ ...c })); this.show(); this.host.changed(); };
     this.host.run({ label, apply: () => set(after), invert: () => set(before) });
   }
 

@@ -23,8 +23,6 @@ export interface Settings {
   demand?: 'baixa' | 'normal' | 'pico';
   traffic?: number;
   people?: number;
-  /** Road markings: br, us, eu, classic. */
-  paint?: string;
   /** Furniture of new roads: 0 complete, 1 basic, 2 none. */
   furniture?: number;
   /** Always day, always night or the clock's light (Roadcraft 4.0 keeps it with the player, not with the map). */
@@ -165,7 +163,6 @@ export class OptionsPanel {
     row(t('sim.demand'), select(s.demand ?? 'normal', [['baixa', t('sim.demand.low')], ['normal', t('sim.demand.normal')], ['pico', t('sim.demand.peak')]], (v) => { s.demand = v; }));
     row(t('sim.traffic'), range(s.traffic ?? 1, 0.1, 2, 0.1, pct, (v) => { s.traffic = v; }));
     row(t('sim.people'), range(s.people ?? 1, 0.1, 2, 0.1, pct, (v) => { s.people = v; }));
-    row(t('menu.paint'), select(s.paint ?? 'br', [['br', t('paint.br')], ['us', t('paint.us')], ['eu', t('paint.eu')], ['classic', t('paint.classic')]], (v) => { s.paint = v; }));
     row(t('roadFurniture.row'), select(String(s.furniture ?? 0), [['0', t('roadFurniture.complete')], ['1', t('roadFurniture.basic')], ['2', t('roadFurniture.none')]], (v) => { s.furniture = Number(v); }));
     {
       // road keys: click and press the new key
@@ -222,7 +219,7 @@ export class OptionsPanel {
     if (name) { const g = document.createElement('p'); g.className = 'opt-note opt-gpu'; g.textContent = `${t('gfx.gpu')}: ${name}`; box.append(g); }
     const buttons = document.createElement('div'); buttons.className = 'opt-buttons';
     const ok = document.createElement('button'); ok.className = 'v2-btn primary'; ok.textContent = t('ui.options.apply');
-    // what other panels changed while the dialog was open (simulation, road paint and furniture) is kept
+    // what other panels changed while the dialog was open (simulation and furniture) is kept
     ok.addEventListener('click', () => {
       const now = this.current(), opened = this.opened;
       for (const k of Object.keys(s) as Array<keyof Settings>) if (s[k] === opened[k] && now[k] !== opened[k]) (s as unknown as Record<string, unknown>)[k] = now[k];

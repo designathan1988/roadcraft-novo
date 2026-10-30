@@ -10,7 +10,6 @@ import { floorsFor, type Growth } from '../world/growth.ts';
 import { curveLotSide, deleteLot, joinLots, lotAt, lotFits, lotOutlineWorld, lotToWorld, moveSharedCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotsByLine } from '../world/lotEdit.ts';
 import { RoadJournal } from '../roads/build.ts';
 import { addressAt } from '../roads/streetNames.ts';
-import { setPaintStyle } from '../render/roads.ts';
 import { RoadPreview } from '../render/preview.ts';
 import { CameraRig } from '../render/cameraRig.ts';
 import { InsideView, insideTarget } from '../render/inside.ts';
@@ -266,7 +265,6 @@ export class LotEditing {
         return a ? `${a.name}, ${a.number}` : '';
       },
       streetNameAt: (x, z) => { const a = addressAt(this.h.world, x, z, 30); return a ? a.name : ''; },
-      mapPaint: (style) => { this.h.settings.paint = style; setPaintStyle(style); this.h.unsaved = true; },
       impossibleNodes: () => this.h.world.impossible.count,
       impossibleAngle: (n) => this.h.world.impossible.angleAt(n),
       impossibleList: () => { const nc = this.h.world.roads.nodes.cols, out: number[] = []; for (const [n, a] of this.h.world.impossible.nodes) out.push(n, nc.x[n], nc.z[n], a); return out; },
