@@ -932,3 +932,16 @@ test('cars: lamps and plates lie on the body (boxes stood out of the rounded cor
     }
   }
 });
+
+test('cars: the cabin stays clear of the wheels (its door trim stood in the rear arch, over the wheel)', async () => {
+  const { CAR_SIZES, buildCarCabin, axlesOf } = await import('../src/render/carBody.ts');
+  for (const style of ['sedan', 'hatch', 'suv', 'van', 'pickup'] as const) {
+    const a = CAR_SIZES[style], p = buildCarCabin(a, style).getAttribute('position').array, archR = a.wheelRadius + 0.07;
+    let inside = 0;
+    for (let i = 0; i < p.length; i += 3) {
+      // the wheel's space: the arch's reach along the length, below its top, out where the tyre is
+      for (const ax of axlesOf(a)) if (Math.abs(p[i] - ax) < archR && p[i + 1] < 2 * a.wheelRadius + 0.07 && Math.abs(p[i + 2]) > a.width / 2 - a.width * 0.14 - 0.05) inside++;
+    }
+    assert.equal(inside, 0, `${style}: ${inside} cabin vertices in a wheel's space`);
+  }
+});

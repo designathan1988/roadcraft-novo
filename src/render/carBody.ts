@@ -932,15 +932,32 @@ export function buildCarCabin(a: CarArchetype, styleName: Exclude<CarStyle, 'wag
   }
   // the trim inside the doors, up to the waist, from the footwell to behind the last seat: it hides the inside of the
   // far side's panels (the shell is one-sided) seen through the near window
-  // (in four lengths, each as wide as the body there, and thick enough that its top closes the door's inside)
-  const x0 = Math.max(back + M(0.25), lastX - M(0.75)), x1 = bulk;
+  // (in four lengths, each as wide as the body there, and thick enough that its top closes the door's inside), clear
+  // of the wheel arches: through the arch's opening it stood over the rear wheel as a grey slab
+  const x0 = Math.max(back + M(0.25), lastX - M(0.75), axlesOf(a)[1]! + archR + M(0.03)), x1 = bulk;
   for (let k = 0; k < 4; k++) {
     const xa = lerp(x0, x1, k / 4), xb = lerp(x0, x1, (k + 1) / 4);
     let hw = Infinity, waist = Infinity;
     for (let i = 0; i <= 4; i++) { const x = lerp(xa, xb, i / 4); hw = Math.min(hw, halfWidth(x)); waist = Math.min(waist, belt(x)); }
     for (const side of [-1, 1] as const) parts.push(tint(box(xb - xa, waist - floor, M(0.1), (xa + xb) / 2, (waist + floor) / 2, side * (hw - M(0.08))), CARD));
   }
-  return merge(parts);
+  // the wheel houses come into the cabin, as in a car: by each axle (and a margin, so the narrowing lies clear of the
+  // arch) and up to the arch's top, nothing is wider than the wheel house's inner face (the floor, the rear bench and
+  // the boot floor reached through the arch's opening over the tyre)
+  const well = W / 2 - W * 0.14 - M(0.06), wellTop = archR + a.wheelRadius * 0.96 + M(0.02);
+  // the wheel house's top inside, over each arch and its margin, from its inner face to the side (above the arch's
+  // opening: not seen from outside)
+  for (const ax of axlesOf(a)) {
+    const reach = archR + M(0.15), side = Math.min(halfWidth(ax - reach), halfWidth(ax + reach)) - M(0.03);
+    if (side > well) for (const sd of [-1, 1] as const) parts.push(tint(box(2 * reach, M(0.03), side - well, ax, wellTop + M(0.015), sd * (well + side) / 2), CARD));
+  }
+  const g = merge(parts), pos = g.getAttribute('position') as BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    if (y < wellTop && Math.abs(z) > well && axlesOf(a).some((ax) => Math.abs(x - ax) < archR + M(0.15))) pos.setZ(i, Math.sign(z) * well);
+  }
+  g.computeVertexNormals();
+  return g;
 }
 
 /** A seat (4.0 seatShell): the side profile of cushion and back extruded across, its bolsters and its base. */
