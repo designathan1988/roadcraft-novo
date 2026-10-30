@@ -42,6 +42,12 @@ Data: 2026-10-29. Toda mudança visual precisa de foto nas mesmas vistas, 1:1 na
 - Linha com curvas de 90° e rotatória; seguir o ônibus; registrar pose/yaw por passo.
 - Sem tranco/salto/giro errado; rodas alinhadas; passageiros embarcam/descem no ponto.
 - Semáforo, cancela, faixa de pedestre e conversões proibidas nos dois sentidos (perto/longe).
+- **Estado em 2026-10-29 (HEAD `c522b73`):** `node tools/fotos-onibus-qa.mjs test-results/onibus-qa-3-2026-10-29`
+  cria uma linha de quatro cantos e segue o ônibus mais próximo de um cruzamento em 14 quadros. As fotos
+  `01-linha-larga.png` e `02..14-seguir-*.png` mostram o ônibus opaco e centrado na faixa, mas **nenhuma
+  curva foi capturada**; o heading pelo acorde e o entre-eixos 6,2 m estão no código e nos testes, porém a
+  prova visual da curva/rotatória continua em aberto. Passageiros embarcando/descendo também não foram
+  isolados nesta rodada.
 
 ### Cintilação/sobreposição
 

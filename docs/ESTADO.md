@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 22h47.
+Atualizado: 2026-10-29, 22h54.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,9 +39,9 @@ Atualizado: 2026-10-29, 22h47.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `80bfefc` (ferramenta de pessoas), com `e89f6ed` (vidro,
-  ocupantes e entre-eixos) e `8fb94b2`/`066b047`/`0965073`/`b6f4857`/`084425c` antes. Sem push e sem
-  merge em main; nenhum agente ativo.
+- Branch `port/roadcraft-features`; HEAD `c522b73` (ferramenta de ônibus), com `80bfefc`/`917e88f`
+  (pessoas), `e89f6ed` (vidro, ocupantes e entre-eixos) e `8fb94b2`/`066b047`/`0965073`/`b6f4857`/
+  `084425c` antes. Sem push e sem merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
   `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
   `polygon.ts`, `geometry.ts` e `materials.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts`
@@ -61,6 +61,9 @@ Atualizado: 2026-10-29, 22h47.
 - Pessoas: `test-results/pessoas-qa-2026-10-29/01..05` (2/20/100 m dia, 2/20 m noite) mostra o grupo
   de 8 + 4 andando criado pelo `api.people`: corpo inteiro, roupas/cabelo e sombra, sem buraco ou
   transparência no grupo. A multidão e a animação de skinning não foram isoladas nesta prova.
+- Ônibus: `test-results/onibus-qa-3-2026-10-29/01..14` segue um ônibus por 14 quadros numa linha de
+  quatro cantos; ele aparece opaco e centrado na faixa, mas nenhuma curva foi capturada. O heading pelo
+  acorde e o entre-eixos 6,2 m estão no código/testes; a prova visual da curva continua em aberto.
 - Pendente: sinks do `GenContext` e o resto de `traffic`/`r40/buildingMesh`, bomba real, construtor
   completo, multidão/ônibus em curva, cidade organizada/250 mil, reabertura de 10 km.
 
