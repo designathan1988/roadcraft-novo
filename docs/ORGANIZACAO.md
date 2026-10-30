@@ -20,18 +20,18 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 254 |
-| Bytes / linhas | 3.728.223 / 66.990 |
-| Arquivos >= 50 KB | 11 |
+| Arquivos TS | 258 |
+| Bytes / linhas | 3.731.054 / 67.049 |
+| Arquivos >= 50 KB | 10 |
 | Arquivos >= 100 KB | 4 |
 | Arquivos >= 150 KB | 3 |
-| Arestas de import | 1040 (192 só de tipo) |
+| Arestas de import | 1099 (196 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
 Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.852),
-`game.ts` (2.645), `jobs/buildingGen.ts` (1.520), `r40/render/buildings/signature.ts` (1.781),
+`game.ts` (2.645), `r40/render/buildings/signature.ts` (1.781), `jobs/buildingGen/plans.ts` (422),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
@@ -221,12 +221,13 @@ Ordem por risco e valor (não por tamanho):
   `R40_ZONES`, `catalogLevels`), com o gerador de 2.311 para 2.259 linhas e fora da faixa de 150 KB.
 - Feito em 2026-10-29: `buildingGen/windows.ts` (janelas, `curtainFins`, `ledge`, `setFac`) e
   `buildingGen/shell.ts` (`prism`, `frame`, `parapet`, `ring`, `piers`, `part`/`PART`, capturas), com o gerador
-  de 2.259 para 1.949 linhas. Falta o shell de alto nível/cívico.
+  de 2.259 para 1.949 linhas.
 - Feito em 2026-10-29: `buildingGen/lot.ts` (muro, chão, caminho, polígono, estacionamento, portão,
   fundação e `beginLot`/`endLot`), com o gerador de 1.848 para 1.520 linhas.
-- Em andamento: shell de alto nível/cívico e catálogo do `buildingGen` (a tentativa de dividir agora foi
-  revertida por imports/ciclos pendentes); `sim/traffic.ts` por micro/meso/ônibus; `r40/buildingMesh.ts`
-  continua por último.
+- Feito em 2026-10-30: `plans.ts` (base/casa/quarteirão/árvores/jardins), `plans2.ts` (torre, galpão,
+  chaminé, polígonos, telhados, projeto do jogador), `civic.ts` e `catalog.ts`. `buildingGen.ts` caiu de
+  1.520 para **250 linhas**, só orquestração, lotes e partes; arquivos >=50 KB caíram para 10.
+- Em andamento: `sim/traffic.ts` por micro/meso/ônibus; `r40/buildingMesh.ts` continua por último.
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
   usa saída antecipada (≈13 s reais). A suíte completa fechou **370/370 em 66,0 s** antes da extração de regiões;
   depois dela, trânsito/defeitos/movimento 61/61 em 58,3 s. Não declarar a suíte completa verde depois de `b6f4857`
