@@ -10,6 +10,7 @@ import { PROFILES } from '../src/roads/profiles.ts';
 import { Zone } from '../src/roads/zones.ts';
 import type { NetOp } from '../src/roads/network.ts';
 import { asSeg } from '../src/core/ids.ts';
+import { VehPhase } from '../src/sim/traffic/state.ts';
 
 /** Warehouse loading docks next to the streets (as the page sends them: point, heading facing the street). */
 const DOCKS = [[-200, -100, Math.PI / 2], [60, 200, Math.PI], [200, 40, -Math.PI / 2], [-100, 60, 0]];
@@ -85,7 +86,7 @@ test('manobras perto da câmera: estacionar na vaga, sair dela, deixar passageir
         if (mc.kind[m] === MKind.Park) parkedChecked++;
       }
       // caminhão manobrando ainda na faixa: quem vem atrás espera (fila atrás dele)
-      for (let v = 0; v < tr.veh.end; v++) if (tr.veh.alive[v] && c.kind[v] === 2 && c.dying[v] === 3) {
+      for (let v = 0; v < tr.veh.end; v++) if (tr.veh.alive[v] && c.kind[v] === 2 && c.phase[v] === VehPhase.Manoeuvre) {
         let q = 0;
         for (let o = c.next[v]; o >= 0 && q < 20; o = c.next[o]) q++;
         maxQueueBehindTruck = Math.max(maxQueueBehindTruck, q);

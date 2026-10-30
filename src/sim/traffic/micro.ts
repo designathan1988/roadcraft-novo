@@ -13,7 +13,7 @@ import type { Meso } from './meso.ts';
 import type { Buses } from './buses.ts';
 import type { Junctions } from './junctions.ts';
 import type { SimLine } from './lines.ts';
-import { CROSSWALK, DWELL, JAM_SECONDS, PED_BODY, PARK_SIDE_S, RELEASE_EVERY, REJOIN, ROUTE_CAP, STARVE_SECONDS, type vehSchema } from './state.ts';
+import { CROSSWALK, DWELL, JAM_SECONDS, PED_BODY, PARK_SIDE_S, RELEASE_EVERY, REJOIN, ROUTE_CAP, STARVE_SECONDS, type vehSchema, VehPhase } from './state.ts';
 import { TERMINAL_DWELL } from './buses.ts';
 
 export interface MicroHost {
@@ -158,8 +158,8 @@ export class Micro {
   moveOnLane(v: number, lane: number, dt: number): void {
     const c = this.h.veh.cols, sim = this.h.sim;
     // manoeuvring while still in the lane: stopped there, so those behind wait (or change lanes)
-    if (c.dying[v] === 3) { c.v[v] = 0; c.brk[v] = 1; return; }
-    if (c.dying[v] === 4) { this.h.kerbStep(v, lane, dt); return; }
+    if (c.phase[v] === VehPhase.Manoeuvre) { c.v[v] = 0; c.brk[v] = 1; return; }
+    if (c.phase[v] === VehPhase.KerbStop) { this.h.kerbStep(v, lane, dt); return; }
     const L = sim.laneLen(lane);
     const p = sim.net.segs.cols.profile[laneSeg(lane)];
     // the limit, and the lane's own bend (a sharply curved road is driven slower)
@@ -173,7 +173,7 @@ export class Micro {
     let conn = -1, release = false;
     // bus: the stop is an obstacle until it halts and serves it
     let atStop = false;
-    if (c.line[v] >= 0 && !c.dying[v]) {
+    if (c.line[v] >= 0 && !c.phase[v]) {
       const ln = this.h.lines[c.line[v]];
       if (ln && ln.stopLane[c.stopI[v]] === lane) {
         const sg = ln.stopV[c.stopI[v]] - c.s[v];
@@ -188,7 +188,7 @@ export class Micro {
         }
       }
     }
-    if (c.dying[v]) { /* leaving */ }
+    if (c.phase[v]) { /* leaving */ }
     // a truck bound for a yard turns in at its gate as it drives past (tried every second: planning the reverse costs)
     else if (this.h.atDestination(v) && c.line[v] < 0 && c.kind[v] === 2 && this.h.docks.length && (this.microStep + v) % 20 === 0 && this.h.nearCam(lane) && this.h.tryDock(v, lane)) return;
     else if (this.h.atDestination(v) && c.line[v] < 0) {
@@ -196,10 +196,10 @@ export class Micro {
       // (a drop-off that drives straight on decides with room to brake for the next turn)
       let room = c.micro[v] && (c.kind[v] === 0 || c.kind[v] === 2) && this.h.nearCam(lane) ? 30 : 12;
       if (this.h.dropsOff(v)) room = Math.max(room, (c.v[v] * c.v[v]) / (2 * c.db[v]) + 25);
-      if (L - c.s[v] < room) { const r = this.h.arrive(v, lane, L - c.s[v]); if (r === 1) return; if (r === 2) c.dying[v] = 1; }
+      if (L - c.s[v] < room) { const r = this.h.arrive(v, lane, L - c.s[v]); if (r === 1) return; if (r === 2) c.phase[v] = VehPhase.Leaving; }
     } else {
       let ns = this.h.nextSeg(v);
-      if (ns < 0 && !c.dying[v]) { this.h.replanFrom(v, sim.laneTo(lane)); ns = this.h.nextSeg(v); }
+      if (ns < 0 && !c.phase[v]) { this.h.replanFrom(v, sim.laneTo(lane)); ns = this.h.nextSeg(v); }
       if (ns >= 0) conn = sim.connToward(lane, ns, c.line[v] >= 0);
       if (conn < 0) {
         // wrong lane: try to change; otherwise take any connection and replan
@@ -278,8 +278,8 @@ export class Micro {
     let a = driveAccel(c, v, c.v[v], v0, gap, vl, al, dt, stopRoom);
     // the bends ahead (this junction's turn, and the next one's after a short lane): braked for in time
     if (conn >= 0) a = Math.min(a, this.bendBrake(v, conn, L - c.s[v]));
-    if (c.dying[v]) a = Math.min(a, 0); // an arrived vehicle disappears without braking in front of others
-    if (c.pk[v] > 0 && !c.dying[v] && c.dwell[v] < 1.2) a = -9; // in the bay, waiting to pull out
+    if (c.phase[v]) a = Math.min(a, 0); // an arrived vehicle disappears without braking in front of others
+    if (c.pk[v] > 0 && !c.phase[v] && c.dwell[v] < 1.2) a = -9; // in the bay, waiting to pull out
     if (c.mv[v] >= 0) a = -9; // pulling out of the bay: held until the manoeuvre is back in the lane
     if (atStop) a = Math.min(a, -2);
     a = Math.max(-9, a);
@@ -288,12 +288,12 @@ export class Micro {
     c.exitC[v] = conn;
     c.brk[v] = a < -1.2 || nv < 0.4 ? 1 : 0;
     // pulling out of the bay: the drawing slides from the kerb to the lane (the simulation already has it in the lane)
-    if (c.pk[v] > 0 && !c.dying[v] && c.mv[v] < 0 && (c.dwell[v] += dt) > 1.2) c.pk[v] = Math.max(0, c.pk[v] - dt / PARK_SIDE_S);
+    if (c.pk[v] > 0 && !c.phase[v] && c.mv[v] < 0 && (c.dwell[v] += dt) > 1.2) c.pk[v] = Math.max(0, c.pk[v] - dt / PARK_SIDE_S);
     c.s[v] += (c.v[v] + nv) * 0.5 * dt;
     c.v[v] = nv;
     if (c.lcT[v] < 1) c.lcT[v] = Math.min(1, c.lcT[v] + dt / 2.2);
     c.lcCool[v] -= dt;
-    if (c.dying[v]) { c.fade[v] -= dt * 1.5; if (c.fade[v] <= 0) this.h.finish(v); return; }
+    if (c.phase[v]) { c.fade[v] -= dt * 1.5; if (c.fade[v] <= 0) this.h.finish(v); return; }
     if (c.fade[v] < 1) c.fade[v] = Math.min(1, c.fade[v] + dt * 1.2);
     if (nv < 0.5) c.held[v] += dt; else c.held[v] = 0;
     if (c.s[v] >= L) {

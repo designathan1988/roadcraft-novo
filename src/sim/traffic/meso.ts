@@ -177,7 +177,7 @@ export class Meso {
     const h = this.host, c = h.cols, sim = h.sim;
     let lane = c.lane[v];
     if (!sim.net.segs.alive[laneSeg(lane)]) { c.why[v] = End.Lost; h.finish(v); return; }
-    if (c.dying[v]) { h.finish(v); return; }
+    if (c.phase[v]) { h.finish(v); return; }
     // on a lane inside the window, behind drawn vehicles: it waits to fit behind them (never passes them unseen)
     if (h.laneHead[lane] >= 0 && this.inWindow(lane)) { h.materialize(lane); if (!c.micro[v]) this.schedule(v, h.time + 1); return; }
     if (h.atDestination(v)) {
@@ -185,13 +185,13 @@ export class Meso {
       if (h.dropsOff(v) && h.dropOffTrip(v, sim.laneTo(lane))) { this.schedule(v, h.time + 6); return; }
       if (c.line[v] < 0) { h.finish(v); return; }
       h.busPlan(v, sim.laneTo(lane)); // bus arrived without serving: redo the leg to the stop
-      if (c.dying[v]) { h.finish(v); return; }
+      if (c.phase[v]) { h.finish(v); return; }
     }
     let ns = h.nextSeg(v);
     if (ns < 0) {
       // route ended before the destination (truncated route): plan again from here
       h.replanFrom(v, sim.laneTo(lane));
-      if (c.dying[v]) { h.finish(v); return; }
+      if (c.phase[v]) { h.finish(v); return; }
       ns = h.nextSeg(v);
       if (ns < 0) { h.lose(v); h.finish(v); return; }
     }
@@ -206,7 +206,7 @@ export class Meso {
         c.lane[v] = lane = alt; this.link(v, alt);
       } else {
         h.replanFrom(v, node);
-        if (c.dying[v]) { h.finish(v); return; }
+        if (c.phase[v]) { h.finish(v); return; }
         ns = h.nextSeg(v);
         if (ns < 0) break;
       }

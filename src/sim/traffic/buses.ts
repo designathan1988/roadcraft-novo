@@ -5,7 +5,7 @@
 import type { Rng } from '../../core/rng.ts';
 import type { Columns } from '../../core/table.ts';
 import type { SimNet } from '../lanes.ts';
-import { End, KIND_LEN, ROUTE_CAP, type vehSchema } from './state.ts';
+import { End, KIND_LEN, ROUTE_CAP, type vehSchema, VehPhase } from './state.ts';
 import { drawDriver, archOf } from '../drivers.ts';
 import type { Router } from '../routing.ts';
 import { resolveLine, type LineSpec, type SimLine } from './lines.ts';
@@ -105,7 +105,7 @@ export class Buses {
     if (!h.veh.alive[v] || c.line[v] < 0) return;
     this.riders.delete(v); this.realRiders.delete(v);
     c.why[v] = End.NoTrip;
-    if (c.micro[v]) { c.dying[v] = 1; c.line[v] = -1; } else { c.line[v] = -1; h.despawn(v); }
+    if (c.micro[v]) { c.phase[v] = VehPhase.Leaving; c.line[v] = -1; } else { c.line[v] = -1; h.despawn(v); }
   }
 
   /** The new version `ln` (index `li`) of line `prev`: its buses, riders and those waiting, stop by stop. */
@@ -128,7 +128,7 @@ export class Buses {
     /** The first stop from old index `j` on (in the line's order) that is still there. */
     const nextKept = (j: number): number => { for (let k = 0; k < m; k++) { const i = toNew[(j + k) % m]; if (i >= 0) return i; } return 0; };
     for (const v of prevSet) {
-      if (!this.host.veh.alive[v] || c.dying[v] || c.line[v] < 0) continue;
+      if (!this.host.veh.alive[v] || c.phase[v] || c.line[v] < 0) continue;
       set.add(v);
       c.line[v] = li;
       const next = nextKept(c.stopI[v]);
@@ -151,7 +151,7 @@ export class Buses {
       const n = ln.stopLane.length;
       if (n < 2) return;
       let have = 0;
-      for (const v of this.sets[i]) if (!c.dying[v]) have++;
+      for (const v of this.sets[i]) if (!c.phase[v]) have++;
       for (let k = have; k < ln.buses; k++) this.spawnBus(i, Math.floor((k * n) / Math.max(1, ln.buses)) % n);
     });
   }
@@ -252,9 +252,9 @@ export class Buses {
   /** Route from node `from` to the current stop: arrives via the stop's lane (in the right direction). */
   busPlan(v: number, from: number): void {
     const h = this.host, c = h.veh.cols, sim = h.sim, ln = this.lines[c.line[v]];
-    if (!ln) { c.line[v] = -1; c.dying[v] = 1; return; }  // (line gone: the set has already been replaced)
+    if (!ln) { c.line[v] = -1; c.phase[v] = VehPhase.Leaving; return; }  // (line gone: the set has already been replaced)
     const target = ln.stopLane[c.stopI[v]];
-    if (!sim.net.segs.alive[laneSeg(target)]) { c.dying[v] = 1; return; }
+    if (!sim.net.segs.alive[laneSeg(target)]) { c.phase[v] = VehPhase.Leaving; return; }
     const b = sim.laneTo(target);
     const o = v * ROUTE_CAP;
     // already on the stop's lane (not served yet): it stays on it; the stop comes before the lane's end
@@ -263,7 +263,7 @@ export class Buses {
     // (planning only to its start node could leave the bus unable to turn into it, circling for ever)
     const inSeg = c.lane[v] >= 0 && sim.laneTo(c.lane[v]) === from ? laneSeg(c.lane[v]) : -1;
     const n = h.router.route(from, b, h.routes, o, ROUTE_CAP, false, inSeg, ln.mode > 0, -1, true, laneSeg(target));
-    if (n < 2) { c.dying[v] = 1; return; }
+    if (n < 2) { c.phase[v] = VehPhase.Leaving; return; }
     // (a truncated route goes on and is planned again at its end)
     c.rLen[v] = n; c.rIdx[v] = 0; c.dest[v] = h.routes[o + n - 1];
   }

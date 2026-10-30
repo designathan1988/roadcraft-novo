@@ -18,7 +18,7 @@ import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
 import { stripAt } from './probe.ts';
 import { archOf, drawDriver } from './drivers.ts';
-import { BODY_HALF_W, CAR_STYLE_LEN, CROSSWALK, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema } from './traffic/state.ts';
+import { BODY_HALF_W, CAR_STYLE_LEN, CROSSWALK, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema, VehPhase } from './traffic/state.ts';
 export { CAR_STYLE_LEN, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, INSPECT_STRIDE, ROUTE_CAP, WAGONS, WAGON_LEN } from './traffic/state.ts';
 import { LaneChanges } from './traffic/laneChanges.ts';
 import { BUS_CAP, Buses } from './traffic/buses.ts';
@@ -249,7 +249,7 @@ export class Traffic {
       const v = this.micro[i];
       if (!c.has[v] || Math.hypot(c.px[v] - x, c.pz[v] - z) > r) continue;
       // parking: already out of the lane, just fade it (`stepParkers` finishes it)
-      if (c.dying[v] !== 2) c.dying[v] = 1;
+      if (c.phase[v] !== VehPhase.Parked) c.phase[v] = VehPhase.Leaving;
       if (c.why[v] === End.Arrived) c.why[v] = End.Lost;
       c.fade[v] = Math.min(c.fade[v], 0.3); n++;
     }
@@ -509,7 +509,7 @@ export class Traffic {
     const c = this.veh.cols;
     for (let i = 0; i < this.microN; i++) {
       const v = this.micro[i];
-      if (c.dying[v] !== 4 || c.lane[v] < 0) continue;
+      if (c.phase[v] !== VehPhase.KerbStop || c.lane[v] < 0) continue;
       this.sim.lanePoint(c.lane[v], c.s[v], p);
       list.push(p[0], p[2], 4, Math.min(1, c.dwell[v] / 6));
     }
@@ -628,7 +628,7 @@ export class Traffic {
     this.centrePose(lane, bayFront, len, du, b);
     const m = this.mvs.start(v, MKind.Park, a[0], a[2], a[3], b[0], b[2], b[3], a[1], 5, 12);
     if (m < 0) { this.releaseSpot(v); return false; }
-    c.mv[v] = m; c.ms[v] = bayFront; c.dying[v] = 3; c.dwell[v] = 0; c.pk[v] = 0;
+    c.mv[v] = m; c.ms[v] = bayFront; c.phase[v] = VehPhase.Manoeuvre; c.dwell[v] = 0; c.pk[v] = 0;
     return true;
   }
 
@@ -644,7 +644,7 @@ export class Traffic {
     const yaw = d[best + 2], bx = d[best] + Math.sin(yaw) * len / 2, bz = d[best + 1] + Math.cos(yaw) * len / 2;
     const m = this.mvs.start(v, MKind.Dock, a[0], a[2], a[3], bx, bz, yaw, a[1], 9, 45);
     if (m < 0) { this.releaseSpot(v); return false; }
-    c.mv[v] = m; c.ms[v] = -1; c.dying[v] = 3; c.dwell[v] = 0;
+    c.mv[v] = m; c.ms[v] = -1; c.phase[v] = VehPhase.Manoeuvre; c.dwell[v] = 0;
     this.docked++;
     return true;
   }
@@ -664,14 +664,14 @@ export class Traffic {
     this.arrived++; this.kerbStops++;
     c.dest[v] = b;
     this.replanFrom(v, node);
-    return !c.dying[v];
+    return !c.phase[v];
   }
 
   private tryKerbStop(v: number, lane: number): boolean {
     const c = this.veh.cols;
     if (laneIdx(lane) !== 0 || !this.dropsOff(v)) return false;
     if (!PROFILE_INFO[this.sim.net.segs.cols.profile[laneSeg(lane)]].walk) return false;
-    c.dying[v] = 4; c.dwell[v] = 0; c.served[v] = 0;
+    c.phase[v] = VehPhase.KerbStop; c.dwell[v] = 0; c.served[v] = 0;
     return true;
   }
 
@@ -701,8 +701,8 @@ export class Traffic {
     }
     if (c.dwell[v] > 6) {
       // the passenger is out: that trip ended; the car pulls out on another (the bay-leaving slide takes it back)
-      c.dying[v] = 0; c.served[v] = 0; c.dwell[v] = 1.3;
-      if (!this.dropOffTrip(v, sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; c.dying[v] = 1; }
+      c.phase[v] = VehPhase.Driving; c.served[v] = 0; c.dwell[v] = 1.3;
+      if (!this.dropOffTrip(v, sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; c.phase[v] = VehPhase.Leaving; }
     }
   }
 
@@ -716,7 +716,7 @@ export class Traffic {
       const lane = c.lane[v];
       if (!c.micro[v] || lane < 0 || !sim.net.segs.alive[laneSeg(lane)]) {
         this.mvs.end(m); c.mv[v] = -1;
-        if (c.dying[v] === 3) this.lose(v);
+        if (c.phase[v] === VehPhase.Manoeuvre) this.lose(v);
         continue;
       }
       const kind = mc.kind[m];
@@ -727,14 +727,14 @@ export class Traffic {
         if (done) { this.mvs.end(m); c.mv[v] = -1; c.s[v] = Math.min(sim.laneLen(lane) - 0.5, c.ms[v]); c.pk[v] = 0; c.dwell[v] = 9; }
         continue;
       }
-      if (c.dying[v] !== 3) continue;
+      if (c.phase[v] !== VehPhase.Manoeuvre) continue;
       this.mvs.pose(m, p);
       this.centrePose(lane, c.s[v], c.len[v], 0, q);
       const lat = Math.abs((p[0] - q[0]) * Math.cos(q[3]) - (p[1] - q[2]) * Math.sin(q[3]));
       if (done || lat > (kind === MKind.Dock ? 3.2 : 1.8)) {
         this.unlink(v);
         this.setLaneCount(lane, -1);
-        c.dying[v] = 2; c.dwell[v] = 0;
+        c.phase[v] = VehPhase.Parked; c.dwell[v] = 0;
         this.parkers.add(v);
       }
     }
@@ -751,7 +751,7 @@ export class Traffic {
     if (Number.isNaN(pu)) return false;
     this.unlink(v);
     this.setLaneCount(lane, -1);
-    c.dying[v] = 2; c.dwell[v] = 0; c.pk[v] = 0;
+    c.phase[v] = VehPhase.Parked; c.dwell[v] = 0; c.pk[v] = 0;
     this.parkers.add(v);
     return true;
   }
@@ -1090,7 +1090,7 @@ export class Traffic {
     c.vf[v] = drawDriver(c, v, archOf(kind, style), this.sample);
     c.lane[v] = -1; c.conn[v] = -1; c.cameBy[v] = -1;
     c.brk[v] = 0; c.exitC[v] = -1; c.pk[v] = 0; c.mv[v] = -1; c.ms[v] = 0;
-    c.micro[v] = 0; c.dying[v] = 0; c.fade[v] = 1; c.has[v] = 0;
+    c.micro[v] = 0; c.phase[v] = VehPhase.Driving; c.fade[v] = 1; c.has[v] = 0;
     c.next[v] = c.prev[v] = -1; c.lcFrom[v] = -1; c.lcT[v] = 1; c.lcCool[v] = this.rng.next() * 2;
     c.v[v] = 0;
     c.line[v] = -1; c.stopI[v] = 0; c.dwell[v] = 0; c.load[v] = 0; c.served[v] = 0; c.wait[v] = 0;
@@ -1101,7 +1101,7 @@ export class Traffic {
   private lose(v: number): void {
     const c = this.veh.cols;
     if (c.why[v] === End.Arrived) c.why[v] = End.Lost;
-    if (c.dying[v] !== 2) c.dying[v] = 1;
+    if (c.phase[v] !== VehPhase.Parked) c.phase[v] = VehPhase.Leaving;
   }
 
   /** The vehicle leaves the simulation and its trip is counted (arrived or lost; a bus is not a trip). */
@@ -1118,10 +1118,10 @@ export class Traffic {
     if (c.line[v] >= 0) this.buses.forget(v);
     this.wagonPrev.delete(v);
     if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
-    const parked = c.dying[v] === 2;
+    const parked = c.phase[v] === VehPhase.Parked;
     if (c.micro[v]) { if (!parked) this.unlink(v); this.removeMicro(v); }
     if (c.lane[v] >= 0 && !parked) this.setLaneCount(c.lane[v], -1);
-    if (parked) { this.parkers.delete(v); c.dying[v] = 1; }
+    if (parked) { this.parkers.delete(v); c.phase[v] = VehPhase.Leaving; }
     c.lane[v] = -1; c.conn[v] = -1;
     c.tExit[v] = -1;
     this.veh.release(v);
@@ -1326,15 +1326,15 @@ export class Traffic {
     for (const n of this.windowSignals) this.sig.setActive(n, true);
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
-      if (c.conn[v] >= 0 || c.dying[v] === 2) continue;
+      if (c.conn[v] >= 0 || c.phase[v] === VehPhase.Parked) continue;
       const lane = c.lane[v];
       if (this.inWindowOut(lane)) continue;
       // what only exists near the camera ends here, counted: a drop-off at the kerb finishes its trip and the car goes
       // on to the next; a car or truck manoeuvring into its bay or dock has arrived; one fading out leaves
       if (c.mv[v] >= 0) { this.mvs.end(c.mv[v]); c.mv[v] = -1; }
-      if (c.dying[v] === 3 || c.dying[v] === 1) { this.finish(v); continue; }
-      if (c.dying[v] === 4) {
-        c.dying[v] = 0; c.served[v] = 0;
+      if (c.phase[v] === VehPhase.Manoeuvre || c.phase[v] === VehPhase.Leaving) { this.finish(v); continue; }
+      if (c.phase[v] === VehPhase.KerbStop) {
+        c.phase[v] = VehPhase.Driving; c.served[v] = 0;
         if (!this.dropOffTrip(v, this.sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; this.finish(v); continue; }
       }
       c.pk[v] = 0;
@@ -1363,7 +1363,7 @@ export class Traffic {
     const free = laneSpeed(sim.net.segs.cols.profile[laneSeg(lane)]);
     for (let v = this.mesoHead[lane]; v >= 0;) {
       const next = c.mnext[v];
-      if (c.dying[v]) { this.finish(v); v = next; continue; }
+      if (c.phase[v]) { this.finish(v); v = next; continue; }
       const span = c.tExit[v] - c.tIn[v];
       const est = span > 0 ? c.s0[v] + (L - c.s0[v]) * Math.min(1, Math.max(0, (this.time - c.tIn[v]) / span)) : L;
       // (one that has just come in stands at the start of the lane, whole)
@@ -1493,7 +1493,7 @@ export class Traffic {
       }
       if (c.pk[v] > 0 || c.mv[v] >= 0) flags |= INSPECT_BAY;
       if (c.pass[v]) flags |= INSPECT_PASS; // over its line with the way open: it is not an approach violation
-      if (c.dying[v]) flags |= INSPECT_LEAVING;
+      if (c.phase[v]) flags |= INSPECT_LEAVING;
       if (c.line[v] >= 0 && c.dwell[v] > 0) flags |= INSPECT_STOP;
       if (c.lcT[v] < 1) flags |= INSPECT_CHANGING;
       const [strip, fromEnd] = stripAt(sim, p[0], p[2]);
@@ -1660,7 +1660,7 @@ export class Traffic {
     const dx = ahead[0] - behind[0], dz = ahead[2] - behind[2];
     if (dx * dx + dz * dz > 1e-6) p[3] = Math.atan2(dx, dz);
     p[0] = mid[0]; p[1] = mid[1]; p[2] = mid[2];
-    if (c.dying[v] === 4 && c.conn[v] < 0) {
+    if (c.phase[v] === VehPhase.KerbStop && c.conn[v] < 0) {
       // at the kerb: 0.9 m to the right, hazard lights while stopped
       const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
       p[0] -= Math.cos(p[3]) * 0.9 * k; p[2] += Math.sin(p[3]) * 0.9 * k;
@@ -1672,7 +1672,7 @@ export class Traffic {
       const du = (parkU(sim.net.segs.cols.profile[laneSeg(lane)], dir) - sim.laneU(lane)) * dir;
       const k = c.pk[v] * c.pk[v] * (3 - 2 * c.pk[v]);
       if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
-      if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
+      if (c.phase[v] === VehPhase.Parked ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.phase[v] === VehPhase.Parked ? LIGHT_RIGHT : LIGHT_LEFT;
     }
     return lights;
   }

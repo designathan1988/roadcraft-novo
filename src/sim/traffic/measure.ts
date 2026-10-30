@@ -3,11 +3,12 @@
 
 import { laneCount, laneDir, laneId, laneSeg, laneSpeed, type SimNet } from '../lanes.ts';
 import { JAMMED } from './regions.ts';
+import { VehPhase } from './state.ts';
 
 /** The columns and arrays the measurement reads (all owned by Traffic). */
 export interface MeasureHost {
   readonly cols: {
-    v: Float32Array; conn: Int32Array; lane: Int32Array; dying: Uint8Array; next: Int32Array;
+    v: Float32Array; conn: Int32Array; lane: Int32Array; phase: Uint8Array; next: Int32Array;
     mnext: Int32Array; wait: Float32Array; tExit: Float64Array;
   };
   readonly micro: Int32Array;
@@ -49,7 +50,7 @@ export class Measure {
     let stopped = h.jammedNow;
     for (let i = 0; i < h.microN; i++) {
       const v = h.micro[i];
-      if (c.v[v] >= 0.5 || c.conn[v] >= 0 || c.lane[v] < 0 || c.dying[v] === 2) continue;
+      if (c.v[v] >= 0.5 || c.conn[v] >= 0 || c.lane[v] < 0 || c.phase[v] === VehPhase.Parked) continue;
       const sg = laneSeg(c.lane[v]), fwd = laneDir(c.lane[v]) > 0, lanes = laneCount(sc.profile[sg], fwd ? 1 : -1);
       if (h.segLoad[sg * 2 + (fwd ? 0 : 1)] < JAMMED * lanes * sc.len[sg] / 7.5) stopped++;
     }

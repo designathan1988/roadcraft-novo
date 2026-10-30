@@ -55,7 +55,7 @@ export const vehSchema = {
   tExit: Float64Array,
   next: Int32Array, prev: Int32Array, // lane/connection list (micro), front to back
   px: Float32Array, py: Float32Array, pz: Float32Array, pyaw: Float32Array, has: Uint8Array,
-  fade: Float32Array, dying: Uint8Array,
+  fade: Float32Array, phase: Uint8Array,
   lcFrom: Int32Array, lcT: Float32Array, lcCool: Float32Array,
   microIdx: Int32Array,
   // bus: line (-1 = ordinary car), next stop, dwell time, load, stop already served
@@ -88,3 +88,10 @@ export const vehSchema = {
 
 /** How a vehicle's trip ends: arrived, lost (no route, its road removed, an explosion), or no trip at all (a bus). */
 export const End = { Arrived: 0, Lost: 1, NoTrip: 2 } as const;
+/**
+ * Where a vehicle is in its life (the `phase` column). Driving: on its lane or a connection. Manoeuvre: pulling into
+ * a parking bay or a loading dock, still in its lane's list. Parked: out of the lane (in the bay or at the dock), it
+ * stays a moment and disappears. KerbStop: stopped at the kerb while a passenger gets out. Leaving: its trip ended;
+ * it fades out where it is.
+ */
+export const VehPhase = { Driving: 0, Leaving: 1, Parked: 2, Manoeuvre: 3, KerbStop: 4 } as const;

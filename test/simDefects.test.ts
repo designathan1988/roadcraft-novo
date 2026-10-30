@@ -7,6 +7,7 @@ import type { SimNet } from '../src/sim/lanes.ts';
 import { ROUTE_CAP, type Traffic } from '../src/sim/traffic.ts';
 import { gridCity, inner, traffic } from './simCity.ts';
 import { asNode, asSeg } from '../src/core/ids.ts';
+import { VehPhase } from '../src/sim/traffic/state.ts';
 
 /** A connection whose two lanes are both long enough to hold a queue. */
 function someConn(sim: SimNet): number {
@@ -118,7 +119,7 @@ test('C9: the page sending the same bus lines again (after any road edit or zone
   tr.setLines(spec);
   for (let i = 0; i < 20 * 240; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
   const T = inner(tr), c = tr.veh.cols;
-  const buses = [...T.buses.sets[0] as Set<number>].filter((v) => !c.dying[v]);
+  const buses = [...T.buses.sets[0] as Set<number>].filter((v) => !c.phase[v]);
   const riders = buses.map((v) => [...(T.buses.riders.get(v) ?? [])].reduce((a: number, b: number) => a + b, 0));
   // background demand accrues lazily (at each visit): waiting now = waiting + arrivals since the last visit
   const waitingNow = () => tr.lines[0].waiting.map((w, i) => Math.min(120, w + (tr.time - tr.lines[0].lastT[i]) / 9));
@@ -127,7 +128,7 @@ test('C9: the page sending the same bus lines again (after any road edit or zone
   assert.ok(waiting.some((w) => w > 1), 'people waiting at the stops');
   tr.setLines(spec.map((l) => ({ ...l, stops: [...l.stops] })));
   for (const v of buses) {
-    assert.ok(tr.veh.alive[v] && !c.dying[v] && c.line[v] === 0 && T.buses.sets[0].has(v), `bus ${v} was removed by the resend`);
+    assert.ok(tr.veh.alive[v] && !c.phase[v] && c.line[v] === 0 && T.buses.sets[0].has(v), `bus ${v} was removed by the resend`);
   }
   const after = buses.map((v) => [...(T.buses.riders.get(v) ?? [])].reduce((a: number, b: number) => a + b, 0));
   assert.deepEqual(after.map(Math.round), riders.map(Math.round), 'riders kept');
@@ -135,7 +136,7 @@ test('C9: the page sending the same bus lines again (after any road edit or zone
   // the player removes the middle stop: the same buses go on, with every rider, on the shorter line
   const total = buses.reduce((a, v) => a + [...(T.buses.riders.get(v) ?? [])].reduce((x: number, y: number) => x + y, 0), 0);
   tr.setLines([{ ...spec[0], stops: [-120, -189, 0, 189] }]);
-  for (const v of buses) assert.ok(tr.veh.alive[v] && !c.dying[v] && T.buses.sets[0].has(v) && c.stopI[v] < tr.lines[0].stopLane.length, `bus ${v} after removing a stop`);
+  for (const v of buses) assert.ok(tr.veh.alive[v] && !c.phase[v] && T.buses.sets[0].has(v) && c.stopI[v] < tr.lines[0].stopLane.length, `bus ${v} after removing a stop`);
   const total2 = buses.reduce((a, v) => a + [...(T.buses.riders.get(v) ?? [])].reduce((x: number, y: number) => x + y, 0), 0);
   assert.ok(Math.abs(total2 - total) < 1e-6, `riders ${total} before, ${total2} after`);
 });
@@ -282,7 +283,7 @@ test('C15: trips that end without reaching their destination are counted as lost
   for (let i = 0; i < 20 * 60; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
   // the segment with most vehicles on it (near the camera: in the lists) is demolished
   const c = tr.veh.cols, on = new Map<number, number>();
-  for (let i = 0; i < tr.microN; i++) { const v = tr.micro[i]; if (c.conn[v] < 0 && c.lane[v] >= 0 && !c.dying[v] && c.line[v] < 0) on.set(laneSeg(c.lane[v]), (on.get(laneSeg(c.lane[v])) ?? 0) + 1); }
+  for (let i = 0; i < tr.microN; i++) { const v = tr.micro[i]; if (c.conn[v] < 0 && c.lane[v] >= 0 && !c.phase[v] && c.line[v] < 0) on.set(laneSeg(c.lane[v]), (on.get(laneSeg(c.lane[v])) ?? 0) + 1); }
   const [seg, cars] = [...on].sort((a, b) => b[1] - a[1])[0];
   assert.ok(cars >= 2, `cars on the busiest segment: ${cars}`);
   const arrived = tr.arrived, lost = tr.lost;
@@ -331,7 +332,7 @@ test('C16: a new road that reuses a demolished one\'s id does not inherit its fa
   for (let k = 0; k < 16; k++) {
     const l = seg * 16 + k, c = tr.veh.cols;
     let n = 0;
-    for (let v = 0; v < tr.veh.end; v++) if (tr.veh.alive[v] && c.lane[v] === l && c.dying[v] !== 2) n++;
+    for (let v = 0; v < tr.veh.end; v++) if (tr.veh.alive[v] && c.lane[v] === l && c.phase[v] !== VehPhase.Parked) n++;
     assert.equal(tr.laneCount[l], n, `lane ${k}: count ${tr.laneCount[l]}, vehicles ${n}`);
   }
 });
@@ -345,7 +346,7 @@ test('C17: upgrading a road keeps the vehicles that are on it', async () => {
     const tr = traffic(sim, camX, 0);
     tr.density = 1 / 15;
     for (let i = 0; i < 20 * 90; i++) { tr.step(0.05); if (i % 10 === 0) tr.checkWindow(); }
-    const seg = busiest(tr), cars = onSeg(tr, seg).all.filter((v) => !tr.veh.cols.dying[v]);
+    const seg = busiest(tr), cars = onSeg(tr, seg).all.filter((v) => !tr.veh.cols.phase[v]);
     assert.ok(cars.length >= 2, `vehicles on the busiest segment: ${cars.length}`);
     const to = sim.net.segs.cols.profile[seg] === 3 ? 0 : 3;
     w.roads.setProfile(asSeg(seg), to);
@@ -353,7 +354,7 @@ test('C17: upgrading a road keeps the vehicles that are on it', async () => {
     syncNet(sim, tr);
     const c = tr.veh.cols;
     for (const v of cars) {
-      assert.ok(tr.veh.alive[v] && !c.dying[v], `vehicle ${v} disappeared with the upgrade (camera ${camX ? 'away' : 'near'})`);
+      assert.ok(tr.veh.alive[v] && !c.phase[v], `vehicle ${v} disappeared with the upgrade (camera ${camX ? 'away' : 'near'})`);
       const l = c.conn[v] >= 0 ? sim.conns.cols.to[c.conn[v]] : c.lane[v];
       assert.ok((l & 7) < laneCount(to, (l & 8) ? -1 : 1), `vehicle ${v} on lane ${l & 7} of ${laneCount(to, (l & 8) ? -1 : 1)}`);
     }
@@ -523,9 +524,9 @@ test('C18: a car pulling up at the kerb stops behind the car ahead, not inside i
   // a stopped car, and right behind it a car at 12 m/s that starts its kerb stop (4 m of gap)
   const ahead = place(tr, lane, 30, k.to[conn], true);
   const c = tr.veh.cols;
-  c.v[ahead] = 0; c.dying[ahead] = 3; // held in place (as a car parking)
+  c.v[ahead] = 0; c.phase[ahead] = VehPhase.Manoeuvre; // held in place (as a car parking)
   const v = place(tr, lane, 30 - 4.4 - 4, k.to[conn], true);
-  c.v[v] = 12; c.dying[v] = 4; c.dwell[v] = 0;
+  c.v[v] = 12; c.phase[v] = VehPhase.KerbStop; c.dwell[v] = 0;
   let worst = 99;
   for (let i = 0; i < 20 * 5; i++) { tr.step(0.05); worst = Math.min(worst, c.s[ahead] - c.len[ahead] - c.s[v]); }
   assert.ok(worst > 0, `the car at the kerb ran ${(-worst).toFixed(1)} m into the car ahead`);
@@ -633,13 +634,13 @@ test('C42: a car stopped at the kerb when the camera leaves finishes its drop-of
   const k = sim.conns.cols, conn = someConn(sim), lane = k.from[conn];
   const v = place(tr, lane, 20, k.to[conn], true);
   const c = tr.veh.cols;
-  c.v[v] = 0; c.dying[v] = 4; c.dwell[v] = 2; c.served[v] = 1; // passenger getting out
+  c.v[v] = 0; c.phase[v] = VehPhase.KerbStop; c.dwell[v] = 2; c.served[v] = 1; // passenger getting out
   const arrived = tr.arrived, lost = tr.lost;
   tr.camX = 8000; tr.camZ = 8000; tr.checkWindow();
   for (let i = 0; i < 20 * 5; i++) tr.step(0.05);
   assert.equal(tr.lost, lost, 'counted as a lost trip');
   assert.equal(tr.arrived, arrived + 1, `the drop-off trip was not counted (arrived ${arrived} → ${tr.arrived})`);
-  assert.ok(tr.veh.alive[v] && !c.dying[v], 'the car did not drive on to its next trip');
+  assert.ok(tr.veh.alive[v] && !c.phase[v], 'the car did not drive on to its next trip');
 });
 
 test('C34: a car leaving a junction moves once per step, not twice', () => {
