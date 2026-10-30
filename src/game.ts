@@ -46,14 +46,12 @@ import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
 import { BOMB_START } from './shared/contracts/bomb.ts';
-import { dropBomb } from './features/demolition/bomb.ts';
+import { Demolition } from './features/demolition/demolition.ts';
 import { demandFactor, zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
 import { InsideView } from './render/inside.ts';
-import { Blast } from './render/blast.ts';
-import { struckItem, throwItem, throwVehicle } from './render/blast/thrown.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
 import { lotAt, lotToWorld, polygonLot } from './world/lotEdit.ts';
@@ -229,9 +227,8 @@ export class Game {
   /** Inside view: the building and the floor shown. */
   private inside = new InsideView();
   private textSigns!: TextSigns;
-  private blast!: Blast;
-  /** The terrain's height (the blast's pieces land on it). */
-  private groundAt = (x: number, z: number) => heightAt(this.world.heights, x, z);
+  /** The bomb: explosion, breaking buildings and what it throws (features/demolition). */
+  private demolition!: Demolition;
   private shakeOffset = new THREE.Vector3();
   /** People from the creator and the bomb strength. */
   private personSpec = { color: 3, height: 7, walk: false, count: 1 };
@@ -549,11 +546,14 @@ export class Game {
     scene.add(this.transitView.group);
     scene.add(this.weather.group);
     this.particles = new Particles(this.world);
-    this.blast = new Blast(this.vehicles.wreckModels, (x, y, z, kind, strength, seconds) => this.particles.burst(x, y, z, kind, strength, seconds), this.groundAt);
+    this.demolition = new Demolition({
+      world: this.world, vehicles: this.vehicles, burst: (x, y, z, kind, strength, seconds) => this.particles.burst(x, y, z, kind, strength, seconds),
+      push: (cmd) => this.commands.push(cmd), sim: { postMessage: (msg) => this.sim.postMessage(msg) }, hud: this.hud, ambient: this.ambient, flash: flashU,
+    });
     scene.add(this.particles.mesh);
     scene.add(this.cloudView.mesh);
     scene.add(this.inside.group);
-    scene.add(this.blast.group);
+    scene.add(this.demolition.group);
     this.textSigns = new TextSigns(this.world, this.world.signTexts);
     scene.add(this.textSigns.group);
     this.itemTool.onText = (text, x, z, seg, street) => {
@@ -577,7 +577,8 @@ export class Game {
     const warm = new THREE.Group();
     for (const l of this.layers) warm.add(l.warmupMesh());
     warm.add(this.textSigns.warmup());
-    this.blast.warm(true);
+    this.demolition.warm(true);
+    this.particles.warm(true);
     scene.add(warm);
     for (const m of [this.preview.mesh, this.preview.marker, this.preview.circle]) m.visible = true;
     this.inside.warm(); // compiles the inside-view materials at load
@@ -620,7 +621,8 @@ export class Game {
     await this.warmPost();
     scene.remove(warm);
     warm.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
-    this.blast.warm(false);
+    this.demolition.warm(false);
+    this.particles.warm(false);
     this.preview.hideAll();
     this.inside.hide();
     this.transitView.showPaths = false;
@@ -710,7 +712,7 @@ export class Game {
 
     this.rig.update(dt);
     // an explosion shakes the camera for a moment (4.0 renderer.ts: a random offset each frame, gone the next)
-    const shake = this.blast.shake();
+    const shake = this.demolition.shake();
     if (shake > 0) {
       this.rig.camera.position.add(this.shakeOffset.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(shake));
       this.rig.camera.updateMatrixWorld();
@@ -734,7 +736,7 @@ export class Game {
     setTimeOfDay(this.parts, light, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
     this.particles.update(dt, this.rig.eye);
     this.textSigns.update(this.rig.eye);
-    this.blast.update(dt);
+    this.demolition.update(dt);
     if (flashU.value > 0) { this.parts.hemi.intensity += flashU.value * 4; this.parts.hemi.color.lerp(FLASH_COLOR, flashU.value * 0.6); }
     {
       const st = this.simStats?.type === 'stats' ? this.simStats : null;
@@ -782,7 +784,7 @@ export class Game {
     // Drawn only when something visible can change: the camera, the simulation or the clock running, input, meshes
     // arriving, weather. Paused and idle, after STILL_FRAMES (the anti-aliasing settles) nothing is drawn; water and
     // leaves stand still until something moves.
-    const live = !this.paused || now - this.lastInput < 800 || !this.pool.isIdle() || this.generating || rainU.value > 0.01 || flashU.value > 0 || this.blast.active()
+    const live = !this.paused || now - this.lastInput < 800 || !this.pool.isIdle() || this.generating || rainU.value > 0.01 || flashU.value > 0 || this.demolition.active()
       || !this.drawnView.equals(cam.matrixWorld) || !this.drawnProj.equals(cam.projectionMatrix);
     this.stillFrames = live ? 0 : this.stillFrames + 1;
     this.drawnView.copy(cam.matrixWorld);
@@ -818,7 +820,7 @@ export class Game {
       if (this.props.changed || this.layers.some((l) => l.changed)) this.post.invalidateShadows();
       this.props.changed = false;
       this.post.setCamera(cam);
-      this.post.render(!this.paused || windU.value > 0.001 || this.blast.moving());
+      this.post.render(!this.paused || windU.value > 0.001 || this.demolition.moving());
     }
     else renderer.render(scene, cam);
     // measurement (?perf): frames over 30 ms say where the time went
@@ -1149,10 +1151,10 @@ export class Game {
     if (compile) {
       this.hud.showLoading(t('game.loading.options'));
       // the explosion's pieces: shadows switched on are 3 more pipelines for them (compiled here, not at the next bomb)
-      this.blast.warm(true);
+      this.demolition.warm(true);
       await renderer.compileAsync(scene, this.rig.persp);
       await this.warmPost();
-      this.blast.warm(false);
+      this.demolition.warm(false);
       this.hud.hideLoading();
     }
   }
@@ -1514,24 +1516,7 @@ export class Game {
 
   /** Bomb: the feature owns the world change and the effect context; the page only wires them. */
   private bomb(x: number, z: number): void {
-    dropBomb({
-      world: this.world,
-      push: (cmd) => this.commands.push(cmd),
-      blast: this.blast,
-      thrown: {
-        item: (type, ix, g, iz, bx, bz, r) => throwItem(this.blast, type, ix, g, iz, bx, bz, r),
-        struck: struckItem,
-        vehicle: (model, vx, vy, vz, yaw, paint, bx, bz, r) => throwVehicle(this.blast, model, vx, vy, vz, yaw, paint, bx, bz, r),
-      },
-      vehiclesNear: (vx, vz, r, out) => this.vehicles.vehiclesNear(vx, vz, r, out),
-      particles: this.particles,
-      sim: { postMessage: (msg) => this.sim.postMessage(msg) },
-      hud: this.hud,
-      ambient: this.ambient,
-      flash: flashU,
-      force: this.bombForce,
-      setHitKind: (kind) => { this.hitKind = kind; },
-    }, x, z);
+    this.demolition.bomb(x, z, this.bombForce, this.rig.camera.position, (kind) => { this.hitKind = kind; });
   }
 
   private onHit(people: number, vehicles: number): void {
@@ -1799,7 +1784,7 @@ export class Game {
     for (const l of this.layers) l.reset();
     this.props.clear();
     // the last city's wrecks, craters and soot
-    this.blast.clear();
+    this.demolition.clear();
     this.transit.clear();
     this.commands.clear();
     this.clouds = []; this.cloudView.set([]);

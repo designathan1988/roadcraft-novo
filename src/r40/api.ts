@@ -9,7 +9,10 @@ export { COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT } from './render/
 export { POSE_FLOATS } from './render/buildings/partPose.ts';
 export { LOOK_FLOATS } from './render/buildings/shellParts.ts';
 export { FINISHES, roofMaterial, wallMaterial } from './world/buildings/materials.ts';
-export { levelElevation, levelHeight } from './world/buildings/geometry.ts';
+export { levelElevation, levelHeight, localToWorld, volumeElevation } from './world/buildings/geometry.ts';
+export { floorHeight } from './world/buildings/foundation.ts';
+export { interiorFurniture } from './render/buildings/buildingMesh.ts';
+export { createFurnitureGeometries } from './render/buildings/furnitureKit.ts';
 export type { PartKind } from './render/buildings/kit.ts';
 export type { Building, RoofKind } from './world/buildings/types.ts';
 export type { BuildingChunk } from './render/buildings/chunk.ts';

@@ -4,13 +4,13 @@
 // into this engine's mesh: the shell's faces with their paint and finish (the finishes texture array), and the parts
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
-import { Rng, madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
+import { Rng, madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
 import type { BufferGeometry } from 'three';
 import { FIN } from './buildingFinishes.ts';
 import { MeshBuilder } from './meshBuilder.ts';
 
 /** Building materials as the generator writes them (jobs/buildingGen.ts BMAT). */
-const MAT = { Wall: 0, Plain: 4, Metal: 5, Grass: 7, WinGlass: 10 } as const;
+const MAT = { Wall: 0, Plain: 4, Metal: 5, Grass: 7, WinGlass: 10, Indoor: 11 } as const;
 
 /** A 4.0 finish name -> this engine's finish id (high nibble of the material byte). */
 const FIN_OF: Record<string, number> = {
@@ -36,6 +36,21 @@ export const COARSE_PARTS = new Set<string>(['glass', 'glassDark', 'water']);
 const SKIPPED = new Set<string>(['wash']);
 
 let models: Record<PartKind, BufferGeometry> | null = null;
+
+/**
+ * A ruin's source (features/demolition/ruin): the panes stay in the shell's mesh, each pane tagged with its own group
+ * (PART_GROUP + n in the vertex tag) so the cut keeps it whole; every other part and the furniture inside go to `attach`
+ * as instances of the kit's models (kind, pose of POSE_FLOATS, sRGB colour), and the storeys' slabs are laid. Set by
+ * the ruin's worker while it lays one building.
+ */
+export type AttachSink = (kind: string, pose: Float32Array, at: number, rgb: number) => void;
+let attach: AttachSink | null = null;
+export function setRuinSource(sink: AttachSink | null): void { attach = sink; }
+const wholeParts = (): boolean => attach !== null;
+/** Vertex tag of a whole part (features/demolition/ruin/fracture.ts PART_GROUP). */
+const PART_GROUP = 0x8000;
+/** The base colour a part kind's instance colour tints (PART_LOOK), as sRGB. */
+export function partBase(kind: string): number { return PART_LOOK[kind as PartKind]?.[0] ?? 0xffffff; }
 
 /** An IEEE half float's bits -> its number. */
 function half(h: number): number {
@@ -203,7 +218,17 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
     if (!parts) continue;
     models ??= partGeometries();
     for (const [kind, batch] of Object.entries(chunk.parts) as Array<[PartKind, typeof chunk.parts[PartKind]]>) {
-      if (!batch || batch.count === 0 || SKIPPED.has(kind) || !COARSE_PARTS.has(kind)) continue;
+      if (!batch || batch.count === 0 || SKIPPED.has(kind) || kind === 'water') continue;
+      if (!COARSE_PARTS.has(kind)) {
+        // a ruin's parts: instances of the kit's model, tinted as the cell's pool tints them
+        if (attach) {
+          const coloured = COLOURED_PARTS.has(kind) && batch.colours;
+          for (let i = 0; i < batch.count; i++) {
+            attach(kind, batch.poses, i * POSE_FLOATS, coloured ? hexOf(batch.colours![i * 3], batch.colours![i * 3 + 1], batch.colours![i * 3 + 2]) : 0xffffff);
+          }
+        }
+        continue;
+      }
       const g = models[kind];
       if (!g) continue;
       const pos = g.getAttribute('position'), nor = g.getAttribute('normal'), uv = g.getAttribute('uv'), vc = g.getAttribute('color');
@@ -225,6 +250,8 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
           parts.curFac[0] = paneRow; parts.curFac[1] = (lot.seed + i * 7) & 255;
           parts.curFac[2] = 0; parts.curFac[3] = Math.min(127, Math.max(1, Math.round(Math.abs(sx) * 10))) * 2;
         } else parts.curFac[3] = 0;
+        const ownTag = parts.curTag;
+        if (wholeParts()) parts.curTag = PART_GROUP | (laidParts & 0x7fff);
         const base = parts.v;
         for (let v = 0; v < pos.count; v++) {
           const lx = pos.getX(v) * sx, ly = pos.getY(v) * sy, lz = pos.getZ(v) * sz;
@@ -251,11 +278,13 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
         if (idx) for (let t = 0; t < idx.count; t += 3) tri(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
         else for (let t = 0; t < pos.count; t += 3) tri(t, t + 1, t + 2);
         parts.curU = 0;
+        parts.curTag = ownTag;
         laidParts++;
       }
     }
     parts.curFac[3] = 0;
   }
+  if (shell && attach) layInside(b, lot, shell, attach);
   // The 4.0 lot ground (world x/z; NaN off it). The 4.0 skips its own greenery (buildingMesh.ts:2454-2455), so
   // the old generator's yard plants remain the owner and must stand on this ground, not on the old plan's.
   const lg = chunk.lotGround;
@@ -267,6 +296,33 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
     return [fx + lx * c - ly * s, fz - lx * s - ly * c, v.w / 2, v.d / 2, lot.rot] as [number, number, number, number, number];
   });
   return { shell: laidShell, parts: laidParts, ground: lg ? (x, z) => lg.heightAt(x, -z) : undefined, footprints };
+}
+
+/**
+ * What a ruin shows inside (the whole-parts mode): a concrete slab at every storey of every closed block, and the
+ * furniture of every floor (4.0 interiorAt, by the building's use), each piece whole (its own part group).
+ */
+function layInside(b: Building, lot: Lot40, mb: MeshBuilder, sink: AttachSink): void {
+  const ground = (x: number, y: number) => lot.groundAt(x, -y);
+  const floor = floorHeight(b, ground);
+  mb.curFac[3] = 0; mb.curU = 0;
+  // the floors as the 4.0 lays them (interiorMesh.ts): wood in homes, stone elsewhere
+  const home = lot.use === 'residential';
+  const slab = MAT.Indoor | ((home ? FIN.Wood : FIN.Stone) << 4), floorRgb = home ? 0xa27548 : 0xb9b2a5;
+  for (const v of b.volumes) {
+    if (v.open) continue;
+    const corners = [[v.x, v.y], [v.x + v.w, v.y], [v.x + v.w, v.y + v.d], [v.x, v.y + v.d]].map(([lx, ly]) => localToWorld(b, lx, ly));
+    for (let level = v.base + 1; level < v.base + v.storeys.length; level++) {
+      const y = floor + volumeElevation(b, v, level) - 0.02;
+      const k = corners.map((c) => mb.vert(c.x, y, -c.y, 0, 1, 0, floorRgb, slab));
+      mb.quad(k[0], k[1], k[2], k[3], 0, 1, 0);
+    }
+  }
+  // the furniture as the 4.0 lays it (its own vertex colours: no tint)
+  for (const [kind, batch] of Object.entries(interiorFurniture(b, floor))) {
+    if (!batch) continue;
+    for (let i = 0; i < batch.count; i++) sink('f:' + kind, batch.poses, i * POSE_FLOATS, 0xffffff);
+  }
 }
 
 /**

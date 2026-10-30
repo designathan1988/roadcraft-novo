@@ -11,7 +11,7 @@ export const T: Record<string, any> = TSL;
  * Compact vertex (snorm16 position, snorm8 octahedral normal): wires position and
  * normal into the material and returns the world normal as a varying.
  */
-export function useCompactVertex(m: { positionNode: Node; normalNode: Node }, name: string): Node {
+export function useCompactVertex(m: { positionNode: Node; normalNode: Node }, name: string, place?: (rest: Node) => Node): Node {
   const { Fn, attribute, vec3, float, abs, max, select, normalize, varyingProperty, transformNormalToView } = T;
   const vN = varyingProperty('vec3', name);
   const vertex = Fn(() => {
@@ -21,7 +21,8 @@ export function useCompactVertex(m: { positionNode: Node; normalNode: Node }, na
     n.x.addAssign(select(n.x.greaterThanEqual(0), t.negate(), t));
     n.y.addAssign(select(n.y.greaterThanEqual(0), t.negate(), t));
     vN.assign(normalize(n));
-    return attribute('position', 'vec4').xyz;
+    const rest = attribute('position', 'vec4').xyz;
+    return place ? place(rest) : rest;
   });
   m.positionNode = vertex();
   m.normalNode = transformNormalToView(normalize(vN));

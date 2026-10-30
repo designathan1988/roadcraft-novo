@@ -10,7 +10,7 @@ import { boxTransfer } from '../shared/contracts/worker.ts';
 import type { World } from '../world/world.ts';
 import { heightAt } from '../world/heights.ts';
 import { CellLayer, type LayerSource } from './cellLayer.ts';
-import { T, lodFadeMask, useCompactVertex, type Node } from './tsl.ts';
+import { T, lodFadeMask, useCompactVertex, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { ARCHES, ARCH_COUNT, facadeWindowTable } from '../world/arch.ts';
 import { cutMask } from './inside.ts';
@@ -89,7 +89,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
     hasContent: (c) => world.cellBuildings[c] > 0,
     buildCell: (c, level, priority, done) => {
       const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
-      const boxes = world.gatherBoxes([c]);
+      const boxes = world.gatherBoxes([c], true);
       pool.submit('buildingMesh', { boxes, originX: cellOriginX(cx), originZ: cellOriginX(cz), extent: CELL_SIZE, lod: level },
         (r) => done(r.mesh), { key: `cell${level}:${c}`, priority, transfer: boxTransfer(boxes) });
     },
@@ -97,7 +97,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
       const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
       const cells: number[] = [];
       for (let j = 0; j < CELLS_PER_TILE; j++) for (let i = 0; i < CELLS_PER_TILE; i++) cells.push(cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j));
-      const boxes = world.gatherBoxes(cells);
+      const boxes = world.gatherBoxes(cells, true);
       if (boxes.count === 0) { done(null); return; }
       pool.submit('buildingMesh', { boxes, originX: tileOriginX(tx), originZ: tileOriginX(tz), extent: TILE_SIZE, lod: 2 },
         (r) => done(r.mesh), { key: `tile:${t}`, priority, transfer: boxTransfer(boxes) });
@@ -110,7 +110,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
         const ci = px * per + i, cj = pz * per + j;
         if (ci < MAP_CELLS && cj < MAP_CELLS) cells.push(cellId(ci, cj));
       }
-      const boxes = world.gatherBoxes(cells);
+      const boxes = world.gatherBoxes(cells, true);
       if (boxes.count === 0) { done(null); return; }
       pool.submit('buildingMesh', { boxes, originX: cellOriginX(px * per), originZ: cellOriginX(pz * per), extent: PLATE_SIZE, lod: 3 },
         (r) => done(r.mesh), { key: `plate:${p}`, priority, transfer: boxTransfer(boxes) });
@@ -135,7 +135,7 @@ export function createCityDetail(world: World, pool: JobPool, material: THREE.Ma
     buildCell: (c, level, priority, done) => {
       if (level > 0) { done(null); return; } // far: no detail
       const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
-      const boxes = world.gatherBoxes([c]);
+      const boxes = world.gatherBoxes([c], true);
       pool.submit('buildingMesh', { boxes, originX: cellOriginX(cx), originZ: cellOriginX(cz), extent: CELL_SIZE, lod: -1 },
         (r) => done(r.mesh), { key: `detail:${c}`, priority: priority - 1, transfer: boxTransfer(boxes) });
     },
@@ -170,9 +170,16 @@ const PLINTH_RGB = new THREE.Color(0x7f786d).convertSRGBToLinear().toArray();
 const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a.trim).convertSRGBToLinear(); return new THREE.Vector4(c.r, c.g, c.b, 1); }), 'vec4');
 
 /** The one building material. Materials by the colour's alpha channel (BMAT in the generator). */
-export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
+/**
+ * Moves the building's vertices after they are read (a ruin's fragments, features/demolition/ruin): `place` turns a
+ * vertex's rest position into where it is drawn, `turn` a rest normal into its drawn one, `surface` is the rest world
+ * position the finishes and the grain are laid by (so they stay on a piece as it tumbles), `prev` last frame's place.
+ */
+export interface BuildingPlacement { place: (rest: Node) => Node; turn: (n: Node) => Node; surface: Node; prev: Node }
+
+export function createBuildingMaterial(moved?: BuildingPlacement): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
-  const n = useCompactVertex(m, 'vBldNormal');
+  const n = useCompactVertex(m, 'vBldNormal', moved?.place);
   // the level swap dither and the inside view cut
   bakeFinishesOnce();
   const col = attribute('col', 'vec4');
@@ -184,7 +191,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const hasFin = step(float(0.5), fin);
   // the lot lawn with the same baked grass as the terrain
   const lawn = step(abs(mat.sub(7)), float(0.5));
-  const base = sRGBTransferEOTF(col.xyz).mul(mix(vec3(1, 1, 1), texture(GRASS_TEX, positionWorld.xz.div(GRASS_TILE)).xyz.mul(2), lawn));
+  const base = sRGBTransferEOTF(col.xyz).mul(mix(vec3(1, 1, 1), texture(GRASS_TEX, (moved?.surface ?? positionWorld).xz.div(GRASS_TILE)).xyz.mul(2), lawn));
   const fac = attribute('fac', 'vec4').mul(255);
   const fuv = attribute('fuv', 'vec2').mul(512);
 
@@ -385,7 +392,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   wallFinal = mix(wallFinal, bandC.mul(mix(float(1), float(0.94), lowerTier)), bandOn.mul(clamp(float(1.4).sub(wy.mul(fh).mul(2.8)), 0, 1)));
   const finE = select(plinthAmt.greaterThan(0.5), float(4), fin);
   const hasFinE = max(hasFin, plinthAmt);
-  const P = positionWorld;
+  const P = moved?.surface ?? positionWorld;
   // finish: UV in metres in the face's plane (u along the face, v up; on a slab, x and z)
   const look = FINISH_LOOK.element(int(floor(finE.add(0.5))));
   const faceH = vec2(n.z, n.x.negate());
@@ -468,6 +475,8 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   m.colorNode = vec4(albedo, 1);
   m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt)).mul(float(1).sub(paneFrame)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
 
+  // indoors (BMAT.Indoor: a ruin's floors and the inner side of its walls): the sky's light hardly reaches in
+  m.aoNode = select(mat.equal(11), float(0.5), float(1));
   const rough0 = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
   const rough = mix(rough0, finA.w, hasFinE);
   m.roughnessNode = mix(mix(rough, float(0.12), winAmt.mul(float(1).sub(reveal))), float(0.6), max(rollAmt, paneFrame));
@@ -476,6 +485,7 @@ export function createBuildingMaterial(): THREE.MeshStandardNodeMaterial {
   const nm = finN.xyz.mul(2).sub(1);
   const nk = look.y.mul(hasFinE).mul(float(1).sub(winAmt)).mul(float(1).sub(sillAmt));
   const nW = normalize(tAx.mul(nm.x.mul(nk)).add(bAx.mul(nm.y.mul(nk))).add(n.mul(nm.z)));
-  m.normalNode = transformNormalToView(nW);
+  m.normalNode = transformNormalToView(moved ? moved.turn(nW) : nW);
+  if (moved) withPrevious(m, moved.prev);
   return m;
 }

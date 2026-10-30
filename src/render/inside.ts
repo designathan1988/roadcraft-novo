@@ -18,6 +18,27 @@ export const cutYU = T.uniform(1e9);
 /** The cut building's tag (jobs/buildingGen.ts buildingTag): only its own vertices are cut. */
 export const cutTagU = T.uniform(0);
 
+/** Buildings not drawn by the cell layers, at most HIDDEN at once: tag, centre x, z, radius² (radius² < 0: free). */
+export const HIDDEN = 16;
+export const hiddenU = T.uniformArray(Array.from({ length: HIDDEN }, () => new THREE.Vector4(0, 0, 0, -1)), 'vec4');
+
+/**
+ * 1 for a vertex of a hidden building (its tag, within its radius: tags are a 15-bit hash), 0 otherwise. Worked out
+ * per vertex (HIDDEN comparisons) and passed flat, never per pixel. A building stood in for by its ruin
+ * (features/demolition/ruin) is hidden in the frame its ruin appears, before its cell is rebuilt without it.
+ */
+function hiddenMask(): ReturnType<typeof T.float> {
+  const { attribute, positionWorld, abs, float, varying, max, step } = T;
+  const tag = attribute('position', 'vec4').w.mul(32767);
+  let any: ReturnType<typeof T.float> = float(0);
+  for (let k = 0; k < HIDDEN; k++) {
+    const h = hiddenU.element(k);
+    const d = positionWorld.xz.sub(h.yz);
+    any = max(any, step(abs(tag.sub(h.x)), float(0.5)).mul(step(d.dot(d), h.w)));
+  }
+  return varying(any).setInterpolation('flat', 'either');
+}
+
 /** The cut mask for the buildings' material (and its detail layer): false = fragment gone. */
 export function cutMask(): ReturnType<typeof T.float> {
   const { positionWorld, abs, attribute } = T;
@@ -26,7 +47,7 @@ export function cutMask(): ReturnType<typeof T.float> {
   const inside = abs(lx).lessThan(cutBoxU.z).and(abs(lz).lessThan(cutBoxU.w));
   // position.w = the building's tag (snorm16)
   const mine = abs(attribute('position', 'vec4').w.mul(32767).sub(cutTagU)).lessThan(0.5);
-  return inside.and(mine).and(positionWorld.y.greaterThan(cutYU)).not();
+  return inside.and(mine).and(positionWorld.y.greaterThan(cutYU)).not().and(hiddenMask().lessThan(0.5));
 }
 
 /** How high the walls of the shown floor stay (m above its slab): a doll's house cut, so the rooms are seen. */

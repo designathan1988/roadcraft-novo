@@ -328,6 +328,8 @@ export class World {
   }
 
   removeBuilding(id: number): void {
+    // its id may be reused by the next building: it is not a ruin
+    this.ruined.delete(id);
     if (!this.buildings.alive[id]) return;
     this.buildingIndex.remove(id);
     this.count(id, -1);
@@ -339,7 +341,23 @@ export class World {
   }
 
   /** Copies the buildings of a cell (or a tile) into transferable columns. */
-  gatherBoxes(cells: number[]): BoxColumns {
+  /**
+   * Buildings stood in for by their ruin (features/demolition/ruin): still in the world (the simulation, the growth
+   * and the save count them), not drawn by the cell layers (`gatherBoxes(cells, true)`). A handful at a time.
+   */
+  readonly ruined = new Set<number>();
+
+  /** Building `id` drawn by its ruin (`on`) or by the cell layers again: its cell is drawn again either way. */
+  setRuined(id: number, on: boolean): void {
+    if (on === this.ruined.has(id)) return;
+    if (on) this.ruined.add(id); else this.ruined.delete(id);
+    const cid = this.buildings.cols.cell[id];
+    this.dirty.mark(cid, Dirty.Buildings | Dirty.Props);
+    this.cellVersion[cid]++;
+  }
+
+  /** The buildings of `cells` as job columns; `drawn`: only those the cell layers draw (not the ruined). */
+  gatherBoxes(cells: number[], drawn = false): BoxColumns {
     let n = 0;
     for (const c of cells) n += this.cellBuildings[c];
     const out = emptyBoxes(n);
@@ -347,7 +365,7 @@ export class World {
     let k = 0;
     for (const c of cells) {
       this.buildingIndex.queryCell(c, (id) => {
-        if (col.cell[id] !== c) return;
+        if (col.cell[id] !== c || (drawn && this.ruined.has(id))) return;
         out.x[k] = col.x[id]; out.z[k] = col.z[id]; out.w[k] = col.w[id]; out.d[k] = col.d[id];
         out.h[k] = col.h[id]; out.rot[k] = col.rot[id]; out.color[k] = col.color[id];
         out.seed[k] = col.seed[id]; out.zone[k] = col.zone[id]; out.floors[k] = col.floors[id]; out.style[k] = col.style[id]; out.fn[k] = col.fn[id];
@@ -369,6 +387,7 @@ export class World {
   }
 
   clearBuildings(): void {
+    this.ruined.clear();
     this.buildingIndex.clear();
     this.buildings.clear();
     this.cellBuildings.fill(0);

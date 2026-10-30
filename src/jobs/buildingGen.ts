@@ -14,7 +14,7 @@ import { ARCHES, ArchId, Fn, PANE_ROW, chimneyOf, pickArch } from '../world/arch
 import { type BoxColumns, type PackedMesh } from '../shared/contracts/worker.ts';
 import { CIVIC_DESIGNS, decodeDesign, hasDesign } from '../world/design.ts';
 import { catalogProjects } from '../world/catalog.ts';
-import { layLot40, massLot40, volumes40, type Lot40, type PartSink } from './building40.ts';
+import { layLot40, massLot40, setRuinSource, volumes40, type AttachSink, type Lot40, type PartSink } from './building40.ts';
 import { planCells, type CellPlan } from './buildingGen/plan.ts';
 import { lotFit } from './buildingGen/polygon.ts';
 import { type Frame } from './buildingGen/geometry.ts';
@@ -58,6 +58,20 @@ export function buildingVolumes(heights: Float32Array, b: BoxColumns, i: number)
   const sink = newOutputs({ layout: [] });
   try { genOne(NO_MESH, heights, b, i, planCells(b), -3, false, sink); } finally { endLot(); }
   return sink.layout!.sort((p, q) => q.hw * q.hd - p.hw * p.hd);
+}
+
+/**
+ * Building i of the boxes (its cell's: the cell plan picks its facade and landmark from them) at the near level with
+ * every part laid in as geometry (jobs/building40.ts whole parts): what its ruin is cut from (jobs/ruin.ts).
+ */
+export function buildingForRuin(heights: Float32Array, b: BoxColumns, i: number, attach: AttachSink): MeshBuilder {
+  const mb = new MeshBuilder(false, true);
+  setRuinSource(attach);
+  try {
+    mb.curTag = buildingTag(b.seed[i], b.x[i], b.z[i]);
+    genOne(mb, heights, b, i, planCells(b), 0, false, newOutputs({}));
+  } finally { setRuinSource(null); endLot(); }
+  return mb;
 }
 
 /**

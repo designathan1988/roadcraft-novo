@@ -514,7 +514,7 @@ export class PropRenderer {
     const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
     const segs: number[] = [];
     net.forSegsNear(x0 - 40, z0 - 40, x0 + 296, z0 + 296, (s) => segs.push(s));
-    const boxes = w.gatherBoxes([c]);
+    const boxes = w.gatherBoxes([c], true);
     const graph = net.gather(segs, []);
     const items = w.items.gather(c, MAP_CELLS);
     this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome, parts40 }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {

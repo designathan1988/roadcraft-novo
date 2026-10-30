@@ -5,10 +5,10 @@
 // (`warm`): nothing is created during play, and with nothing moving the effect costs nothing a frame.
 
 import * as THREE from 'three/webgpu';
-import { T } from './tsl.ts';
-import { Debris, PieceSpec, Shape } from './blast/debris.ts';
-import { Marks } from './blast/marks.ts';
-import { Puff } from './particles.ts';
+import { T } from '../../../render/tsl.ts';
+import { Debris, PieceSpec, Shape } from './debris.ts';
+import { Marks } from './marks.ts';
+import { Puff } from '../../../render/particles.ts';
 
 const { vec3, float, mix, smoothstep, attribute, mx_noise_float } = T;
 
@@ -30,9 +30,6 @@ export class Blast {
   readonly marks: Marks;
   /** A reusable piece to fill and pass to `debris.add`. */
   readonly spec = new PieceSpec();
-  private flash: THREE.Mesh;
-  private flashT = 9;
-  private flashMat = new THREE.MeshBasicNodeMaterial({ color: 0xffd28a, transparent: true, depthWrite: false });
   private ring: THREE.Mesh;
   private ringMat = new THREE.MeshBasicNodeMaterial({ color: 0xfff1d0, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
   private ringAge = Infinity;
@@ -56,9 +53,6 @@ export class Blast {
     this.emit = emit;
     this.groundAt = groundAt;
     this.marks = new Marks(groundAt);
-    this.flash = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), this.flashMat);
-    this.flash.visible = false;
-    this.flash.frustumCulled = false;
     this.ring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 48).rotateX(-Math.PI / 2), this.ringMat);
     this.ring.name = 'blast-ring';
     this.ring.visible = false;
@@ -69,7 +63,7 @@ export class Blast {
     this.debris = new Debris(bodies, carcassMaterial());
     // a wreck that was burning keeps burning where it comes to rest, under its own smoke
     this.debris.onRest = (x, y, z, size, seconds) => this.burn(x, y, z, size, seconds);
-    this.group.add(this.flash, this.ring, this.debris.group, this.marks.group);
+    this.group.add(this.ring, this.debris.group, this.marks.group);
   }
 
   /** A burst of particles (Particles.burst). */
@@ -77,46 +71,10 @@ export class Blast {
   /** A wreck model's box: width, height, length (m). */
   wreckSize(model: number): [number, number, number] { return this.wreckSizes[model]; }
 
-  /**
-   * A building struck down by the blast at (bx, bz): its shell in panels and one slab per floor, thrown out from the
-   * blast and tumbling to rest as rigid pieces (`color` its walls' 0xRRGGBB). Footprint w × d centred at (x, z), turned
-   * `rot`, standing on `y`, `h` high.
-   */
-  collapse(x: number, y: number, z: number, w: number, d: number, h: number, rot: number, floors: number, color: number, bx: number, bz: number, radius: number): void {
-    const c = Math.cos(rot), sn = Math.sin(rot);
-    const nx = 3, nz = 2, ny = Math.max(1, Math.min(6, Math.round(floors)));
-    const s = this.spec;
-    const out = (px: number, pz: number, k: number) => {
-      const dx = px - bx, dz = pz - bz, dd = Math.hypot(dx, dz) || 1, f = k * Math.max(0.25, 1 - dd / (radius * 1.6));
-      s.vx = (dx / dd) * f + (Math.random() - 0.5); s.vy = f * 0.4 * Math.random(); s.vz = (dz / dd) * f + (Math.random() - 0.5);
-    };
-    for (let ix = 0; ix < nx; ix++) for (let iz = 0; iz < nz; iz++) for (let iy = 0; iy < ny; iy++) {
-      const lx = (ix + 0.5) / nx * w - w / 2, lz = (iz + 0.5) / nz * d - d / 2;
-      s.reset().turn(0, 1, 0, rot);
-      s.shape = Shape.Box; s.color = (ix + iy + iz) % 4 === 3 ? Kind.concrete : color;
-      s.x = x + lx * c + lz * sn; s.y = y + (iy + 0.5) * h / ny; s.z = z - lx * sn + lz * c;
-      s.sx = w / nx * 0.92; s.sy = h / ny * 0.92; s.sz = d / nz * 0.92;
-      out(s.x, s.z, 6);
-      s.wx = (Math.random() - 0.5) * 1.5; s.wy = (Math.random() - 0.5) * 0.6; s.wz = (Math.random() - 0.5) * 1.5;
-      this.debris.add(s);
-    }
-    // the floor slabs, coming down flat
-    for (let f = 1; f <= floors && f <= 12; f++) {
-      s.reset().turn(0, 1, 0, rot);
-      s.shape = Shape.Box; s.color = Kind.concrete;
-      s.x = x; s.y = y + f * h / Math.max(1, floors); s.z = z;
-      s.sx = w * 0.92; s.sy = 0.2; s.sz = d * 0.92;
-      out(s.x, s.z, 2);
-      s.wx = (Math.random() - 0.5) * 0.4; s.wy = 0; s.wz = (Math.random() - 0.5) * 0.4;
-      this.debris.add(s);
-    }
-    this.emit(x, y + h * 0.5, z, Puff.Dust, Math.min(15, 4 + h / 4), 6);
-  }
-
   /** How far the camera is shaken now (m). */
   shake(): number { return this.shakeAmp; }
   /** Whether anything is still moving, flashing or shaking (the frame is drawn while it is). */
-  active(): boolean { return this.flash.visible || this.ringAge < RING_LIFE || this.shakeAmp > 0 || this.nFires > 0 || this.debris.moving(); }
+  active(): boolean { return this.ringAge < RING_LIFE || this.shakeAmp > 0 || this.nFires > 0 || this.debris.moving(); }
   /** Whether anything casting a shadow moves (the shadow maps are redrawn while it does). */
   moving(): boolean { return this.debris.moving(); }
 
@@ -125,11 +83,7 @@ export class Blast {
    * a fire left burning, the shockwave, the shake and shrapnel.
    */
   explode(x: number, y: number, z: number, radius: number, ground: BlastGround): void {
-    this.flash.position.set(x, y + 2, z);
-    this.flash.scale.setScalar(radius * 0.3);
-    this.flash.userData.r = radius;
-    this.flashT = 0;
-    this.flash.visible = true;
+    // the flash is light, not a shape (4.0 flashAt: a point light; here the scene's light, flashU, set by the bomb)
     const k = Math.min(15, 3 + radius / 4);
     // the fireball, the column rising after it, and the fire left in the hole a while under black smoke
     this.emit(x, y + 0.8, z, Puff.Fire, k, 1.5);
@@ -221,14 +175,6 @@ export class Blast {
   }
 
   update(dt: number): void {
-    if (this.flash.visible) {
-      this.flashT += dt;
-      const k = this.flashT / 0.6;
-      const r = (this.flash.userData.r as number) ?? 10;
-      this.flash.scale.setScalar(r * (0.3 + k * 0.9));
-      this.flashMat.opacity = Math.max(0, 1 - k);
-      if (k >= 1) this.flash.visible = false;
-    }
     if (this.ringAge < RING_LIFE) {
       this.ringAge += dt;
       const k = Math.min(1, this.ringAge / RING_LIFE);
@@ -260,7 +206,6 @@ export class Blast {
     this.debris.clear();
     this.marks.clear();
     this.nFires = 0;
-    this.flash.visible = false;
     this.ringAge = Infinity;
     this.shakeAmp = 0;
   }
@@ -271,8 +216,7 @@ export class Blast {
    * (NodeManager.getCacheKey). Far under the ground meanwhile.
    */
   warm(on: boolean): void {
-    if (on) { this.flash.position.set(0, -5000, 0); this.ring.position.set(0, -5000, 0); }
-    this.flash.visible = on;
+    if (on) this.ring.position.set(0, -5000, 0);
     this.ring.visible = on;
     this.debris.warm(on);
     this.marks.warm(on);

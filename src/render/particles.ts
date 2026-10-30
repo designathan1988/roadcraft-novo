@@ -144,6 +144,20 @@ export class Particles {
   private bursts: Array<[number, number, number, number, number, number]> = [];
   private clock = 0;
 
+  /**
+   * Drawn once at load (`on`) with one emitter far under the ground: a map with no emitter (an empty one) otherwise
+   * compiled the particles' pipeline at the first explosion, a 100 ms frame.
+   */
+  warm(on: boolean): void {
+    if (on) {
+      this.data[0] = 0; this.data[1] = -5000; this.data[2] = 0; this.data[3] = 0;
+      this.tex.needsUpdate = true;
+      this.geo.instanceCount = PER;
+    }
+    this.mesh.visible = on;
+    if (!on) { this.due = true; this.timer = 0; }
+  }
+
   /** Smoke, fire, dust and sparks for a few seconds at a point. */
   burst(x: number, y: number, z: number, kind: number, strength: number, seconds: number): void {
     this.bursts.push([x, y, z, kind, strength, this.clock + seconds]);

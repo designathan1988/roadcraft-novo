@@ -102,13 +102,25 @@
   });
   await check('pessoas andando', () => { g.personSpec = { color: 5, height: 7, walk: true, count: 5 }; g.placePerson(X + 20, Z + 30); return true; });
   await check('pistola', () => { g.shoot(X + 20, Z + 30); return true; });
-  await check('bomba derruba prédio', () => {
+  await check('bomba abre o prédio e depois o derruba', async () => {
+    // as Roadcraft 4.0 (bomb/ANALISE.md): a weak bomb breaks the building into its ruin and leaves it standing; a strong
+    // one on the ruin brings it down
     const col = w.buildings.cols; let id = -1;
     w.buildingIndex.query(X - 200, Z - 200, X + 200, Z + 200, (b) => { if (id < 0 && col.floors[b] > 0) id = b; });
     if (id < 0) return 'sem prédio para testar';
-    const x = col.x[id], z = col.z[id]; g.bomb(x, z);
-    let still = false; w.buildingIndex.query(x - 1, z - 1, x + 1, z + 1, (b) => { if (col.floors[b] > 0 && Math.hypot(col.x[b] - x, col.z[b] - z) < 1) still = true; });
-    return !still || 'o prédio continuou de pé';
+    const x = col.x[id], z = col.z[id], seed = col.seed[id];
+    const standing = () => { let s = false; w.buildingIndex.query(x - 1, z - 1, x + 1, z + 1, (b) => { if (col.floors[b] > 0 && col.seed[b] === seed) s = true; }); return s; };
+    const force = g.bombForce;
+    // seen from straight above, the pointer's ray goes into this building first (the bomb lands on the first one)
+    await g.view(x, z, 0, 85, 80, 11);
+    g.bombForce = 5; g.bomb(x, z);
+    for (let k = 0; k < 80 && !w.ruined.has(id); k++) await wait(100);
+    if (!w.ruined.has(id)) { g.bombForce = force; return 'a ruína não ficou pronta em 8 s'; }
+    if (!standing()) { g.bombForce = force; return 'força 5 derrubou o prédio de uma vez'; }
+    g.bombForce = 50; g.bomb(x, z);
+    for (let k = 0; k < 50 && standing(); k++) await wait(100);
+    g.bombForce = force;
+    return !standing() || 'força 50 não derrubou a ruína';
   });
 
   // ---------------- salvar, carregar, exportar

@@ -4,10 +4,10 @@
 // in pieces; vehicles as their own burnt-out bodies, burning, and their wheels. Only pieces are added (render/blast/
 // debris.ts); what was struck is removed from the world by the bomb's command.
 
-import { Item } from '../../world/items.ts';
-import { Puff } from '../particles.ts';
-import type { Blast } from '../blast.ts';
-import { Kind } from '../blast.ts';
+import { Item } from '../../../world/items.ts';
+import { Puff } from '../../../render/particles.ts';
+import type { Blast } from './blast.ts';
+import { Kind } from './blast.ts';
 import { Shape } from './debris.ts';
 
 /** The horizontal push from the blast at (bx, bz) on what stands at (x, z) (4.0 `away`), into `out` [x, y, z]. */
