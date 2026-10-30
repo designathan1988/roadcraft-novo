@@ -35,10 +35,13 @@ export class GpuTiming {
     }).finally(() => { this.pending = false; });
   }
 
-  /** Mean GPU ms per frame, in total and per render call index, since the last reset. */
+  /**
+   * Mean GPU ms per frame, in total and per render call index, since the last reset. Every index up to the last one is
+   * given: a call that wrote no timestamp in those frames is 0 ms (the sums are sparse, and map() skips the holes).
+   */
   snapshot(): { frames: number; totalMs: number; perCallMs: number[] } {
     const n = Math.max(1, this.frames.size);
-    return { frames: this.frames.size, totalMs: this.total / n, perCallMs: this.sums.map((s) => (s ?? 0) / n) };
+    return { frames: this.frames.size, totalMs: this.total / n, perCallMs: Array.from({ length: this.sums.length }, (_, i) => (this.sums[i] ?? 0) / n) };
   }
 
   reset(): void { this.sums = []; this.frames.clear(); this.total = 0; }
