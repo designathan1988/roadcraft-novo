@@ -933,15 +933,40 @@ test('cars: lamps and plates lie on the body (boxes stood out of the rounded cor
   }
 });
 
+/** Whether triangle (a, b, c) overlaps the box centred at `m` with half sizes `h` (separating axes, Akenine-Möller). */
+function triBox(t: number[], m: number[], h: number[]): boolean {
+  const v = [0, 1, 2].map((k) => [t[3 * k] - m[0], t[3 * k + 1] - m[1], t[3 * k + 2] - m[2]]);
+  const e = [0, 1, 2].map((k) => [0, 1, 2].map((j) => v[(k + 1) % 3][j] - v[k][j]));
+  const sep = (ax: number[]): boolean => {
+    const p = v.map((w) => w[0] * ax[0] + w[1] * ax[1] + w[2] * ax[2]);
+    const r = h[0] * Math.abs(ax[0]) + h[1] * Math.abs(ax[1]) + h[2] * Math.abs(ax[2]);
+    return Math.min(...p) > r - 1e-6 || Math.max(...p) < -r + 1e-6;
+  };
+  for (const ed of e) for (const u of [[1, 0, 0], [0, 1, 0], [0, 0, 1]]) {
+    const ax = [u[1] * ed[2] - u[2] * ed[1], u[2] * ed[0] - u[0] * ed[2], u[0] * ed[1] - u[1] * ed[0]];
+    if (Math.hypot(...ax) > 1e-9 && sep(ax)) return false;
+  }
+  for (const u of [[1, 0, 0], [0, 1, 0], [0, 0, 1]]) if (sep(u)) return false;
+  const n = [e[0][1] * e[1][2] - e[0][2] * e[1][1], e[0][2] * e[1][0] - e[0][0] * e[1][2], e[0][0] * e[1][1] - e[0][1] * e[1][0]];
+  return !(Math.hypot(...n) > 1e-12 && sep(n));
+}
+
 test('cars: the cabin stays clear of the wheels (its door trim stood in the rear arch, over the wheel)', async () => {
   const { CAR_SIZES, buildCarCabin, axlesOf } = await import('../src/render/carBody.ts');
   for (const style of ['sedan', 'hatch', 'suv', 'van', 'pickup'] as const) {
-    const a = CAR_SIZES[style], p = buildCarCabin(a, style).getAttribute('position').array, archR = a.wheelRadius + 0.07;
+    const a = CAR_SIZES[style], g = buildCarCabin(a, style), archR = a.wheelRadius + 0.07;
+    const p = g.getAttribute('position').array, idx = g.index ? g.index.array : null;
+    const n = idx ? idx.length : p.length / 3;
+    // the wheel's space: the arch's reach along the length, below its top, out where the tyre is (each side)
+    const inner = a.width / 2 - a.width * 0.14 - 0.05, outer = a.width / 2 + 0.3, topY = 2 * a.wheelRadius + 0.07;
     let inside = 0;
-    for (let i = 0; i < p.length; i += 3) {
-      // the wheel's space: the arch's reach along the length, below its top, out where the tyre is
-      for (const ax of axlesOf(a)) if (Math.abs(p[i] - ax) < archR && p[i + 1] < 2 * a.wheelRadius + 0.07 && Math.abs(p[i + 2]) > a.width / 2 - a.width * 0.14 - 0.05) inside++;
+    for (let k = 0; k < n; k += 3) {
+      const t: number[] = [];
+      for (let j = 0; j < 3; j++) { const i = idx ? idx[k + j] : k + j; t.push(p[3 * i], p[3 * i + 1], p[3 * i + 2]); }
+      for (const ax of axlesOf(a)) for (const sd of [-1, 1]) {
+        if (triBox(t, [ax, topY / 2 - 0.5, sd * (inner + outer) / 2], [archR, topY / 2 + 0.5, (outer - inner) / 2])) inside++;
+      }
     }
-    assert.equal(inside, 0, `${style}: ${inside} cabin vertices in a wheel's space`);
+    assert.equal(inside, 0, `${style}: ${inside} cabin triangles in a wheel's space`);
   }
 });

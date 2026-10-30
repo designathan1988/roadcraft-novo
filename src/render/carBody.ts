@@ -913,7 +913,7 @@ export function buildCarCabin(a: CarArchetype, styleName: Exclude<CarStyle, 'wag
   const dashTop = belt(screenBase - M(0.1)) - M(0.01);
   const dashRear = dx + M(wheelSpec.forward) + M(0.12);
   parts.push(tint(extrude([
-    [screenBase + M(0.02), dashTop - M(0.03)], [bulk + M(0.05), floor + M(0.14)], [bulk - M(0.06), floor + M(0.14)],
+    [screenBase + M(0.02), dashTop - M(0.03)], [bulk, floor + M(0.14)], [bulk - M(0.06), floor + M(0.14)],
     [dashRear + M(0.12), dashTop - M(0.3)], [dashRear, dashTop - M(0.18)], [dashRear - M(0.02), dashTop - M(0.05)],
     [dashRear + M(0.06), dashTop + M(0.01)],
   ], widthOver(dashRear, screenBase + M(0.02)), 0), DASH));
@@ -972,23 +972,122 @@ export function buildCarCabin(a: CarArchetype, styleName: Exclude<CarStyle, 'wag
     for (let i = 0; i <= 4; i++) { const x = lerp(xa, xb, i / 4); hw = Math.min(hw, halfWidth(x)); waist = Math.min(waist, belt(x)); }
     for (const side of [-1, 1] as const) parts.push(tint(box(xb - xa, waist - floor, M(0.1), (xa + xb) / 2, (waist + floor) / 2, side * (hw - M(0.08))), CARD));
   }
-  // the wheel houses come into the cabin, as in a car: by each axle (and a margin, so the narrowing lies clear of the
-  // arch) and up to the arch's top, nothing is wider than the wheel house's inner face (the floor, the rear bench and
-  // the boot floor reached through the arch's opening over the tyre)
-  const well = W / 2 - W * 0.14 - M(0.06), wellTop = archR + a.wheelRadius * 0.96 + M(0.02);
-  // the wheel house's top inside, over each arch and its margin, from its inner face to the side (above the arch's
-  // opening: not seen from outside)
-  for (const ax of axlesOf(a)) {
-    const reach = archR + M(0.15), side = Math.min(halfWidth(ax - reach), halfWidth(ax + reach)) - M(0.03);
-    if (side > well) for (const sd of [-1, 1] as const) parts.push(tint(box(2 * reach, M(0.03), side - well, ax, wellTop + M(0.015), sd * (well + side) / 2), CARD));
+  // the wheel houses come into the cabin, as in a car: by each axle, from under the floor up to the arch's top and out
+  // from the wheel house's inner face, the floor, the rear bench and the boot floor are cut away (they reached through
+  // the arch's opening over the tyre), and the wheel house's walls, in the trim, close the cut
+  const well = W / 2 - W * 0.14 - M(0.06), wellTop = archR + a.wheelRadius * 0.96 + M(0.02), rx = archR + M(0.02);
+  const houses: number[][] = [];
+  for (const ax of axlesOf(a)) for (const sd of [-1, 1] as const) {
+    houses.push(sd > 0 ? [ax - rx, floor - M(0.1), well, ax + rx, wellTop, W] : [ax - rx, floor - M(0.1), -W, ax + rx, wellTop, -well]);
   }
-  const g = merge(parts), pos = g.getAttribute('position') as BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    if (y < wellTop && Math.abs(z) > well && axlesOf(a).some((ax) => Math.abs(x - ax) < archR + M(0.15))) pos.setZ(i, Math.sign(z) * well);
+  const reach = new Float64Array(houses.length * 2), carved = carve(merge(parts), houses, reach);
+  // the walls close only what was cut and can be seen: the rear houses (the cabin's floor ends before the front ones, of
+  // which only the dash's front edge, closed in the dash, is cut), the inner wall and the top over a cut, a wall ahead or
+  // behind only where what was cut goes on past the house (cabin there; a sedan's boot is under its shelf).
+  // One face each, the trim's, towards the cabin: from outside, through the arch's opening, the liner over the tyre hides
+  // the house's other side (rays from all round: 0 meet it).
+  const walls: BufferGeometry[] = [];
+  houses.forEach((h, i) => {
+    const x0 = reach[2 * i]!, x1 = reach[2 * i + 1]!;
+    if (!(x1 > x0)) return;
+    const ax = (h[0]! + h[3]!) / 2, sd = h[2]! > 0 ? 1 : -1;
+    if (ax > 0) return;
+    const side = Math.min(halfWidth(ax - rx), halfWidth(ax + rx)) - M(0.03);
+    if (side <= well) return;
+    const zOut = [sd * well, sd * side].sort((p, q) => p - q);
+    // on the space cut: its inner wall and its top, and its ends where the cabin goes on
+    walls.push(face(2, sd * well, [ax - rx, ax + rx], [floor, wellTop], -sd, CARD));
+    walls.push(face(1, wellTop, [ax - rx, ax + rx], zOut, 1, CARD));
+    for (const k of [-1, 1] as const) {
+      if (k > 0 ? x1 <= ax + rx + 1e-4 : x0 >= ax - rx - 1e-4) continue;
+      walls.push(face(0, ax + k * rx, [floor, wellTop], zOut, k, CARD));
+    }
+  });
+  return merge([carved, ...walls]);
+}
+
+/**
+ * A rectangle in the plane coordinate[axis] = value, over `u` and `v` along the next two axes (x → y, z; y → x, z;
+ * z → x, y), facing `facing` (±1) along `axis`, in colour `hex`: two triangles.
+ */
+function face(axis: number, value: number, u: readonly number[], v: readonly number[], facing: number, hex: number): BufferGeometry {
+  const [ua, va] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
+  const corner = (a: number, b: number): number[] => { const p = [0, 0, 0]; p[axis] = value; p[ua] = a; p[va] = b; return p; };
+  let q = [corner(u[0]!, v[0]!), corner(u[1]!, v[0]!), corner(u[1]!, v[1]!), corner(u[0]!, v[1]!)];
+  // wound counter-clockwise seen from the side it faces
+  const e1 = q[1]!.map((c, k) => c - q[0]![k]!), e2 = q[2]!.map((c, k) => c - q[0]![k]!);
+  const n = [e1[1]! * e2[2]! - e1[2]! * e2[1]!, e1[2]! * e2[0]! - e1[0]! * e2[2]!, e1[0]! * e2[1]! - e1[1]! * e2[0]!];
+  if (n[axis]! * facing < 0) q = [q[0]!, q[3]!, q[2]!, q[1]!];
+  const pos = [...q[0]!, ...q[1]!, ...q[2]!, ...q[0]!, ...q[2]!, ...q[3]!], nrm: number[] = [];
+  for (let i = 0; i < 6; i++) { const m = [0, 0, 0]; m[axis] = facing; nrm.push(...m); }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new Float32BufferAttribute(nrm, 3));
+  return tint(g, hex);
+}
+
+/**
+ * `g` (non-indexed: position, normal, colour) less what lies inside any of the boxes ([x0, y0, z0, x1, y1, z1]): each
+ * triangle that reaches into one is cut by the box's planes (Sutherland-Hodgman), the parts outside kept (attributes
+ * interpolated along the cut), the part inside dropped. What is cut is left open there: what cut it closes it.
+ * `reach`: for each box, the least and most x of what reached into it (Infinity, -Infinity: nothing).
+ */
+function carve(g: BufferGeometry, boxes: readonly (readonly number[])[], reach?: Float64Array): BufferGeometry {
+  if (reach) for (let i = 0; i < boxes.length; i++) { reach[2 * i] = Infinity; reach[2 * i + 1] = -Infinity; }
+  const P = g.getAttribute('position').array, N = g.getAttribute('normal').array, C = g.getAttribute('color').array;
+  const out: number[][] = [[], [], []];
+  type V = number[]; // x y z, nx ny nz, r g b
+  const at = (a: V, b: V, f: number): V => a.map((v, k) => v + (b[k]! - v) * f);
+  // the part of `poly` on one side of the plane coordinate[axis] = value (`keepBelow`: below it)
+  const clip = (poly: V[], axis: number, value: number, keepBelow: boolean): V[] => {
+    const res: V[] = [];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i]!, b = poly[(i + 1) % poly.length]!;
+      const da = keepBelow ? value - a[axis]! : a[axis]! - value, db = keepBelow ? value - b[axis]! : b[axis]! - value;
+      if (da >= 0) res.push(a);
+      if ((da >= 0) !== (db >= 0)) res.push(at(a, b, da / (da - db)));
+    }
+    return res;
+  };
+  const emit = (poly: V[]): void => {
+    for (let i = 1; i + 1 < poly.length; i++) {
+      const a = poly[0]!, b = poly[i]!, c = poly[i + 1]!;
+      const ux = b[0]! - a[0]!, uy = b[1]! - a[1]!, uz = b[2]! - a[2]!, vx = c[0]! - a[0]!, vy = c[1]! - a[1]!, vz = c[2]! - a[2]!;
+      if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) < 1e-9) continue;
+      for (const v of [a, b, c]) { out[0]!.push(v[0]!, v[1]!, v[2]!); out[1]!.push(v[3]!, v[4]!, v[5]!); out[2]!.push(v[6]!, v[7]!, v[8]!); }
+    }
+  };
+  for (let t = 0; t < P.length; t += 9) {
+    let pieces: V[][] = [[0, 1, 2].map((k) => { const o = t + 3 * k; return [P[o]!, P[o + 1]!, P[o + 2]!, N[o]!, N[o + 1]!, N[o + 2]!, C[o]!, C[o + 1]!, C[o + 2]!]; })];
+    for (const bx of boxes) {
+      const next: V[][] = [];
+      for (const poly of pieces) {
+        let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        for (const v of poly) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k]!, v[k]!); hi[k] = Math.max(hi[k]!, v[k]!); }
+        if (hi[0]! <= bx[0]! || lo[0]! >= bx[3]! || hi[1]! <= bx[1]! || lo[1]! >= bx[4]! || hi[2]! <= bx[2]! || lo[2]! >= bx[5]!) { next.push(poly); continue; }
+        // (how far along x what is cut reaches, `reach`: the walls that close it)
+        if (reach) { const i = boxes.indexOf(bx); reach[2 * i] = Math.min(reach[2 * i]!, lo[0]!); reach[2 * i + 1] = Math.max(reach[2 * i + 1]!, hi[0]!); }
+        // outside each plane in turn is kept; what is inside all six is the box's
+        let rest = poly;
+        for (let k = 0; k < 3 && rest.length >= 3; k++) {
+          const below = clip(rest, k, bx[k]!, true);
+          if (below.length >= 3) next.push(below);
+          rest = clip(rest, k, bx[k]!, false);
+          if (rest.length < 3) break;
+          const above = clip(rest, k, bx[k + 3]!, false);
+          if (above.length >= 3) next.push(above);
+          rest = clip(rest, k, bx[k + 3]!, true);
+        }
+      }
+      pieces = next;
+    }
+    for (const poly of pieces) emit(poly);
   }
-  g.computeVertexNormals();
-  return g;
+  const r = new BufferGeometry();
+  r.setAttribute('position', new Float32BufferAttribute(out[0]!, 3));
+  r.setAttribute('normal', new Float32BufferAttribute(out[1]!, 3));
+  r.setAttribute('color', new Float32BufferAttribute(out[2]!, 3));
+  return r;
 }
 
 /** A seat (4.0 seatShell): the side profile of cushion and back extruded across, its bolsters and its base. */
