@@ -25,6 +25,7 @@ import { BUS_CAP, Buses } from './traffic/buses.ts';
 import { Meso } from './traffic/meso.ts';
 import { Junctions } from './traffic/junctions.ts';
 import { Micro } from './traffic/micro.ts';
+import { KerbStops } from './traffic/kerbStops.ts';
 import { growArray as grow } from './traffic/grow.ts';
 import type { LineSpec, SimLine } from './traffic/lines.ts';
 import { JAMMED, REGION, REGION_EVERY, REGION_OCC, REGION_SLOPE, Regions } from './traffic/regions.ts';
@@ -130,6 +131,8 @@ export class Traffic {
   /** Traffic lights (plans, timed cycle, actuated near the camera). */
   readonly sig: Signals;
   private readonly laneChanges: LaneChanges;
+  /** Drop-offs at the kerb (sim/traffic/kerbStops.ts). */
+  private readonly kerb: KerbStops;
   private signalNodes = new Set<number>();
   /** Signals near the camera (only these run; distant ones stay frozen). */
   private windowSignals = new Set<number>();
@@ -371,8 +374,8 @@ export class Traffic {
       segAfter: (v, k) => g.segAfter(v, k),
       pickLane: (seg, dir, after, bus, fallback) => g.pickLane(seg, dir, after, bus, fallback),
       atDestination: (v) => g.atDestination(v),
-      dropsOff: (v) => g.dropsOff(v),
-      dropOffTrip: (v, node) => g.dropOffTrip(v, node),
+      dropsOff: (v) => g.kerb.dropsOff(v),
+      dropOffTrip: (v, node) => g.kerb.endTrip(v, node),
       finish: (v) => g.finish(v),
       lose: (v) => g.lose(v),
       replanFrom: (v, node) => g.replanFrom(v, node),
@@ -406,6 +409,12 @@ export class Traffic {
       ...moves,
       mesoEnter: (v, lane, spawned) => g.meso.enter(v, lane, spawned),
       despawn: (v) => g.despawn(v),
+    });
+    this.kerb = new KerbStops({
+      get sim() { return g.sim; }, get cols() { return g.veh.cols; },
+      centrePose: (lane, s, len, du, out) => g.centrePose(lane, s, len, du, out),
+      nextDestination: () => g.zonedNode(g.zoneWeights(false)), replanFrom: (v, node) => g.replanFrom(v, node),
+      countTrip: () => { g.arrived++; g.kerbStops++; }, dropOff: (x, z) => g.onDropOff(x, z),
     });
     this.laneChanges = new LaneChanges({
       sim,
@@ -452,12 +461,12 @@ export class Traffic {
       pedCrossing: (n) => g.pedCrossing(n),
       arrive: (v, lane, toEnd) => g.arrive(v, lane, toEnd),
       atDestination: (v) => g.atDestination(v),
-      dropsOff: (v) => g.dropsOff(v),
+      dropsOff: (v) => g.kerb.dropsOff(v),
       enterLane: (v, s) => g.enterLane(v, s),
       finish: (v) => g.finish(v),
       inWindowOut: (lane) => g.inWindowOut(lane),
       insert: (v, onConn, id) => g.insert(v, onConn, id),
-      kerbStep: (v, lane, dt) => g.kerbStep(v, lane, dt),
+      kerbStep: (v, lane, dt) => g.kerb.step(v, lane, dt),
       leaveLane: (v, lane) => g.leaveLane(v, lane),
       nearCam: (lane) => g.nearCam(lane),
       nextSeg: (v) => g.nextSeg(v),
@@ -593,14 +602,14 @@ export class Traffic {
     const c = this.veh.cols;
     if (c.micro[v] && this.nearCam(lane)) {
       if (c.kind[v] === 2 && this.tryDock(v, lane)) return 1;
-      if (c.kind[v] === 0 && this.tryKerbStop(v, lane)) return 1;
+      if (c.kind[v] === 0 && this.kerb.tryStop(v, lane)) return 1;
       if (c.kind[v] === 0 && this.tryParkManoeuvre(v, lane)) return 1;
     }
     // the same share of drop-offs away from the kerb animation: the trip ends and the car drives on to another; decided
     // with room to brake for wherever the new route turns (it stops at the kerb instead where it can)
-    if (this.dropsOff(v)) {
-      if (c.micro[v] && c.kind[v] === 0 && toEnd < 12 && this.tryKerbStop(v, lane)) return 1;
-      if ((toEnd >= 12 || !c.micro[v] || c.kind[v] !== 0 || laneIdx(lane) !== 0) && this.dropOffTrip(v, this.sim.laneTo(lane))) return 0;
+    if (this.kerb.dropsOff(v)) {
+      if (c.micro[v] && c.kind[v] === 0 && toEnd < 12 && this.kerb.tryStop(v, lane)) return 1;
+      if ((toEnd >= 12 || !c.micro[v] || c.kind[v] !== 0 || laneIdx(lane) !== 0) && this.kerb.endTrip(v, this.sim.laneTo(lane))) return 0;
     }
     if (toEnd >= 12) return 0;
     return this.startParking(v, lane) ? 1 : 2;
@@ -657,63 +666,6 @@ export class Traffic {
     c.mv[v] = m; c.ms[v] = -1; c.phase[v] = VehPhase.Manoeuvre; c.dwell[v] = 0;
     this.docked++;
     return true;
-  }
-
-  /** Some cars (4 in 10, by their id) stop at the kerb with the hazard lights on, a passenger gets out, and they go on. */
-  /** A car whose trip is dropping someone off (4 in 10, by vehicle and destination): the same rule near and far. */
-  private dropsOff(v: number): boolean {
-    const c = this.veh.cols;
-    return c.kind[v] === 0 && c.line[v] < 0 && ((Math.imul(v * 31 + c.dest[v], 2654435761) >>> 0) % 10) < 4;
-  }
-
-  /** The drop-off trip ends (counted) and the car starts another from `node`; false if there is nowhere to go. */
-  private dropOffTrip(v: number, node: number): boolean {
-    const c = this.veh.cols;
-    const b = this.zonedNode(this.zoneWeights(false));
-    if (b < 0 || b === node) return false;
-    this.arrived++; this.kerbStops++;
-    c.dest[v] = b;
-    this.replanFrom(v, node);
-    return !c.phase[v];
-  }
-
-  private tryKerbStop(v: number, lane: number): boolean {
-    const c = this.veh.cols;
-    if (laneIdx(lane) !== 0 || !this.dropsOff(v)) return false;
-    if (!PROFILE_INFO[this.sim.net.segs.cols.profile[laneSeg(lane)]].walk) return false;
-    c.phase[v] = VehPhase.KerbStop; c.dwell[v] = 0; c.served[v] = 0;
-    return true;
-  }
-
-  /** At the kerb: brake, edge to the kerb, let the passenger out, then pick a new trip and pull out. */
-  private kerbStep(v: number, lane: number, dt: number): void {
-    const c = this.veh.cols, sim = this.sim;
-    // brakes gently, harder if the car ahead is close (it stops behind it, never inside it)
-    const lead = c.prev[v];
-    const room = lead >= 0 ? c.s[lead] - c.len[lead] - c.s[v] - 1 : 1e9;
-    const brake = Math.min(9, Math.max(3, (c.v[v] * c.v[v]) / (2 * Math.max(0.1, room))));
-    const nv = Math.max(0, c.v[v] - brake * dt);
-    let s = Math.min(sim.laneLen(lane) - 0.3, c.s[v] + (c.v[v] + nv) * 0.5 * dt);
-    if (lead >= 0) s = Math.min(s, Math.max(c.s[v], c.s[lead] - c.len[lead] - 0.5));
-    c.s[v] = s;
-    c.v[v] = nv; c.brk[v] = 1;
-    c.pk[v] = Math.min(1, c.pk[v] + dt / 2);
-    if (nv > 0) return;
-    c.dwell[v] += dt;
-    if (c.dwell[v] > 1.5 && !c.served[v]) {
-      c.served[v] = 1;
-      const p = this.mvA;
-      // the door side: the middle of the sidewalk on the right
-      const info = PROFILE_INFO[sim.net.segs.cols.profile[laneSeg(lane)]], dir = laneDir(lane);
-      const wu = dir > 0 ? info.walkRight : info.walkLeft;
-      this.centrePose(lane, c.s[v], c.len[v], Number.isNaN(wu) ? -3 : (wu - sim.laneU(lane)) * dir, p);
-      this.onDropOff(p[0], p[2]);
-    }
-    if (c.dwell[v] > 6) {
-      // the passenger is out: that trip ended; the car pulls out on another (the bay-leaving slide takes it back)
-      c.phase[v] = VehPhase.Driving; c.served[v] = 0; c.dwell[v] = 1.3;
-      if (!this.dropOffTrip(v, sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; c.phase[v] = VehPhase.Leaving; }
-    }
   }
 
   /** Moves the manoeuvres; a parking car or docking truck leaves the lane lists once it is out of the lane. */
@@ -1361,7 +1313,7 @@ export class Traffic {
       if (c.phase[v] === VehPhase.Manoeuvre || c.phase[v] === VehPhase.Leaving) { this.finish(v); continue; }
       if (c.phase[v] === VehPhase.KerbStop) {
         c.phase[v] = VehPhase.Driving; c.served[v] = 0;
-        if (!this.dropOffTrip(v, this.sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; this.finish(v); continue; }
+        if (!this.kerb.endTrip(v, this.sim.laneTo(lane))) { this.arrived++; this.kerbStops++; c.why[v] = End.NoTrip; this.finish(v); continue; }
       }
       c.pk[v] = 0;
       this.unlink(v);
