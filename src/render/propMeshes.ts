@@ -8,7 +8,7 @@ import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts'
 import { impostorQuad } from './impostor.ts';
 import { SMALL_CASTER } from './sun.ts';
 import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
-import { partGeometries } from '../r40/render/buildings/kit.ts';
+import { partGeometries } from '../r40/api.ts';
 import { PART_BASE, PART_DIST, POOL_PARTS, VARIANT_TYPES } from '../jobs/parts40.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 

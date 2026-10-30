@@ -4,20 +4,9 @@
 // into this engine's mesh: the shell's faces with their paint and finish (the finishes texture array), and the parts
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
-import { Rng } from '../r40/core/rng.ts';
-import { madeToMeasure } from '../r40/world/buildings/procedural.ts';
-import { furnishLot, lotKind, planLot } from '../r40/world/growth/lotPlan.ts';
-import { emitChunk, letGoEmitted } from '../r40/render/buildings/buildingMesh.ts';
-import { PLATE_DETAIL, TILE_DETAIL, emitMassing } from '../r40/render/buildings/massing.ts';
-import { partGeometries, type PartKind } from '../r40/render/buildings/kit.ts';
-import { COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT } from '../r40/render/buildings/cellArrays.ts';
-import { POSE_FLOATS } from '../r40/render/buildings/partPose.ts';
-import { LOOK_FLOATS } from '../r40/render/buildings/shellParts.ts';
-import { FINISHES, roofMaterial, wallMaterial } from '../r40/world/buildings/materials.ts';
-import type { Building, RoofKind } from '../r40/world/buildings/types.ts';
+import { Rng, madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
 import type { BufferGeometry } from 'three';
 import { FIN } from './buildingFinishes.ts';
-import { levelElevation, levelHeight } from '../r40/world/buildings/geometry.ts';
 import { MeshBuilder } from './meshBuilder.ts';
 
 /** Building materials as the generator writes them (jobs/buildingGen.ts BMAT). */
