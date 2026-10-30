@@ -20,7 +20,7 @@ const build = `(async()=>{const g=window.__cidade.game;
   ${wait(1500)}
 })()`;
 const tick = `(async()=>{${wait(1500)}})()`;
-const seq = [[path.join(out, '01-quadra-fixa.png'), build]];
+const seq = []; // photo 01 (with the build script) is the main shot
 for (let i = 2; i <= 30; i++) seq.push([path.join(out, `${String(i).padStart(2, '0')}-quadro.png`), tick]);
 const env = { ...process.env, CIDADE_W: '1920', CIDADE_H: '1080', CIDADE_SEQ: JSON.stringify(seq) };
 delete env.ELECTRON_RUN_AS_NODE;

@@ -44,7 +44,6 @@ const follow = `(async()=>{const g=window.__cidade.game,r=g.vehicles.reader,d=r.
   ${wait(2200)}
 })()`;
 const seq = [
-  [path.join(out, '01-linha-larga.png'), makeLine],
   [path.join(out, '02-seguir-a.png'), follow],
   [path.join(out, '03-seguir-b.png'), follow],
   [path.join(out, '04-seguir-c.png'), follow],

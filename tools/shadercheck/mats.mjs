@@ -16,7 +16,7 @@ const warm = city.warmupMesh();
 const roads = createRoads(new RoadNetwork(w), { submit() {} }, w.dirty, createTrafficLook(new SharedArrayBuffer(1 << 18)));
 const warmRoad = roads.warmupMesh();
 scene.add(terrain.mesh, warm, warmRoad);
-const which = process.env.WHICH ?? 'wgsl';
+const which = globalThis.__which;
 for (const [name, mesh] of [['terreno', terrain.mesh], ['água', terrain.waterMesh], ['cascas', warm], ['vias', warmRoad]]) {
   try {
     const s = await build(mesh, scene, cam, which);
@@ -34,7 +34,7 @@ if (which === 'wgsl') {
     console.log(`== peças: ok (${s.v.length} + ${s.f.length} chars)`);
     if (process.env.DUMP === 'peças') console.log(s.v, '\n-----\n', s.f);
   } catch (e) { console.log('== peças: ERRO', e.stack); }
-  for (const name of ['reset', 'cull', 'clamp']) {
+  for (const name of ['reset', 'count', 'prefix', 'cull']) {
     try {
       const b = new globalThis.__THREE.WGSLNodeBuilder(null, globalThis.__renderer);
       b.compute = pr[name];

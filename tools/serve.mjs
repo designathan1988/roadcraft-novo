@@ -24,7 +24,9 @@ if (!fs.existsSync(path.join(root, 'index.html'))) {
 const server = http.createServer((req, res) => {
   const rel = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname).replace(/^\/+/, '') || 'index.html';
   const file = path.resolve(root, rel);
-  if (!file.startsWith(root)) { res.writeHead(404).end('not found'); return; }
+  // inside root, not a sibling whose name starts with root's ("/../dist-x/")
+  const inside = path.relative(root, file);
+  if (inside.startsWith('..') || path.isAbsolute(inside)) { res.writeHead(404).end('not found'); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('not found'); return; }
     res.writeHead(200, {

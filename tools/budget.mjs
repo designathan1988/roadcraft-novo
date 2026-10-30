@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { VIEWS, viewScript } from './photos/views.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const budgetFile = path.join(root, 'tools', 'budget.json');
@@ -16,15 +17,7 @@ const out = path.join(root, 'test-results', 'budget');
 fs.mkdirSync(out, { recursive: true });
 const baseline = process.argv.includes('--baseline');
 
-// The same views as tools/fotos.mjs plus the whole map. yaw/pitch in degrees, dist in metres, hour of day.
-const VIEWS = [
-  { name: 'street', yaw: 35, pitch: 18, dist: 90, hour: 11 },
-  { name: 'district', yaw: 35, pitch: 50, dist: 420, hour: 11 },
-  { name: 'city', yaw: 35, pitch: 45, dist: 2200, hour: 11 },
-  { name: 'map', yaw: 0, pitch: 75, dist: 11000, hour: 11 },
-  { name: 'night', yaw: 35, pitch: 18, dist: 90, hour: 21 },
-];
-
+// The standard views (tools/photos/views.mjs, shared with tools/fotos.mjs) plus the whole map.
 // Limits relative to the baseline: what each view may grow before the merge is refused.
 const LIMITS = {
   street: { draws: (b) => b + 150, tris: (b) => b * 2 },
@@ -36,10 +29,12 @@ const LIMITS = {
 const MEMORY_FACTOR = 1.5; // cityMB + roadsMB
 
 // the detail held at full while counting (game.fixDetail): the counts do not depend on how busy the machine was
-const script = (v) => `(async()=>{const g=window.__cidade.game;g.fixDetail(true);g.hudActions.speed(1);await g.view(0,0,${v.yaw},${v.pitch},${v.dist},${v.hour});` +
-  `await g.settle(20);g.hudActions.speed(0);const s=g.stats();` +
-  `if(!s.draws||!s.tris){console.log('error: empty budget view ${v.name}');return;}` +
-  `console.log('BUDGET '+JSON.stringify({view:'${v.name}',...s}));})()`;
+const script = (v) => viewScript(v, {
+  before: 'g.fixDetail(true);g.hudActions.speed(1);',
+  after: `await g.settle(20);g.hudActions.speed(0);const s=g.stats();` +
+    `if(!s.draws||!s.tris){console.log('error: empty budget view ${v.name}');return;}` +
+    `console.log('BUDGET '+JSON.stringify({view:'${v.name}',...s}));`,
+});
 
 const seq = VIEWS.slice(1).map((v) => [path.join(out, `${v.name}.png`), script(v)]);
 const env = { ...process.env, CIDADE_W: '1920', CIDADE_H: '1080', CIDADE_SEQ: JSON.stringify(seq) };
@@ -47,7 +42,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 const first = VIEWS[0];
 const p = spawn(process.execPath, [
   path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first.name}.png`),
-  `?cidade&mapa=10&limpo&hora=${first.hour}&cam=0,0,${first.yaw},${first.pitch},${first.dist}`, script(first),
+  `?cidade&mapa=10&limpo&hora=${first.hour}`, script(first),
 ], { cwd: root, env, stdio: ['ignore', 'pipe', 'inherit'] });
 
 const counts = {};
@@ -58,7 +53,7 @@ p.stdout.on('data', (d) => {
   while ((i = buf.indexOf('\n')) >= 0) {
     const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
     const m = /BUDGET (\{.*\})/.exec(line);
-    if (m) { const s = JSON.parse(m[1]); counts[s.view] = s; } else if (/^state:|error|Error/.test(line)) console.log(line);
+    if (m) { const s = JSON.parse(m[1]); counts[s.view] = s; } else if (/^state:|view:|error|Error/.test(line)) console.log(line);
   }
 });
 

@@ -243,8 +243,8 @@ export const SCENARIOS = {
     net.addSeg({ a: P, b: B, cx: 1550, cz: 1500, profile: 0, flags: 0, zl: 0, zr: 0 });
     net.addSeg({ a: C, b: D, cx: 1550, cz: 1550, profile: 0, flags: 0, zl: 0, zr: 0 });
     for (let t = 0; t < w.saveDirty.length; t++) w.saveDirty[t] = 1;
-    await g.save(false);
-    await g.load();
+    await g.saving.save(false);
+    await g.saving.load();
     await wait(300);
     const shown = QA('.v2-toast').filter((e) => !e.hidden).map((e) => e.textContent).join(' / ');
     check('the repair notice is still shown', /reparado|repaired/i.test(shown), 'toasts: ' + shown);
@@ -299,12 +299,12 @@ export const SCENARIOS = {
   // B23: the water panel shows the values of the map that was opened
   'B23-panels-show-map': `
     A.water({ waves: 0.9, foam: 0.1, current: 2 });
-    await g.save(false); A.water({ waves: 0.3, foam: 0.4, current: 0.5 }); await g.load();
+    await g.saving.save(false); A.water({ waves: 0.3, foam: 0.4, current: 0.5 }); await g.saving.load();
     click('[data-cat=landscape]'); await frames(2);
     // the water rows show with the river brush (as Roadcraft 4.0)
     click(byText('.v2-card', '^Rio|^River')); await frames(2);
     const waves = QA('.v2-range').find((e) => /Ondas|Waves/.test(e.getAttribute('aria-label')));
-    check('the waves slider shows the map', waves && waves.value === '90', 'slider ' + (waves && waves.value) + ', map ' + g.waterCtl.waves);
+    check('the waves slider shows the map', waves && waves.value === '90', 'slider ' + (waves && waves.value) + ', map ' + g.hudActions.environment().water.waves);
   `,
   // B24: the decay figure follows the city clock while the panel is open
   'B24-decay-follows-clock': `

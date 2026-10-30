@@ -126,8 +126,8 @@
   // ---------------- salvar, carregar, exportar
   await check('salvar e carregar mantém a cidade', async () => {
     const s = segs(), b = blds(), i = items();
-    await g.save(); await wait(500);
-    await g.load(); await wait(1500);
+    await g.saving.save(); await wait(500);
+    await g.saving.load(); await wait(1500);
     return segs() === s && blds() === b && items() === i ? true : `vias ${s}/${segs()} prédios ${b}/${blds()} itens ${i}/${items()}`;
   });
   await check('exportar e abrir arquivo', async () => { const blob = await a.packMap(); if (!blob || !blob.size) return 'pacote vazio'; await a.openMap(blob); await wait(1500); return segs() > 0 || 'abriu vazio'; });

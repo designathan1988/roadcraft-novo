@@ -7,8 +7,8 @@
   const c = net.addNode({ x: X + 20, z: Z + 90, y: a.ground(X + 20, Z + 90) }), d = net.addNode({ x: X + 20, z: Z + 1, y: a.ground(X + 20, Z) });
   net.addSeg({ a: c, b: d, cx: X + 20, cz: Z + 45, profile: 0, flags: 0 });
   const before = net.nodes.cols.deg[d];
-  await g.save(); await wait(500);
-  await g.load(); await wait(1500);
+  await g.saving.save(); await wait(500);
+  await g.saving.load(); await wait(1500);
   const n = net.nearestNode(X + 20, Z, 3);
   const repaired = { pontaAntes: before, noNovo: n, grauDepois: n >= 0 ? net.nodes.cols.deg[n] : -1 };
   console.log('RESULTADO reparo ' + JSON.stringify({ ...repaired, vias: net.segs.size }));

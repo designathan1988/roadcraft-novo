@@ -12,7 +12,6 @@ const wait = (ms) => `await new Promise(r=>setTimeout(r,${ms}));`;
 const view = (dist, pitch, hour) => `(async()=>{window.__cidade.game.view(177,711,35,${pitch},${dist},${hour});${wait(4500)}})()`;
 const follow = (dist, pitch, hour) => `(async()=>{const g=window.__cidade.game;await g.view(177,711,35,8,20,${hour});${wait(3000)}g.hudActions.follow();${wait(1200)}g.rig.dist=${dist};g.rig.pitch=${pitch}*Math.PI/180;${wait(2200)}})()`;
 const seq = [
-  [path.join(out, '01-carro-20m-dia.png'), view(20, 8, 11)],
   [path.join(out, '02-carro-100m-dia.png'), view(100, 18, 11)],
   [path.join(out, '03-carro-500m-dia.png'), view(500, 28, 11)],
   [path.join(out, '04-carro-20m-noite.png'), view(20, 8, 21)],

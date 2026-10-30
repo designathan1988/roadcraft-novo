@@ -13,7 +13,6 @@ const ready = `for(let k=0;k<150&&!g.vehicles.people.ready;k++)${wait(200)}`;
 const place = `(async()=>{const g=window.__cidade.game;${ready}g.api.people(177,711,{count:8,mode:'group',mixed:true});g.api.people(183,711,{count:4,mode:'walk',mixed:true,hold:'phone'});${wait(1200)}})()`;
 const view = (dist, pitch, hour) => `(async()=>{const g=window.__cidade.game;await g.view(177,711,35,${pitch},${dist},${hour});${wait(2500)}})()`;
 const seq = [
-  [path.join(out, '01-pessoas-2m-dia.png'), view(2, 4, 11)],
   [path.join(out, '02-pessoas-20m-dia.png'), view(20, 10, 11)],
   [path.join(out, '03-pessoas-100m-dia.png'), view(100, 18, 11)],
   [path.join(out, '04-pessoas-2m-noite.png'), view(2, 4, 21)],

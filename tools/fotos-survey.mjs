@@ -12,7 +12,6 @@ const wait = (ms) => `await new Promise(r=>setTimeout(r,${ms}));`;
 const view = (x, z, yaw, pitch, dist, hour, ms) => `(async()=>{window.__cidade.game.view(${x},${z},${yaw},${pitch},${dist},${hour});${wait(ms)}})()`;
 const a = [177, 711], b = [57, 591], c = [297, 831];
 const seq = [
-  [path.join(out, '01-carro-a-perto-dia.png'), view(...a, 35, 8, 12, 11, 4500)],
   [path.join(out, '02-carro-a-medio-dia.png'), view(...a, 215, 12, 35, 11, 4500)],
   [path.join(out, '03-carro-a-lado-dia.png'), view(...a, 125, 10, 18, 11, 4500)],
   [path.join(out, '04-carro-b-perto-dia.png'), view(...b, 35, 8, 14, 11, 4500)],

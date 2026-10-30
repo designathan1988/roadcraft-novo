@@ -25,8 +25,8 @@ const road = (ax, az, bx, bz) => { const r = a.road(ax, az, bx, bz); if (r !== '
 const roadAt = (x, z) => w.roads.nearestSeg(x, z, 6) !== null;
 // segments whose ends are not live nodes (a road shooting off to wherever a dead node's numbers point)
 const deadEnds = () => { const s = w.roads.segs, c = s.cols, n = w.roads.nodes.alive; let k = 0; for (let i = 0; i < s.alive.length; i++) if (s.alive[i] && (!n[c.a[i]] || !n[c.b[i]])) k++; return k; };
-// the save's file storage (g.saveStore, a FileStore, since saves are written by the page); before that, the browser storage
-const saveStore = async () => g.saveStore ? await g.saveStore : null;
+// the save's file storage (g.saving.saveStore, a FileStore, since saves are written by the page); before that, the browser storage
+const saveStore = async () => g.saving.saveStore ? await g.saving.saveStore : null;
 // makes every write of a file whose name matches \`re\` fail, until the returned function is called
 const failWrites = async (re) => {
   const st = await saveStore();
@@ -115,15 +115,15 @@ const SCENARIOS = {
     const before = w.roads.segs.size, marked = dirtyTiles();
     check('an edit marks tiles to save', marked.length > 0 && g.unsaved, 'unsaved=' + g.unsaved + ' tiles=' + marked);
     const heal = await failWrites(/^tile/);
-    const r = await within(g.save(false), 10000);
+    const r = await within(g.saving.save(false), 10000);
     check('a failed save returns', r === 'returned', 'save() ' + r);
     check('the game is free after a failed save', g.busy === false, 'busy=' + g.busy);
     check('a failed save leaves the work unsaved', g.unsaved === true, 'unsaved=' + g.unsaved);
     check('a failed save keeps the tiles marked', marked.every((t) => w.saveDirty[t]), 'marked now: ' + dirtyTiles());
     heal();
-    const r2 = await within(g.save(false), 10000);
+    const r2 = await within(g.saving.save(false), 10000);
     check('the next save works', r2 === 'returned' && !g.unsaved && dirtyTiles().length === 0, 'save() ' + r2 + ' unsaved=' + g.unsaved + ' tiles=' + dirtyTiles());
-    const r3 = await within(g.load(), 30000);
+    const r3 = await within(g.saving.load(), 30000);
     check('the saved road comes back', r3 === 'returned' && w.roads.segs.size === before, 'load() ' + r3 + ', segments ' + w.roads.segs.size + ' of ' + before);
   `,
   // A11, A12: an old map repaired on opening, then edited elsewhere and saved incrementally, opens again
@@ -135,22 +135,22 @@ const SCENARIOS = {
     net.addSeg({ a: A, b: B, cx: 1550, cz: 1500, profile: 0, flags: 0, zl: 0, zr: 0 });
     net.addSeg({ a: C, b: D, cx: 1550, cz: 1550, profile: 0, flags: 0, zl: 0, zr: 0 });
     for (let t = 0; t < w.saveDirty.length; t++) w.saveDirty[t] = 1;
-    await g.save(false);
-    let r = await within(g.load(), 30000);
+    await g.saving.save(false);
+    let r = await within(g.saving.load(), 30000);
     check('the old map opens (and is repaired)', r === 'returned' && !g.busy, 'load() ' + r);
     road(-2000, -2000, -1800, -2000);
-    await g.save(false);
+    await g.saving.save(false);
     const segs = w.roads.segs.size;
     const e0 = errors.length;
-    r = await within(g.load(), 30000);
+    r = await within(g.saving.load(), 30000);
     check('the map opens again after an incremental save', r === 'returned' && !g.busy && errors.length === e0, 'load() ' + r + ' busy=' + g.busy + ' errors: ' + errors.slice(e0).join(' | '));
     check('nothing lost or doubled', w.roads.segs.size === segs, 'segments ' + w.roads.segs.size + ' of ' + segs);
   `,
   // A26: generating a city after loading another one does not keep the old city's tiles in the save
   'generate-after-load': `
     road(4000, 4000, 4200, 4000);
-    await g.save(false);
-    await g.load();
+    await g.saving.save(false);
+    await g.saving.load();
     const listed = w.tileInSave.reduce((s, v) => s + v, 0);
     check('the loaded city lists its saved tiles', listed > 0, 'tiles listed: ' + listed);
     const r = await within(g.generatedCity(), 240000);
@@ -160,7 +160,7 @@ const SCENARIOS = {
   // A34: opening a broken map file never destroys the player's save
   'import-broken-file': `
     road(1500, 1500, 1700, 1500);
-    await g.save(false);
+    await g.saving.save(false);
     // a package of the player's own save with its map description garbled
     const list = [];
     for (const n of await files.list()) { let d = await files.read(n); if (n.startsWith('meta')) d = d.map((v, i) => (i > 4 ? v ^ 0x5a : v)); list.push([n, d]); }
@@ -180,7 +180,7 @@ const SCENARIOS = {
     window.roadcraftApp.quit();
     await wait(30000);
   `, `
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the road built before closing is there', r === 'returned' && w.roads.segs.size > 0, 'load() ' + r + ', segments ' + w.roads.segs.size);
   `],
   // A generated 10 km city saved, the app closed, and the city reopened in a new process: the same counts
@@ -189,7 +189,7 @@ const SCENARIOS = {
     check('the city is generated', r === 'returned' && !g.busy, 'generatedCity() ' + r);
     g.growth.rate = 0;
     const segs = w.roads.segs.size, nodes = w.roads.nodes.size, builds = w.buildings.size;
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     const tiles = w.tileInSave.reduce((s, v) => s + v, 0);
     check('the save lists its tiles', tiles > 0, 'tiles: ' + tiles);
     localStorage.setItem('qa-city-counts', JSON.stringify([segs, nodes, builds, tiles]));
@@ -197,7 +197,7 @@ const SCENARIOS = {
     window.roadcraftApp.quit();
     await wait(30000);
   `, `
-    const r = await within(g.load(), 60000);
+    const r = await within(g.saving.load(), 60000);
     const c = JSON.parse(localStorage.getItem('qa-city-counts') || '[]');
     const now = [w.roads.segs.size, w.roads.nodes.size, w.buildings.size, w.tileInSave.reduce((s, v) => s + v, 0)];
     check('the 10 km city opens', r === 'returned' && !g.busy, 'load() ' + r);
@@ -207,18 +207,18 @@ const SCENARIOS = {
   // game is closed while the close save fails the same way) leaves the save before it intact, and that save opens
   'interrupted-save': [`
     road(1500, 1500, 1700, 1500);
-    check('the first save completes', await g.save(false) === true, 'save() did not complete');
+    check('the first save completes', await g.saving.save(false) === true, 'save() did not complete');
     // after it: another road in the same tile (its file is written again) and one in a tile not saved yet
     road(1500, 1620, 1700, 1620);
     road(-3000, -3000, -2800, -3000);
     await failWrites(/^(meta|current|manifest)/);
-    check('the interrupted save reports that it did not complete', await g.save(false) === false, 'save() said it completed');
+    check('the interrupted save reports that it did not complete', await g.saving.save(false) === false, 'save() said it completed');
     console.log('CHECK END');
     window.roadcraftApp.quit();
     await wait(30000);
   `, `
-    const r = await within(g.load(), 30000);
-    check('the save before the interrupted one opens', r === 'returned' && !g.busy && !g.saveBlocked, 'load() ' + r + ' busy=' + g.busy + ' blocked=' + g.saveBlocked);
+    const r = await within(g.saving.load(), 30000);
+    check('the save before the interrupted one opens', r === 'returned' && !g.busy && !g.saving.blocked, 'load() ' + r + ' busy=' + g.busy + ' blocked=' + g.saving.blocked);
     check('it is that save, intact: its road and none of the later ones', roadAt(1600, 1500) && !roadAt(1600, 1620) && !roadAt(-2900, -3000),
       'roads: first ' + roadAt(1600, 1500) + ', same tile later ' + roadAt(1600, 1620) + ', other tile later ' + roadAt(-2900, -3000));
     check('no road ends on a missing node', deadEnds() === 0, deadEnds() + ' segments with a dead end');
@@ -231,13 +231,13 @@ const SCENARIOS = {
     for (let k = 0; k < 5; k++) a.terrain('raise', x, z, 150, 1);
     road(1500, 1500, 1700, 1500);
     check('the edit raised the terrain', a.ground(x, z) - seed > 1, 'from ' + seed + ' to ' + a.ground(x, z));
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     // the city on screen changes again and is not saved: its terrain must not leak into the opened save
     for (let k = 0; k < 2; k++) a.terrain('lower', x, z, 150, 1);
     const onScreen = a.ground(x, z);
     await files.remove(await tileFile(tileOf(x, z)));
     toasts.length = 0;
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the save opens', r === 'returned' && !g.busy, 'load() ' + r);
     const h = a.ground(x, z);
     check('the lost tile comes back from the seed', Math.abs(h - seed) < 0.05, 'height ' + h + ', seed ' + seed + ', the city on screen had ' + onScreen);
@@ -247,34 +247,34 @@ const SCENARIOS = {
   // "damaged": the opening stops, nothing is quarantined or rewritten, and once the storage works the save opens
   'storage-error': `
     road(1500, 1500, 1700, 1500);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     const before = await files.snapshot(), folders = (await files.folders()).length;
     let heal = await failStorage(/^(meta|current|manifest|cidade-1$)/);
     toasts.length = 0;
-    let r = await within(g.load(), 30000);
+    let r = await within(g.saving.load(), 30000);
     heal();
     check('a storage failure is not reported as no save', r === 'returned' && toasts.length > 0 && !toasts.some((m) => /Nenhum salvamento|No save/.test(m)), 'load() ' + r + ', toasts: ' + toasts.join(' | '));
     const file = await tileFile(tileOf(1600, 1500));
     heal = await failStorage({ test: (n) => n === file });
     toasts.length = 0;
-    r = await within(g.load(), 30000);
+    r = await within(g.saving.load(), 30000);
     heal();
     check('the opening returns', r === 'returned' && !g.busy, 'load() ' + r);
     check('a tile the storage failed to read is not called damaged or lost', !toasts.some((m) => /ilegíve|pedaço|quarentena/.test(m)), 'toasts: ' + toasts.join(' | '));
     check('nothing went to quarantine', (await files.folders()).length === folders, 'folders ' + folders + ' → ' + (await files.folders()));
     check('the save files are untouched', sameFiles(before, await files.snapshot()), 'files changed');
-    r = await within(g.load(), 30000);
-    check('once the storage works the save opens with its road', r === 'returned' && !g.busy && !g.saveBlocked && roadAt(1600, 1500), 'load() ' + r + ' blocked=' + g.saveBlocked + ' road=' + roadAt(1600, 1500));
+    r = await within(g.saving.load(), 30000);
+    check('once the storage works the save opens with its road', r === 'returned' && !g.busy && !g.saving.blocked && roadAt(1600, 1500), 'load() ' + r + ' blocked=' + g.saving.blocked + ' road=' + roadAt(1600, 1500));
   `,
   // A36: exporting packs only the files of the city saved now (never tiles of a city saved earlier in the same slot),
   // and opening an old package that carries such a file does not take it in
   'export-this-city': `
     road(-4000, -4000, -3800, -4000);
-    check('the first city is saved', await g.save(false) === true, 'save() did not complete');
-    await g.newMap();
+    check('the first city is saved', await g.saving.save(false) === true, 'save() did not complete');
+    await g.saving.newMap();
     w.unlimited = true;
     road(1500, 1500, 1700, 1500);
-    check('the second city is saved', await g.save(false) === true, 'save() did not complete');
+    check('the second city is saved', await g.saving.save(false) === true, 'save() did not complete');
     const listed = () => w.tileInSave.reduce((s, v) => s + v, 0);
     let names = (await unpack(await a.packMap())).map(([n]) => n);
     check('the export holds one file per tile of this city', names.filter((n) => n.startsWith('tile_')).length === listed(), names.length + ' files: ' + names + '; tiles listed ' + listed());
@@ -293,12 +293,12 @@ const SCENARIOS = {
     const s = w.roads.nearestSeg(0, 1500, 6)[0], c = w.roads.segs.cols, n = w.roads.nodes.cols;
     const ta = tileOf(n.x[c.a[s]], n.z[c.a[s]]), tb = tileOf(n.x[c.b[s]], n.z[c.b[s]]);
     check('the road crosses from one tile to the next', ta !== tb, 'tiles ' + ta + ', ' + tb);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     // the tile of the far end (the segment is saved with its first end) is damaged
     const file = await tileFile(tb), data = await files.read(file);
     await files.write(file, data.map((v, i) => (i > 8 ? v ^ 0xa5 : v)));
     const e0 = errors.length;
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the save opens', r === 'returned' && !g.busy, 'load() ' + r);
     check('no road ends on a node that was not read', deadEnds() === 0, deadEnds() + ' segments with a dead end; errors: ' + errors.slice(e0).join(' | '));
   `,
@@ -306,29 +306,29 @@ const SCENARIOS = {
   // the save opens clean
   'quarantine-once': `
     road(1500, 1500, 1700, 1500);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     const file = await tileFile(tileOf(1600, 1500)), data = await files.read(file);
     await files.write(file, data.map((v, i) => (i > 8 ? v ^ 0xa5 : v)));
     const quarantines = async () => (await files.folders()).filter((f) => f.startsWith('quarentena-')).length;
-    for (let k = 0; k < 3; k++) await g.load();
+    for (let k = 0; k < 3; k++) await g.saving.load();
     check('opening the same damaged save three times quarantines it once', await quarantines() === 1, (await quarantines()) + ' quarantine folders');
     check('the damaged tile is marked to be written again', w.saveDirty[tileOf(1600, 1500)] === 1, 'not marked');
-    check('the next save completes', await g.save(false) === true, 'save() did not complete');
+    check('the next save completes', await g.saving.save(false) === true, 'save() did not complete');
     toasts.length = 0;
-    await g.load();
+    await g.saving.load();
     check('then the save opens clean', !toasts.some((m) => /ilegíve|pedaço/.test(m)) && await quarantines() === 1, 'toasts: ' + toasts.join(' | ') + '; quarantines ' + (await quarantines()));
   `,
   // A17: lots the workers were still making for the city on screen are not taken in by the city opened after it (no
   // building of the old city grows in the new one)
   'stale-lots': `
     road(1500, 1500, 1700, 1500);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     // the workers get lot jobs 4 s late (as when they are busy), so the lots of the next road are still being made
     for (const wk of g.pool.workers) { if (!wk) continue; const post = wk.postMessage.bind(wk); wk.postMessage = (m, tr) => m && m.kind === 'lots' ? setTimeout(() => post(m, tr), 4000) : post(m, tr); }
     road(-3000, -3000, -2600, -3000);
     a.zone(-2800, -3000, 80, 1);
     await wait(500);
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the save opens', r === 'returned' && !g.busy, 'load() ' + r);
     await wait(9000);
     let grown = 0;
@@ -338,13 +338,13 @@ const SCENARIOS = {
   // A10: two openings, or an opening and a save, never run together (nothing is inserted twice)
   'overlap': `
     road(1500, 1500, 1700, 1500);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     const segs = w.roads.segs.size, builds = w.buildings.size, e0 = errors.length;
-    const [l1, l2] = await Promise.all([g.load(), g.load()]);
+    const [l1, l2] = await Promise.all([g.saving.load(), g.saving.load()]);
     check('a second opening while one runs is refused', l1 === true && l2 === false, 'load() ' + l1 + ', ' + l2);
-    const [l3, s3] = await Promise.all([g.load(), g.save(false)]);
+    const [l3, s3] = await Promise.all([g.saving.load(), g.saving.save(false)]);
     check('a save while opening is refused', l3 === true && s3 === false, 'load() ' + l3 + ', save() ' + s3);
-    const [s4, l4] = await Promise.all([g.save(false), g.load()]);
+    const [s4, l4] = await Promise.all([g.saving.save(false), g.saving.load()]);
     check('an opening while saving is refused', s4 === true && l4 === false, 'save() ' + s4 + ', load() ' + l4);
     check('nothing is doubled', w.roads.segs.size === segs && w.buildings.size === builds && errors.length === e0, 'segments ' + w.roads.segs.size + ' of ' + segs + ', errors: ' + errors.slice(e0).join(' | '));
   `,
@@ -353,9 +353,9 @@ const SCENARIOS = {
     road(1500, 1500, 1700, 1500);
     w.money = 12345;
     w.unlimited = true;
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     w.money = 1; w.unlimited = false;
-    await g.load();
+    await g.saving.load();
     check('unlimited money is still on after opening', w.unlimited === true, 'unlimited=' + w.unlimited);
     w.unlimited = false;
     check('turning it off gives the saved balance', w.money === 12345, 'money ' + w.money);
@@ -381,7 +381,7 @@ const SCENARIOS = {
   // The desktop game keeps its saves as real files in <user data>/saves (POST checks the disk), not in the browser storage
   'desktop-files': `
     road(1500, 1500, 1700, 1500);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     let inBrowser = [];
     try { for await (const [n] of await opfs(SLOT)) inBrowser.push(n); } catch { /* no such folder: right */ }
     check('nothing of it is in the browser storage', inBrowser.length === 0, 'browser storage holds ' + inBrowser);
@@ -389,7 +389,7 @@ const SCENARIOS = {
   // Saves an earlier desktop version kept in the browser storage are copied to files once, open, and stay where they were
   'migrate-opfs': [`
     road(1500, 1500, 1700, 1500);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     // the same city as an earlier version left it: meta.bin and tile_NNNN.bin in the browser storage, no files
     const cur = JSON.parse(new TextDecoder().decode(await files.read('current.json')));
     const man = JSON.parse(new TextDecoder().decode(await files.read(cur.manifest.file)));
@@ -401,7 +401,7 @@ const SCENARIOS = {
     await st.remove('', 'migrated-from-browser-storage.json');
     console.log('CHECK END');
   `, `
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the save of the earlier version opens', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500));
     check('it was copied to files', (await files.list()).includes('meta.bin'), 'files: ' + (await files.list()));
     const left = []; try { for await (const [n] of await opfs(SLOT)) left.push(n); } catch { /* gone */ }
@@ -411,11 +411,11 @@ const SCENARIOS = {
   // in the save goes aside in its turn)
   'previous-cities': `
     road(-4000, -4000, -3800, -4000);
-    check('the first city is saved', await g.save(false) === true, 'save() did not complete');
-    await g.newMap();
+    check('the first city is saved', await g.saving.save(false) === true, 'save() did not complete');
+    await g.saving.newMap();
     w.unlimited = true;
     road(1500, 1500, 1700, 1500);
-    check('the second city is saved', await g.save(false) === true, 'save() did not complete');
+    check('the second city is saved', await g.saving.save(false) === true, 'save() did not complete');
     const list = await g.hudActions.previousCities();
     check('the first city is listed as a previous city', list.length === 1 && list[0].tiles >= 1 && list[0].bytes > 0 && !!list[0].saved, JSON.stringify(list));
     g.hudActions.openPreviousCity(list[0].folder);
@@ -423,7 +423,7 @@ const SCENARIOS = {
     check('opening it brings it back', roadAt(-3900, -4000) && !roadAt(1600, 1500) && !g.busy, 'first city road ' + roadAt(-3900, -4000) + ', second ' + roadAt(1600, 1500));
     const after = await g.hudActions.previousCities();
     check('the city that was in the save is now a previous city', after.some((c) => c.gameId !== list[0].gameId), JSON.stringify(after));
-    check('and the save works', await g.save(false) === true, 'save() did not complete');
+    check('and the save works', await g.saving.save(false) === true, 'save() did not complete');
   `,
   // Reload keys of the desktop window (Ctrl+R, F5, Ctrl+Shift+R) never throw away work that was not saved: the edit is
   // there at the next opening (two sessions over the same user data folder)
@@ -434,7 +434,7 @@ const SCENARIOS = {
     window.roadcraftApp.testKey(${JSON.stringify(key)}, ${JSON.stringify(mods)});
     await wait(15000);
   `, `
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the road built before the key is there', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500) + ', toasts: ' + toasts.join(' | '));
   `]])),
   // A generated city, saved and opened again, is the same city: same roads and buildings, nothing repaired on opening
@@ -443,9 +443,9 @@ const SCENARIOS = {
     check('the city is generated', r === 'returned' && !g.busy, 'generatedCity() ' + r);
     g.growth.rate = 0;
     const segs = w.roads.segs.size, nodes = w.roads.nodes.size, builds = w.buildings.size;
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
     toasts.length = 0;
-    await g.load();
+    await g.saving.load();
     check('it opens the same', w.roads.segs.size === segs && w.roads.nodes.size === nodes && w.buildings.size === builds,
       'segments ' + segs + ' → ' + w.roads.segs.size + ', nodes ' + nodes + ' → ' + w.roads.nodes.size + ', buildings ' + builds + ' → ' + w.buildings.size);
     check('nothing is repaired on opening', !toasts.some((m) => /reparado|repaired/.test(m)) && g.unsaved === false, 'toasts: ' + toasts.join(' | ') + ', unsaved=' + g.unsaved);
@@ -453,8 +453,8 @@ const SCENARIOS = {
   // A city just opened has nothing unsaved (opening another one does not ask to discard anything)
   'opened-is-saved': `
     road(1500, 1500, 1700, 1500);
-    check('the save completes', await g.save(false) === true, 'save() did not complete');
-    await g.load();
+    check('the save completes', await g.saving.save(false) === true, 'save() did not complete');
+    await g.saving.load();
     check('right after opening nothing is unsaved', g.unsaved === false && dirtyTiles().length === 0, 'unsaved=' + g.unsaved + ' tiles=' + dirtyTiles());
   `,
   // Alt+F4 (what Windows sends for it, from outside the game) closes through the close that saves
@@ -468,7 +468,7 @@ const SCENARIOS = {
     // still here: Alt+F4 did not close the window (the run would then close it itself, and that close saves too)
     check('Alt+F4 closes the window', false, 'the window was still open 30 s later');
   `, `
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the road built before Alt+F4 is there', r === 'returned' && roadAt(1600, 1500), 'load() ' + r + ', road ' + roadAt(1600, 1500) + ', toasts: ' + toasts.join(' | '));
   `],
   // The desktop window's other shortcuts: DevTools only with ?dev, no page zoom on Ctrl +, F11 still toggles full screen
@@ -492,7 +492,7 @@ const SCENARIOS = {
     void window.__cidade.setLang('en');
     await wait(15000);
   `, `
-    const r = await within(g.load(), 30000);
+    const r = await within(g.saving.load(), 30000);
     check('the road built before the language change is there', r === 'returned' && w.roads.segs.size > 0, 'load() ' + r + ', segments ' + w.roads.segs.size);
   `],
 };
@@ -523,13 +523,13 @@ const BROWSER = {
   'two-tabs': [
     { tab: 0, body: `
       road(1500, 1500, 1700, 1500);
-      check('the first tab saves', await g.save(false) === true, 'save() did not complete');
+      check('the first tab saves', await g.saving.save(false) === true, 'save() did not complete');
       console.log('persisted storage: ' + await navigator.storage.persisted());
     ` },
     { tab: 1, body: `
       const before = await files.snapshot();
       road(-3000, -3000, -2800, -3000);
-      const r = await g.save(false);
+      const r = await g.saving.save(false);
       const same = sameFiles(before, await files.snapshot());
       check('a second tab does not write the same save', r === false && same, 'save() ' + r + ', files ' + (same ? 'same' : 'changed'));
       check('it says why', toasts.some((m) => /outra aba|another tab/.test(m)), 'toasts: ' + toasts.join(' | '));
@@ -540,12 +540,12 @@ const BROWSER = {
     ` },
     { tab: 0, body: `
       road(1500, 1600, 1700, 1600);
-      check('the first tab still saves', await g.save(false) === true, 'save() did not complete');
+      check('the first tab still saves', await g.saving.save(false) === true, 'save() did not complete');
     ` },
     { close: 0 },
     { tab: 1, body: `
       await wait(2000);
-      check('once the first tab closed, the second one saves', await g.save(false) === true, 'save() did not complete');
+      check('once the first tab closed, the second one saves', await g.saving.save(false) === true, 'save() did not complete');
     ` },
   ],
 };

@@ -30,7 +30,7 @@ const listAll = () => new Map(places.flatMap((p) => [...listing(p)]));
 const before = listAll();
 const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-check-'));
 const shot = path.join(own, 'shot.png');
-const script = '(async()=>{const g=window.__cidade.game;await g.save(false);console.log("script SAVED");})()';
+const script = '(async()=>{const g=window.__cidade.game;await g.saving.save(false);console.log("script SAVED");})()';
 const lines = await new Promise((resolve) => {
   const out = [];
   const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, '?vazio&hora=11', script],

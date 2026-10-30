@@ -10,7 +10,6 @@ fs.mkdirSync(out, { recursive: true });
 const wait = (ms) => `await new Promise(r=>setTimeout(r,${ms}));`;
 const view = (yaw, pitch, dist, hour, ms) => `(async()=>{window.__cidade.game.view(177,711,${yaw},${pitch},${dist},${hour});${wait(ms)}})()`;
 const seq = [
-  [path.join(out, '01-carro-8m.png'), view(35, 8, 8, 11, 4000)],
   [path.join(out, '02-carro-12m.png'), view(215, 8, 12, 11, 4000)],
   [path.join(out, '03-carro-16m.png'), view(35, 10, 16, 11, 4000)],
   [path.join(out, '04-carro-8m-noite.png'), view(35, 8, 8, 21, 4000)],

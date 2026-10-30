@@ -33,7 +33,7 @@ async function savedSegments(own, port) {
     await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
     const ev = (expr) => new Promise((r) => { ws.onmessage = (m) => r(JSON.parse(m.data).result?.result?.value); ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, awaitPromise: true, returnByValue: true } })); });
     for (let k = 0; k < 240 && (await ev('window.__cidade && window.__cidade.status')) !== 'pronto'; k++) await wait(500);
-    const n = await ev('(async () => { const g = window.__cidade.game; await g.load(); return g.world.roads.segs.size; })()');
+    const n = await ev('(async () => { const g = window.__cidade.game; await g.saving.load(); return g.world.roads.segs.size; })()');
     ws.close();
     return n;
   } finally { p.kill(); await wait(1500); }
@@ -76,7 +76,7 @@ async function session(name, key, code, vk, mods, port) {
     await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
     ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); } };
     for (let k = 0; k < 240 && (await evaluate('window.__cidade && window.__cidade.status')) !== 'pronto'; k++) await wait(500);
-    const after = await evaluate(`(async () => { const g = window.__cidade.game; const same = window.__sameDocument === 1; const now = g.world.roads.segs.size; const loaded = same ? -1 : (await g.load(), g.world.roads.segs.size); return { same, now, loaded }; })()`);
+    const after = await evaluate(`(async () => { const g = window.__cidade.game; const same = window.__sameDocument === 1; const now = g.world.roads.segs.size; const loaded = same ? -1 : (await g.saving.load(), g.world.roads.segs.size); return { same, now, loaded }; })()`);
     ws.close();
     if (after.same) return `${name}: nothing happened (same page, ${after.now} of ${before.segs} segments)`;
     return `${name}: the page reloaded; the edit (${before.segs} segments, unsaved ${before.unsaved}) ${after.loaded >= before.segs ? 'was saved first and came back' : `was LOST (after reload ${after.now}, the save holds ${after.loaded})`}`;

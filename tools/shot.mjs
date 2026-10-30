@@ -28,5 +28,7 @@ for (const s of [p.stdout, p.stderr]) {
     }
   });
 }
-const limit = setTimeout(() => { console.log('timed out'); p.kill(); }, Number(process.env.CIDADE_LIMIT ?? 600) * 1000);
-p.on('exit', (c) => { clearTimeout(limit); process.exit(c ?? 0); });
+// a run cut by the time limit (or ended by a signal) failed: it never exits 0
+let timedOut = false;
+const limit = setTimeout(() => { timedOut = true; console.log('timed out'); p.kill(); }, Number(process.env.CIDADE_LIMIT ?? 600) * 1000);
+p.on('exit', (c, signal) => { clearTimeout(limit); process.exit(timedOut ? 124 : c ?? (signal ? 1 : 0)); });
