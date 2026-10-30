@@ -709,11 +709,11 @@ test('C38: clearing the simulation (new map, load) leaves nothing of the old cit
   tr.occupancy = new Uint8Array(1 << 16);
   for (let i = 0; i < 20 * 60; i++) tr.step(0.05);
   tr.gov = 0.8; tr.jamShare = 0.4;
-  inner(tr).crossingClosed.set(3, tr.time + 100);
+  inner(tr).junctions.crossingClosed.set(3, tr.time + 100);
   tr.clearAll();
   assert.equal(tr.gov, 1, 'fleet share');
   assert.equal(tr.jamShare, 0, 'jam share');
-  assert.equal(inner(tr).crossingClosed.size, 0, 'level crossings still closed');
+  assert.equal(inner(tr).junctions.crossingClosed.size, 0, 'level crossings still closed');
   assert.equal(tr.lines.length, 0, 'bus lines of the old city');
   assert.ok(tr.occupancy.every((x) => x === 0), 'road occupancy');
   assert.equal(tr.docks.length, 0, 'docks of the old city');

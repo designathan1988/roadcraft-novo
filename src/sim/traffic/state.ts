@@ -8,6 +8,20 @@ export const MAX_VEHICLES = 1 << 16;
 export const JAM_SECONDS = 20;
 /** Controlled release of a jammed junction: one vehicle every this many seconds. */
 export const RELEASE_EVERY = 3;
+/** Length of the crosswalk and its stop line at the end of a lane (m, as painted: jobs/roadMesh.ts CROSSWALK). */
+export const CROSSWALK = 4.2;
+/** Seconds a vehicle stands at its line giving way to people stepping onto the zebra before it is its turn. */
+export const PED_COURTESY = 8;
+/** A walker steps off in front of an approaching vehicle only with this many seconds to spare. */
+export const PED_CRITICAL_GAP = 4;
+/** Half widths of the vehicle kinds (car, bus, truck, motorbike, train), m. */
+export const BODY_HALF_W = [0.9, 1.27, 1.25, 0.4, 1.5];
+/** How near a walker on a zebra to where a vehicle's lane crosses it holds the vehicle (m). */
+export const SPAN_REACH = 2.55 / 2 + 0.9 + 0.6;
+/** Waiting for the same full exit for this long (s), the driver claims its turn on it. */
+export const STARVE_SECONDS = 30;
+/** A train on its route within this distance (m) of a level crossing closes the barrier. */
+export const CROSSING_REACH = 160;
 
 /** Numbers per vehicle in `Traffic.inspect`, and why a vehicle there may stand still (bits). */
 export const INSPECT_STRIDE = 18;
