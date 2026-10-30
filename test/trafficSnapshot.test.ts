@@ -53,7 +53,8 @@ function run(steps: number, window?: number, buses = false): string {
   }
   const h = createHash('sha256'), t = tr.veh;
   h.update(new Uint8Array(t.alive.buffer, 0, t.end));
-  for (const k of Object.keys(t.cols).sort()) {
+  // in the schema's order, not by name: renaming a column (with its meaning unchanged) leaves the hash as it was
+  for (const k of Object.keys(t.cols)) {
     const col = t.cols[k as keyof typeof t.cols] as unknown as ArrayLike<number> & { buffer: ArrayBuffer; BYTES_PER_ELEMENT: number };
     // only live vehicles: a released id's leftovers are not behaviour
     const one = col.BYTES_PER_ELEMENT, bytes = new Uint8Array(col.buffer);
@@ -64,9 +65,9 @@ function run(steps: number, window?: number, buses = false): string {
   return `${t.size} ${tr.microN} ${busesNow} ${h.digest('hex')}`;
 }
 
-// recorded at 71825f5, before the vehicle table's owner (P9.2): "vehicles micro buses sha256"
-const EXPECTED_MICRO = '114 113 0 29e5b3e68cd1fe640e2f6583787fdbfdd13b083a8f64f4590810af0a0be86b20';
-const EXPECTED_MIXED = '114 65 3 a3aa3e96f11c0315c549534266a19ba9fe54696f7349cce72d406fcd6f77b05d';
+// recorded at d540d98 (traffic code as at 71825f5), before the vehicle table's owner (P9.2): "vehicles micro buses sha256"
+const EXPECTED_MICRO = '114 113 0 b829699ce623f7ffdd499e8592dddd99abdab67900f7d940ddb09ab0cc7bf868';
+const EXPECTED_MIXED = '114 65 3 1095aa6510e25ef8e196a18ab04f16875f98ce9b2c1e8ea35c23a07f7eed3fb8';
 
 test('the traffic of a fixed city, seed and number of steps is the same, bit for bit (all micro)', () => {
   // 60 s of simulated time at 20 Hz on the grid city
