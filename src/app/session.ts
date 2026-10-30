@@ -1,6 +1,7 @@
 // Saving the city: one generation of the save (the changed tiles, the map description and the manifest), built on the
 // last committed generation. The game owns the state; this module only reads it through SaveHost.
 import { MAP_SIZES } from '../config.ts';
+import type { Lifecycle } from './lifecycle.ts';
 import { Dirty, TILE_COUNT, cellsOfTile, tileId, tileX } from '../core/grid.ts';
 import { packTileHeights } from '../jobs/storage.ts';
 import { WATER_TILE_RES } from '../world/ground.ts';
@@ -32,7 +33,7 @@ export interface LoadReport { missing: number; damaged: number; repaired: number
 
 /** What starting a new city needs from the Game. */
 export interface NewMapHost {
-  busy: boolean;
+  readonly life: Lifecycle;
   readonly world: World;
   readonly hud: { showLoading(message: string): void };
   resetCity(): void;
@@ -42,8 +43,7 @@ export interface NewMapHost {
 
 /** Starts a new city with a fresh seed and generation id. */
 export async function newMapSession(host: NewMapHost): Promise<void> {
-  if (host.busy) return;
-  host.busy = true;
+  if (!host.life.begin('generating')) return;
   host.hud.showLoading(t('game.loading.terrain'));
   const w = host.world;
   try {
@@ -62,7 +62,7 @@ export async function newMapSession(host: NewMapHost): Promise<void> {
 
 /** What opening a city needs from the Game; the world itself stays the Game's. */
 export interface LoadHost {
-  busy: boolean;
+  readonly life: Lifecycle;
   readonly hud: { toast(message: string): void; showLoading(message: string): void };
   slot(): Promise<SaveSlot>;
   openGeneration(slot: SaveSlot, g: Generation, last: boolean): Promise<LoadReport | null>;
@@ -77,23 +77,22 @@ export interface LoadHost {
  * opening and touches nothing. True when the city opened.
  */
 export async function loadSession(host: LoadHost): Promise<boolean> {
-  if (host.busy) return false;
-  host.busy = true;
+  if (!host.life.begin('opening')) return false;
   let slot: SaveSlot, opened: Opened;
   try { slot = await host.slot(); opened = await slot.open(); } catch (err) {
-    host.busy = false;
+    host.life.end('opening');
     host.hud.toast(t('save.storageFailed', { message: errorText(err) }));
     return false;
   }
-  if (!opened.found) { host.busy = false; host.hud.toast(t('save.none')); return false; }
+  if (!opened.found) { host.life.end('opening'); host.hud.toast(t('save.none')); return false; }
   for (const p of opened.problems) console.warn('save:', p);
   const gens = opened.generations;
   // a save of another map size: the page reloads at that size and opens it there
   try { if (gens[0]) decodeMeta(gens[0].metaBytes); } catch (err) {
-    if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { host.busy = false; reloadWithMap(err.tiles, 'carregar'); return false; }
+    if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { host.life.end('opening'); reloadWithMap(err.tiles, 'carregar'); return false; }
   }
   if (!gens.length) {
-    host.busy = false;
+    host.life.end('opening');
     const q = await quarantineSlot(slot, opened.problems.join('; '));
     host.hud.toast(t('save.damaged', { folder: q ?? '—' }));
     return false;
@@ -135,10 +134,7 @@ export interface SaveHost {
   readonly waterCtl: SaveWater;
   readonly clouds: readonly Cloud[];
   readonly hour: number;
-  readonly saveBlocked: boolean;
-  readonly unsavedSerial: number;
-  busy: boolean;
-  unsaved: boolean;
+  readonly life: Lifecycle;
   slotBase: Generation | null;
   mayWrite(): Promise<boolean>;
   slot(): Promise<SaveSlot>;
@@ -153,29 +149,29 @@ export interface SaveHost {
  * save leaves them set and the next save tries again. True when the save completed.
  */
 export async function saveSession(host: SaveHost, auto = false): Promise<boolean> {
-  if (host.busy) return false;
-  if (host.saveBlocked) {
+  // the half-built world of a failed opening or generation is never saved
+  if (host.life.failed) {
     if (!auto) host.hud.toast(t('save.blocked'));
     return false;
   }
-  // busy is taken before anything is awaited, so an opening asked for right after is refused while this save runs
-  host.busy = true;
-  if (!await host.mayWrite()) { host.busy = false; return false; }
+  // the save starts before anything is awaited, so an opening asked for right after is refused while it runs
+  if (!host.life.begin('saving')) return false;
+  if (!await host.mayWrite()) { host.life.end('saving'); return false; }
   let slot: SaveSlot;
   try { slot = await host.slot(); await host.keepSlotForThisCity(slot); } catch (err) {
-    host.busy = false;
+    host.life.end('saving');
     host.hud.toast(t('save.keepFailed', { message: errorText(err) }));
     return false;
   }
   let base: Generation | null;
   // the generation built on must still have every file (otherwise every tile in the save is written again)
   try { base = host.slotBase && await slot.hasFiles(host.slotBase) ? host.slotBase : null; } catch (err) {
-    host.busy = false;
+    host.life.end('saving');
     host.hud.toast(t('save.failed', { message: errorText(err) }));
     return false;
   }
   const w = host.world;
-  const serial = host.unsavedSerial;
+  const serial = host.life.serial;
   // a tile is written when it changed, or when the save holds it but the generation built on does not
   const listed = new Uint8Array(w.tileInSave);
   const tiles: number[] = [];
@@ -208,7 +204,7 @@ export async function saveSession(host: SaveHost, auto = false): Promise<boolean
     for (let t = 0; t < TILE_COUNT; t++) if (listed[t]) inSave.push(t);
     host.slotBase = await writer.commit(meta, inSave, base, w.gameId, w.seed);
     tiles.forEach((t, k) => { w.tileInSave[t] = 1; if (w.saveVer[t] === versions[k]) w.saveDirty[t] = 0; });
-    if (host.unsavedSerial === serial) host.unsaved = false;
+    host.life.saved(serial);
     if (auto) host.hud.toast(t('save.auto'));
     else host.hud.toast(tiles.length ? t('save.doneTiles', { tiles: tiles.length, mb: (bytes / 1024 / 1024).toFixed(1) }) : t('save.done'));
     return true;
@@ -218,6 +214,6 @@ export async function saveSession(host: SaveHost, auto = false): Promise<boolean
     host.hud.toast(t('save.failed', { message: errorText(err) }));
     return false;
   } finally {
-    host.busy = false;
+    host.life.end('saving');
   }
 }

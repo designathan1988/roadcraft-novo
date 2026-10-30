@@ -72,6 +72,9 @@ export class ItemTool {
 
   setMode(m: 'streetscape' | 'barrier'): void { this.mode = m; this.cancel(); }
 
+  /** A wall is being traced: its first point is down and Enter, Esc or a double click ends it. */
+  get open(): boolean { return this.last !== null; }
+
   cancel(showHint = true): void {
     if (this.last) this.commands.endGroup();
     this.last = null;

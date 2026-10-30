@@ -2,9 +2,11 @@
 // The state it reads and writes belongs to Game (the owner), through InputHost; no rule of the world lives here.
 
 import * as THREE from 'three/webgpu';
+import type { Lifecycle } from './lifecycle.ts';
+import type { LotEditing } from './lotEditing.ts';
 import { attachPinch } from '../ui/touch.ts';
 import { installKeys } from '../ui/keys.ts';
-import { GROUND_TOOLS, TERRAIN_TOOLS, ROAD_TOOLS, type LotMode, type SkyToolState, type Tool } from '../ui/hud.ts';
+import { GROUND_TOOLS, TERRAIN_TOOLS, ROAD_TOOLS, type SkyToolState, type Tool } from '../ui/hudActions.ts';
 import { BrushStroke, LANDFORM_ROCK, type BrushParams } from '../world/brush.ts';
 import { GroundStroke } from '../world/ground.ts';
 import { ElementStroke } from '../world/items.ts';
@@ -30,6 +32,8 @@ import type { World } from '../world/world.ts';
 import type { ZoneTool } from '../features/zones/zoneTool.ts';
 
 export interface InputHost {
+  /** The game's lifecycle: world tools act only while the world is editable (app/lifecycle.ts). */
+  readonly life: Lifecycle;
   readonly canvas: HTMLCanvasElement;
   readonly ambient: Ambient;
   readonly commands: CommandStack;
@@ -56,24 +60,15 @@ export interface InputHost {
   readonly simSpeed: number;
   readonly paused: boolean;
   readonly homeView: Float64Array | null;
-  readonly polyPts: Array<[number, number]>;
   readonly riverPts: Array<[number, number]>;
-  lotStroke: Array<[number, number]>;
-  readonly lotPts: Array<[number, number]> | null;
-  readonly lotMode: LotMode;
-  lotExtraPts: Array<[number, number]>;
-  lotExtra: 'line' | 'curve' | null;
-  joinFirst: number;
-  cornerDrag: { id: number; k: number } | null;
+  /** The lot tool (its state: mode, points under way, corner dragged). */
+  readonly editing: LotEditing;
   readonly insideId: number;
   readonly cloudGrab: number;
   pointer: { x: number; y: number; inside: boolean };
-  drag: 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' | 'lots';
   stroke: BrushStroke | GroundStroke | null;
   rockStroke: GroundStroke | null;
   elemStroke: ElementStroke | null;
-  boxStart: THREE.Vector3 | null;
-  wallOpen: boolean;
   ndcX(): number;
   ndcY(): number;
   clickHost(): ClickHost;
@@ -94,7 +89,24 @@ export interface InputHost {
   save(): Promise<boolean> | void;
 }
 
-export function bindInput(h: InputHost): void {
+export type Drag = 'none' | 'pan' | 'rotate' | 'brush' | 'click' | 'zone' | 'node' | 'box' | 'row' | 'free' | 'lots';
+
+/** The pointer gesture under way: what kind of drag, where a box or row started, the stroke of a lots deletion. */
+export class Gesture {
+  drag: Drag = 'none';
+  boxStart: THREE.Vector3 | null = null;
+  lotStroke: Array<[number, number]> = [];
+}
+
+/** What the page keeps of the input: the gesture (read by the frame) and how to end it when the tool changes. */
+export interface InputControl {
+  readonly gesture: Gesture;
+  /** Leaves the gesture under way: what is already in the world (brush, ground, elements, zone) is one undo step; what waits for the release (box, row, lots stroke, free road, a corner or cloud held) is dropped. */
+  cancel(): void;
+}
+
+export function bindInput(h: InputHost): InputControl {
+  const gs = new Gesture();
     const c = h.canvas;
     const down = { x: 0, y: 0, button: -1 };
     c.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -105,42 +117,45 @@ export function bindInput(h: InputHost): void {
       c.setPointerCapture(e.pointerId);
       h.pointer.x = e.offsetX; h.pointer.y = e.offsetY;
       down.x = e.offsetX; down.y = e.offsetY; down.button = e.button;
-      if (e.button === 2) h.drag = 'rotate';
+      if (e.button === 2) gs.drag = 'rotate';
       else if (e.button === 1 || (e.button === 0 && h.tool === 'camera')) {
-        h.drag = 'pan';
+        gs.drag = 'pan';
         h.rig.beginPan(h.ndcX(), h.ndcY());
+      } else if (e.button === 0 && h.tool !== 'inspect' && !h.life.worldEditable) {
+        // the city on screen is being rebuilt or is half built (a failed opening or generation): no tool changes it
+        h.hud.toast(t('game.toast.saveBlocked'));
       } else if (e.button === 0 && TERRAIN_TOOLS.includes(h.tool)) {
-        h.drag = 'brush';
+        gs.drag = 'brush';
         h.stroke = new BrushStroke(h.world);
         h.rockStroke = LANDFORM_ROCK[h.brush.mode] !== undefined ? new GroundStroke(h.world) : null;
       } else if (e.button === 0 && h.tool === 'sky' && h.skyTool.fog !== 'none') {
-        h.drag = 'brush';
+        gs.drag = 'brush';
         h.elemStroke = new ElementStroke(h.world.items);
       } else if (e.button === 0 && h.tool === 'sky' && h.skyTool.cloud === 'move' && h.grabCloud(h.rig.pick(h.ndcX(), h.ndcY()))) {
-        h.drag = 'node';
+        gs.drag = 'node';
       } else if (e.button === 0 && h.tool === 'elements') {
-        h.drag = 'brush';
+        gs.drag = 'brush';
         h.elemStroke = new ElementStroke(h.world.items);
       } else if (e.button === 0 && h.tool === 'forest' && h.forestOne) {
-        h.drag = 'click';
+        gs.drag = 'click';
       } else if (e.button === 0 && GROUND_TOOLS.includes(h.tool)) {
-        h.drag = 'brush';
+        gs.drag = 'brush';
         h.stroke = new GroundStroke(h.world);
       } else if (e.button === 0 && h.tool === 'free' && h.roadTool.freeBegin(h.rig.pick(h.ndcX(), h.ndcY()))) {
-        h.drag = 'free';
+        gs.drag = 'free';
       } else if (e.button === 0 && h.tool === 'move' && h.roadTool.grab(h.rig.pick(h.ndcX(), h.ndcY()))) {
-        h.drag = 'node';
-      } else if (e.button === 0 && h.tool === 'building' && h.lotMode === 'corner' && h.grabCorner(h.rig.pick(h.ndcX(), h.ndcY()))) {
-        h.drag = 'node';
-      } else if (e.button === 0 && h.tool === 'building' && h.lotMode === 'delete' && !h.lotExtra) {
+        gs.drag = 'node';
+      } else if (e.button === 0 && h.tool === 'building' && h.editing.lotMode === 'corner' && h.grabCorner(h.rig.pick(h.ndcX(), h.ndcY()))) {
+        gs.drag = 'node';
+      } else if (e.button === 0 && h.tool === 'building' && h.editing.lotMode === 'delete' && !h.editing.lotExtra) {
         const hit = h.rig.pick(h.ndcX(), h.ndcY());
-        h.drag = 'lots';
-        h.lotStroke = hit ? [[hit.x, hit.z]] : [];
+        gs.drag = 'lots';
+        gs.lotStroke = hit ? [[hit.x, hit.z]] : [];
       } else if (e.button === 0 && h.tool === 'zone' && !h.zoneBlock) {
-        h.drag = 'zone';
+        gs.drag = 'zone';
         h.zoneTool.begin();
       } else if (e.button === 0) {
-        h.drag = 'click'; // becomes a camera drag if it moves
+        gs.drag = 'click'; // becomes a camera drag if it moves
       }
       e.preventDefault();
     });
@@ -149,34 +164,33 @@ export function bindInput(h: InputHost): void {
       h.pointer.x = e.offsetX; h.pointer.y = e.offsetY;
       h.pointer.inside = true;
       h.roadTool.shiftHeld = e.shiftKey;
-      if (h.drag === 'click' && (h.tool === 'bulldoze' || h.tool === 'streetscape') && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
+      if (gs.drag === 'click' && (h.tool === 'bulldoze' || h.tool === 'streetscape') && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
         const px = h.pointer.x, py = h.pointer.y;
         h.pointer.x = down.x; h.pointer.y = down.y;
-        h.boxStart = h.rig.pick(h.ndcX(), h.ndcY());
+        gs.boxStart = h.rig.pick(h.ndcX(), h.ndcY());
         h.pointer.x = px; h.pointer.y = py;
-        if (h.boxStart) h.drag = h.tool === 'streetscape' ? 'row' : 'box';
+        if (gs.boxStart) gs.drag = h.tool === 'streetscape' ? 'row' : 'box';
       }
-      if (h.drag === 'click' && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
-        h.drag = 'pan';
+      if (gs.drag === 'click' && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
+        gs.drag = 'pan';
         h.pointer.x = down.x; h.pointer.y = down.y;
         h.rig.beginPan(h.ndcX(), h.ndcY());
         h.pointer.x = e.offsetX; h.pointer.y = e.offsetY;
       }
-      if (h.drag === 'rotate') h.rig.rotate(dx, dy);
-      else if (h.drag === 'pan') h.rig.pan(h.ndcX(), h.ndcY());
-      else if (h.drag === 'lots') {
-        const hit = h.rig.pick(h.ndcX(), h.ndcY()), last = h.lotStroke[h.lotStroke.length - 1];
-        if (hit && (!last || Math.hypot(hit.x - last[0], hit.z - last[1]) > 2)) h.lotStroke.push([hit.x, hit.z]);
+      if (gs.drag === 'rotate') h.rig.rotate(dx, dy);
+      else if (gs.drag === 'pan') h.rig.pan(h.ndcX(), h.ndcY());
+      else if (gs.drag === 'lots') {
+        const hit = h.rig.pick(h.ndcX(), h.ndcY()), last = gs.lotStroke[gs.lotStroke.length - 1];
+        if (hit && (!last || Math.hypot(hit.x - last[0], hit.z - last[1]) > 2)) gs.lotStroke.push([hit.x, hit.z]);
       }
     });
-    const finishDrag = (e: PointerEvent) => {
-      if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
-      const still = Math.hypot(e.offsetX - down.x, e.offsetY - down.y) <= 5;
-      if (h.drag === 'brush' && h.elemStroke) {
+    // what a drag already put in the world (a brush of ground or elements, a zone) becomes one undo step
+    const commitStrokes = () => {
+      if (gs.drag === 'brush' && h.elemStroke) {
         if (!h.elemStroke.cmd.empty) h.commands.push(h.elemStroke.cmd);
         h.elemStroke = null;
       }
-      if (h.drag === 'brush' && h.stroke) {
+      if (gs.drag === 'brush' && h.stroke) {
         const rock = h.rockStroke;
         h.rockStroke = null;
         if (h.stroke.finish()) {
@@ -187,52 +201,57 @@ export function bindInput(h: InputHost): void {
         }
         h.stroke = null;
       }
-      if (h.drag === 'zone') h.zoneTool.end();
-      if (h.drag === 'lots') {
-        const r = h.lotStroke.length ? deleteLotsAlong(h.world, h.lotStroke) : null;
-        h.lotStroke = [];
+      if (gs.drag === 'zone') h.zoneTool.end();
+    };
+    const finishDrag = (e: PointerEvent) => {
+      if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
+      const still = Math.hypot(e.offsetX - down.x, e.offsetY - down.y) <= 5;
+      commitStrokes();
+      if (gs.drag === 'lots') {
+        const r = gs.lotStroke.length ? deleteLotsAlong(h.world, gs.lotStroke) : null;
+        gs.lotStroke = [];
         if (typeof r === 'string') h.hud.toast(r[0].toUpperCase() + r.slice(1) + '.');
-        else if (r) { h.commands.push(r); h.hud.toast('Apagado.'); }
+        else if (r) { h.commands.push(r); h.hud.toast(t('game.toast.deleted')); }
       }
-      if (h.drag === 'free') h.roadTool.freeEnd(h.rig.pick(h.ndcX(), h.ndcY()));
-      if (h.drag === 'row' && h.boxStart) {
+      if (gs.drag === 'free') h.roadTool.freeEnd(h.rig.pick(h.ndcX(), h.ndcY()));
+      if (gs.drag === 'row' && gs.boxStart) {
         const b = h.rig.pick(h.ndcX(), h.ndcY());
-        if (b) h.itemTool.row(h.boxStart.x, h.boxStart.z, b.x, b.z);
+        if (b) h.itemTool.row(gs.boxStart.x, gs.boxStart.z, b.x, b.z);
         h.preview.hideAll();
-        h.boxStart = null;
+        gs.boxStart = null;
       }
-      if (h.drag === 'box' && h.boxStart) {
+      if (gs.drag === 'box' && gs.boxStart) {
         const b = h.rig.pick(h.ndcX(), h.ndcY());
-        const r = b ? demolishBox(h.world, h.boxStart.x, h.boxStart.z, b.x, b.z) : null;
+        const r = b ? demolishBox(h.world, gs.boxStart.x, gs.boxStart.z, b.x, b.z) : null;
         h.preview.hideAll();
         if (r) { h.commands.push(r.cmd); h.hud.toast((plural('game.toast.demolished', r.count) + (r.charge < 0 ? t('game.toast.refunded', { money: money(-r.charge) }) : '') + '.')); }
-        h.boxStart = null;
+        gs.boxStart = null;
       }
-      if (h.drag === 'node' && h.cloudGrab >= 0) { h.dropCloud(h.rig.pick(h.ndcX(), h.ndcY())); }
-      else if (h.drag === 'node' && h.cornerDrag) h.dropCorner(h.rig.pick(h.ndcX(), h.ndcY()));
-      else if (h.drag === 'node') h.roadTool.drop(h.rig.pick(h.ndcX(), h.ndcY()));
-      if (h.drag === 'click' && still && e.type === 'pointerup') {
+      if (gs.drag === 'node' && h.cloudGrab >= 0) { h.dropCloud(h.rig.pick(h.ndcX(), h.ndcY())); }
+      else if (gs.drag === 'node' && h.editing.cornerDrag) h.dropCorner(h.rig.pick(h.ndcX(), h.ndcY()));
+      else if (gs.drag === 'node') h.roadTool.drop(h.rig.pick(h.ndcX(), h.ndcY()));
+      if (gs.drag === 'click' && still && e.type === 'pointerup') {
         clickTool(h.clickHost(), h.rig.pick(h.ndcX(), h.ndcY()), e.shiftKey, e.altKey);
       }
-      if (h.drag === 'rotate' && still && ROAD_TOOLS.includes(h.tool)) h.roadTool.cancel();
-      if (h.drag === 'pan') h.rig.endPan();
-      h.drag = 'none';
+      if (gs.drag === 'rotate' && still && ROAD_TOOLS.includes(h.tool)) h.roadTool.cancel();
+      if (gs.drag === 'pan') h.rig.endPan();
+      gs.drag = 'none';
     };
     // whatever the tool does on release, the drag always ends (an error must not leave the next move panning the camera)
     const end = (e: PointerEvent) => {
       try { finishDrag(e); } catch (err) {
         console.error(err);
         h.hud.toast(t('tool.failed', { message: (err as Error)?.message ?? String(err) }));
-      } finally { h.drag = 'none'; if (h.commands.holding) h.zoneTool.end(); }
+      } finally { gs.drag = 'none'; if (h.commands.holding) h.zoneTool.end(); }
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('dblclick', () => {
       if (h.tool === 'river') h.finishRiver();
-      if (h.tool === 'building' && h.lotMode === 'poly') h.finishPoly();
+      if (h.tool === 'building' && h.editing.lotMode === 'poly') h.finishPoly();
       // the building picked by the first click: see it inside (the hint of "See inside" says so)
-      else if (h.tool === 'building' && h.lotMode === 'edit' && !h.lotExtra && h.selected >= 0 && !(h.inside.on && h.insideId === h.selected)) h.insideCmd('toggle');
+      else if (h.tool === 'building' && h.editing.lotMode === 'edit' && !h.editing.lotExtra && h.selected >= 0 && !(h.inside.on && h.insideId === h.selected)) h.insideCmd('toggle');
       // a wall ends (the barrier hint: double click or Enter)
-      if (h.tool === 'barrier' && h.wallOpen) { h.itemTool.cancel(); h.wallOpen = false; }
+      if (h.tool === 'barrier' && h.itemTool.open) h.itemTool.cancel();
     });
     c.addEventListener('pointercancel', end);
     c.addEventListener('pointerleave', () => { h.pointer.inside = false; });
@@ -260,9 +279,9 @@ export function bindInput(h: InputHost): void {
       cancelStroke: () => {
         if (h.vehicles.follow) { h.vehicles.follow = null; return true; }
         // a wall being traced ends and the tool stays (the next Esc puts it down)
-        if (h.tool === 'barrier' && h.wallOpen) { h.itemTool.cancel(); h.wallOpen = false; return true; }
-        if (h.tool === 'building' && h.lotExtraPts.length) { h.lotExtraPts = []; h.preview.hideAll(); return true; }
-        if (h.tool === 'building' && (h.lotPts?.length || h.polyPts.length || h.joinFirst >= 0)) { if (h.lotPts) h.lotPts.length = 0; h.polyPts.length = 0; h.joinFirst = -1; h.preview.hideAll(); return true; }
+        if (h.tool === 'barrier' && h.itemTool.open) { h.itemTool.cancel(); return true; }
+        if (h.tool === 'building' && h.editing.lotExtraPts.length) { h.editing.lotExtraPts = []; h.preview.hideAll(); return true; }
+        if (h.tool === 'building' && (h.editing.lotPts?.length || h.editing.polyPts.length || h.editing.joinFirst >= 0)) { if (h.editing.lotPts) h.editing.lotPts.length = 0; h.editing.polyPts.length = 0; h.editing.joinFirst = -1; h.preview.hideAll(); return true; }
         if (h.tool === 'river' && h.riverPts.length) { h.riverPts.length = 0; h.preview.hideAll(); return true; }
         if (ROAD_TOOLS.includes(h.tool) && h.roadTool.busy) { h.roadTool.cancel(); return true; }
         return false;
@@ -294,4 +313,22 @@ export function bindInput(h: InputHost): void {
       wake: () => h.ambient.start(),
       camera: h.rig,
     });
+
+    // the tool changes in the middle of a drag (a key, the toolbar): the gesture is left, never finished on the new tool
+    const cancel = () => {
+      if (gs.drag === 'none') return;
+      commitStrokes();
+      if (gs.drag === 'node') {
+        if (h.cloudGrab >= 0) h.dropCloud(null);
+        else if (h.editing.cornerDrag) h.dropCorner(null);
+        else h.roadTool.drop(null);
+      }
+      if (gs.drag === 'free') h.roadTool.cancel();
+      if (gs.drag === 'pan') h.rig.endPan();
+      if (gs.drag === 'box' || gs.drag === 'row') h.preview.hideAll();
+      gs.boxStart = null;
+      gs.lotStroke = [];
+      gs.drag = 'none';
+    };
+    return { gesture: gs, cancel };
 }

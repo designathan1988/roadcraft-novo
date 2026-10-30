@@ -3,6 +3,7 @@
 // The page's parts it clears and the loading screen it shows are reached through CityFlowHost.
 
 import { MAP_TILES, TILE_SIZE } from '../config.ts';
+import type { Lifecycle } from './lifecycle.ts';
 import { FLAT_BIT } from '../jobs/terrainGen.ts';
 import { Dirty, TILE_COUNT, tileId, tileOriginX, tileX } from '../core/grid.ts';
 import type { JobPool } from '../jobs/pool.ts';
@@ -20,9 +21,8 @@ export interface CityFlowHost {
   readonly world: World;
   readonly pool: JobPool;
   readonly hud: Hud;
-  busy: boolean;
-  /** True while the terrain is being made and conformed (the frame loop leaves it alone). */
-  generating: boolean;
+  /** The game's lifecycle (app/lifecycle.ts): a generation is its 'generating' operation. */
+  readonly life: Lifecycle;
   /** Lets go of everything the page holds of the city on screen (lots under way, layers, props, wrecks, lines, history, clouds, sign texts). */
   clearPage(): void;
   /** The city on screen is not the one the save slot holds any more. */
@@ -35,6 +35,9 @@ export interface CityFlowHost {
 
 export class CityFlows {
   private h: CityFlowHost;
+  private terrain = false;
+  /** True while the generated city's terrain is made and conformed (the frame loop leaves the growth alone). */
+  get terrainUnderway(): boolean { return this.terrain; }
 
   constructor(host: CityFlowHost) { this.h = host; }
 
@@ -57,8 +60,7 @@ export class CityFlows {
   /** The whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
   async generated(medium = false): Promise<void> {
     const h = this.h, w = h.world;
-    if (h.busy) return;
-    h.busy = true;
+    if (!h.life.begin('generating')) return;
     // the medium town is laid on a level plain (Roadcraft 2.0's flat map); the whole map keeps its relief
     w.seed = (medium ? w.seed | FLAT_BIT : w.seed & ~FLAT_BIT) >>> 0;
     const t0 = performance.now();
@@ -66,7 +68,7 @@ export class CityFlows {
     h.hud.showLoading(t('game.loading.city'));
     try {
       this.reset();
-      h.generating = true;
+      this.terrain = true;
       await h.generateTerrain();
       phase('terrain');
       const city = await h.pool.run('cityGen', { seed: w.seed, medium }, { priority: 0 });
@@ -107,7 +109,7 @@ export class CityFlows {
         const tx = r.tile % MAP_TILES, tz = (r.tile / MAP_TILES) | 0;
         w.touchRect(tileOriginX(tx), tileOriginX(tz), tileOriginX(tx) + TILE_SIZE - 1, tileOriginX(tz) + TILE_SIZE - 1, Dirty.Terrain);
       }));
-      h.generating = false;
+      this.terrain = false;
       phase('terrain conformed');
       h.hud.showLoading(t('game.loading.lots'));
       const n = await h.grow();
@@ -117,6 +119,7 @@ export class CityFlows {
       const secs = ((performance.now() - t0) / 1000).toFixed(0);
       h.hud.toast(t('game.toast.generated', { secs, buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
     } catch (err) {
+      this.terrain = false;
       h.endRebuild(err, t('game.flow.generate'));
     }
   }
@@ -124,8 +127,7 @@ export class CityFlows {
   /** Worst case: fills the map with zoned streets and lets buildings grow on every lot. */
   async testCity(): Promise<void> {
     const h = this.h, w = h.world;
-    if (h.busy) return;
-    h.busy = true;
+    if (!h.life.begin('generating')) return;
     h.hud.toast(t('game.toast.testCity'));
     try {
       this.reset();

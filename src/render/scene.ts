@@ -49,6 +49,8 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<SceneParts
     forceWebGL,
     reversedDepthBuffer: true,
     powerPreference: 'high-performance',
+    // ?perf: GPU time per render call (render/gpuTiming.ts); the queries are the measurement, off in play
+    trackTimestamp: new URLSearchParams(location.search).has('perf'),
   });
   await renderer.init();
   renderer.setPixelRatio(window.devicePixelRatio);

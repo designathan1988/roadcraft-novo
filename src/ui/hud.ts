@@ -17,7 +17,7 @@ import { ROAD_TUNING } from '../roads/tuning.ts';
 import { AboutBox } from './about.ts';
 import { centreText } from './readouts.ts';
 import { closeRoadKeys } from './roadKeysPanel.ts';
-import type { CityStatus, HudActions, LotMode, SimSettings, SkyMode, Tool } from './hudActions.ts';
+import type { CityStatus, HudActions, HudReads, SimSettings, SkyMode, Tool } from './hudActions.ts';
 export type { CityStatus, HudActions, LotMode, SimSettings, SkyMode, SkyToolState, Tool, WeatherCtl } from './hudActions.ts';
 import {
   CATS, ShellState, categoriesOf, lineInfo, renderBuild, renderDemolish, renderLandscape, renderRoads, renderTransit, renderZones,
@@ -25,11 +25,6 @@ import {
 } from './drawers.ts';
 
 declare const __BUILD__: string;
-
-export const TERRAIN_TOOLS: Tool[] = ['raise', 'lower', 'smooth', 'flatten', 'landform'];
-/** Ground brushes (they share the radius). */
-export const GROUND_TOOLS: Tool[] = ['paint', 'forest', 'elements'];
-export const ROAD_TOOLS: Tool[] = ['road', 'curve', 'free', 'roundabout', 'upgrade', 'blocks', 'move', 'split', 'bulldoze'];
 
 /** The simulation's settings the Simulation panel changes. */
 
@@ -61,8 +56,9 @@ export class Hud {
   /** Extension point of the Build drawer: the buildings session mounts its editor (creator.ts) here. */
   readonly buildingSlot: HTMLElement;
   private a: HudActions;
-  private s = new ShellState();
-  private current: Tool = 'camera';
+  /** The owners the HUD reads (the tool in hand, the camera mode): never a copy kept here. */
+  private read: HudReads;
+  private s: ShellState;
   private cat: Category | null = null;
   private open = false;
   private lastTool = new Map<Category, Tool>();
@@ -81,7 +77,8 @@ export class Hud {
   private redoB: HTMLButtonElement;
   private insideBar: HTMLElement;
   private insideLevel: HTMLElement;
-  private speedNow = 1;
+  /** The speed the buttons show (written to the page only when the clock's changes). */
+  private speedShown = 1;
   private status: CityStatus | null = null;
   private moneyShown = NaN;
   private clockShown = '';
@@ -91,7 +88,6 @@ export class Hud {
   private popAnchor: HTMLElement | null = null;
   private metrics: HTMLElement | null = null;
   private layers = { grid: false, zones: false, traffic: false };
-  private view: 'persp' | 'iso' = 'persp';
   private insideFloor = -1;
   private about = new AboutBox();
   private readoutTimer = 0;
@@ -121,7 +117,9 @@ export class Hud {
   /** What writes the bar's and the dock's names again when the language changes. */
   private relabels: Array<() => void> = [];
 
-  constructor(a: HudActions) {
+  constructor(a: HudActions, read: HudReads) {
+    this.read = read;
+    this.s = new ShellState(read);
     this.a = a;
     this.root = document.getElementById('hud')!;
     this.root.className = 'v2';
@@ -337,16 +335,19 @@ export class Hud {
     this.cat = id;
     this.open = true;
     // Build edits buildings: a lot mode left on by the Zones tab (split, join...) goes back to editing
-    if (id === 'build' && !['edit', 'rect', 'poly'].includes(this.s.lotMode)) { this.a.lotExtraOff?.(); this.s.lotExtra = null; this.s.lotMode = 'edit'; this.a.lotMode('edit'); }
+    if (id === 'build' && !['edit', 'rect', 'poly'].includes(this.s.lotMode)) { this.a.lotExtraOff?.(); this.a.lotMode('edit'); }
     const def = CATS.find((c) => c.id === id)!.tool;
     const keep = categoriesOf(this.current).includes(id);
     if (!keep) this.a.tool(this.lastTool.get(id) ?? def);
     else this.render();
   }
 
-  /** The category a key or the game put the tool in. */
-  setTool(tool: Tool): void {
-    this.current = tool;
+  private get current(): Tool { return this.read.tool(); }
+  private get view(): 'persp' | 'iso' { return this.read.view(); }
+
+  /** The tool changed (a key, the game, the API): the dock and the drawer follow the tool in hand. */
+  toolChanged(): void {
+    const tool = this.current;
     const cats = categoriesOf(tool);
     if (!cats.length) this.open = false;
     else {
@@ -670,10 +671,8 @@ export class Hud {
 
     for (const b of this.skyButtons) { const on = b.dataset.sky === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
   }
-  setLotMode(m: LotMode): void {
-    this.s.lotExtra = null;
-    if (this.s.lotMode === m) return;
-    this.s.lotMode = m;
+  /** The lot tool's mode changed (its owner: app/lotEditing.ts): the open Build or Zones drawer shows it. */
+  lotModeChanged(): void {
     if (this.open && (this.cat === 'build' || this.cat === 'zones')) this.render();
   }
   /**
@@ -711,11 +710,11 @@ export class Hud {
     const text = `${String(h).padStart(2, '0')}:${String(m - (m % 5)).padStart(2, '0')}`;
     if (text !== this.clockShown) { this.clockShown = text; this.clockText.data = text; }
     const now = paused ? 0 : simSpeed;
-    if (now !== this.speedNow) { this.speedNow = now; this.syncSpeed(); }
+    if (now !== this.speedShown) { this.speedShown = now; this.syncSpeed(); }
   }
 
   private syncSpeed(): void {
-    for (const b of this.speedButtons) { const on = Number(b.dataset.speed) === this.speedNow; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
+    for (const b of this.speedButtons) { const on = Number(b.dataset.speed) === this.speedShown; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
   }
 
   setMoney(v: number, unlimited: boolean): void {
@@ -767,7 +766,8 @@ export class Hud {
     this.redoB.disabled = !canRedo;
   }
 
-  setView(mode: 'persp' | 'iso'): void { this.view = mode; if (this.popId === 'camera') this.fillPop('camera'); }
+  /** The camera mode changed: the open camera menu shows it. */
+  viewChanged(): void { if (this.popId === 'camera') this.fillPop('camera'); }
 
   /**
    * A short message. Several can show at once (a repair notice is not hidden by "City loaded"): the newest on top, at

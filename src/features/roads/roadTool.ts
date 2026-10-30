@@ -68,6 +68,7 @@ export class RoadTool {
     this.control = null;
     this.plan = null;
     this.moving = -1;
+    this.freePts = [];
     this.preview.hideAll();
     this.updateHint();
   }

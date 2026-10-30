@@ -10,7 +10,7 @@ import { LINE_COLORS } from '../world/transit.ts';
 import { PAINTS } from '../shared/vehiclePaints.ts';
 import { DEFAULT_PERSON_OPTIONS, type PersonOptions } from '../shared/contracts/people.ts';
 import { renderPeople } from './peoplePanel.ts';
-import type { Category, HudActions, LotMode, SkyToolState, Tool, WeatherCtl } from './hudActions.ts';
+import type { Category, HudActions, HudReads, LotMode, SkyToolState, Tool, WeatherCtl } from './hudActions.ts';
 export type { Category } from './hudActions.ts';
 import { topSwatch, type RoadCatalog } from './roadCatalog.ts';
 import { LANE_CHOICES, PARKING_PRESETS } from '../roads/roadVariant.ts';
@@ -92,8 +92,13 @@ export type BuilderTabRender = (box: HTMLElement, building: BuildingInfo | null)
 export type LandTab = 'relief' | 'ground' | 'nature' | 'sky' | 'street' | 'people';
 export type TransitTab = 'stop' | 'terminal' | 'trainTrack' | 'trainStation' | 'metroTrack' | 'metroStation';
 
-/** Every choice the panels show, as the shell last set it (the engine starts with the same values). */
+/**
+ * Every choice the panels show. The lot tool's state is read from its owner (app/lotEditing.ts); the other choices are
+ * the panels' own values, given to the engine by the actions (owners in plan P8/P22).
+ */
 export class ShellState {
+  private readonly read: Pick<HudReads, 'lots'>;
+  constructor(read: Pick<HudReads, 'lots'>) { this.read = read; }
   snap = 0;
   elevation = 0;
   cutWalls = false;
@@ -103,17 +108,17 @@ export class ShellState {
   density: Density = 'medium';
   zoneFill = false;
   zoneRadius = 40;
-  lotMode: LotMode = 'edit';
-  /** The lot mode last used under Zones (the Lots tab goes back to it). */
+  get lotMode(): LotMode { return this.read.lots().lotMode; }
+  /** The lot mode last used under Zones (the Lots tab goes back to it): the panel's own memory. */
   lastLotMode: LotMode = 'rect';
   /** A lot mode of the gameplay front in use (split by line, curve side), or none. */
-  lotExtra: 'line' | 'curve' | null = null;
-  splitKind: 'side' | 'depth' = 'side';
-  splitParts = 2;
-  lotUse = 1;
+  get lotExtra(): 'line' | 'curve' | null { return this.read.lots().lotExtra; }
+  get splitKind(): 'side' | 'depth' { return this.read.lots().splitKind; }
+  get splitParts(): number { return this.read.lots().splitParts; }
+  get lotUse(): number { return this.read.lots().lotUse; }
   /** Style (−1: by neighbourhood) and function of the next lot drawn or built. */
-  nextArch = -1;
-  nextFn = 0;
+  get nextArch(): number { return this.read.lots().newArch; }
+  get nextFn(): number { return this.read.lots().newFn; }
   radius = 60;
   strength = 40;
   riverWidth = 14;
@@ -309,7 +314,7 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
   const painting = h.tool() === 'zone';
   p.tabs.append(
     tab(t('v2.zone.paint'), painting, () => { if (!painting) h.pick('zone'); }, svg('brush', 18)),
-    tab(t('zone.lots'), !painting, () => { if (painting) { s.lotMode = s.lastLotMode; a.lotMode(s.lotMode); h.pick('building'); } }, svg('lotEdit', 18)),
+    tab(t('zone.lots'), !painting, () => { if (painting) { a.lotMode(s.lastLotMode); h.pick('building'); } }, svg('lotEdit', 18)),
   );
   if (painting) {
     const use = section(p.strip, t('v2.zone.use'));
@@ -337,26 +342,26 @@ export function renderZones(h: DrawerHost, p: DrawerParts): void {
   for (const [mode, key, icon] of LOTS) {
     const on = mode === 'curve' ? s.lotExtra === 'curve' : s.lotExtra === null && s.lotMode === mode;
     const c = card(t(key), on, () => {
-      if (mode === 'curve') { if (a.lotCurve) { a.lotCurve(); s.lotExtra = 'curve'; h.render(); } return; }
-      a.lotExtraOff?.(); s.lotExtra = null;
-      s.lotMode = mode; s.lastLotMode = mode; a.lotMode(mode); h.render();
+      if (mode === 'curve') { if (a.lotCurve) { a.lotCurve(); h.render(); } return; }
+      a.lotExtraOff?.();
+      s.lastLotMode = mode; a.lotMode(mode); h.render();
     }, svg(icon, 30), mode === 'delete' ? 'danger' : '');
     if (mode === 'curve' && !a.lotCurve) soon(c, SOON());
     lots.append(c);
   }
   if (s.lotMode === 'split' || s.lotExtra === 'line') {
     p.options.append(orow(t('v2.row.cut'), choices([
-      { label: t('zone.split.vertical'), on: s.lotExtra === null && s.splitKind === 'side', run: () => { a.lotExtraOff?.(); s.lotExtra = null; s.lotMode = 'split'; a.lotMode('split'); s.splitKind = 'side'; a.lotSplit('side', s.splitParts); h.render(); }, icon: svg('split_vertical', 18) },
-      { label: t('zone.split.horizontal'), on: s.lotExtra === null && s.splitKind === 'depth', run: () => { a.lotExtraOff?.(); s.lotExtra = null; s.lotMode = 'split'; a.lotMode('split'); s.splitKind = 'depth'; a.lotSplit('depth', s.splitParts); h.render(); }, icon: svg('split_horizontal', 18) },
-      { label: t('zone.split.line'), on: s.lotExtra === 'line', run: () => { if (a.lotLine) { a.lotLine(); s.lotExtra = 'line'; h.render(); } }, icon: svg('split_line', 18), soon: a.lotLine ? undefined : SOON() },
+      { label: t('zone.split.vertical'), on: s.lotExtra === null && s.splitKind === 'side', run: () => { a.lotExtraOff?.(); a.lotMode('split'); a.lotSplit('side', s.splitParts); h.render(); }, icon: svg('split_vertical', 18) },
+      { label: t('zone.split.horizontal'), on: s.lotExtra === null && s.splitKind === 'depth', run: () => { a.lotExtraOff?.(); a.lotMode('split'); a.lotSplit('depth', s.splitParts); h.render(); }, icon: svg('split_horizontal', 18) },
+      { label: t('zone.split.line'), on: s.lotExtra === 'line', run: () => { if (a.lotLine) { a.lotLine(); h.render(); } }, icon: svg('split_line', 18), soon: a.lotLine ? undefined : SOON() },
     ])));
     if (s.lotExtra !== 'line') p.options.append(orow(t('v2.row.parts'), choices([2, 3, 4, 5, 6].map((n) => ({
-      label: `${t('zone.split.into')} ${n}`, on: s.splitParts === n, run: () => { s.splitParts = n; a.lotSplit(s.splitKind, n); h.render(); }, icon: `<b class="v2-num">${n}</b>`,
+      label: `${t('zone.split.into')} ${n}`, on: s.splitParts === n, run: () => { a.lotSplit(s.splitKind, n); h.render(); }, icon: `<b class="v2-num">${n}</b>`,
     })))));
   }
   if (s.lotMode === 'rect' || s.lotMode === 'poly') {
     p.options.append(orow(t('v2.zone.use'), dropdown(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
-      (v) => { s.lotUse = Number(v); a.lotUse(s.lotUse); })));
+      (v) => { a.lotUse(Number(v)); })));
   }
 }
 
@@ -366,11 +371,11 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
   const bt = h.builderTabs.has(s.buildTab as BuilderTab) ? s.buildTab : null;
   const editing = s.lotMode === 'edit' && !bt;
   // a builder tab: lit when the buildings session mounted it, "being built" otherwise
-  const builder = (id: BuilderTab): (() => void) | null => (h.builderTabs.has(id) ? () => { s.buildTab = id; if (s.lotMode !== 'edit') { s.lotMode = 'edit'; a.lotMode('edit'); } h.render(); } : null);
+  const builder = (id: BuilderTab): (() => void) | null => (h.builderTabs.has(id) ? () => { s.buildTab = id; if (s.lotMode !== 'edit') a.lotMode('edit'); h.render(); } : null);
   const tabs: Array<[string, string, (() => void) | null, boolean]> = [
     ['builder.category.models', 'models', builder('models'), bt === 'models'],
-    ['builder.category.draw', 'draw', () => { s.buildTab = null; s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, !bt && (s.lotMode === 'rect' || s.lotMode === 'poly')],
-    ['builder.category.mass', 'mass', () => { s.buildTab = null; s.lotMode = 'edit'; a.lotMode('edit'); h.render(); }, editing],
+    ['builder.category.draw', 'draw', () => { s.buildTab = null; a.lotMode('rect'); h.render(); }, !bt && (s.lotMode === 'rect' || s.lotMode === 'poly')],
+    ['builder.category.mass', 'mass', () => { s.buildTab = null; a.lotMode('edit'); h.render(); }, editing],
     ['builder.category.facade', 'face', builder('facade'), bt === 'facade'], ['builder.category.parts', 'components', builder('parts'), bt === 'parts'],
     ['builder.category.roof', 'roof', builder('roof'), bt === 'roof'],
     ['builder.category.interior', 'interiorView', () => a.inside('toggle'), h.insideFloor() >= 0], ['builder.category.paint', 'paint', builder('paint'), bt === 'paint'],
@@ -403,17 +408,17 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
     } else {
       note(p, t('v2.build.selectToEdit'));
       p.options.append(subhead(t('ui.build.next')));
-      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { s.nextArch = Number(v); a.style(s.nextArch); })));
-      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { s.nextFn = Number(v); a.buildingFn(s.nextFn); })));
+      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { a.style(Number(v)); })));
+      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { a.buildingFn(Number(v)); })));
     }
     // extension point: the buildings session mounts its editor here (src/ui/creator.ts)
     p.options.append(h.buildingSlot);
   } else {
     const draw = section(p.strip, t('builder.category.draw'));
-    draw.append(card(t('zone.lot.shape.rect'), s.lotMode === 'rect', () => { s.lotMode = 'rect'; a.lotMode('rect'); h.render(); }, svg('plus', 30)),
-      card(t('zone.lot.shape.polygon'), s.lotMode === 'poly', () => { s.lotMode = 'poly'; a.lotMode('poly'); h.render(); }, svg('lotPolygon', 30)));
+    draw.append(card(t('zone.lot.shape.rect'), s.lotMode === 'rect', () => { a.lotMode('rect'); h.render(); }, svg('plus', 30)),
+      card(t('zone.lot.shape.polygon'), s.lotMode === 'poly', () => { a.lotMode('poly'); h.render(); }, svg('lotPolygon', 30)));
     p.options.append(orow(t('v2.zone.use'), dropdown(t('v2.zone.use'), [[1, t('zone.residential')], [2, t('zone.commercial')], [3, t('zone.industrial')], [4, t('zone.mixed')]], s.lotUse,
-      (v) => { s.lotUse = Number(v); a.lotUse(s.lotUse); })));
+      (v) => { a.lotUse(Number(v)); })));
   }
 }
 

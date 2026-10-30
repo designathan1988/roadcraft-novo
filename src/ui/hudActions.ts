@@ -7,6 +7,11 @@ export interface RoadKeys { roadUp: string; roadDown: string; roadAlign: string 
 
 export type Category = 'roads' | 'zones' | 'build' | 'landscape' | 'transit' | 'demolish' | 'info';
 export type Tool = 'camera' | 'inspect' | 'road' | 'curve' | 'roundabout' | 'upgrade' | 'blocks' | 'free' | 'move' | 'split' | 'bulldoze' | 'zone' | 'building' | 'transit' | 'streetscape' | 'barrier' | 'raise' | 'lower' | 'smooth' | 'flatten' | 'paint' | 'forest' | 'river' | 'weather' | 'landform' | 'elements' | 'sky' | 'person' | 'pistol' | 'bomb';
+/** Terrain brushes. */
+export const TERRAIN_TOOLS: Tool[] = ['raise', 'lower', 'smooth', 'flatten', 'landform'];
+/** Ground brushes (they share the radius). */
+export const GROUND_TOOLS: Tool[] = ['paint', 'forest', 'elements'];
+export const ROAD_TOOLS: Tool[] = ['road', 'curve', 'free', 'roundabout', 'upgrade', 'blocks', 'move', 'split', 'bulldoze'];
 export type SkyMode = 'ciclo' | 'dia' | 'noite';
 export interface SkyToolState { cloud: 'none' | 'add' | 'move' | 'edit' | 'remove'; fog: 'none' | 'lay' | 'erase'; size: number; base: number; density: number; fogHeight: number }
 /** Rain 0..1, wind in m/s, direction in degrees (where it blows to), lightning per minute, thunder 0..1. */
@@ -43,6 +48,26 @@ export interface OptionalActions {
   healthLevel?(): string;
   personOptions?(o: Partial<PersonOptions>): void;
   peopleCatalog?(): ReturnType<typeof creatorCatalog> | null;
+}
+
+/** The lot tool's state as the panels show it (its owner: app/lotEditing.ts). */
+export interface LotToolView {
+  readonly lotMode: LotMode;
+  /** Split by line or curve side under way, or none. */
+  readonly lotExtra: 'line' | 'curve' | null;
+  readonly splitKind: 'side' | 'depth';
+  readonly splitParts: number;
+  readonly lotUse: number;
+  /** Style (−1: by neighbourhood) and function of the next lot drawn or built. */
+  readonly newArch: number;
+  readonly newFn: number;
+}
+
+/** What the HUD reads from the state owners (the tool in hand, the camera mode, the lot tool). */
+export interface HudReads {
+  tool(): Tool;
+  view(): 'persp' | 'iso';
+  lots(): LotToolView;
 }
 
 export interface HudActions extends OptionalActions {

@@ -1,7 +1,8 @@
-// The active tool and the hints of the tool panels. The state stays in the Game; this module only reads and writes
-// it through an explicit host, so switching tools has one place and no hidden duplicate.
+// The tool in hand: its owner (ToolState: the tool, the landform it raises) and the switch, which leaves what the
+// previous tool had open (the gesture under way, the lot points, a wall being traced) and sets the new tool's hint.
+// The other tools' parts are reached through an explicit host (audit §13.4: tool → sub-mode → drag).
 import { zoneOverlayU } from '../render/roads.ts';
-import { ROAD_TOOLS, TERRAIN_TOOLS } from '../ui/hud.ts';
+import { ROAD_TOOLS, TERRAIN_TOOLS } from '../ui/hudActions.ts';
 import { t } from '../shared/i18n/index.ts';
 import type { BrushMode, BrushParams } from '../world/brush.ts';
 import type { InsideView } from '../render/inside.ts';
@@ -18,11 +19,8 @@ import type { Ambient } from '../platform/audio.ts';
 
 /** What switching tools needs from the Game; every mutable field is an accessor, never a copy. */
 export interface ToolHost {
-  tool: Tool;
-  wallOpen: boolean;
   readonly zoneLayer: boolean;
   readonly brush: BrushParams;
-  readonly landformMode: BrushMode;
   readonly lotMode: LotMode;
   readonly skyTool: SkyToolState;
   readonly riverPts: Array<[number, number]>;
@@ -40,15 +38,42 @@ export interface ToolHost {
   readonly ambient: Ambient;
   select(id: number): void;
   setLotMode(mode: LotMode): void;
+  /** Leaves the pointer gesture under way (app/input.ts): a drag never finishes on the next tool. */
+  cancelGesture(): void;
+  /** Leaves the lot tool: the points of a lot being drawn, a join or a corner under way are dropped. */
+  exitLots(): void;
 }
 
-/** Changes the tool, cancelling what the previous one left open and setting its hint. */
-export function setTool(host: ToolHost, tool: Tool): void {
-  if (tool !== host.tool) host.ambient.sfx('click');
-  host.wallOpen = false;
-  host.tool = tool;
+/** The tool in hand and the landform it raises: one owner, read by the input, the frame and the HUD. */
+export class ToolState {
+  private now: Tool = 'camera';
+  private landform: BrushMode = 'mesa';
+
+  get current(): Tool { return this.now; }
+  get landformMode(): BrushMode { return this.landform; }
+
+  /** The landform picked in its panel; the brush takes it at once when the Landform tool is in hand. */
+  setLandform(brush: BrushParams, mode: BrushMode): void {
+    this.landform = mode;
+    if (this.now === 'landform') brush.mode = mode;
+  }
+
+  /** Changes the tool, leaving what the previous one had open and setting its hint. */
+  set(host: ToolHost, tool: Tool): void {
+    const was = this.now;
+    if (tool !== was) host.ambient.sfx('click');
+    // the children of the tool in hand are left first: a drag never finishes on the next tool
+    host.cancelGesture();
+    if (was === 'building' && tool !== 'building') host.exitLots();
+    this.now = tool;
+    enter(host, tool, this.landform);
+  }
+}
+
+/** The new tool's state and hint. */
+function enter(host: ToolHost, tool: Tool, landform: BrushMode): void {
   zoneOverlayU.value = tool === 'zone' || host.zoneLayer ? 1 : 0;
-  if (TERRAIN_TOOLS.includes(tool)) host.brush.mode = tool === 'landform' ? host.landformMode : tool as BrushParams['mode'];
+  if (TERRAIN_TOOLS.includes(tool)) host.brush.mode = tool === 'landform' ? landform : tool as BrushParams['mode'];
   if (ROAD_TOOLS.includes(tool)) host.roadTool.setMode(tool);
   else { host.roadTool.cancel(); host.hud.setHint(''); }
   if (tool === 'zone') host.hud.setHint(t('game.hint.zone'));
@@ -74,7 +99,7 @@ export function setTool(host: ToolHost, tool: Tool): void {
     if (host.creator) host.creator.el.style.display = 'none';
     if (host.inside.on) { host.inside.hide(); host.insideId = -1; host.hud.setInside(-1); }
   }
-  host.hud.setTool(tool);
+  host.hud.toolChanged();
   if (host.health) host.health.context = `ferramenta ${tool}`;
   host.canvas.style.cursor = tool === 'camera' ? 'grab' : 'crosshair';
 }

@@ -1,6 +1,6 @@
 // The click a tool gets on release: one dispatch, in the tool's order. The Game owns the tools and the world; this
 // module only calls the ports of the host.
-import { ROAD_TOOLS } from '../ui/hud.ts';
+import { ROAD_TOOLS } from '../ui/hudActions.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { loose, t } from '../shared/i18n/index.ts';
 import type { Vector3 } from 'three/webgpu';
@@ -17,7 +17,6 @@ export interface ClickHost {
   readonly forestOne: boolean;
   readonly zoneBlock: boolean;
   readonly transitTerminal: boolean;
-  wallOpen: boolean;
   readonly inspector: Pick<Inspector, 'pick'>;
   readonly riverPts: Array<[number, number]>;
   readonly itemTool: ItemTool;
@@ -40,10 +39,7 @@ export function clickTool(host: ClickHost, hit: Vector3 | null, shift: boolean, 
   if (host.tool === 'inspect') { if (hit) host.inspector.pick(hit.x, hit.z); }
   else if (host.tool === 'river') { if (hit) host.riverPts.push([hit.x, hit.z]); }
   else if (host.tool === 'barrier' && host.itemRemove) host.removePole(hit);
-  else if (host.tool === 'streetscape' || host.tool === 'barrier') {
-    host.itemTool.click(hit, shift);
-    if (host.tool === 'barrier' && !shift && hit) host.wallOpen = true;
-  }
+  else if (host.tool === 'streetscape' || host.tool === 'barrier') host.itemTool.click(hit, shift);
   else if (host.tool === 'building') host.clickBuilding(hit, shift);
   else if (host.tool === 'transit') host.clickTransit(hit, shift || host.transitTerminal);
   else if (host.tool === 'forest' && host.forestOne) { if (hit) host.plantTree(hit.x, hit.z); }

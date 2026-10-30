@@ -4,6 +4,7 @@
 // layers, the sky, the camera, the buildings read) it reaches through SaveFlowHost.
 
 import { MAP_SIZES } from '../config.ts';
+import type { Lifecycle } from './lifecycle.ts';
 import { Dirty, TILE_COUNT, cellsOfTile, tileId, tileX } from '../core/grid.ts';
 import { SEG_REC, type BoxColumns, type JobResults, type RoadSave } from '../shared/contracts/worker.ts';
 import { MapSizeError, decodeMeta } from '../platform/save.ts';
@@ -33,9 +34,8 @@ export interface SaveFlowHost {
   readonly rig: CameraRig;
   readonly transit: Transit;
   readonly settings: Settings;
-  busy: boolean;
-  unsaved: boolean;
-  readonly unsavedSerial: number;
+  /** The game's lifecycle (app/lifecycle.ts): the flows start and end their operation there. */
+  readonly life: Lifecycle;
   /** What the save writes of the page's state (sky mode, weather, water, clouds, hour). */
   extras(): { skyMode: SaveHost['skyMode']; weather: SaveHost['weatherCtl']; water: SaveHost['waterCtl']; clouds: SaveHost['clouds']; hour: number };
   /** Lets go of the city on screen before another opens (lots under way, layers, props, lines, history). */
@@ -62,11 +62,6 @@ export class SaveFlow {
   slotBase: Generation | null = null;
   /** The gameId of the city in the save slot (null: not known yet). */
   slotGame: number | null = null;
-  /**
-   * After a flow that rebuilds the world failed half way: the world on screen is incomplete, so saving is refused until
-   * another city is opened or made (an autosave would write the half-built world over the player's save).
-   */
-  blocked = false;
   /** In the browser, only the tab holding the slot's lock writes it (another tab of the game only reads). */
   private readonly slotLock: SlotLock;
   private h: SaveFlowHost;
@@ -100,10 +95,7 @@ export class SaveFlow {
     const host: SaveHost = {
       world: h.world, pool: h.pool, hud: h.hud, rig: h.rig, transit: h.transit, settings: h.settings,
       skyMode: x.skyMode, weatherCtl: x.weather, waterCtl: x.water, clouds: x.clouds, hour: x.hour,
-      get saveBlocked() { return f.blocked; },
-      get unsavedSerial() { return h.unsavedSerial; },
-      get busy() { return h.busy; }, set busy(v) { h.busy = v; },
-      get unsaved() { return h.unsaved; }, set unsaved(v) { h.unsaved = v; },
+      life: h.life,
       get slotBase() { return f.slotBase; }, set slotBase(v) { f.slotBase = v; },
       mayWrite: () => f.mayWrite(), slot: () => f.slot(), keepSlotForThisCity: (slot) => f.keepSlotForThisCity(slot),
     };
@@ -120,7 +112,7 @@ export class SaveFlow {
   async load(): Promise<boolean> {
     const f = this, h = this.h;
     const host: LoadHost = {
-      get busy() { return h.busy; }, set busy(v) { h.busy = v; },
+      life: h.life,
       hud: h.hud,
       slot: () => f.slot(),
       openGeneration: (slot, gen, last) => f.openGeneration(slot, gen, last),
@@ -223,19 +215,17 @@ export class SaveFlow {
     } catch { /* save without chosen junctions */ }
     // what was read is what the save holds (opening itself marked it unsaved: clearing the history, water, weather);
     // only the repair below and the tiles that lost a segment or could not be read need writing
-    this.h.unsaved = false;
+    this.h.life.clean();
     w.saveDirty.fill(0);
     // a tile that could not be read now holds the seed's terrain: the next save writes it, so the damaged file stops
     // coming back at every opening (it was kept in quarantine)
     for (const t of [...cutTiles, ...unreadable]) { w.saveDirty[t] = 1; w.saveVer[t]++; }
-    if (unreadable.length) this.h.unsaved = true;
-    if (cut) this.h.unsaved = true;
+    if (unreadable.length || cut) this.h.life.changed();
     // old maps: dead ends lying inside another road become junctions (marked to save)
     const repaired = repairDanglingEnds(w);
-    if (repaired) this.h.unsaved = true;
+    if (repaired) this.h.life.changed();
     this.h.rig.restore(meta.camera);
-    this.h.hud.setView(this.h.rig.mode);
-    this.blocked = false;
+    this.h.hud.viewChanged();
     this.slotGame = meta.gameId;
     this.slotBase = g;
     return { missing, damaged: unreadable.length - missing, repaired, cut };
@@ -244,13 +234,12 @@ export class SaveFlow {
   /** Saves and downloads the whole map as a .cidade file (only a save that completed is exported, nothing else). */
   async exportMap(): Promise<void> {
     if (!await this.save()) { this.h.hud.toast(t('save.exportNotSaved')); return; }
-    if (this.h.busy) return;
-    this.h.busy = true;
+    if (!this.h.life.begin('exporting')) return;
     let blob: Blob | null;
     try { blob = await packSlot(await this.slot()); } catch (err) {
       this.h.hud.toast(t('save.failed', { message: errorText(err) }));
       return;
-    } finally { this.h.busy = false; }
+    } finally { this.h.life.end('exporting'); }
     if (!blob) { this.h.hud.toast(t('save.exportNothing')); return; }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -266,9 +255,8 @@ export class SaveFlow {
    * generation of the slot and opened.
    */
   async importMap(file: Blob): Promise<void> {
-    if (this.h.busy) return;
-    this.h.busy = true;
-    if (!await this.mayWrite()) { this.h.busy = false; return; }
+    if (!this.h.life.begin('importing')) return;
+    if (!await this.mayWrite()) { this.h.life.end('importing'); return; }
     let kept: string | null;
     try {
       const saved = await savedIn(await readPackage(file));
@@ -282,7 +270,7 @@ export class SaveFlow {
       this.h.hud.toast(t('save.importFailed', { why: err instanceof MapFileError ? t(err.key) : errorText(err) }));
       return;
     } finally {
-      this.h.busy = false;
+      this.h.life.end('importing');
     }
     this.slotGame = null;
     this.slotBase = null;
@@ -320,15 +308,14 @@ export class SaveFlow {
    * turn), then the previous city's save becomes a new generation of the slot.
    */
   async openPreviousCity(folder: string): Promise<void> {
-    if (this.h.busy) return;
-    this.h.busy = true;
-    if (!await this.mayWrite()) { this.h.busy = false; return; }
+    if (!this.h.life.begin('importing')) return;
+    if (!await this.mayWrite()) { this.h.life.end('importing'); return; }
     let kept: string | null;
     try { kept = await restorePrevious(await this.slot(), folder); } catch (err) {
       this.h.hud.toast(t('save.previousFailed', { why: errorText(err) }));
       return;
     } finally {
-      this.h.busy = false;
+      this.h.life.end('importing');
     }
     this.slotGame = null;
     this.slotBase = null;
@@ -339,7 +326,7 @@ export class SaveFlow {
   async newMap(): Promise<void> {
     const h = this.h;
     const host: NewMapHost = {
-      get busy() { return h.busy; }, set busy(v) { h.busy = v; },
+      life: h.life,
       world: h.world, hud: h.hud,
       resetCity: () => h.resetCity(),
       generateTerrain: () => h.generateTerrain(),
@@ -350,7 +337,8 @@ export class SaveFlow {
 
   /** The window is closing: a save under way is waited for, then what is still unsaved is written. */
   async saveBeforeClose(): Promise<void> {
-    for (let k = 0; this.h.busy && k < 100; k++) await new Promise((r) => setTimeout(r, 200));
-    if ((this.h.unsaved || this.h.world.saveDirty.includes(1)) && !this.blocked) await this.save(true);
+    // the operation under way ends (an opening or a save); a half-built world (Failed) is never written
+    await this.h.life.whenIdle(20000);
+    if ((this.h.life.unsaved || this.h.world.saveDirty.includes(1)) && !this.h.life.failed) await this.save(true);
   }
 }
