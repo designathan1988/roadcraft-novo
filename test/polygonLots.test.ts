@@ -45,6 +45,13 @@ test('lote de 5 lados: guardado como polígono de 5 cantos, mesma área, clique 
   assert.ok(polygonArea(local) > 0, 'anti-horário');
 });
 
+test('lote desenhado sobre água é recusado', () => {
+  const w = flatWorld();
+  w.water.fill(11); // the ground is at 10: the lot would stand in the river
+  const r = polygonLot([[100, 100], [140, 100], [140, 140], [100, 140]], w);
+  assert.equal(typeof r, 'string', 'a lot over water was accepted');
+});
+
 test('polígono que se cruza é recusado; mais de 16 cantos também', () => {
   assert.equal(typeof polygonLot([[0, 0], [30, 30], [30, 0], [0, 30]]), 'string');
   const many: Array<[number, number]> = [];

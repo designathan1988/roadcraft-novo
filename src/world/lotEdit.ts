@@ -12,6 +12,8 @@ import { RoadJournal } from '../roads/build.ts';
 import { bez, closestT } from '../roads/geometry.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { floorsFor } from './growth.ts';
+import { heightAt } from './heights.ts';
+import { waterAt } from './ground.ts';
 import { World, polygonArea, type BuildingRec } from './world.ts';
 
 /** Shortest side of a lot (m). */
@@ -184,6 +186,15 @@ export function lotFits(world: World, outline: Pt[], ignore: readonly number[] =
     for (let k = 0; k <= 16 && !onRoad; k++) { bez(q, k / 16, p); if (pointInPolygon(outline, p[0], p[1])) onRoad = true; }
   });
   if (onRoad) return 'o lote ficaria sobre uma via';
+  // water: the outline and the middle must stand on ground above the water line
+  const wet = (x: number, z: number) => waterAt(world.water, x, z) > heightAt(world.heights, x, z) - 0.5;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  if (wet(cx, cz)) return 'o lote ficaria sobre a água';
+  for (let i = 0; i < outline.length; i++) {
+    const [ax, az] = outline[i], [bx, bz] = outline[(i + 1) % outline.length];
+    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 4));
+    for (let k = 0; k <= n; k++) if (wet(ax + (bx - ax) * k / n, az + (bz - az) * k / n)) return 'o lote ficaria sobre a água';
+  }
   // other lots: edges crossing, or a corner (pulled 0.3 m inwards) inside the other one; touching is fine
   const shrink = (o: Pt[]): Pt[] => {
     const cx = o.reduce((s, v) => s + v[0], 0) / o.length, cz = o.reduce((s, v) => s + v[1], 0) / o.length;
