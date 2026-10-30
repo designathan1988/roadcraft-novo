@@ -157,7 +157,7 @@ test('C11: at a quiet traffic light (no cars, at night) pedestrians still get to
   assert.ok(signals >= 1, 'the grid has a traffic light');
   const waited = new Float64Array(1 << 16);
   let worst = 0, waits = 0;
-  for (let i = 0; i < 20 * 60; i++) {
+  for (let i = 0; i < 20 * 120; i++) {
     tr.step(0.05); peds.step(0.05);
     if (i % 10 === 0) { tr.checkWindow(); peds.checkWindow(); }
     const c = peds.t.cols;

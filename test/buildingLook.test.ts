@@ -35,8 +35,8 @@ function block(count = 36): { heights: Float32Array; b: BoxColumns } {
     b.x[i] = 18 + (i % 6) * 40; b.z[i] = 18 + Math.floor(i / 6) * 40; b.w[i] = 22 + (i % 3) * 5; b.d[i] = 26 + (i % 4) * 3;
     b.zone[i] = zones[i % zones.length]; b.floors[i] = [1, 2, 4, 7, 12, 18][i % 6]; b.seed[i] = 9001 + i * 7919; b.style[i] = (i * 37) % 128;
   }
-  // three catalog projects (their walls go through facadeWall)
-  if (count >= 36) for (const [i, k] of [[33, 3], [34, 12], [35, 25]]) { const e = encodeDesign({ shape: 0, roof: 0, finish: 0, gear: 0, setback: 0, wall: 0xd9c7a6, catalog: k }); b.color[i] = e.color; b.h[i] = e.h; b.w[i] = 34; b.d[i] = 36; }
+  // three catalog projects at the end (their walls go through facadeWall)
+  if (count >= 3) for (const [i, k] of [[count - 3, 3], [count - 2, 12], [count - 1, 25]]) { const e = encodeDesign({ shape: 0, roof: 0, finish: 0, gear: 0, setback: 0, wall: 0xd9c7a6, catalog: k }); b.color[i] = e.color; b.h[i] = e.h; b.w[i] = 34; b.d[i] = 36; }
   b.count = count;
   return { heights: w.heights, b };
 }
@@ -175,8 +175,9 @@ test('telhado 3: flat roofs carry the 4.0 parapet (0.85 m) and the plant the 4.0
     if (near(top + 0.85, 4)) withParapet++;
   }
   assert.ok(roofs >= 8, `${roofs} flat roofs`);
-  // the plain parapet is 0.85 m; deco/slab/attic crowns use their own edge, so this is a minimum count
-  assert.ok(withParapet >= 8, `${withParapet}/${roofs} with the 0.85 m parapet`);
+  // the plain parapet is 0.85 m; deco/slab/attic crowns use their own edge, so at least three quarters of the flat
+  // roofs still carry the plain one
+  assert.ok(withParapet >= roofs * 0.75, `${withParapet}/${roofs} with the 0.85 m parapet`);
 });
 
 test('telhado 4: pitched roofs have the 4.0 body (18 cm fascia, soffit, ridge cap) and gable triangles in the wall', async () => {
