@@ -2898,9 +2898,18 @@ export class Traffic {
       if (!Number.isNaN(du)) { p[0] += Math.cos(p[3]) * du * k; p[2] -= Math.sin(p[3]) * du * k; }
       if (c.dying[v] === 2 ? c.pk[v] < 1 : c.dwell[v] > 0.4) lights |= c.dying[v] === 2 ? LIGHT_RIGHT : LIGHT_LEFT;
     }
-    // reference point at the middle of the vehicle
-    const back = centred ? 0 : c.len[v] / 2;
-    p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
+    // reference point at the middle of the vehicle; a bus takes its middle and heading from the chord between its front
+    // and rear on the path, so it turns around the bend instead of pivoting about its front
+    if (!centred && c.kind[v] === 1) {
+      const fx = p[0], fy = p[1], fz = p[2], rear = this.tmp2;
+      backAlong(sim, c.lane[v], c.conn[v], c.s[v], c.len[v], rear);
+      const dx = fx - rear[0], dz = fz - rear[2];
+      if (dx * dx + dz * dz > 1e-6) p[3] = Math.atan2(dx, dz);
+      p[0] = (fx + rear[0]) / 2; p[1] = (fy + rear[1]) / 2; p[2] = (fz + rear[2]) / 2;
+    } else {
+      const back = centred ? 0 : c.len[v] / 2;
+      p[0] -= Math.sin(p[3]) * back; p[2] -= Math.cos(p[3]) * back;
+    }
     return lights;
   }
 }
