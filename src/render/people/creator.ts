@@ -37,6 +37,8 @@ const MAX_GROUPS = 256;
 
 export class PeopleCreator {
   private groups: Group[] = [];
+  /** The options of the last group placed (count, mode…), or null. */
+  get lastOptions(): Readonly<Group['o']> | null { return this.groups[this.groups.length - 1]?.o ?? null; }
   private nextId = 1;
   /** Ground height for each placed person (set by the game: the terrain's heights); the group's own height without it. */
   ground: ((x: number, z: number) => number) | null = null;

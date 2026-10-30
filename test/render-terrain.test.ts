@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three/webgpu';
 
-(globalThis as { location?: unknown }).location = { search: '?mapa=24' };
+(globalThis as { location?: unknown }).location = { search: '?map=24' };
 const { MAP_SIZE } = await import('../src/config.ts');
 const { World } = await import('../src/world/world.ts');
 const { TerrainRenderer } = await import('../src/render/terrain.ts');

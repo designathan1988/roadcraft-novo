@@ -30,19 +30,19 @@ const MEMORY_FACTOR = 1.5; // cityMB + roadsMB
 
 // the detail held at full while counting (game.fixDetail): the counts do not depend on how busy the machine was
 const script = (v) => viewScript(v, {
-  before: 'g.fixDetail(true);g.hudActions.speed(1);',
-  after: `await g.settle(20);g.hudActions.speed(0);const s=await g.drawnStats();` +
+  before: 'R.frames.fixDetail(true);R.ui.speed(1);',
+  after: `await R.frames.settle(20);R.ui.speed(0);const s=await R.frames.drawnStats();` +
     `if(!s.draws||!s.tris){console.log('error: empty budget view ${v.name}');return;}` +
     `console.log('BUDGET '+JSON.stringify({view:'${v.name}',...s}));`,
 });
 
 const seq = VIEWS.slice(1).map((v) => [path.join(out, `${v.name}.png`), script(v)]);
-const env = { ...process.env, CIDADE_W: '1920', CIDADE_H: '1080', CIDADE_SEQ: JSON.stringify(seq) };
+const env = { ...process.env, ROADCRAFT_W: '1920', ROADCRAFT_H: '1080', ROADCRAFT_SEQ: JSON.stringify(seq) };
 delete env.ELECTRON_RUN_AS_NODE;
 const first = VIEWS[0];
 const p = spawn(process.execPath, [
   path.join(root, 'tools', 'shot.mjs'), path.join(out, `${first.name}.png`),
-  `?cidade&mapa=10&limpo&hora=${first.hour}`, script(first),
+  `?city&map=10&clear&hour=${first.hour}`, script(first),
 ], { cwd: root, env, stdio: ['ignore', 'pipe', 'inherit'] });
 
 const counts = {};

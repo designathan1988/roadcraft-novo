@@ -6,7 +6,7 @@
 
 const arg = (i: number, d: number) => { const v = Number(process.argv[2 + i]); return Number.isFinite(v) && process.argv[2 + i] !== undefined ? v : d; };
 const MAPA = arg(0, 10), MIN = arg(1, 15), HORA = arg(2, 12), DEMANDA = arg(3, 1.5), SEED = arg(4, 1);
-(globalThis as { name?: string }).name = `mapa=${MAPA}`;
+(globalThis as { name?: string }).name = `map=${MAPA}`;
 
 const { generateCity } = await import('../src/jobs/cityGen.ts');
 const { World } = await import('../src/world/world.ts');

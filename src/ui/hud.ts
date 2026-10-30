@@ -88,6 +88,8 @@ export class Hud {
   private popAnchor: HTMLElement | null = null;
   private metrics: HTMLElement | null = null;
   private layers = { grid: false, zones: false, traffic: false };
+  /** The map layers the Layers menu shows as on. */
+  get layersShown(): Readonly<{ grid: boolean; zones: boolean; traffic: boolean }> { return { ...this.layers }; }
   private insideFloor = -1;
   private about = new AboutBox();
   private readoutTimer = 0;

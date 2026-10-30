@@ -1,6 +1,6 @@
 // Electron shell. Serves the project through its own protocol with COOP/COEP,
 // so the page gets SharedArrayBuffer, and turns on WebGPU where it needs a flag.
-// CIDADE_SHOT=file.png takes a screenshot when the game is ready and exits.
+// ROADCRAFT_SHOT=file.png takes a screenshot when the game is ready and exits.
 import { app, BrowserWindow, Menu, protocol, net, ipcMain } from 'electron';
 import { initSteam, enableOverlay, steamInfo, unlock } from './steam.mjs';
 import { fileStore } from './files.mjs';
@@ -10,10 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = path.resolve(here, '..', 'dist');
-const devUrl = process.env.CIDADE_DEV_URL;
-const shot = process.env.CIDADE_SHOT;
-const query = process.env.CIDADE_QUERY ?? '';
+// ROADCRAFT_DIST: another build folder (a long proof keeps running on a frozen build while the tree is rebuilt)
+const rootDir = process.env.ROADCRAFT_DIST ? path.resolve(process.env.ROADCRAFT_DIST) : path.resolve(here, '..', 'dist');
+const devUrl = process.env.ROADCRAFT_DEV_URL;
+const shot = process.env.ROADCRAFT_SHOT;
+const query = process.env.ROADCRAFT_QUERY ?? '';
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-unsafe-webgpu');
@@ -26,12 +27,12 @@ if (shot) {
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 }
-if (process.env.CIDADE_NOVSYNC) {
+if (process.env.ROADCRAFT_NOVSYNC) {
   // performance measurement: without the display limit (60 frames), rAF counts how many frames the machine can do
   app.commandLine.appendSwitch('disable-frame-rate-limit');
   app.commandLine.appendSwitch('disable-gpu-vsync');
 }
-if (process.env.CIDADE_SOFTWARE) {
+if (process.env.ROADCRAFT_SOFTWARE) {
   // no GPU (server): WebGPU and WebGL through SwiftShader
   app.commandLine.appendSwitch('use-vulkan', 'swiftshader');
   app.commandLine.appendSwitch('use-webgpu-adapter', 'swiftshader');
@@ -42,13 +43,13 @@ if (process.env.CIDADE_SOFTWARE) {
 
 // One game at a time: a second copy would share the save files (in the user data folder) and both would write them. The second one hands over to the first and quits.
 app.setName('Roadcraft');
-// Screenshot and test runs get a user data folder of their own (CIDADE_USER_DATA, or a fresh one in the temp folder,
+// Screenshot and test runs get a user data folder of their own (ROADCRAFT_USER_DATA, or a fresh one in the temp folder,
 // removed on exit): they edit, save and autosave, and must never touch the player's saves in the game's folder.
 if (shot) {
-  const own = process.env.CIDADE_USER_DATA ?? fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-shot-'));
+  const own = process.env.ROADCRAFT_USER_DATA ?? fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-shot-'));
   app.setPath('userData', own);
   console.log(`userData: ${own}`);
-  if (!process.env.CIDADE_USER_DATA) process.on('exit', () => { try { fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 }); } catch { /* left for the system to clean */ } });
+  if (!process.env.ROADCRAFT_USER_DATA) process.on('exit', () => { try { fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 }); } catch { /* left for the system to clean */ } });
 }
 if (!shot && !app.requestSingleInstanceLock()) app.exit(0);
 app.on('second-instance', () => {
@@ -69,9 +70,9 @@ const isolation = {
 function createWindow() {
   const win = new BrowserWindow({
     // visible screenshot window (otherwise Chromium throttles frames), but off screen
-    ...(shot && process.env.CIDADE_SHOW !== 'tela' ? { x: -20000, y: -20000 } : {}),
-    width: Number(process.env.CIDADE_W ?? 1600),
-    height: Number(process.env.CIDADE_H ?? 900),
+    ...(shot && process.env.ROADCRAFT_SHOW !== 'screen' ? { x: -20000, y: -20000 } : {}),
+    width: Number(process.env.ROADCRAFT_W ?? 1600),
+    height: Number(process.env.ROADCRAFT_H ?? 900),
     show: !shot,
     backgroundColor: '#0c0f14',
     autoHideMenuBar: true,
@@ -79,7 +80,7 @@ function createWindow() {
     icon: path.join(here, 'icon.png'),
     webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, offscreen: false, preload: path.join(here, 'preload.cjs') },
   });
-  win.loadURL(devUrl ?? `app://cidade/index.html${query}`);
+  win.loadURL(devUrl ?? `app://roadcraft/index.html${query}`);
   // The window's own keys (there is no menu, so none of Electron's default shortcuts: reload, which would throw away
   // what is not saved, page zoom, DevTools). F11 toggles full screen; DevTools only in development (?dev or the dev
   // server). Closing (the X, Alt+F4) goes through the close below, which saves first.
@@ -95,8 +96,8 @@ function createWindow() {
     if (k === 'f5' || (ctrl && k === 'r') || (ctrl && ['+', '=', '-', '0'].includes(k))) e.preventDefault();
   });
   // Closing saves first: the page is asked, saves what is not saved yet and answers; past the time limit the window
-  // closes anyway. Screenshot runs close without it unless CIDADE_CLOSE_SAVES is set (the save checks set it).
-  if (!shot || process.env.CIDADE_CLOSE_SAVES) {
+  // closes anyway. Screenshot runs close without it unless ROADCRAFT_CLOSE_SAVES is set (the save checks set it).
+  if (!shot || process.env.ROADCRAFT_CLOSE_SAVES) {
     let asked = false;
     win.on('close', (e) => {
       if (asked) return;
@@ -114,24 +115,24 @@ function createWindow() {
     win.webContents.on('console-message', (e) => console.log(`[page] ${e.message}`));
     win.webContents.once('did-finish-load', async () => {
       const t0 = Date.now();
-      const limit = Number(process.env.CIDADE_TIMEOUT ?? 240) * 1000;
+      const limit = Number(process.env.ROADCRAFT_TIMEOUT ?? 240) * 1000;
       for (;;) {
-        const s = await win.webContents.executeJavaScript('window.__cidade?.status ?? "carregando"').catch(() => 'error');
-        if (s === 'pronto' || s === 'falhou' || Date.now() - t0 > limit) { console.log(`state: ${s} after ${((Date.now() - t0) / 1000).toFixed(1)} s`); break; }
+        const s = await win.webContents.executeJavaScript('window.__roadcraft?.status ?? "loading"').catch(() => 'error');
+        if (s === 'ready' || s === 'failed' || Date.now() - t0 > limit) { console.log(`state: ${s} after ${((Date.now() - t0) / 1000).toFixed(1)} s`); break; }
         await new Promise((r) => setTimeout(r, 500));
       }
-      // CIDADE_SEQ: more screenshots in the same session, JSON [[file, script], ...]
-      const seq = [[shot, process.env.CIDADE_SCRIPT], ...JSON.parse(process.env.CIDADE_SEQ || '[]')];
+      // ROADCRAFT_SEQ: more screenshots in the same session, JSON [[file, script], ...]
+      const seq = [[shot, process.env.ROADCRAFT_SCRIPT], ...JSON.parse(process.env.ROADCRAFT_SEQ || '[]')];
       for (const [file, script] of seq) {
         if (script) await win.webContents.executeJavaScript(script).catch((e) => console.log('script:', e.message));
-        await new Promise((r) => setTimeout(r, Number(process.env.CIDADE_SETTLE ?? 3) * 1000));
+        await new Promise((r) => setTimeout(r, Number(process.env.ROADCRAFT_SETTLE ?? 3) * 1000));
         const img = await win.webContents.capturePage();
         fs.writeFileSync(file, img.toPNG());
         console.log(`photo: ${file}`);
-        // CIDADE_DIFF=ms: another capture after that time; measures what changed (shake, noise) and writes the difference map
-        if (process.env.CIDADE_DIFF) {
+        // ROADCRAFT_DIFF=ms: another capture after that time; measures what changed (shake, noise) and writes the difference map
+        if (process.env.ROADCRAFT_DIFF) {
           const fps = await win.webContents.executeJavaScript('new Promise((r)=>{let n=0;const t0=performance.now();const f=()=>{n++;if(performance.now()-t0<1000)requestAnimationFrame(f);else r(n)};requestAnimationFrame(f)})').catch(() => -1);
-          await new Promise((r) => setTimeout(r, Number(process.env.CIDADE_DIFF)));
+          await new Promise((r) => setTimeout(r, Number(process.env.ROADCRAFT_DIFF)));
           const img2 = await win.webContents.capturePage();
           const a = img.toBitmap(), b = img2.toBitmap();
           const { width, height } = img.getSize();

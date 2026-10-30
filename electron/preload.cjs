@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('roadcraftApp', {
   onClosing: (fn) => { ipcRenderer.on('app:closing', () => fn()); },
   canClose: () => ipcRenderer.send('app:can-close'),
   quit: () => ipcRenderer.send('app:quit'),
-  // screenshot and test runs (CIDADE_SHOT) only: presses a key as the keyboard would; the game itself never calls it
+  // screenshot and test runs (ROADCRAFT_SHOT) only: presses a key as the keyboard would; the game itself never calls it
   testKey: (keyCode, modifiers) => ipcRenderer.invoke('test:key', { keyCode: String(keyCode), modifiers: Array.isArray(modifiers) ? modifiers.map(String) : [] }),
   // the save files, real files kept by the main process (electron/files.mjs)
   files: {

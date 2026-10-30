@@ -18,6 +18,8 @@ export interface AmbientState {
 
 export class Ambient {
   private ctx: AudioContext | null = null;
+  /** The sound context's state (running, suspended while the game is hidden), or none before the first sound. */
+  get state(): AudioContextState | 'none' { return this.ctx?.state ?? 'none'; }
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private rain: GainNode | null = null;

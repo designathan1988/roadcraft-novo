@@ -2,11 +2,11 @@
 // with a user data folder of its own (never the game's). Prints "CHECK OK|FAILED name" lines and leaves each
 // scenario's photo in the output folder.
 // Usage: npx vite build && node tools/check-sim.mjs [output-folder] [scenario...]   (exits with code 1 if anything fails)
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { session } from './checks/run.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -16,14 +16,14 @@ fs.mkdirSync(out, { recursive: true });
 
 const PRELUDE = `
 const S = window.__S = window.__S || {};
-const g = window.__cidade.game, a = g.api, w = g.world;
+const R = window.__roadcraft, a = R.actions, w = R.world;
 const errors = [];
 const logError = console.error.bind(console);
 console.error = (...x) => { errors.push(x.map(String).join(' ').slice(0, 300)); logError(...x); };
 window.addEventListener('error', (e) => errors.push('error: ' + (e.message || e.error)));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const check = (name, ok, why) => console.log('CHECK ' + (ok ? 'OK ' : 'FAILED ') + name + (ok ? '' : ': ' + why));
-const stats = () => g.simStats && g.simStats.type === 'stats' ? g.simStats : null;
+const stats = () => { const s = R.sim.stats(); return s && s.type === 'stats' ? s : null; };
 w.unlimited = true;
 `;
 
@@ -31,10 +31,10 @@ const SCENARIOS = {
   // motion probe: what is near the camera, every 0.25 s for 20 s, at a junction with a light, one without, a
   // roundabout and a street with a bus stop; roadcraft 4.0's invariants (sim/invariants.ts) checked on it, and frames
   // about a second apart at each place
-  'motion': { query: '?cidade&mapa=10&limpo&hora=11', limit: 900, steps: () => motionSteps() },
+  'motion': { query: '?city&map=10&clear&hour=11', limit: 900, steps: () => motionSteps() },
   // the generated 10 km city: traffic and people everywhere, figures for the whole city, a busy junction photographed
   'city-traffic': {
-    query: '?cidade&mapa=10&limpo&hora=8',
+    query: '?city&map=10&clear&hour=8',
     body: `
       await wait(45000);
       const s1 = stats();
@@ -54,7 +54,7 @@ const SCENARIOS = {
         if (d < bd) { bd = d; best = n; }
       }
       check('a junction to look at', best >= 0, 'none');
-      if (best >= 0) await g.view(nc.x[best], nc.z[best], 35, 30, 110, 8);
+      if (best >= 0) await R.camera.view(nc.x[best], nc.z[best], 35, 30, 110, 8);
       await wait(8000);
       const s3 = stats();
       console.log('CHECK INFO cars ' + s3.cars + ' micro ' + s3.micro + ' peds ' + s3.peds + ' speed ' + (s3.speed * 3.6).toFixed(1) + ' km/h stopped ' + s3.stopped + ' arrived ' + s3.arrived + ' lost ' + s3.lost);
@@ -63,7 +63,7 @@ const SCENARIOS = {
   },
   // C14: a network change the simulation cannot apply makes the page send the whole network; traffic goes on
   'resync': {
-    query: '?vazio&hora=11&workers=3&cam=1500,1500,0,50,600',
+    query: '?empty&hour=11&workers=3&cam=1500,1500,0,50,600',
     body: `
       const road = (ax, az, bx, bz) => { const r = a.road(ax, az, bx, bz); if (r !== 'ok') throw new Error('road refused: ' + r); };
       for (let i = 0; i < 4; i++) { road(1200, 1200 + i * 150, 1800, 1200 + i * 150); road(1200 + i * 150, 1200, 1200 + i * 150, 1800); }
@@ -74,7 +74,7 @@ const SCENARIOS = {
       let n = -1;
       for (let i = 0; i < w.roads.nodes.end && n < 0; i++) if (w.roads.nodes.alive[i] && w.roads.nodes.cols.deg[i] >= 3) n = i;
       const ops = new Float64Array(8); ops[0] = 2; ops[1] = n;
-      g.sim.postMessage({ type: 'ops', ops, extra: [] });
+      R.sim.post({ type: 'ops', ops, extra: [] });
       await wait(15000);
       const after = stats();
       check('the failure was reported', errors.some((e) => e.includes('node still connected')), errors.slice(0, 3).join(' | '));
@@ -106,11 +106,7 @@ function motionSteps() {
 // picks the places: a four-way junction with a light, a junction without one, a roundabout and a bus stop, all near
 // the middle of the city
 const MOTION_PICK = `
-  S.inspect = (x, z, r) => new Promise((res) => {
-    const h = (e) => { if (e.data && e.data.type === 'inspect') { g.sim.removeEventListener('message', h); res(e.data); } };
-    g.sim.addEventListener('message', h);
-    g.sim.postMessage({ type: 'inspect', x, z, r });
-  });
+  S.inspect = (x, z, r) => R.sim.inspect(x, z, r);
   await wait(30000);
   const nc = w.roads.nodes.cols, sc = w.roads.segs.cols;
   const ringAt = (n) => w.roads.segsOf(n, []).some((s) => sc.flags[s] & 1);
@@ -132,7 +128,7 @@ const MOTION_PICK = `
   const four = cand.slice(0, 300).find((n) => nc.deg[n] === 4 && !used.has(n) && !ringAt(n) && Math.hypot(nc.x[n] - P.plain.x, nc.z[n] - P.plain.z) > 150);
   if (four !== undefined) {
     const x = nc.x[four], z = nc.z[four];
-    const m0 = g.roadTool.mode; g.roadTool.setMode('roundabout'); g.roadTool.click({ x, z }, false); g.roadTool.setMode(m0);
+    const t0 = R.tools.current(); R.tools.set('roundabout'); R.tools.click(x, z); R.tools.set(t0);
     let rb = 1e18;
     for (let s = 0; s < w.roads.segs.end; s++) {
       if (!w.roads.segs.alive[s] || !(sc.flags[s] & 1)) continue;
@@ -149,7 +145,7 @@ const MOTION_PICK = `
       stops.push(P.plain.x + dx / l * 30 + dz / l * 7, P.plain.z + dz / l * 30 - dx / l * 7);
     }
     a.line(0, stops, 3);
-    const ln = g.transit.lines[g.transit.lines.length - 1];
+    const lines = R.transit.lines(), ln = lines[lines.length - 1];
     if (ln && ln.stops.length) P.stop = { x: ln.stops[0], z: ln.stops[1], node: -1 };
     console.log('CHECK INFO line ' + JSON.stringify(ln && ln.stops));
   }
@@ -163,10 +159,10 @@ const motionStart = (i) => `
   const name = ${JSON.stringify(MOTION_PLACES)}[${i}], P = S.places[name];
   S.place = name; S.samples = []; S.done = !P;
   if (P) {
-    await g.view(P.x, P.z, 35, 38, 70, 11);
+    await R.camera.view(P.x, P.z, 35, 38, 70, 11);
     await wait(8000);
     const people = () => {
-      const rd = g.poses, d = rd.data, n = rd.count, out = [];
+      const rd = R.sim.poses(), d = rd.data, n = rd.count, out = [];
       for (let k = 0; k < n; k++) {
         const o = k * 11, type = Math.floor((d[o + 8] % 65536) / 256);
         if (type !== 3 || Math.hypot(d[o + 4] - P.x, d[o + 6] - P.z) > ${MOTION_R}) continue;
@@ -355,14 +351,8 @@ for (const name of names) {
   const wrap = (body, last) => !body && !last ? '' : `(async()=>{${PRELUDE}\ntry {${body}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\n${last ? "console.log('CHECK END');" : ''}})()`;
   const files = steps.map(([n]) => path.join(out, `${n}.png`));
   const scripts = steps.map(([, b], i) => wrap(b, i === steps.length - 1));
-  const lines = await new Promise((resolve) => {
-    const got = [];
-    const seq = JSON.stringify(files.slice(1).map((file, i) => [file, scripts[i + 1]]));
-    const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), files[0], sc.query, scripts[0]],
-      { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: String(sc.limit ?? 600), CIDADE_SEQ: seq } });
-    p.stdout.on('data', (d) => got.push(...String(d).split('\n')));
-    p.on('exit', () => resolve(got));
-  });
+  const seq = JSON.stringify(files.slice(1).map((file, i) => [file, scripts[i + 1]]));
+  const lines = await session({ query: sc.query, script: scripts[0], own, shot: files[0], env: { ROADCRAFT_LIMIT: String(sc.limit ?? 600), ROADCRAFT_SEQ: seq } });
   const checks = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
   if (!checks.includes('END')) checks.push('FAILED the session did not finish (hung or crashed) after: ' + (checks[checks.length - 1] ?? 'nothing'));
   const bad = checks.filter((c) => c.startsWith('FAILED'));

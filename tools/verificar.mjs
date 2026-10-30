@@ -19,8 +19,8 @@ for (const f of files) {
   const script = fs.readFileSync(path.join(dir, f), 'utf8');
   const lines = await new Promise((resolve) => {
     const out = [];
-    const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, '?vazio&hora=11&workers=3&cam=1500,1500,0,50,400', script],
-      { cwd: root, env: { ...process.env, CIDADE_SETTLE: '1', CIDADE_LIMIT: process.env.VERIFY_LIMIT ?? '560' } });
+    const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, '?empty&hour=11&workers=3&cam=1500,1500,0,50,400', script],
+      { cwd: root, env: { ...process.env, ROADCRAFT_SETTLE: '1', ROADCRAFT_LIMIT: process.env.VERIFY_LIMIT ?? '560' } });
     let buf = '';
     p.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { out.push(buf.slice(0, i)); buf = buf.slice(i + 1); } });
     p.on('exit', () => resolve(out));

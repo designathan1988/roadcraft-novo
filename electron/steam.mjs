@@ -10,7 +10,7 @@ let lib = null;
 
 /** Starts Steam. appId: steam_appid.txt next to the executable, otherwise 480 (Spacewar, test). */
 export function initSteam(appDir) {
-  if (process.env.CIDADE_SHOT || process.env.CIDADE_NO_STEAM) return false;
+  if (process.env.ROADCRAFT_SHOT || process.env.ROADCRAFT_NO_STEAM) return false;
   try {
     lib = require('steamworks.js');
     let appId = 480;

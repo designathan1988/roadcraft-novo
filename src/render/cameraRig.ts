@@ -114,6 +114,8 @@ export class CameraRig {
   private zoomGrab: THREE.Vector3 | null = null;
   /** Turn still to spend (rad). */
   private pendingTurn = 0;
+  /** The turn still to come of an animated turn (north, a quarter turn): yaw + turning is where the camera settles. */
+  get turning(): number { return this.pendingTurn; }
   /** Drag inertia (m/s on the ground). */
   private coast = new THREE.Vector2();
   private panSamples: Array<[number, number, number]> = [];

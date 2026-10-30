@@ -17,8 +17,8 @@ export const VIEWS = [
  * Page-side: the street view nearest (cx, cz) for a camera at `dist` and `pitch`, or null when no straight street
  * within 600 m has a free line of sight. Runs in the game page (stringified), reading the road network.
  */
-export function findStreetView(g, cx, cz, dist, pitch) {
-  const net = g.world.roads, c = net.segs.cols, n = net.nodes.cols;
+export function findStreetView(R, cx, cz, dist, pitch) {
+  const net = R.world.roads, c = net.segs.cols, n = net.nodes.cols;
   const back = dist * Math.cos((pitch * Math.PI) / 180);
   const cand = [];
   net.forSegsNear(cx - 600, cz - 600, cx + 600, cz + 600, (s) => { cand.push(s); });
@@ -40,16 +40,16 @@ export function findStreetView(g, cx, cz, dist, pitch) {
 }
 
 /**
- * Page script (a string for CIDADE_SEQ / tools/shot.mjs) that puts the camera on view `v` and awaits it; on a street
+ * Page script (a string for ROADCRAFT_SEQ / tools/shot.mjs) that puts the camera on view `v` and awaits it; on a street
  * view with no street found it prints `error: no street view` (the callers fail on it). `before` runs before the view
- * is set and `after` once it is (inside the same async function, `g` = the game).
+ * is set and `after` once it is (inside the same async function, `R` = the automation contract, window.__roadcraft).
  */
 export function viewScript(v, { before = '', after = '' } = {}) {
   const set = v.street
-    ? `const sv=(${findStreetView.toString()})(g,${v.street[0]},${v.street[1]},${v.dist},${v.pitch});` +
+    ? `const sv=(${findStreetView.toString()})(R,${v.street[0]},${v.street[1]},${v.dist},${v.pitch});` +
       `if(!sv){console.log('error: no street view near ${v.street[0]},${v.street[1]}');return;}` +
       `console.log('view: ${v.name} street at '+sv.x.toFixed(1)+','+sv.z.toFixed(1)+' yaw '+sv.yaw.toFixed(1));` +
-      `await g.view(sv.x,sv.z,sv.yaw,${v.pitch},${v.dist},${v.hour});`
-    : `await g.view(${v.at[0]},${v.at[1]},${v.yaw},${v.pitch},${v.dist},${v.hour});`;
-  return `(async()=>{const g=window.__cidade.game;${before}${set}${after}})()`;
+      `await R.camera.view(sv.x,sv.z,sv.yaw,${v.pitch},${v.dist},${v.hour});`
+    : `await R.camera.view(${v.at[0]},${v.at[1]},${v.yaw},${v.pitch},${v.dist},${v.hour});`;
+  return `(async()=>{const R=window.__roadcraft;${before}${set}${after}})()`;
 }

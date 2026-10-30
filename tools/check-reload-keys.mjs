@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { connect, findPage, waitReady } from './checks/cdp.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const exe = path.join(root, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
@@ -17,8 +18,8 @@ const KEYS = [['Ctrl+R', 'r', 'KeyR', 82, 2], ['F5', 'F5', 'F5', 116, 0], ['Ctrl
 
 /** Opens the game over `own` with the DevTools port; returns the process and a way to talk to the page. */
 async function open(own, port) {
-  const env = { ...process.env, CIDADE_SHOT: path.join(own, 'shot.png'), CIDADE_QUERY: '?vazio&hora=11&workers=3', CIDADE_SCRIPT: '1',
-    CIDADE_SETTLE: '200', CIDADE_LIMIT: '260', CIDADE_USER_DATA: own, CIDADE_W: '1600', CIDADE_H: '900', CIDADE_CLOSE_SAVES: '1' };
+  const env = { ...process.env, ROADCRAFT_SHOT: path.join(own, 'shot.png'), ROADCRAFT_QUERY: '?empty&hour=11&workers=3', ROADCRAFT_SCRIPT: '1',
+    ROADCRAFT_SETTLE: '200', ROADCRAFT_LIMIT: '260', ROADCRAFT_USER_DATA: own, ROADCRAFT_W: '1600', ROADCRAFT_H: '900', ROADCRAFT_CLOSE_SAVES: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
   return spawn(exe, ['.', `--remote-debugging-port=${port}`], { cwd: root, env, stdio: 'ignore' });
 }
@@ -27,14 +28,12 @@ async function open(own, port) {
 async function savedSegments(own, port) {
   const p = await open(own, port);
   try {
-    let target = null;
-    for (let k = 0; k < 120 && !target; k++) { await wait(500); try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page' && t.url.startsWith('app://')); } catch { /* not up */ } }
-    const ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-    const ev = (expr) => new Promise((r) => { ws.onmessage = (m) => r(JSON.parse(m.data).result?.result?.value); ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, awaitPromise: true, returnByValue: true } })); });
-    for (let k = 0; k < 240 && (await ev('window.__cidade && window.__cidade.status')) !== 'pronto'; k++) await wait(500);
-    const n = await ev('(async () => { const g = window.__cidade.game; await g.saving.load(); return g.world.roads.segs.size; })()');
-    ws.close();
+    const target = await findPage(port, (u) => u.startsWith('app://'));
+    if (!target) return -1;
+    const tab = await connect(target);
+    await waitReady(tab, 120000);
+    const n = await tab.evaluate('(async () => { const R = window.__roadcraft; await R.saves.load(); return R.world.roads.segs.size; })()');
+    tab.close();
     return n;
   } finally { p.kill(); await wait(1500); }
 }
@@ -45,24 +44,14 @@ async function session(name, key, code, vk, mods, port) {
   let exited = false;
   p.on('exit', () => { exited = true; });
   try {
-    let target = null;
-    for (let k = 0; k < 120 && !target; k++) {
-      await wait(500);
-      try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page' && t.url.startsWith('app://')); } catch { /* not up yet */ }
-    }
+    let target = await findPage(port, (u) => u.startsWith('app://'));
     if (!target) return `${name}: the game did not open`;
-    let ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-    let id = 0;
-    const pending = new Map();
-    ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); } };
-    const call = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
-    const evaluate = async (expr) => (await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })).result?.result?.value;
-    for (let k = 0; k < 240 && (await evaluate('window.__cidade && window.__cidade.status')) !== 'pronto'; k++) await wait(500);
-    const before = await evaluate(`(async () => { const g = window.__cidade.game; g.world.unlimited = true; g.api.road(1400, 1500, 1700, 1500); g.api.road(1400, 1600, 1700, 1600); window.__sameDocument = 1; return { segs: g.world.roads.segs.size, unsaved: g.unsaved }; })()`);
-    await call('Page.bringToFront');
+    let tab = await connect(target);
+    await waitReady(tab, 120000);
+    const before = await tab.evaluate(`(async () => { const R = window.__roadcraft; R.world.unlimited = true; R.actions.road(1400, 1500, 1700, 1500); R.actions.road(1400, 1600, 1700, 1600); window.__sameDocument = 1; return { segs: R.world.roads.segs.size, unsaved: R.lifecycle.unsaved() }; })()`);
+    await tab.send('Page.bringToFront');
     for (const type of ['rawKeyDown', 'keyUp']) {
-      await call('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: mods });
+      await tab.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: mods });
     }
     await wait(8000);
     if (exited) {
@@ -70,14 +59,12 @@ async function session(name, key, code, vk, mods, port) {
       return `${name}: the window closed; the edit (${before.segs} segments, unsaved ${before.unsaved}) ${saved >= before.segs ? 'was saved first and came back on reopening' : `was LOST (the save holds ${saved})`}`;
     }
     // the page may have been replaced: talk to it again
-    try { ws.close(); } catch { /* gone */ }
-    target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page' && t.url.startsWith('app://'));
-    ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-    ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); } };
-    for (let k = 0; k < 240 && (await evaluate('window.__cidade && window.__cidade.status')) !== 'pronto'; k++) await wait(500);
-    const after = await evaluate(`(async () => { const g = window.__cidade.game; const same = window.__sameDocument === 1; const now = g.world.roads.segs.size; const loaded = same ? -1 : (await g.saving.load(), g.world.roads.segs.size); return { same, now, loaded }; })()`);
-    ws.close();
+    tab.close();
+    target = await findPage(port, (u) => u.startsWith('app://'));
+    tab = await connect(target);
+    await waitReady(tab, 120000);
+    const after = await tab.evaluate(`(async () => { const R = window.__roadcraft; const same = window.__sameDocument === 1; const now = R.world.roads.segs.size; const loaded = same ? -1 : (await R.saves.load(), R.world.roads.segs.size); return { same, now, loaded }; })()`);
+    tab.close();
     if (after.same) return `${name}: nothing happened (same page, ${after.now} of ${before.segs} segments)`;
     return `${name}: the page reloaded; the edit (${before.segs} segments, unsaved ${before.unsaved}) ${after.loaded >= before.segs ? 'was saved first and came back' : `was LOST (after reload ${after.now}, the save holds ${after.loaded})`}`;
   } finally {

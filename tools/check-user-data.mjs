@@ -30,11 +30,11 @@ const listAll = () => new Map(places.flatMap((p) => [...listing(p)]));
 const before = listAll();
 const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-check-'));
 const shot = path.join(own, 'shot.png');
-const script = '(async()=>{const g=window.__cidade.game;await g.saving.save(false);console.log("script SAVED");})()';
+const script = '(async()=>{const R=window.__roadcraft;await R.saves.save(false);console.log("script SAVED");})()';
 const lines = await new Promise((resolve) => {
   const out = [];
-  const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, '?vazio&hora=11', script],
-    { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '2', CIDADE_LIMIT: '180' } });
+  const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), shot, '?empty&hour=11', script],
+    { cwd: root, env: { ...process.env, ROADCRAFT_USER_DATA: own, ROADCRAFT_SETTLE: '2', ROADCRAFT_LIMIT: '180' } });
   p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
   p.on('exit', () => resolve(out));
 });

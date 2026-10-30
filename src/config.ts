@@ -7,16 +7,16 @@ export const MAP_SIZES = [4, 10, 16, 20, 24];
 
 /**
  * Size chosen before any module builds arrays: on the page it comes from
- * ?mapa=N or the last choice (localStorage); in workers, from the worker name.
+ * ?map=N or the last choice (localStorage); in workers, from the worker name.
  * Changing the size reloads the page.
  */
 function readMapTiles(): number {
   const g = globalThis as { name?: unknown; location?: { search?: string }; localStorage?: Storage; document?: unknown };
   let v = NaN;
   try {
-    if (!g.document && typeof g.name === 'string') { const m = /mapa=(\d+)/.exec(g.name); if (m) v = Number(m[1]); }
+    if (!g.document && typeof g.name === 'string') { const m = /map=(\d+)/.exec(g.name); if (m) v = Number(m[1]); }
     else {
-      const m = /[?&]mapa=(\d+)/.exec(g.location?.search ?? '');
+      const m = /[?&]map=(\d+)/.exec(g.location?.search ?? '');
       if (m) v = Number(m[1]);
       else v = Number(g.localStorage?.getItem('cidade.mapa') ?? NaN);
     }
@@ -27,7 +27,7 @@ function readMapTiles(): number {
 /** Tiles per map side. 10 → a 10,240 m map. */
 export const MAP_TILES = readMapTiles();
 /** Tag that passes the size to workers through the worker name. */
-export const MAP_TAG = `mapa=${MAP_TILES}`;
+export const MAP_TAG = `map=${MAP_TILES}`;
 /** Map side in meters. */
 export const MAP_SIZE = TILE_SIZE * MAP_TILES;
 /** Half the map: the world spans -MAP_HALF to +MAP_HALF in X and Z. */

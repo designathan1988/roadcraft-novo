@@ -26,7 +26,7 @@ export interface SaveWater { waves: number; foam: number; current: number }
 /** Changes the map size: the world arrays are sized to the map, so the page reloads. */
 export function reloadWithMap(tiles: number, then: string): void {
   try { localStorage.setItem('cidade.mapa', String(tiles)); } catch { /* no storage: it goes through the URL */ }
-  location.href = `${location.pathname}?mapa=${tiles}&${then}`;
+  location.href = `${location.pathname}?map=${tiles}&${then}`;
 }
 
 export interface LoadReport { missing: number; damaged: number; repaired: number; cut: number }
@@ -89,7 +89,7 @@ export async function loadSession(host: LoadHost): Promise<boolean> {
   const gens = opened.generations;
   // a save of another map size: the page reloads at that size and opens it there
   try { if (gens[0]) decodeMeta(gens[0].metaBytes); } catch (err) {
-    if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { host.life.end('opening'); reloadWithMap(err.tiles, 'carregar'); return false; }
+    if (err instanceof MapSizeError && MAP_SIZES.includes(err.tiles)) { host.life.end('opening'); reloadWithMap(err.tiles, 'open'); return false; }
   }
   if (!gens.length) {
     host.life.end('opening');

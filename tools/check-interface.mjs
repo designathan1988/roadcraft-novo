@@ -2,17 +2,13 @@
 // real keys (the same events the player makes), then checks what the game did. One Electron session per scenario,
 // with a user data folder of its own (never the game's). Results are printed as "CHECK OK|FAILED name".
 // Usage: npx vite build && node tools/check-interface.mjs [scenario...]   (exits with code 1 if anything fails)
-import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+import { checksOf, pick, report, scenarioFolder, session, wrap } from './checks/run.mjs';
 
 // Page helpers shared by every scenario.
 const PRELUDE = `
-const g = window.__cidade.game, a = g.api, w = g.world, A = g.hudActions, hud = g.hud;
+const R = window.__roadcraft, a = R.actions, w = R.world, A = R.ui;
 const errors = [];
 const logError = console.error.bind(console);
 console.error = (...x) => { errors.push(x.map(String).join(' ').slice(0, 300)); logError(...x); };
@@ -22,6 +18,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const frames = (n) => new Promise((r) => { const f = () => (n-- <= 0 ? r() : requestAnimationFrame(f)); f(); });
 const check = (name, ok, why) => console.log('CHECK ' + (ok ? 'OK ' : 'FAILED ') + name + (ok ? '' : ': ' + why));
 const Q = (s) => document.querySelector(s), QA = (s) => [...document.querySelectorAll(s)];
+// the Options dialog as the player sees it (About shares its backdrop class; Options has its buttons row)
+const optionsRoot = () => QA('.v2-dialog-back').find((e) => e.querySelector('.opt-buttons'));
+const optionsOpen = () => { const r = optionsRoot(); return !!r && !r.classList.contains('hidden'); };
 const label = (e) => [e.textContent, e.title, e.dataset.tip, e.getAttribute('aria-label')].filter(Boolean).join(' | ');
 const byText = (sel, re) => QA(sel).find((e) => new RegExp(re).test(label(e)));
 const click = (s) => { const e = typeof s === 'string' ? Q(s) : s; if (!e) throw new Error('nothing to click: ' + s); e.click(); };
@@ -30,9 +29,9 @@ const key = (code, o = {}) => (document.activeElement || document.body).dispatch
 const keyUp = (code, o = {}) => (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keyup', { code, key: o.key ?? code, bubbles: true, ...o }));
 /** A left click on the map at (x, z): the camera looks straight at the point and the canvas centre is clicked. */
 const mapClick = async (x, z, o = {}) => {
-  await g.view(x, z, 0, 70, o.dist ?? 140);
+  await R.camera.view(x, z, 0, 70, o.dist ?? 140);
   await frames(3);
-  const c = g.canvas, r = c.getBoundingClientRect();
+  const c = document.getElementById('view'), r = c.getBoundingClientRect();
   const p = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', bubbles: true, isPrimary: true, shiftKey: !!o.shift };
   c.dispatchEvent(new PointerEvent('pointermove', { ...p, buttons: 0 }));
   await frames(2);
@@ -58,23 +57,23 @@ export const SCENARIOS = {
     click(plus);
     await frames(2);
     const shown = Q('.v2-stepper-value').textContent;
-    const real = g.roadTool.elevation;
+    const real = R.tools.options().road.elevation;
     check('one + raises the road 4 m', real === 4, 'elevation ' + real);
     check('the stepper shows the height the road is drawn at', shown.includes('4') && !shown.includes('8'), 'shows "' + shown + '" for ' + real + ' m');
   `,
   // B32: the camera panel's "turn left (Q)" and "turn right (E)" turn the way Q and E do
   'B32-turn-buttons': `
-    await g.view(0, 0, 0, 40, 300);
-    const yaw0 = g.rig.yaw;
+    await R.camera.view(0, 0, 0, 40, 300);
+    const yaw0 = R.camera.pose().yaw;
     key('KeyQ'); await wait(400); keyUp('KeyQ'); await wait(300);
-    const q = g.rig.yaw - yaw0;
+    const q = R.camera.pose().yaw - yaw0;
     click('[data-pop=camera]');
     await frames(2);
-    const y1 = g.rig.yaw;
+    const y1 = R.camera.pose().yaw;
     // the turn-left button: its name without the key, as Roadcraft 4.0 (v2/shell.ts:759)
     click(byText('.v2-pop .v2-icon', '^Girar à esquerda|^Turn left'));
     await wait(1500);
-    const left = g.rig.yaw - y1;
+    const left = R.camera.pose().yaw - y1;
     check('Q turns the camera', Math.abs(q) > 0.1, 'Q turned ' + q.toFixed(3));
     check('the turn-left button turns the same way as Q', Math.sign(left) === Math.sign(q) && Math.abs(left) > 0.1, 'Q ' + q.toFixed(3) + ', button ' + left.toFixed(3));
   `,
@@ -82,26 +81,26 @@ export const SCENARIOS = {
   'B31-zone-radius-keys': `
     click('[data-cat=zones]');
     await frames(2);
-    const before = g.zoneTool.radius, brush = g.brush.radius;
+    const before = R.tools.options().zone.radius, brush = R.tools.options().brush.radius;
     key('BracketRight');
     await frames(2);
-    check('] widens the zone brush', g.zoneTool.radius > before, 'zone radius ' + before + ' → ' + g.zoneTool.radius + ', terrain brush ' + brush + ' → ' + g.brush.radius);
+    check('] widens the zone brush', R.tools.options().zone.radius > before, 'zone radius ' + before + ' → ' + R.tools.options().zone.radius + ', terrain brush ' + brush + ' → ' + R.tools.options().brush.radius);
     const slider = QA('.v2-range').find((r) => /Raio|Radius/.test(r.getAttribute('aria-label')));
-    check('the radius slider follows', slider && Number(slider.value) === Math.round(g.zoneTool.radius), 'slider ' + (slider && slider.value) + ', zone radius ' + g.zoneTool.radius);
+    check('the radius slider follows', slider && Number(slider.value) === Math.round(R.tools.options().zone.radius), 'slider ' + (slider && slider.value) + ', zone radius ' + R.tools.options().zone.radius);
   `,
   // B4: with a bus line chosen, the Train station tab puts a station on a train line (not a bus stop on the bus line)
   'B4-station-tabs': `
     road(0, 100, 400, 100);
     a.line(0, [200, 108], 1);
     road(0, -100, 400, -100, 'Ferrovia dupla');
-    const bus = g.transit.lines[0];
+    const bus = R.transit.lines()[0];
     click('[data-cat=transit]');
     await frames(2);
     click(byText('.v2-tab', 'Estação de trem|Train station'));
     await frames(2);
     await mapClick(200, -100);
-    const train = g.transit.lines.find((l) => (l.mode ?? 0) === 1);
-    check('the click makes a train station', !!train && train.stops.length === 2, 'lines: ' + g.transit.lines.map((l) => 'mode ' + (l.mode ?? 0) + ' with ' + l.stops.length / 2 + ' stops').join('; '));
+    const train = R.transit.lines().find((l) => (l.mode ?? 0) === 1);
+    check('the click makes a train station', !!train && train.stops.length === 2, 'lines: ' + R.transit.lines().map((l) => 'mode ' + (l.mode ?? 0) + ' with ' + l.stops.length / 2 + ' stops').join('; '));
     check('the bus line is left alone', bus.stops.length === 2, 'bus line has ' + bus.stops.length / 2 + ' stops');
   `,
   // B5: after Remove poles, a smoke card places smoke (it does not remove)
@@ -136,7 +135,7 @@ export const SCENARIOS = {
   'B18-undo-building-panel': `
     click('[data-cat=build]'); await frames(2);
     const id = a.lot(100, 100, 130, 100, 115, 130, 1, 3);
-    g.select(id); await frames(2);
+    R.tools.select(id); await frames(2);
     click(byText('.v2-stepper .v2-icon', '\\\\+$')); await frames(2);
     const after = Q('.v2-stepper-value').textContent;
     key('KeyZ', { ctrlKey: true }); await frames(2);
@@ -151,11 +150,11 @@ export const SCENARIOS = {
   'B19-furniture-after-reload': [`
     click('[data-cat=roads]'); await frames(2);
     click(byText('[data-furniture]', 'Nenhum|None')); await frames(2);
-    check('None is chosen', g.settings.furniture === 2, 'furniture ' + g.settings.furniture);
+    check('None is chosen', R.options.get().furniture === 2, 'furniture ' + R.options.get().furniture);
   `, `
     click('[data-cat=roads]'); await frames(2);
     const on = Q('[data-furniture].on');
-    check('the panel shows None after reopening', on && /Nenhum|None/.test(on.textContent), 'lit: ' + (on && on.textContent) + ', settings ' + g.settings.furniture);
+    check('the panel shows None after reopening', on && /Nenhum|None/.test(on.textContent), 'lit: ' + (on && on.textContent) + ', settings ' + R.options.get().furniture);
   `],
   // B20: applying the options keeps what other panels changed since (simulation traffic)
   'B20-options-keep-others': `
@@ -165,11 +164,11 @@ export const SCENARIOS = {
     click('[data-pop=sim]'); await frames(2);
     const r = QA('.v2-pop .v2-range').find((e) => /Tráfego|Traffic/.test(e.getAttribute('aria-label')));
     r.value = '50'; r.dispatchEvent(new Event('input', { bubbles: true })); await frames(2);
-    check('the simulation panel sets traffic 50%', g.settings.traffic === 0.5, 'traffic ' + g.settings.traffic);
+    check('the simulation panel sets traffic 50%', R.options.get().traffic === 0.5, 'traffic ' + R.options.get().traffic);
     click('[data-pop=sim]');
     await options();
     click(byText('.v2-dialog button', '^Aplicar$|^Apply$')); await wait(1500);
-    check('applying the options keeps traffic 50%', g.settings.traffic === 0.5, 'traffic ' + g.settings.traffic);
+    check('applying the options keeps traffic 50%', R.options.get().traffic === 0.5, 'traffic ' + R.options.get().traffic);
   `,
   // B21: applying the options keeps the weather set by hand
   'B21-options-keep-weather': `
@@ -179,16 +178,16 @@ export const SCENARIOS = {
     click(byText('.v2-choice', 'Ajustado aqui|Set here')); await frames(2);
     const rain = QA('.v2-range').find((e) => /Chuva|Rain/.test(e.getAttribute('aria-label')));
     rain.value = '100'; rain.dispatchEvent(new Event('input', { bubbles: true })); await frames(2);
-    check('the panel sets rain 100%', g.weather.fixed && g.weather.fixed.rain === 1, 'fixed ' + JSON.stringify(g.weather.fixed));
+    check('the panel sets rain 100%', R.sky.weather() && R.sky.weather().rain === 1, 'fixed ' + JSON.stringify(R.sky.weather()));
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
     click(byText('.v2-dialog button', '^Aplicar$|^Apply$')); await wait(1500);
-    check('applying the options keeps rain 100%', g.weather.fixed && g.weather.fixed.rain === 1, 'fixed ' + JSON.stringify(g.weather.fixed));
+    check('applying the options keeps rain 100%', R.sky.weather() && R.sky.weather().rain === 1, 'fixed ' + JSON.stringify(R.sky.weather()));
   `,
   // B39: the chosen line's colour and ring have buttons in the transit panel
   'B39-line-colour-loop': `
     road(0, 100, 400, 100);
     a.line(0, [100, 108, 300, 108], 1);
-    const l = g.transit.lines[0], c0 = l.color;
+    const l = R.transit.lines()[0], c0 = l.color;
     click('[data-cat=transit]'); await frames(4);
     const sw = QA('.v2-line-colours .v2-swatch').find((b) => !b.classList.contains('on'));
     check('the panel has colour swatches for the line', !!sw, 'no swatch');
@@ -211,30 +210,31 @@ export const SCENARIOS = {
     await wait(1200);
     const warn = Q('.v2-warn');
     check('the top bar shows the warning with the count', warn && !warn.hidden && warn.textContent.includes(String(n)), 'warning ' + (warn ? (warn.hidden ? 'hidden' : '"' + warn.textContent + '"') : 'missing'));
-    await g.view(3000, 3000, 0, 40, 300);
+    await R.camera.view(3000, 3000, 0, 40, 300);
     if (warn) click(warn);
     await wait(1500);
-    const d = Math.hypot(g.rig.target.x, g.rig.target.z);
-    check('its click points the camera at the node', d < 30, 'camera target ' + g.rig.target.x.toFixed(0) + ', ' + g.rig.target.z.toFixed(0));
-    check('and inspects it', g.tool === 'inspect' && g.inspector.isOpen, 'tool ' + g.tool + ', inspector open ' + g.inspector.isOpen);
-    g.commands.undo();
+    const d = Math.hypot(R.camera.pose().x, R.camera.pose().z);
+    check('its click points the camera at the node', d < 30, 'camera target ' + R.camera.pose().x.toFixed(0) + ', ' + R.camera.pose().z.toFixed(0));
+    check('and inspects it', R.tools.current() === 'inspect' && R.tools.inspector().open, 'tool ' + R.tools.current() + ', inspector open ' + R.tools.inspector().open);
+    R.history.undo();
     await wait(1200);
     check('the warning goes when the junction is fixed', !Q('.v2-warn') || Q('.v2-warn').hidden, 'count now ' + A.impossibleNodes());
   `,
   // B51: always day (or night) fixes the light, while the clock and the traffic demand go on
-  'B51-always-day-clock': `
-    g.hour = 8; g.clockSpeed = 30; // ?hora stops the clock: half an hour per second here
+  'B51-always-day-clock': { query: '?empty&workers=3', script: `
+    R.sky.setHour(8); A.speed(4); // the time of day follows the speed: 4 game hours per real minute
     click('[data-sky=dia]'); await frames(2);
-    const h0 = g.hour;
+    const h0 = R.sky.hour();
     await wait(4000);
-    check('the clock goes on with always day', g.hour > h0 + 0.03, 'hour ' + h0.toFixed(3) + ' → ' + g.hour.toFixed(3));
+    check('the clock goes on with always day', R.sky.hour() > h0 + 0.03, 'hour ' + h0.toFixed(3) + ' → ' + R.sky.hour().toFixed(3));
     const sent = [];
-    const post = g.sim.postMessage.bind(g.sim);
-    g.sim.postMessage = (m, t) => { if (m && m.type === 'demand') sent.push(m.hour); return post(m, t); };
+    // the demand message the page sends to the simulation, seen at the boundary (Worker postMessage)
+    const W = Worker.prototype, post = W.postMessage;
+    W.postMessage = function (m, t) { if (m && m.type === 'demand') sent.push(m.hour); return post.call(this, m, t); };
     await wait(2600);
-    g.sim.postMessage = post;
-    check('the demand follows the clock, not noon', sent.length > 0 && sent[sent.length - 1] !== 12 && Math.abs(sent[sent.length - 1] - g.hour) < 1.2, 'demand hour ' + sent + ', clock ' + g.hour.toFixed(2));
-  `,
+    W.postMessage = post;
+    check('the demand follows the clock, not noon', sent.length > 0 && sent[sent.length - 1] !== 12 && Math.abs(sent[sent.length - 1] - R.sky.hour()) < 1.2, 'demand hour ' + sent + ', clock ' + R.sky.hour().toFixed(2));
+  ` },
   // B52: the repair notice opening an old map stays readable next to "City loaded"
   'B52-toasts-stack': `
     const net = w.roads;
@@ -243,8 +243,8 @@ export const SCENARIOS = {
     net.addSeg({ a: P, b: B, cx: 1550, cz: 1500, profile: 0, flags: 0, zl: 0, zr: 0 });
     net.addSeg({ a: C, b: D, cx: 1550, cz: 1550, profile: 0, flags: 0, zl: 0, zr: 0 });
     for (let t = 0; t < w.saveDirty.length; t++) w.saveDirty[t] = 1;
-    await g.saving.save(false);
-    await g.saving.load();
+    await R.saves.save(false);
+    await R.saves.load();
     await wait(300);
     const shown = QA('.v2-toast').filter((e) => !e.hidden).map((e) => e.textContent).join(' / ');
     check('the repair notice is still shown', /reparado|repaired/i.test(shown), 'toasts: ' + shown);
@@ -252,9 +252,9 @@ export const SCENARIOS = {
   `,
   // B41: the builder's tabs (Models, Facade, Roof, Parts, Colours) light up when the buildings session mounts them
   'B41-builder-tabs': `
-    const can = typeof hud.registerBuilderTab === 'function';
-    check('the interface offers a mount point for builder tabs', can, 'hud.registerBuilderTab is ' + typeof hud.registerBuilderTab);
-    if (can) hud.registerBuilderTab('facade', (box, b) => { const p = document.createElement('p'); p.className = 'probe-facade'; p.textContent = 'facade of ' + (b ? b.floors : 'none'); box.append(p); });
+    const can = typeof R.panels.registerBuilderTab === 'function';
+    check('the interface offers a mount point for builder tabs', can, 'R.panels.registerBuilderTab is ' + typeof R.panels.registerBuilderTab);
+    if (can) R.panels.registerBuilderTab('facade', (box, b) => { const p = document.createElement('p'); p.className = 'probe-facade'; p.textContent = 'facade of ' + (b ? b.floors : 'none'); box.append(p); });
     click('[data-cat=build]'); await frames(2);
     const facade = byText('.v2-tab', '^Fachada|^Facade'), roof = byText('.v2-tab', '^Telhado|^Roof');
     check('a mounted tab is enabled', facade && !facade.disabled, 'facade tab ' + (facade ? (facade.disabled ? 'disabled' : 'enabled') : 'missing'));
@@ -265,12 +265,12 @@ export const SCENARIOS = {
     check('Edit goes back to the building panel', !Q('.probe-facade'), 'content still shown');
   `,
   // B57: in English, the game's own hints and toasts are in English
-  'B57-english': { query: '?vazio&hora=11&workers=3&lang=en', script: `
+  'B57-english': { query: '?empty&hour=11&workers=3&lang=en', script: `
     click('[data-cat=zones]'); await frames(2);
     const hint = Q('.v2-hintbar').textContent;
     check('the zone hint is in English', /Drag/.test(hint) && !/[ãõçéêáíóúâô]|Arraste/.test(hint), 'hint: ' + hint);
     click('[data-cat=build]'); await frames(2);
-    g.select(a.lot(100, 100, 130, 100, 115, 130, 1, 3)); await frames(2);
+    R.tools.select(a.lot(100, 100, 130, 100, 115, 130, 1, 3)); await frames(2);
     click(byText('.v2-toolopts button', '^Renovate')); await frames(2);
     const toasts = QA('.v2-toast').map((e) => e.textContent).join(' / ');
     check('the toast is in English', toasts.length > 0 && !/[ãõçéêáíóúâô]|Nenhuma/.test(toasts), 'toasts: ' + toasts);
@@ -280,36 +280,36 @@ export const SCENARIOS = {
     click('[data-cat=roads]'); await frames(2);
     key('PageUp'); keyUp('PageUp'); await frames(2);
     const h = Q('.v2-toolopts .v2-stepper-value').textContent;
-    check('PageUp shows in the height selector', /4/.test(h), 'elevation ' + g.roadTool.elevation + ', shows ' + h);
+    check('PageUp shows in the height selector', /4/.test(h), 'elevation ' + R.tools.options().road.elevation + ', shows ' + h);
     click(byText('.v2-tab', 'Rotatória|Roundabout')); await frames(2);
     key('BracketRight'); await frames(2);
     // the radius is a slider since the 4.0 drawers: its number and its knob follow ]
     const ring = QA('.v2-toolopts .v2-orow').find((x) => /Raio|Radius/.test(x.getAttribute('aria-label')));
     const r = ring ? ring.querySelector('.v2-range-out').textContent : 'none';
-    check('] shows in the roundabout radius', r !== '22 m' && r === g.roadTool.ringRadius + ' m' && ring.querySelector('input').value === String(g.roadTool.ringRadius), 'shows ' + r + ', radius ' + g.roadTool.ringRadius);
+    check('] shows in the roundabout radius', r !== '22 m' && r === R.tools.options().road.ringRadius + ' m' && ring.querySelector('input').value === String(R.tools.options().road.ringRadius), 'shows ' + r + ', radius ' + R.tools.options().road.ringRadius);
   `,
   // B22: the next drawn lot shows the style and function that will be used
   'B22-next-lot-choice': `
     click('[data-cat=build]'); await frames(2);
     await choose(/Estilo|Style/, 2); await choose(/Função|Function/, 3);
     click('[data-cat=roads]'); await frames(2); click('[data-cat=build]'); await frames(2);
-    check('the style shown is the one chosen', listValue(/Estilo|Style/) === '2' && g.newArch === 2, 'shows ' + listValue(/Estilo|Style/) + ', next ' + g.newArch);
-    check('the function shown is the one chosen', listValue(/Função|Function/) === '3' && g.newFn === 3, 'shows ' + listValue(/Função|Function/) + ', next ' + g.newFn);
+    check('the style shown is the one chosen', listValue(/Estilo|Style/) === '2' && R.tools.options().lots.newArch === 2, 'shows ' + listValue(/Estilo|Style/) + ', next ' + R.tools.options().lots.newArch);
+    check('the function shown is the one chosen', listValue(/Função|Function/) === '3' && R.tools.options().lots.newFn === 3, 'shows ' + listValue(/Função|Function/) + ', next ' + R.tools.options().lots.newFn);
   `,
   // B23: the water panel shows the values of the map that was opened
   'B23-panels-show-map': `
     A.water({ waves: 0.9, foam: 0.1, current: 2 });
-    await g.saving.save(false); A.water({ waves: 0.3, foam: 0.4, current: 0.5 }); await g.saving.load();
+    await R.saves.save(false); A.water({ waves: 0.3, foam: 0.4, current: 0.5 }); await R.saves.load();
     click('[data-cat=landscape]'); await frames(2);
     // the water rows show with the river brush (as Roadcraft 4.0)
     click(byText('.v2-card', '^Rio|^River')); await frames(2);
     const waves = QA('.v2-range').find((e) => /Ondas|Waves/.test(e.getAttribute('aria-label')));
-    check('the waves slider shows the map', waves && waves.value === '90', 'slider ' + (waves && waves.value) + ', map ' + g.hudActions.environment().water.waves);
+    check('the waves slider shows the map', waves && waves.value === '90', 'slider ' + (waves && waves.value) + ', map ' + R.ui.environment().water.waves);
   `,
   // B24: the decay figure follows the city clock while the panel is open
   'B24-decay-follows-clock': `
     click('[data-cat=build]'); await frames(2);
-    const id = a.lot(100, 100, 130, 100, 115, 130, 1, 3); g.select(id); await frames(2);
+    const id = a.lot(100, 100, 130, 100, 115, 130, 1, 3); R.tools.select(id); await frames(2);
     const row = () => { const r = QA('.v2-toolopts .v2-orow').find((e) => /Desgaste|Decay/.test(e.getAttribute('aria-label'))); return r ? r.querySelector('.v2-stepper-value').textContent : 'none'; };
     const before = row();
     a.passTime(60 * 24 * 365 * 30); await wait(1200);
@@ -318,10 +318,10 @@ export const SCENARIOS = {
   // B25: the floors selector stops at 60, and "−" on an empty lot builds nothing
   'B25-floors-limits': `
     click('[data-cat=build]'); await frames(2);
-    const id = a.lot(100, 100, 130, 100, 115, 130, 1, 60); g.select(id); await frames(2);
+    const id = a.lot(100, 100, 130, 100, 115, 130, 1, 60); R.tools.select(id); await frames(2);
     click(byText('.v2-stepper .v2-icon', '\\\\+$')); await frames(2);
     check('+ at 60 floors stays at 60', Q('.v2-toolopts .v2-stepper-value').textContent === '60', 'shows ' + Q('.v2-toolopts .v2-stepper-value').textContent);
-    w.editBuilding(id, 0, w.buildings.cols.style[id], 0); g.select(id); await frames(2);
+    w.editBuilding(id, 0, w.buildings.cols.style[id], 0); R.tools.select(id); await frames(2);
     click(byText('.v2-stepper .v2-icon', '−$|-$')); await frames(2);
     check('− on an empty lot builds nothing', w.buildings.cols.floors[id] === 0, 'floors ' + w.buildings.cols.floors[id]);
   `,
@@ -346,12 +346,18 @@ export const SCENARIOS = {
     road(0, 100, 400, 100); a.line(0, [100, 108, 300, 108], 1);
     click('[data-cat=transit]'); await frames(4);
     const row = Q('.v2-transit-line');
-    const l = g.transit.lines[0], real = g.simStats;
-    // the simulation reports 480 passengers an hour on the line
-    Object.defineProperty(g, 'simStats', { configurable: true, get: () => ({ ...(real || {}), type: 'stats', lines: [{ id: l.id, perHour: 480, waiting: 3 }] }), set: () => undefined });
+    const l = R.transit.lines()[0];
+    // the simulation's own report for the line (every second): wait for two of them, the second may change the figure
+    const report = () => (R.sim.stats()?.lines ?? []).find((x) => x.id === l.id);
+    let first = null;
+    for (let k = 0; k < 120 && !(first = report()); k++) await wait(250);
+    const s0 = R.sim.stats();
+    for (let k = 0; k < 40 && R.sim.stats() === s0; k++) await wait(100);
     await frames(4);
+    const now = report();
+    check('the line is reported by the simulation', !!first && !!now, 'no report for the line');
     check('the row stays', row && row.isConnected, 'the panel was rebuilt');
-    check('and shows the new figure', Q('.v2-transit-line') && /480/.test(Q('.v2-transit-line').textContent), 'row: ' + (Q('.v2-transit-line') && Q('.v2-transit-line').textContent));
+    check('and shows the reported figure', !!now && Q('.v2-transit-line') && Q('.v2-transit-line').textContent.includes(String(now.perHour)), 'row: ' + (Q('.v2-transit-line') && Q('.v2-transit-line').textContent) + ', reported ' + (now && now.perHour));
   `,
   // B33: Esc ends the wall being traced and keeps the tool; Esc drops the first click of a lot line
   'B33-esc-steps-back': `
@@ -360,23 +366,23 @@ export const SCENARIOS = {
     click(byText('.v2-card', '^Muro|^Wall')); await frames(2);
     await mapClick(100, 60);
     key('Escape'); await frames(2);
-    check('Esc ends the wall and keeps the wall tool', g.tool === 'barrier', 'tool ' + g.tool);
+    check('Esc ends the wall and keeps the wall tool', R.tools.current() === 'barrier', 'tool ' + R.tools.current());
     key('Escape'); await frames(2);
-    check('a second Esc puts the tool down', g.tool === 'camera', 'tool ' + g.tool);
+    check('a second Esc puts the tool down', R.tools.current() === 'camera', 'tool ' + R.tools.current());
     A.lotLine(); await frames(2);
     await mapClick(100, 100);
     key('Escape'); await frames(2);
-    check('Esc drops the first click of the lot line', g.lotExtraPts.length === 0 && g.tool === 'building', 'points ' + g.lotExtraPts.length + ', tool ' + g.tool);
+    check('Esc drops the first click of the lot line', R.tools.options().lotPoints === 0 && R.tools.current() === 'building', 'points ' + R.tools.options().lotPoints + ', tool ' + R.tools.current());
   `,
   // B36: closing the options while a road key is being captured leaves the next key to the game
   'B36-options-capture': `
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
-    const before = g.settings.roadUp ?? 'PageUp';
+    const before = R.options.get().roadUp ?? 'PageUp';
     click(QA('.v2-dialog .v2-btn').find((b) => /Page|Up/.test(b.textContent))); await frames(1);
-    click([...g.optionsPanel.root.querySelectorAll('button')].find((b) => /^(Fechar|Close)$/.test(b.textContent))); await frames(2);
-    const mode = g.rig.mode;
+    click([...optionsRoot().querySelectorAll('button')].find((b) => /^(Fechar|Close)$/.test(b.textContent))); await frames(2);
+    const mode = R.camera.pose().mode;
     key('KeyV'); await frames(2);
-    check('the next key goes to the game (V changes the view)', g.rig.mode !== mode, 'view stayed ' + mode + ', focus ' + (document.activeElement && document.activeElement.tagName) + ', options open ' + g.optionsPanel.isOpen);
+    check('the next key goes to the game (V changes the view)', R.camera.pose().mode !== mode, 'view stayed ' + mode + ', focus ' + (document.activeElement && document.activeElement.tagName) + ', options open ' + optionsOpen());
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
     const shown = QA('.v2-dialog .v2-btn').find((b) => /Page|Up|Numpad/.test(b.textContent));
     check('the dialog shows the road key unchanged', shown && /Page Up/.test(shown.textContent), 'shows ' + (shown && shown.textContent));
@@ -384,12 +390,12 @@ export const SCENARIOS = {
   // B37: the game's keys do nothing while the options, About or the start screen are open
   'B37-keys-blocked-by-dialogs': `
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
-    const mode = g.rig.mode;
+    const mode = R.camera.pose().mode;
     key('KeyV'); key('KeyT'); await frames(2);
-    check('V does not change the view under the options', g.rig.mode === mode, 'view ' + mode + ' → ' + g.rig.mode);
-    check('T does not open a drawer under the options', g.tool === 'camera', 'tool ' + g.tool);
+    check('V does not change the view under the options', R.camera.pose().mode === mode, 'view ' + mode + ' → ' + R.camera.pose().mode);
+    check('T does not open a drawer under the options', R.tools.current() === 'camera', 'tool ' + R.tools.current());
     key('Escape'); await frames(2);
-    check('Esc closes the options', !g.optionsPanel.isOpen, 'still open');
+    check('Esc closes the options', !optionsOpen(), 'still open');
   `,
   // B44: the rail track tabs show height, snapping and cut sides like the roads do
   'B44-rail-tabs-options': `
@@ -401,16 +407,14 @@ export const SCENARIOS = {
   // B47: a building put on an empty lot uses the style and function chosen for the next one
   'B47-empty-lot-choice': `
     road(1400, 1500, 1800, 1500); a.zone(1600, 1520, 60, 1); // the map centre is a river
-    g.growth.rate = 0; // nothing grows by itself during the check
-    for (let k = 0; k < 40 && g.growth.lots.size === 0; k++) { g.growth.processDirty(); await g.pool.whenIdle(); await wait(250); }
-    let free = null;
-    for (const l of g.growth.lots.values()) for (let i = 0; i < l.count && !free; i++) if (g.growth.lotAt(l.x[i], l.z[i])) free = [l.x[i], l.z[i]];
-    check('there is an empty lot', !!free, 'no free lot; lots in ' + g.growth.lots.size + ' cells, growth cells ' + g.growth.cells.length + ', seg zones ' + w.roads.segs.cols.zl[0] + '/' + w.roads.segs.cols.zr[0] + ', buildings ' + w.buildings.size);
+    R.cities.growthRate(0); // nothing grows by itself during the check
+    const free = (await R.cities.freeLots())[0] ?? null;
+    check('there is an empty lot', !!free, 'no free lot; seg zones ' + w.roads.segs.cols.zl[0] + '/' + w.roads.segs.cols.zr[0] + ', buildings ' + w.buildings.size);
     if (free) {
       click('[data-cat=build]'); await frames(2);
       A.style(4); A.buildingFn(2);
       await mapClick(free[0], free[1]);
-      const id = g.selected, c = w.buildings.cols;
+      const id = R.tools.selected(), c = w.buildings.cols;
       check('the building uses the chosen style and function', id >= 0 && c.style[id] === 128 + 4 && c.fn[id] === 2, 'id ' + id + ', style ' + c.style[id] + ', fn ' + c.fn[id]);
     }
   `,
@@ -419,14 +423,14 @@ export const SCENARIOS = {
     click('[data-cat=build]'); await frames(2);
     const id = a.lot(1500, 1500, 1530, 1500, 1515, 1530, 1, 4);
     await mapClick(w.buildings.cols.x[id], w.buildings.cols.z[id]);
-    g.canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: innerWidth / 2, clientY: innerHeight / 2 })); await frames(4);
-    check('a double click on a building shows it inside', g.inside.on && g.insideId === id, 'inside ' + g.inside.on + ', building ' + g.insideId + ' (clicked ' + id + ')');
+    document.getElementById('view').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: innerWidth / 2, clientY: innerHeight / 2 })); await frames(4);
+    check('a double click on a building shows it inside', R.view.inside() && R.view.insideId() === id, 'inside ' + R.view.inside() + ', building ' + R.view.insideId() + ' (clicked ' + id + ')');
     click('[data-cat=landscape]'); await frames(2);
     click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
     click(byText('.v2-card', '^Muro|^Wall')); await frames(2);
     await mapClick(1700, 1600); await mapClick(1760, 1600);
-    g.canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: innerWidth / 2, clientY: innerHeight / 2 })); await frames(2);
-    check('a double click ends the wall', !g.wallOpen && g.tool === 'barrier', 'wall still open ' + g.wallOpen + ', tool ' + g.tool);
+    document.getElementById('view').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: innerWidth / 2, clientY: innerHeight / 2 })); await frames(2);
+    check('a double click ends the wall', !R.tools.options().items.wallOpen && R.tools.current() === 'barrier', 'wall still open ' + R.tools.options().items.wallOpen + ', tool ' + R.tools.current());
   `,
   // B48: split by line and curve side show the line from the first click to the cursor
   'B48-lot-line-preview': `
@@ -434,14 +438,14 @@ export const SCENARIOS = {
     a.lot(1500, 1500, 1540, 1500, 1520, 1540, 1, 2);
     A.lotLine(); await frames(2);
     await mapClick(1490, 1520);
-    await g.view(1550, 1520, 0, 70, 140); await frames(2);
-    const c = g.canvas, r = c.getBoundingClientRect();
+    await R.camera.view(1550, 1520, 0, 70, 140); await frames(2);
+    const c = document.getElementById('view'), r = c.getBoundingClientRect();
     c.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 1, bubbles: true })); await frames(3);
-    check('the line from the first click shows', g.preview.mesh.visible, 'no preview');
+    check('the line from the first click shows', R.render.preview(), 'no preview');
   `,
   // B53: a photo parameter in the address (?semsombra) is not written into the player's options
-  'B53-url-not-saved': { query: '?vazio&hora=11&workers=3&semsombra', script: `
-    check('the photo parameter applies', g.settings.shadows === false, 'shadows ' + g.settings.shadows);
+  'B53-url-not-saved': { query: '?empty&hour=11&workers=3&noshadows', script: `
+    check('the photo parameter applies', R.options.get().shadows === false, 'shadows ' + R.options.get().shadows);
     click('[data-cat=roads]'); await frames(2);
     click(byText('[data-furniture]', 'Básico|Basic')); await frames(2);
     const kept = JSON.parse(localStorage.getItem('cidade.opcoes') || '{}');
@@ -450,22 +454,22 @@ export const SCENARIOS = {
   ` },
   // B54: two fingers apart on a touch screen zoom in
   'B54-pinch-zoom': `
-    await g.view(1500, 1500, 0, 50, 400); await frames(4);
-    const c = g.canvas, r = c.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    await R.camera.view(1500, 1500, 0, 50, 400); await frames(4);
+    const c = document.getElementById('view'), r = c.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     const ev = (type, id, x) => c.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: cy, button: 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }));
-    const d0 = g.rig.dist;
+    const d0 = R.camera.pose().dist;
     ev('pointerdown', 1, cx - 50); ev('pointerdown', 2, cx + 50);
     for (let k = 1; k <= 10; k++) { ev('pointermove', 1, cx - 50 - k * 15); ev('pointermove', 2, cx + 50 + k * 15); await frames(1); }
     ev('pointerup', 1, cx - 200); ev('pointerup', 2, cx + 200);
     await wait(800);
-    check('spreading two fingers zooms in', g.rig.dist < d0 * 0.7, 'distance ' + d0.toFixed(0) + ' → ' + g.rig.dist.toFixed(0));
-    const t = g.rig.target;
+    check('spreading two fingers zooms in', R.camera.pose().dist < d0 * 0.7, 'distance ' + d0.toFixed(0) + ' → ' + R.camera.pose().dist.toFixed(0));
+    const t = R.camera.pose();
     check('and does not drag the map away', Math.hypot(t.x - 1500, t.z - 1500) < 60, 'target ' + t.x.toFixed(0) + ', ' + t.z.toFixed(0));
   `,
   // B55: the sound stops while the game is hidden (minimised); no birds in a city block with no trees
   'B55-sound-hidden-birds': `
-    g.ambient.start(); await wait(300);
-    const ctx = g.ambient.ctx;
+    R.audio.start(); await wait(300);
+    const ctx = { get state() { return R.audio.state(); } };
     check('the sound runs', ctx && ctx.state === 'running', 'state ' + (ctx && ctx.state));
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
@@ -475,13 +479,13 @@ export const SCENARIOS = {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
     document.dispatchEvent(new Event('visibilitychange')); await wait(400);
     check('shown again, it plays', ctx && ctx.state === 'running', 'state ' + (ctx && ctx.state));
-    await g.view(1500, 1500, 0, 50, 120); await wait(1500);
-    check('birds in the open country', g.green > 0.5, 'green ' + g.green);
+    await R.camera.view(1500, 1500, 0, 50, 120); await wait(1500);
+    check('birds in the open country', R.audio.green() > 0.5, 'green ' + R.audio.green());
     // a block of streets and buildings, no trees
     for (let k = 0; k < 5; k++) { road(1400, 1400 + k * 50, 1600, 1400 + k * 50); road(1400 + k * 50, 1400, 1400 + k * 50, 1600); }
     for (let k = 0; k < 4; k++) for (let m = 0; m < 4; m++) a.lot(1405 + k * 50, 1420 + m * 50, 1445 + k * 50, 1420 + m * 50, 1425 + k * 50, 1445 + m * 50, 2, 6);
-    await g.view(1500, 1500, 0, 50, 120); await wait(1500);
-    check('no birds over a treeless block', typeof g.green === 'number' && g.green < 0.2, 'green ' + g.green);
+    await R.camera.view(1500, 1500, 0, 50, 120); await wait(1500);
+    check('no birds over a treeless block', typeof R.audio.green() === 'number' && R.audio.green() < 0.2, 'green ' + R.audio.green());
   `,
   // B34: the help (F1) lists every key the game answers, from the key table
   'B34-help-lists-keys': `
@@ -514,18 +518,18 @@ export const SCENARIOS = {
     HTMLInputElement.prototype.click = click0;
     check('Ctrl+O opens the map file picker', picker === 1, 'picker opened ' + picker + ' times');
     click('[data-cat=info]'); await frames(2);
-    { const sc = w.roads.segs.cols, nc = w.roads.nodes.cols; const k = w.roads.segs.alive.indexOf(1); g.inspector.pick((nc.x[sc.a[k]] + nc.x[sc.b[k]]) / 2, (nc.z[sc.a[k]] + nc.z[sc.b[k]]) / 2); } await frames(4);
+    { const sc = w.roads.segs.cols, nc = w.roads.nodes.cols; const k = w.roads.segs.alive.indexOf(1); R.tools.inspect((nc.x[sc.a[k]] + nc.x[sc.b[k]]) / 2, (nc.z[sc.a[k]] + nc.z[sc.b[k]]) / 2); } await frames(4);
     const segs = w.roads.segs.size;
     key('KeyD', { ctrlKey: true }); await frames(4);
-    check('Ctrl+D duplicates the inspected road', w.roads.segs.size > segs, 'segments ' + segs + ' → ' + w.roads.segs.size + ', inspector ' + g.inspector.isOpen + ' seg ' + g.inspector.seg + ', toasts ' + QA('.v2-toast').map((e) => e.textContent).join(' / '));
+    check('Ctrl+D duplicates the inspected road', w.roads.segs.size > segs, 'segments ' + segs + ' → ' + w.roads.segs.size + ', inspector ' + R.tools.inspector().open + ' seg ' + R.tools.inspector().seg + ', toasts ' + QA('.v2-toast').map((e) => e.textContent).join(' / '));
     key('Escape'); key('Escape'); await frames(2);
-    const home = [g.rig.target.x, g.rig.target.z, g.rig.dist];
-    await g.view(3000, 3000, 30, 40, 200);
+    const home = [R.camera.pose().x, R.camera.pose().z, R.camera.pose().dist];
+    await R.camera.view(3000, 3000, 30, 40, 200);
     key('Home'); await wait(600);
-    check('Home goes back to the opening view', Math.hypot(g.rig.target.x - home[0], g.rig.target.z - home[1]) < 5, 'target ' + g.rig.target.x.toFixed(0) + ', ' + g.rig.target.z.toFixed(0) + ' (home ' + home[0].toFixed(0) + ', ' + home[1].toFixed(0) + ')');
-    const y0 = g.rig.yaw;
+    check('Home goes back to the opening view', Math.hypot(R.camera.pose().x - home[0], R.camera.pose().z - home[1]) < 5, 'target ' + R.camera.pose().x.toFixed(0) + ', ' + R.camera.pose().z.toFixed(0) + ' (home ' + home[0].toFixed(0) + ', ' + home[1].toFixed(0) + ')');
+    const y0 = R.camera.pose().yaw;
     key('KeyQ', { shiftKey: true }); keyUp('KeyQ', { shiftKey: true }); await wait(3000);
-    const d = ((g.rig.yaw - y0) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+    const d = ((R.camera.pose().yaw - y0) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
     check('Shift+Q turns a quarter', Math.abs(Math.abs(d) - Math.PI / 2) < 0.05, 'turned ' + (d * 180 / Math.PI).toFixed(1) + '°');
   `,
   // B42: the health panel and the worst case are developer tools, out of the player's interface
@@ -538,10 +542,10 @@ export const SCENARIOS = {
     check('no worst case in the menu', !byText('.v2-pop .v2-row', 'pior caso|worst case'), 'the menu has the worst case test');
   `,
   // B30 and the 4.0 panel: for a developer, F9 opens health with World and State tabs, refreshed while open, clear of the inspector
-  'B30-health-panel-dev': { query: '?vazio&hora=11&workers=3&dev', script: `
+  'B30-health-panel-dev': { query: '?empty&hour=11&workers=3&dev', script: `
     road(1400, 1500, 1700, 1500);
     click('[data-cat=info]'); await frames(2);
-    g.inspector.pick(1450, 1500); await frames(4);
+    R.tools.inspect(1450, 1500); await frames(4);
     key('F9'); await frames(2);
     const p = Q('.health');
     check('F9 opens the health panel', p && !p.classList.contains('hidden'), 'not open');
@@ -560,7 +564,7 @@ export const SCENARIOS = {
   // B43: the title screen opens again from the menu, with the seed and the map size; generating there uses its seed;
   // "load the last game" with no save comes back to it; the menu's "generate" takes a new seed
   'B43-title-screen': `
-    const idle = async () => { for (let k = 0; k < 600 && (g.busy || window.__cidade.status !== 'pronto'); k++) await wait(200); await wait(300); };
+    const idle = async () => { for (let k = 0; k < 600 && R.lifecycle.state() !== 'ready'; k++) await wait(200); await wait(300); };
     click('[data-pop=menu]'); await frames(2);
     const row = byText('.v2-pop .v2-row', 'Tela inicial|Title screen');
     check('the menu opens the title screen', !!row, 'no row in the menu');
@@ -574,7 +578,7 @@ export const SCENARIOS = {
     seed.value = '4321'; seed.dispatchEvent(new Event('input'));
     click(byText('.v2-start button', 'Gerar|Generate')); await wait(500); await idle();
     check('generating from the title screen uses its seed', w.seed === 4321 && w.roads.segs.size > 0, 'seed ' + w.seed + ', segments ' + w.roads.segs.size);
-    w.money = w.money; g.unsaved = false; for (let t = 0; t < w.saveDirty.length; t++) w.saveDirty[t] = 0;
+    await R.saves.save(true);
     click('[data-pop=menu]'); await frames(2);
     // the menu's new city over the whole map (Roadcraft 4.0 New world) asks first
     const confirm0 = window.confirm; window.confirm = () => true;
@@ -583,12 +587,12 @@ export const SCENARIOS = {
     check('the generate of the menu takes a new seed', w.seed !== 4321, 'seed ' + w.seed);
   `,
   // As the 4.0 (main.ts sky: 'day'): a game opens with the sky "always day", that button lit, the clock running
-  'sky-starts-day': { query: '?vazio&workers=3', script: `
-    check('the game opens in always day', g.skyMode === 'dia', 'sky ' + g.skyMode);
+  'sky-starts-day': { query: '?empty&workers=3', script: `
+    check('the game opens in always day', R.sky.mode() === 'dia', 'sky ' + R.sky.mode());
     const lit = QA('[data-sky].on').map((b) => b.dataset.sky).join(',');
     check('the day button is the lit one', lit === 'dia', 'lit: ' + lit);
-    const h0 = g.hour; await wait(3000);
-    check('the clock runs', g.hour !== h0, 'hour ' + h0 + ' → ' + g.hour);
+    const h0 = R.sky.hour(); await wait(3000);
+    check('the clock runs', R.sky.hour() !== h0, 'hour ' + h0 + ' → ' + R.sky.hour());
   ` },
   // The 4.0 top bar and its menus (ui/v2/shell.ts): Quality in the menu, Reset view in Camera, Esc gives the focus back
   // to the menu's button, the tooltip does not repeat a name already on screen, simulation 0-300 %
@@ -597,20 +601,20 @@ export const SCENARIOS = {
     const q = QA('.v2-pop .v2-orow').find((r) => /Gráficos|Graphics/.test(r.getAttribute('aria-label')));
     check('the menu has the quality row', !!q && q.querySelectorAll('button').length === 4, 'rows: ' + QA('.v2-pop .v2-orow').map((r) => r.getAttribute('aria-label')).join(', '));
     if (q) { click([...q.querySelectorAll('button')].find((b) => /Baixa|Low/.test(b.textContent))); await wait(2500); }
-    check('a quality click applies the preset', g.settings.preset === 'baixo' && g.settings.shadows === false, 'preset ' + g.settings.preset + ', shadows ' + g.settings.shadows);
+    check('a quality click applies the preset', R.options.get().preset === 'baixo' && R.options.get().shadows === false, 'preset ' + R.options.get().preset + ', shadows ' + R.options.get().shadows);
     if (!Q('.v2-pop:not([hidden])')) { click('[data-pop=menu]'); await frames(2); }
     const row = byText('.v2-pop .v2-row', 'Sobre|About');
     row.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); await frames(1);
     check('no tooltip repeating a name already shown', Q('.v2-tip').hidden, 'tip: ' + Q('.v2-tip').textContent);
     key('Escape'); await frames(2);
     check('Esc closes the menu and gives the focus back to its button', Q('.v2-pop').hidden && document.activeElement === Q('[data-pop=menu]'), 'open ' + !Q('.v2-pop').hidden + ', focus ' + (document.activeElement && (document.activeElement.dataset.pop || document.activeElement.tagName)));
-    const home = [g.rig.target.x, g.rig.target.z];
-    await g.view(2500, 2500, 20, 40, 300);
+    const home = [R.camera.pose().x, R.camera.pose().z];
+    await R.camera.view(2500, 2500, 20, 40, 300);
     click('[data-pop=camera]'); await frames(2);
     const reset = byText('.v2-pop .v2-icon', 'Enquadrar|Reset');
     check('Camera has the reset view button', !!reset, 'buttons: ' + QA('.v2-pop .v2-icon').map((b) => b.title || b.dataset.tip).join(', '));
     if (reset) { click(reset); await wait(800); }
-    check('reset view goes back to the opening view', Math.hypot(g.rig.target.x - home[0], g.rig.target.z - home[1]) < 5, 'target ' + g.rig.target.x.toFixed(0) + ', ' + g.rig.target.z.toFixed(0));
+    check('reset view goes back to the opening view', Math.hypot(R.camera.pose().x - home[0], R.camera.pose().z - home[1]) < 5, 'target ' + R.camera.pose().x.toFixed(0) + ', ' + R.camera.pose().z.toFixed(0));
     click('[data-pop=sim]'); await frames(2);
     const tr = QA('.v2-pop .v2-range').find((e) => /Tráfego|Traffic/.test(e.getAttribute('aria-label')));
     check('simulation sliders run 0-300 %', tr && tr.min === '0' && tr.max === '300', 'range ' + (tr && tr.min + '-' + tr.max));
@@ -631,12 +635,12 @@ export const SCENARIOS = {
     click(byText('.v2-choice', 'Quarteir|Blocks')); await frames(2);
     const ang = byText('.v2-toolopts .v2-stepper .v2-icon', 'Giro.*[+]$|Rotation.*[+]$');
     for (let k = 0; k < 7; k++) { click(ang); await frames(1); }
-    check('blocks turn past 90° in 15° steps', g.roadTool.blocks.angle === 105, 'angle ' + g.roadTool.blocks.angle);
+    check('blocks turn past 90° in 15° steps', R.tools.options().road.blocks.angle === 105, 'angle ' + R.tools.options().road.blocks.angle);
     click(byText('.v2-tab', 'Rotatória|Roundabout')); await frames(2);
     const ring = QA('.v2-toolopts .v2-range').find((e) => /Raio|Radius/.test(e.getAttribute('aria-label')));
     check('roundabout radius is a slider', !!ring, 'no slider');
     if (ring) { ring.value = '40'; ring.dispatchEvent(new Event('input', { bubbles: true })); await frames(1); }
-    check('the slider sets the radius', g.roadTool.ringRadius === 40, 'radius ' + g.roadTool.ringRadius);
+    check('the slider sets the radius', R.tools.options().road.ringRadius === 40, 'radius ' + R.tools.options().road.ringRadius);
     click('[data-cat=zones]'); await frames(2); click(byText('.v2-tab', 'Lotes|Lots')); await frames(2);
     check('Lots has its help note', /Crie lotes|Create lots|lot/i.test(note()), 'note: ' + note());
     check('with cards in the strip the note is not written there', shown() === '', 'paragraph: ' + shown());
@@ -667,7 +671,7 @@ export const SCENARIOS = {
     check('no lines yet: the empty state says what to do', /Nenhuma linha|No lines/.test(Q('.v2-strip').textContent), 'strip: ' + Q('.v2-strip').textContent.slice(0, 120));
   `,
   // The strip of a narrow screen: it fades at the side with more and keeps its scroll across a pick (Roadcraft 4.0)
-  'strip-scroll-narrow': { width: 1000, query: '?vazio&hora=11&workers=3', script: `
+  'strip-scroll-narrow': { width: 1000, query: '?empty&hour=11&workers=3', script: `
     click('[data-cat=landscape]'); await frames(2);
     click(byText('.v2-tab', '^Rua|^Street')); await frames(2);
     const strip = Q('.v2-strip');
@@ -683,7 +687,7 @@ export const SCENARIOS = {
     const req = Element.prototype.requestFullscreen;
     Element.prototype.requestFullscreen = function () { asked++; return Promise.resolve(); };
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
-    const dlg = g.optionsPanel.root;
+    const dlg = optionsRoot();
     const row = [...dlg.querySelectorAll('.opt-row')].find((r) => /Tela cheia|Full screen/.test(r.textContent));
     check('the options have a full screen row', !!row, 'rows: ' + [...dlg.querySelectorAll('.opt-row > span:first-child')].map((x) => x.textContent).join(', '));
     if (row) { click(row.querySelector('input')); await frames(2); }
@@ -695,19 +699,19 @@ export const SCENARIOS = {
   // The 4.0 road keys (ui/roads/keys.ts): a third key, alignment (V), cycles straight, curve and free; Reset in Options
   'road-keys-4.0': `
     click('[data-cat=roads]'); await frames(2);
-    const seq = [g.tool];
-    for (let k = 0; k < 3; k++) { key('KeyV'); keyUp('KeyV'); await frames(2); seq.push(g.tool); }
+    const seq = [R.tools.current()];
+    for (let k = 0; k < 3; k++) { key('KeyV'); keyUp('KeyV'); await frames(2); seq.push(R.tools.current()); }
     check('V cycles the alignment: straight, curve, free, straight', seq.join(',') === 'road,curve,free,road', 'tools ' + seq.join(','));
     const pill = Q('.v2-toolopts .rp-open');
     check('the keys pill shows the three keys, whole', pill && /V/.test(pill.textContent) && pill.scrollWidth <= pill.clientWidth + 1, 'pill: ' + (pill && pill.textContent + ' (' + pill.scrollWidth + ' / ' + pill.clientWidth + ')'));
     click('[data-pop=menu]'); await frames(2); click(byText('.v2-row', 'Opções gráficas|Graphics options')); await frames(2);
-    const dlg = g.optionsPanel.root;
+    const dlg = optionsRoot();
     check('Options lists the alignment key', /Trocar o traçado|Change the alignment|alignment/i.test(dlg.textContent), 'no alignment key');
     check('Options has Reset for the road keys', [...dlg.querySelectorAll('button')].some((b) => /Restaurar padrão|Reset/.test(b.textContent)), 'no reset');
   `,
   // The 4.0 drawer on a narrow screen (shell.ts:1913-1930): pinned to both edges, tabs that do not fit keep only the
   // lit one's name, and a card name never cut inside a word
-  'drawer-narrow-4.0': { width: 700, query: '?vazio&hora=11&workers=3', script: `
+  'drawer-narrow-4.0': { width: 700, query: '?empty&hour=11&workers=3', script: `
     click('[data-cat=build]'); await frames(3);
     const d = Q('.v2-drawer').getBoundingClientRect();
     const k = Q('.v2-dock').getBoundingClientRect();
@@ -733,10 +737,10 @@ export const SCENARIOS = {
     const at = document.activeElement.dataset.value;
     check('Down moves through the list', at === '1', 'focused ' + at);
     document.activeElement.click(); await frames(2);
-    check('a pick sets the style', g.newArch === 1 && listValue(/Estilo|Style/) === '1', 'next ' + g.newArch + ', shows ' + listValue(/Estilo|Style/));
+    check('a pick sets the style', R.tools.options().lots.newArch === 1 && listValue(/Estilo|Style/) === '1', 'next ' + R.tools.options().lots.newArch + ', shows ' + listValue(/Estilo|Style/));
     click(listOf(/Estilo|Style/)); await frames(2);
     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); await frames(2);
-    check('Esc closes the list and keeps the tool', !Q('.v2-dd-list') && g.tool === 'building', 'list open ' + !!Q('.v2-dd-list') + ', tool ' + g.tool);
+    check('Esc closes the list and keeps the tool', !Q('.v2-dd-list') && R.tools.current() === 'building', 'list open ' + !!Q('.v2-dd-list') + ', tool ' + R.tools.current());
     check('the focus goes back to the list button', document.activeElement === listOf(/Estilo|Style/), 'focus ' + (document.activeElement && document.activeElement.className));
   `,
   // The 4.0 "New world" (v2/shell.ts:712, main.ts:2123-2128): second row of the menu, a new city over the whole map
@@ -747,7 +751,6 @@ export const SCENARIOS = {
     check('the menu opens with New map, then the new city over the whole map', /^Novo mapa/.test(rows[0]) && /^Nova cidade \\(10 km × 10 km\\)/.test(rows[1]), 'rows: ' + rows.join(' / '));
     const asked = [], made = [];
     const confirm0 = window.confirm;
-    g.generatedCity = async () => { made.push(w.seed); };
     window.confirm = (m) => { asked.push(m); return false; };
     const seed = w.seed;
     click(byText('.v2-pop .v2-row', '^Nova cidade|^New city')); await frames(2);
@@ -757,7 +760,8 @@ export const SCENARIOS = {
     click('[data-pop=menu]'); await frames(2);
     click(byText('.v2-pop .v2-row', '^Nova cidade|^New city')); await frames(2);
     window.confirm = confirm0;
-    check('saying yes makes a city with a new seed', made.length === 1 && made[0] !== seed, 'made ' + made.join(',') + ' (seed was ' + seed + ')');
+    for (let k = 0; k < 600 && R.lifecycle.state() !== 'ready'; k++) await wait(200);
+    check('saying yes makes a city with a new seed', w.seed !== seed && R.lifecycle.state() === 'ready', 'seed ' + w.seed + ' (was ' + seed + '), lifecycle ' + R.lifecycle.state());
   `,
   // The 4.0 language switch (i18n/index.ts:95-111, v2/shell.ts:2032-2046): at once, no reload, the city as it is,
   // the bar, the dock, the open menu and drawer written in the new language
@@ -768,7 +772,7 @@ export const SCENARIOS = {
     click('[data-cat=roads]'); await frames(2);
     click('[data-pop=menu]'); await frames(2);
     click(byText('.v2-pop .v2-choice', '^English')); await frames(4);
-    check('no reload: the same page, the city as it was', window.__samePage === 1 && w.roads.segs.size === segs && g.unsaved, 'same ' + window.__samePage + ', segments ' + w.roads.segs.size + ' of ' + segs);
+    check('no reload: the same page, the city as it was', window.__samePage === 1 && w.roads.segs.size === segs && R.lifecycle.unsaved(), 'same ' + window.__samePage + ', segments ' + w.roads.segs.size + ' of ' + segs);
     check('the page says English', document.documentElement.lang === 'en', 'lang ' + document.documentElement.lang);
     check('the dock in English', Q('[data-cat=roads] .v2-cat-name').textContent === 'Roads' && /Roads/.test(Q('[data-cat=roads]').title), 'dock: ' + Q('[data-cat=roads] .v2-cat-name').textContent + ' / ' + Q('[data-cat=roads]').title);
     check('the bar in English', QA('.v2-actions .v2-icon').some((b) => /^Undo/.test(b.title)) && Q('[data-pop=menu]').textContent.trim() === 'Menu', 'undo ' + QA('.v2-actions .v2-icon').map((b) => b.title).join(', ') + ' / menu ' + Q('[data-pop=menu]').textContent);
@@ -783,7 +787,7 @@ export const SCENARIOS = {
     click('[data-cat=roads]'); await frames(3);
     const h = Q('.v2-hintbar');
     check('the tool hint is not on screen', h && getComputedStyle(h).display === 'none', 'display ' + (h && getComputedStyle(h).display) + ': ' + (h && h.textContent));
-    const by = g.canvas.getAttribute('aria-describedby');
+    const by = document.getElementById('view').getAttribute('aria-describedby');
     check('it describes the map', !!by && document.getElementById(by) === h && h.textContent.length > 5, 'describedby ' + by);
   `,
   // The 4.0 road keys panel (roads/keysPanel.ts): the pill opens a small panel beside the options, a chip per key, the
@@ -792,7 +796,7 @@ export const SCENARIOS = {
     click('[data-cat=roads]'); await frames(2);
     click(Q('.v2-toolopts .rp-open')); await frames(2);
     const panel = Q('.rp-keys');
-    check('the pill opens the keys panel, not the options', !!panel && !g.optionsPanel.isOpen && QA('.rp-keys .rp-key').length === 3, 'panel ' + !!panel + ', options open ' + g.optionsPanel.isOpen);
+    check('the pill opens the keys panel, not the options', !!panel && !optionsOpen() && QA('.rp-keys .rp-key').length === 3, 'panel ' + !!panel + ', options open ' + optionsOpen());
     if (!panel) throw new Error('no panel');
     click(QA('.rp-keys .rp-key')[1]); await frames(1);
     check('a chip waits for the key', /Aperte|Press/.test(QA('.rp-keys .rp-key')[1].textContent), 'chip ' + QA('.rp-keys .rp-key')[1].textContent);
@@ -800,13 +804,13 @@ export const SCENARIOS = {
     check('a game key is refused (R turns the view)', A.settings().roadDown === 'PageDown' && /R/.test((Q('.rp-keys .rp-note') || {}).textContent || ''), 'roadDown ' + A.settings().roadDown + ', note ' + ((Q('.rp-keys .rp-note') || {}).textContent));
     key('KeyJ', { key: 'j' }); await frames(2);
     const st = A.settings();
-    check('the key pressed is bound, the tool stays', st.roadDown === 'KeyJ' && g.tool === 'road', 'roadDown ' + st.roadDown + ', tool ' + g.tool);
+    check('the key pressed is bound, the tool stays', st.roadDown === 'KeyJ' && R.tools.current() === 'road', 'roadDown ' + st.roadDown + ', tool ' + R.tools.current());
     check('the pill shows it', /J/.test(Q('.v2-toolopts .rp-open').textContent), 'pill ' + Q('.v2-toolopts .rp-open').textContent);
     click(byText('.rp-keys .rp-btn', 'Restaurar|Reset')); await frames(2);
     const back = A.settings();
     check('Reset gives the defaults back', back.roadUp === 'PageUp' && back.roadDown === 'PageDown' && back.roadAlign === 'KeyV', back.roadUp + ' ' + back.roadDown + ' ' + back.roadAlign);
     key('Escape'); await frames(2);
-    check('Esc closes it and the tool stays', !Q('.rp-keys') && g.tool === 'road', 'panel ' + !!Q('.rp-keys') + ', tool ' + g.tool);
+    check('Esc closes it and the tool stays', !Q('.rp-keys') && R.tools.current() === 'road', 'panel ' + !!Q('.rp-keys') + ', tool ' + R.tools.current());
   `,
   // The 4.0 selection panel (v2/shell.ts:891-903, shell.css:283-285): the inspector scrolls inside it and fades at
   // the end with more past it
@@ -814,7 +818,7 @@ export const SCENARIOS = {
     road(-150, 400, 150, 400); road(0, 250, 0, 550);
     A.tool('inspect'); await frames(2);
     Q('.v2-side').style.maxHeight = '260px';
-    g.inspector.pick(0, 400); await frames(4); await wait(300);
+    R.tools.inspect(0, 400); await frames(4); await wait(300);
     const ins = Q('.v2-side .inspector');
     check('a long inspector scrolls inside the panel', ins && ins.scrollHeight > ins.clientHeight + 20, 'scroll ' + (ins && ins.scrollHeight + ' / ' + ins.clientHeight));
     check('it fades at the bottom, with more below', ins.dataset.moreY === 'bottom', 'moreY ' + ins.dataset.moreY);
@@ -831,7 +835,7 @@ export const SCENARIOS = {
     click(byText('.v2-orow .v2-choice', '^2 ')); await frames(2);
     A.peopleCatalog = catalog;
     await mapClick(150, 40);
-    const groups = g.vehicles.people.creator.groups, last = groups[groups.length - 1];
+    const o = R.people.last(), last = o && { o };
     check('the click places 2 people standing, as the panel shows', last && last.o.count === 2 && last.o.mode === 'stand', 'placed ' + (last ? last.o.count + ' ' + last.o.mode : 'nothing'));
   `,
 };
@@ -840,36 +844,21 @@ export const SCENARIOS = {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
 
 async function main() {
-  const pick = process.argv.slice(2);
-  const names = pick.length ? pick : Object.keys(SCENARIOS);
-  let failed = 0;
+  const { names, unknown } = pick(SCENARIOS);
+  let failed = unknown;
   for (const name of names) {
     const bodies = SCENARIOS[name];
-    if (!bodies) { console.log(`unknown scenario ${name}`); failed++; continue; }
     // a scenario is one session, or several sessions one after the other over the same folder (closing and reopening)
-    const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-ui-'));
+    const own = scenarioFolder('roadcraft-ui-', name);
     const checks = [];
     for (const body of Array.isArray(bodies) ? bodies : [bodies]) {
-      const query = typeof body === 'object' ? body.query : '?vazio&hora=11&workers=3';
-    const width = typeof body === 'object' && body.width ? String(body.width) : '1600';
+      const query = typeof body === 'object' ? body.query : '?empty&hour=11&workers=3';
+      const width = typeof body === 'object' && body.width ? String(body.width) : '1600';
       const code = typeof body === 'object' ? body.script : body;
-      const script = `(async()=>{${PRELUDE}\ntry {${code}\n} catch (e) { check('scenario ran to the end', false, e && e.stack || e); }\nconsole.log('CHECK END');})()`;
-      const lines = await new Promise((resolve) => {
-        const out = [];
-        const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(own, 'shot.png'), query, script],
-          { cwd: root, env: { ...process.env, CIDADE_USER_DATA: own, CIDADE_SETTLE: '1', CIDADE_LIMIT: '300', CIDADE_W: width } });
-        p.stdout.on('data', (d) => out.push(...String(d).split('\n')));
-        p.on('exit', () => resolve(out));
-      });
-      const got = lines.filter((l) => l.includes('CHECK ')).map((l) => l.slice(l.indexOf('CHECK ') + 6));
-      if (!got.includes('END')) got.push('FAILED the session did not finish (hung or crashed) after: ' + (got[got.length - 1] ?? 'nothing'));
-      checks.push(...got.filter((c) => c !== 'END'));
+      checks.push(...checksOf(await session({ query, script: wrap(PRELUDE, code), own: own.dir, env: { ROADCRAFT_W: width } })));
     }
-    const bad = checks.filter((c) => c.startsWith('FAILED'));
-    failed += bad.length;
-    console.log(`${name}: ${checks.filter((c) => c.startsWith('OK')).length} ok, ${bad.length} failed`);
-    for (const c of checks) console.log('  ' + c);
-    fs.rmSync(own, { recursive: true, force: true, maxRetries: 3 });
+    failed += report(name, checks);
+    own.done();
   }
   console.log(failed ? `interface check: ${failed} FAILED` : 'interface check: ok');
   process.exit(failed ? 1 : 0);

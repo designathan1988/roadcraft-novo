@@ -10,6 +10,7 @@ import { CELL_COUNT, Dirty, cellOriginX, tileId, tileX, type DirtyReader } from 
 import { CELL_SIZE, MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../shared/contracts/worker.ts';
+import type { PropsProbe } from './propsProbe.ts';
 import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
@@ -768,6 +769,21 @@ export class PropRenderer {
       drawn += draws[k] * tris * args[k * 5 + 1];
     }
     return { counted, drawn };
+  }
+
+  /**
+   * What the render checks read and put into the props layer (the automation contract's render.props): GPU invariants a
+   * Node test cannot reach. putCell takes a cell's props as a job result would (its current version).
+   */
+  probe(renderer: THREE.WebGPURenderer): PropsProbe {
+    return {
+      putCell: (c, p) => this.setCell(c, p, this.cellVer[c]),
+      drawCounts: async () => new Uint32Array(await renderer.getArrayBufferAsync(this.drawAttr)),
+      kindOf: (type, variant) => this.kindOf[type * VARIANTS + variant],
+      levelShown: (kind, level) => this.slotMesh[kind * LODS + level]?.visible === true,
+      kindRadius: (kind) => this.kinds[kind].radius,
+      planes: () => this.planes.map((p) => ({ x: p.x, y: p.y, z: p.z, w: p.w })),
+    };
   }
 
   /** A new animation-loop frame: the draws are counted again (three resets its own counts here too, Animation.js:81). */

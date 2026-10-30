@@ -70,6 +70,8 @@ export class Weather {
   private strikeIn = 6;
   private flashT = 1;
   private bolt: THREE.Mesh;
+  /** A lightning bolt is drawn now (the in-game checks see a strike). */
+  get boltShown(): boolean { return this.bolt.visible; }
   private clouds: THREE.Mesh;
   private rain: THREE.Mesh;
   private skirt: THREE.Mesh;

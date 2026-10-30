@@ -278,6 +278,16 @@ export class Growth {
 
   place(l: LotColumns, i: number): number { return this.world.growBuilding(this.recordFor(l, i)); }
 
+  /** Lots are made for some cell (the lot jobs answered). */
+  get hasLots(): boolean { return this.lots.size > 0; }
+
+  /** The centres of the lots with no building on them. */
+  freeLots(): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    for (const l of this.lots.values()) for (let i = 0; i < l.count; i++) if (this.lotAt(l.x[i], l.z[i])) out.push([l.x[i], l.z[i]]);
+    return out;
+  }
+
   /** Free lot containing the point. */
   lotAt(x: number, z: number): { lots: LotColumns; i: number } | null {
     const c = cellId(cellX(x), cellX(z));

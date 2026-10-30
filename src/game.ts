@@ -31,7 +31,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windU } from './render/weather.ts';
 import { Ambient } from './platform/audio.ts';
 import { Particles } from './render/particles.ts';
-import { fmtInt, followLanguage, loose, onLanguageChange, plural, setLang, t } from './shared/i18n/index.ts';
+import { fmtInt, followLanguage, loose, onLanguageChange, plural, t } from './shared/i18n/index.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import type { Design } from './world/design.ts';
@@ -79,9 +79,11 @@ import { photoView, settlePool } from './app/photoHooks.ts';
 import { reloadWithMap } from './app/session.ts';
 import { ToolState, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
 import { createScriptApi, type ScriptApi } from './app/scriptApi.ts';
+import { FrameProfile, PART } from './app/frameProfile.ts';
+import type { AutomationHost } from './app/automation.ts';
 import type { Lifecycle, Operation } from './app/lifecycle.ts';
 import { Clock } from './app/clock.ts';
-import type { ClickHost } from './app/clicks.ts';
+import { clickTool, type ClickHost } from './app/clicks.ts';
 import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
 import { LotEditing } from './app/lotEditing.ts';
 import { bindInput, type InputControl } from './app/input.ts';
@@ -91,9 +93,6 @@ const STILL_FRAMES = 40;
 /** Segments that fit in the occupancy map (2 directions per segment). */
 export const OCCUPANCY_SEGS = 1 << 17;
 
-/** State exposed to the shell (automated photos and checks): the lifecycle's state; `setLang` is the language menu's own action. */
-const debug: { status: string; life: Lifecycle | null; game: unknown; setLang: typeof setLang } = { get status() { return debug.life?.state ?? 'loading'; }, life: null, game: null, setLang };
-(globalThis as { __cidade?: unknown }).__cidade = debug;
 
 export class Game {
   readonly world = new World();
@@ -104,6 +103,10 @@ export class Game {
   hudActions!: HudActions & FeatureActions & SaveActions;
   /** Measurement (?perf): where the time of slow frames went. */
   perfLog: string[] | null = null;
+  /** The frame's time per system (?perf; read by the probe through the automation contract). */
+  private profile: FrameProfile | null = null;
+  /** Frames that drew (still and hidden frames do not): the idle checks read it. */
+  private framesDrawn = 0;
   /** Measurement (?perf): GPU time per render call (tools/probe.mjs reads it). */
   gpuTiming: GpuTiming | null = null;
   private parts!: SceneParts;
@@ -227,8 +230,6 @@ export class Game {
   constructor(canvas: HTMLCanvasElement, life: Lifecycle) {
     this.canvas = canvas;
     this.life = life;
-    debug.life = life;
-    debug.game = this;
     this.pool = new JobPool({ heights: this.world.heightsSab, ground: this.world.groundSab, water: this.world.waterSab });
     this.rig = new CameraRig(this.world.heights);
     // the features the page wires: each owns its state (sky, water, river tool)
@@ -300,6 +301,7 @@ export class Game {
     this.poses = new PoseReader(viewPoseBuffers(posesSab));
     this.sim = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module', name: `sim ${MAP_TAG}` });
     this.sim.onmessage = (e: MessageEvent<FromSim>) => {
+      this.profile?.simMessage();
       if (e.data.type === 'stats') this.trackTrips(e.data);
       else if (e.data.type === 'probe') this.inspector?.showProbe(e.data);
       else if (e.data.type === 'probeNode') this.inspector?.showNodeProbe(e.data);
@@ -524,7 +526,7 @@ export class Game {
     this.world.seed = Number(params.get('seed') ?? 1) >>> 0;
     this.world.gameId = (Math.random() * 2 ** 32) >>> 0;
     // a photo at a set hour (?hora) shows that hour's light: the sky follows the clock
-    if (params.has('hora')) { this.hour = Number(params.get('hora')) % 24; this.clock.holdHour(); this.skyMode = 'ciclo'; }
+    if (params.has('hour')) { this.hour = Number(params.get('hour')) % 24; this.clock.holdHour(); this.skyMode = 'ciclo'; }
     this.hud.setSky(this.skyMode);
     this.weather.onStrike = (d) => this.ambient.thunder(d);
     const preset = ['tempestade', 'chuva', 'limpo'].find((k) => params.has(k));
@@ -536,7 +538,7 @@ export class Game {
     if (MAP_TILES * MAP_TILES > this.parts.maxLayers) {
       // the GPU cannot hold this map size: fall back to the largest that fits
       const fit = [...MAP_SIZES].reverse().find((t) => t * t <= this.parts.maxLayers) ?? 10;
-      reloadWithMap(fit, 'grande');
+      reloadWithMap(fit, 'large');
       return;
     }
     const { scene, renderer } = this.parts;
@@ -600,17 +602,17 @@ export class Game {
     // options (quality): from last time, or by the GPU; ?simples etc. override them for photos
     this.settings = loadSettings(this.parts.isWebGPU);
     const asStored = { ...this.settings };
-    if (params.has('simples')) Object.assign(this.settings, { shadows: false, ao: false, bloom: false });
-    if (params.has('semsombra')) this.settings.shadows = false;
+    if (params.has('simple')) Object.assign(this.settings, { shadows: false, ao: false, bloom: false });
+    if (params.has('noshadows')) this.settings.shadows = false;
     // measurements: turn parts of the rendering on and off
-    if (params.has('semdetalhe')) this.cityDetail.group.visible = false;
-    if (params.has('perf')) { this.perfLog = []; if (this.parts.isWebGPU) this.gpuTiming = new GpuTiming(this.parts.renderer); }
-    if (params.has('sempedestres')) this.vehicles.hidePeople = true;
-    if (params.has('semao')) this.settings.ao = false;
-    if (params.has('sembrilho')) this.settings.bloom = false;
-    if (params.has('chuva')) this.settings.weather = 'chuva';
-    if (params.has('limpo')) this.settings.weather = 'limpo';
-    if (params.has('tempestade')) this.settings.weather = 'tempestade';
+    if (params.has('nodetail')) this.cityDetail.group.visible = false;
+    if (params.has('perf')) { this.perfLog = []; this.profile = new FrameProfile(); if (this.parts.isWebGPU) this.gpuTiming = new GpuTiming(this.parts.renderer); }
+    if (params.has('nopedestrians')) this.vehicles.hidePeople = true;
+    if (params.has('noao')) this.settings.ao = false;
+    if (params.has('nobloom')) this.settings.bloom = false;
+    if (params.has('rain')) this.settings.weather = 'chuva';
+    if (params.has('clear')) this.settings.weather = 'limpo';
+    if (params.has('storm')) this.settings.weather = 'tempestade';
     // the address's photo parameters hold for this run only: the player's options keep their own values
     keepOverAddress(asStored, this.settings);
     this.health = new HealthPanel(document.getElementById('hud')!, { world: () => this.healthWorld(), state: () => this.healthState() });
@@ -636,7 +638,7 @@ export class Game {
     this.input = this.bindInput();
     this.bindResize();
     this.hud.hideLoading();
-    if (params.has('grande')) this.hud.toast(t('game.toast.mapTooBig'));
+    if (params.has('large')) this.hud.toast(t('game.toast.mapTooBig'));
     if (!this.parts.isWebGPU) this.hud.toast(t('game.toast.webgl'));
     const cam = params.get('cam');
     if (cam) {
@@ -646,13 +648,13 @@ export class Game {
     this.last = performance.now();
     this.watchInput();
     renderer.setAnimationLoop((t) => this.frame(t));
-    if (params.has('teste')) await this.cities.testCity();
-    else if (params.has('cidade')) await this.generatedCity(params.has('media'));
-    else if (params.has('carregar')) await this.saving.load();
-    else if (params.has('inicio')) this.showStart();
+    if (params.has('test')) await this.cities.testCity();
+    else if (params.has('city')) await this.generatedCity(params.has('medium'));
+    else if (params.has('open')) await this.saving.load();
+    else if (params.has('start')) this.showStart();
     // straight into a medium town of straight streets, blocks and lots (Roadcraft 2.0's start): the start screen stays
     // on the menu (and ?inicio)
-    else if (!params.has('cam') && !params.has('vazio')) await this.generatedCity(true);
+    else if (!params.has('cam') && !params.has('empty')) await this.generatedCity(true);
     await this.settle();
     this.homeView ??= this.rig.state();
     this.life.loaded();
@@ -726,9 +728,12 @@ export class Game {
     this.adaptDetail(now - this.last);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    const pr = this.profile;
+    pr?.begin(performance.now());
     const { renderer, scene } = this.parts;
 
     this.rig.update(dt);
+    pr?.lap(PART.camera, performance.now());
     // an explosion shakes the camera for a moment (4.0 renderer.ts: a random offset each frame, gone the next)
     const shake = this.demolition.shake();
     if (shake > 0) {
@@ -752,9 +757,11 @@ export class Game {
     // the rain box round the eye; isometric: round what is looked at (round the perspective eye it was a block of rain)
     this.weather.update(dt, dt * this.clock.daySpeed * 60, this.rig.mode === 'iso' ? this.rig.target : this.rig.eye, groundY, (this.parts.scene.fog as THREE.FogExp2).color);
     setTimeOfDay(this.parts, light, cloudsU.value, rainU.value, this.rig.eye.y - groundY);
+    pr?.lap(PART.weather, performance.now());
     this.particles.update(dt, this.rig.eye);
     this.textSigns.update(this.rig.eye);
     this.demolition.update(dt);
+    pr?.lap(PART.effects, performance.now());
     if (flashU.value > 0) { this.parts.hemi.intensity += flashU.value * 4; this.parts.hemi.color.lerp(FLASH_COLOR, flashU.value * 0.6); }
     {
       const st = this.simStats?.type === 'stats' ? this.simStats : null;
@@ -766,6 +773,7 @@ export class Game {
     this.hud.setClock(this.hour, this.clock.speed, this.clock.paused);
     this.hud.setMoney(this.world.money, this.world.unlimited);
     this.hud.setCompass(this.rig.yaw);
+    pr?.lap(PART.audioHud, performance.now());
 
     // tool under the cursor
     let hit: THREE.Vector3 | null = null;
@@ -798,6 +806,7 @@ export class Game {
       this.preview.show({ x0: (a.x + hit.x) / 2, z0: a.z, cx: (a.x + hit.x) / 2, cz, x1: (a.x + hit.x) / 2, z1: hit.z }, Math.abs(hit.x - a.x) / 2, [0, 1], [H(a.x, a.z), H(hit.x, hit.z)], true, 0xe2564b);
     } else if (ROAD_TOOLS.includes(this.tool) && this.tool !== 'free' && this.input.gesture.drag !== 'pan' && this.input.gesture.drag !== 'rotate') this.roadTool.hover(hit);
     if ((this.tool === 'streetscape' || this.tool === 'barrier') && this.input.gesture.drag !== 'pan' && this.input.gesture.drag !== 'rotate' && this.input.gesture.drag !== 'row') this.itemTool.hover(hit);
+    pr?.lap(PART.tools, performance.now());
 
     // Drawn only when something visible can change: the camera, the simulation or the clock running, input, meshes
     // arriving, weather. Paused and idle, after STILL_FRAMES (the anti-aliasing settles) nothing is drawn; water and
@@ -808,30 +817,40 @@ export class Game {
     this.drawnView.copy(cam.matrixWorld);
     this.drawnProj.copy(cam.projectionMatrix);
     if (this.stillFrames > STILL_FRAMES) return;
+    this.framesDrawn++;
+    pr?.drew();
 
     const pf = this.perfLog, T0 = pf ? performance.now() : 0;
     for (const l of this.layers) l.processDirty();
+    pr?.lap(PART.layersDirty, performance.now());
     // (the terrain's dirty cells are read by the seam layer, render/terrainSeams.ts)
     this.processRoadPaint();
     if (this.arrowNodes.size) this.updateArrows();
     const T1 = pf ? performance.now() : 0;
+    pr?.lap(PART.roadPaint, T1);
     if (!this.cities.terrainUnderway) this.growth.processDirty();
     this.growth.tick(dt, this.clock.running);
     const T2 = pf ? performance.now() : 0;
+    pr?.lap(PART.growth, T2);
     this.terrain.uploadDirtyLayers();
     this.terrain.update(cam, this.rig.eye);
+    pr?.lap(PART.terrain, performance.now());
     for (const l of this.layers) l.update(cam, this.rig.eye);
     const T3 = pf ? performance.now() : 0;
+    pr?.lap(PART.layersUpdate, T3);
     this.syncSim(now);
     this.lines.sync(this.roadsVersion, this.tool === 'transit', this.simStats?.type === 'stats' ? this.simStats.lines : null);
     this.updateInfo(now);
+    pr?.lap(PART.sim, performance.now());
     this.vehicles.update(cam, this.rig.eye, now);
     if (this.vehicles.follow) { const p = this.vehicles.followPose; this.rig.followPose(p[0], p[1], p[2], p[3], dt); }
     else if (this.rig.followY !== null) { this.rig.followY = null; this.hud.toast(t('game.toast.followLost')); }
     const T4 = pf ? performance.now() : 0;
+    pr?.lap(PART.vehicles, T4);
     this.props.processDirty();
     this.props.update(renderer, cam, this.rig.eye, now);
     const T5 = pf ? performance.now() : 0;
+    pr?.lap(PART.props, T5);
 
     if (this.post) {
       // the shadow cascades are redrawn only when something casting changed or moves (render/post.ts prepareShadows)
@@ -842,6 +861,7 @@ export class Game {
     }
     else renderer.render(scene, cam);
     this.gpuTiming?.frameEnd();
+    pr?.lap(PART.draw, performance.now());
     // measurement (?perf): frames over 30 ms say where the time went
     if (pf) { const T6 = performance.now(); if (T6 - T0 > 30) pf.push(`layers ${(T1 - T0).toFixed(0)} growth ${(T2 - T1).toFixed(0)} terrain+lod ${(T3 - T2).toFixed(0)} sim+vehicles ${(T4 - T3).toFixed(0)} props ${(T5 - T4).toFixed(0)} draw ${(T6 - T5).toFixed(0)}`); } // not for the player: ?perf measurement log
   }
@@ -1287,6 +1307,108 @@ export class Game {
     });
   })();
 
+  /**
+   * What the automation contract drives (app/automation.ts, published by main.ts as window.__roadcraft): the owners,
+   * read when a member runs (a field, so before the constructor's body: nothing is captured here).
+   */
+  readonly automation: AutomationHost = (() => {
+    const g = this;
+    return {
+      get world() { return g.world; }, get actions() { return g.api; }, get ui() { return g.hudActions; },
+      view: (x, z, yaw, pitch, dist, hour) => g.view(x, z, yaw, pitch, dist, hour),
+      pose: () => ({ x: g.rig.target.x, y: g.rig.target.y, z: g.rig.target.z, yaw: g.rig.yaw, pitch: g.rig.pitch, dist: g.rig.dist, turning: g.rig.turning, mode: g.rig.mode, eye: { x: g.rig.eye.x, y: g.rig.eye.y, z: g.rig.eye.z } }),
+      place: (p) => { if (p.yaw !== undefined) g.rig.yaw = p.yaw; if (p.pitch !== undefined) g.rig.pitch = p.pitch; if (p.dist !== undefined) g.rig.dist = p.dist; },
+      pick: (fx, fy) => g.rig.pick(fx, fy),
+      toScreen: (x, y, z) => {
+        const v = new THREE.Vector3(x, y, z).project(g.rig.camera);
+        if (v.z > 1) return null;
+        const r = g.canvas.getBoundingClientRect();
+        return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+      },
+      settle: (n) => g.settle(n), stats: () => g.stats(), drawnStats: () => g.drawnStats(), fixDetail: (on) => g.fixDetail(on), gpu: () => g.gpuTiming,
+      profile: () => g.profile,
+      tool: () => g.tool,
+      click: (x, z, shift, alt) => {
+        const hit = new THREE.Vector3(x, heightAt(g.world.heights, x, z), z);
+        // the hover a still pointer gets from the frame before its release (split, upgrade and bulldoze act on it)
+        if (g.tool === 'building') g.hoverLotTool(hit);
+        else if (g.tool === 'river') g.river.hover(hit);
+        else if (ROAD_TOOLS.includes(g.tool) && g.tool !== 'free') g.roadTool.hover(hit);
+        else if (g.tool === 'streetscape' || g.tool === 'barrier') g.itemTool.hover(hit);
+        clickTool(g.clickHost(), hit, shift, alt);
+      },
+      toolOptions: () => {
+        const r = g.roadTool;
+        return {
+          road: { mode: r.mode, profile: r.profile, base: r.base, lanes: r.options.lanes, width: r.options.width, parking: r.options.parking, elevation: r.elevation, ringRadius: r.ringRadius, snap: r.snapMode, furniture: r.furniture, cutWalls: r.cutWalls, blocks: { ...r.blocks } },
+          zone: { zone: g.zoneTool.zone, radius: g.zoneTool.radius },
+          brush: { mode: g.brush.mode, radius: g.brush.radius, strength: g.brush.strength },
+          items: { poleLights: g.itemTool.poleLights, wallOpen: g.itemTool.open },
+          lotPoints: g.editing.lotExtraPts.length,
+          lots: { lotMode: g.editing.lotMode, lotExtra: g.editing.lotExtra, splitKind: g.editing.splitKind, splitParts: g.editing.splitParts, lotUse: g.editing.lotUse, newArch: g.editing.newArch, newFn: g.editing.newFn },
+        };
+      },
+      options: () => ({ ...g.settings }), applyOptions: (p) => g.applySettings({ ...g.settings, ...p }),
+      hour: () => g.hour, skyMode: () => g.skyMode,
+      simStats: () => (g.simStats ? { ...g.simStats } : null),
+      simInspect: (x, z, r) => new Promise((resolve) => {
+        const h = (e: MessageEvent<FromSim>) => { if (e.data?.type === 'inspect') { g.sim.removeEventListener('message', h); resolve(e.data); } };
+        g.sim.addEventListener('message', h);
+        g.sim.postMessage({ type: 'inspect', x, z, r } satisfies ToSim);
+      }),
+      simPost: (m) => g.sim.postMessage(m),
+      poses: () => g.poses,
+      lines: () => g.transit.lines,
+      propsProbe: () => g.props.probe(g.parts.renderer),
+      sun: () => { const p = g.parts.sun.position, l = p.length() || 1; return { x: p.x / l, y: p.y / l, z: p.z / l }; },
+      framesDrawn: () => g.framesDrawn,
+      toast: (text) => g.hud.toast(text),
+      following: () => !!g.vehicles.follow,
+      followAt: (x, z, r) => g.vehicles.pick(x, z, r),
+      peopleReady: () => g.vehicles.people.ready,
+      growthRate: (r) => { g.growth.rate = r; },
+      signals: () => new Uint8Array(g.signalsSab),
+      saveStore: () => g.saving.saveStore,
+      selected: () => g.selected,
+      design: (d, floors) => g.applyDesign(d, floors),
+      peopleGroups: () => g.vehicles.people.creator?.size ?? null,
+      hitKind: () => g.hitKind,
+      bombForce: () => g.bombForce,
+      boltShown: () => g.weather.boltShown,
+      layers: () => g.hud.layersShown,
+      insideOn: () => g.inside.on,
+      clouds: () => g.clouds.list.length,
+      terminals: () => g.transit.terminals,
+      autosaveNow: () => { g.autosaveAt = 0; },
+      demandSentAt: () => g.demandSent,
+      setHour: (h) => { g.hour = ((h % 24) + 24) % 24; },
+      weather: () => ({ clouds: g.weather.fixed?.clouds ?? cloudsU.value, rain: g.weather.fixed?.rain ?? rainU.value, storm: g.weather.fixed?.storm ?? 0, wind: g.weather.windFixed }),
+      inspector: () => ({ open: g.inspector.isOpen, seg: g.inspector.seg }),
+      insideId: () => g.insideId,
+      audioStart: () => g.ambient.start(),
+      audioState: () => g.ambient.state,
+      green: () => g.green,
+      previewShown: () => g.preview.mesh.visible,
+      registerBuilderTab: (id, render) => g.hud.registerBuilderTab(id, render),
+      freeLots: async () => {
+        // the lots are made by jobs for the dirty cells: asked, then waited for, as the frame asks for them
+        for (let k = 0; k < 40 && !g.growth.hasLots; k++) { g.growth.processDirty(); await g.pool.whenIdle(); await new Promise((r) => setTimeout(r, 250)); }
+        return g.growth.freeLots();
+      },
+      lastPeople: () => g.vehicles.people.creator?.lastOptions ?? null,
+      demolitionDrawn: () => {
+        let n = 0;
+        g.demolition.group.traverseVisible((o) => { if ((o as THREE.InstancedMesh).isInstancedMesh ? (o as THREE.InstancedMesh).count > 0 : (o as THREE.Mesh).isMesh) n++; });
+        return n;
+      },
+      setTool: (t) => g.setTool(t), select: (id) => g.select(id), inspect: (x, z) => g.inspector.pick(x, z),
+      undo: () => g.commands.undo(), redo: () => g.commands.redo(), canUndo: () => g.commands.canUndo,
+      save: (quiet) => g.saving.save(quiet), load: () => g.saving.load(), importMap: (f) => g.saving.importMap(f), newMap: () => g.saving.newMap(),
+      generated: (medium) => g.cities.generated(medium), testCity: () => g.cities.testCity(),
+      paused: () => g.clock.paused, togglePause: () => g.togglePause(), speed: (n) => g.setSpeed(n),
+    };
+  })();
+
   private skyHint(): void { skyHintOf(this.toolHost()); }
 
   /** People creator: standing (saved item) or walking (simulation pedestrians in the chosen clothes). */
@@ -1395,7 +1517,7 @@ export class Game {
       },
       empty: (tiles) => {
         if (!this.discardOk()) { this.startMenu?.show(); return; }
-        if (tiles !== MAP_TILES) reloadWithMap(tiles, 'vazio');
+        if (tiles !== MAP_TILES) reloadWithMap(tiles, 'empty');
         else if (this.world.roads.segs.size || this.world.buildings.size) void this.saving.newMap();
       },
       load: () => {
