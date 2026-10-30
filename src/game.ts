@@ -79,7 +79,7 @@ import { MapFileError, keepPreviousCity, packSlot, previousCities, readPackage, 
 import { SaveSlot, SlotLock, TileFileError, WRITES_AT_ONCE, limiter, openSaveStore, type FileStore, type Generation } from './platform/saveFiles.ts';
 import { repairDanglingEnds } from './roads/repair.ts';
 import { photoView, settlePool } from './app/photoHooks.ts';
-import { loadSession, reloadWithMap, saveSession, type LoadHost, type SaveHost } from './app/session.ts';
+import { loadSession, newMapSession, reloadWithMap, saveSession, type LoadHost, type NewMapHost, type SaveHost } from './app/session.ts';
 import { setTool as setGameTool, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
 import { errorText } from './shared/errors.ts';
 
@@ -2630,22 +2630,15 @@ export class Game {
   }
 
   private async newMap(): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
-    this.hud.showLoading(t('game.loading.terrain'));
-    const w = this.world;
-    try {
-      this.resetCity();
-      w.seed = (Math.random() * 2 ** 32) >>> 0;
-      w.gameId = (Math.random() * 2 ** 32) >>> 0;
-      await this.generateTerrain();
-      for (let t = 0; t < TILE_COUNT; t++) for (const c of cellsOfTile(t)) w.touchCell(c, Dirty.Terrain);
-      // the new terrain comes from the seed: it only needs to be written after being edited
-      w.saveDirty.fill(0);
-      this.endRebuild(null, '');
-    } catch (err) {
-      this.endRebuild(err, t('game.flow.newMap'));
-    }
+    const g = this;
+    const host: NewMapHost = {
+      get busy() { return g.busy; }, set busy(v) { g.busy = v; },
+      world: g.world, hud: g.hud,
+      resetCity: () => g.resetCity(),
+      generateTerrain: () => g.generateTerrain(),
+      endRebuild: (err, what) => g.endRebuild(err, what),
+    };
+    return newMapSession(host);
   }
 }
 

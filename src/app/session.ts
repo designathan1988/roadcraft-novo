@@ -1,7 +1,7 @@
 // Saving the city: one generation of the save (the changed tiles, the map description and the manifest), built on the
 // last committed generation. The game owns the state; this module only reads it through SaveHost.
 import { MAP_SIZES } from '../config.ts';
-import { TILE_COUNT, cellsOfTile, tileId, tileX } from '../core/grid.ts';
+import { Dirty, TILE_COUNT, cellsOfTile, tileId, tileX } from '../core/grid.ts';
 import { packTileHeights } from '../jobs/storage.ts';
 import { WATER_TILE_RES } from '../world/ground.ts';
 import { customProfiles } from '../roads/profiles.ts';
@@ -28,6 +28,36 @@ export function reloadWithMap(tiles: number, then: string): void {
 }
 
 export interface LoadReport { missing: number; damaged: number; repaired: number; cut: number }
+
+/** What starting a new city needs from the Game. */
+export interface NewMapHost {
+  busy: boolean;
+  readonly world: World;
+  readonly hud: { showLoading(message: string): void };
+  resetCity(): void;
+  generateTerrain(): Promise<void>;
+  endRebuild(err: unknown, what: string): void;
+}
+
+/** Starts a new city with a fresh seed and generation id. */
+export async function newMapSession(host: NewMapHost): Promise<void> {
+  if (host.busy) return;
+  host.busy = true;
+  host.hud.showLoading(t('game.loading.terrain'));
+  const w = host.world;
+  try {
+    host.resetCity();
+    w.seed = (Math.random() * 2 ** 32) >>> 0;
+    w.gameId = (Math.random() * 2 ** 32) >>> 0;
+    await host.generateTerrain();
+    for (let tile = 0; tile < TILE_COUNT; tile++) for (const c of cellsOfTile(tile)) w.touchCell(c, Dirty.Terrain);
+    // the new terrain comes from the seed: it only needs to be written after being edited
+    w.saveDirty.fill(0);
+    host.endRebuild(null, '');
+  } catch (err) {
+    host.endRebuild(err, t('game.flow.newMap'));
+  }
+}
 
 /** What opening a city needs from the Game; the world itself stays the Game's. */
 export interface LoadHost {
