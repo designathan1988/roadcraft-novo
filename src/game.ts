@@ -30,10 +30,10 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windDirU, windU } from './render/weather.ts';
 import { Ambient } from './platform/audio.ts';
 import { Particles } from './render/particles.ts';
-import { fmtInt, followLanguage, loose, money, onLanguageChange, plural, setLang, t } from './shared/i18n/index.ts';
+import { fmtInt, followLanguage, loose, onLanguageChange, plural, setLang, t } from './shared/i18n/index.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
-import { encodeDesign, type Design } from './world/design.ts';
+import type { Design } from './world/design.ts';
 import { currentU, fogLevel, foamU, nightU, waveU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
 import type { JunctionSpec } from './roads/control.ts';
@@ -43,19 +43,17 @@ import { arrowCode } from './roads/laneLinks.ts';
 import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
-import { installKeys } from './ui/keys.ts';
-import { attachPinch } from './ui/touch.ts';
 import { BOMB_START } from './shared/contracts/bomb.ts';
 import { dropBomb } from './features/demolition/bomb.ts';
 import { demandFactor, zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './tools/itemTool.ts';
 import { GROUND_TOOLS, Hud, ROAD_TOOLS, TERRAIN_TOOLS, type HudActions, type LotMode, type SkyMode, type SkyToolState, type Tool, type WeatherCtl } from './ui/hud.ts';
 import { CloudPuffs, MAX_CLOUDS, type Cloud } from './render/cloudPuffs.ts';
-import { InsideView, insideTarget } from './render/inside.ts';
+import { InsideView } from './render/inside.ts';
 import { Blast } from './render/blast.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
 import { demolishBox } from './tools/demolish.ts';
-import { curveLotSide, deleteLot, deleteLotsAlong, joinLots, lotAt, lotFits, lotOutlineWorld, lotToWorld, moveSharedCorner, nearestCorner, polygonLot, polygonRect, setLotFront, splitLot, splitLotsByLine } from './world/lotEdit.ts';
+import { lotAt, lotToWorld, polygonLot } from './world/lotEdit.ts';
 import type { FeatureActions } from './tools/featureActions.ts';
 import { addressAt, nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
@@ -64,9 +62,8 @@ import { Ground, GroundStroke, RiverCommand, WATER_MAP_RES, waterCoord, waterInd
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
 import { RoadTool } from './tools/roadTool.ts';
 import { ZoneTool } from './tools/zoneTool.ts';
-import { Growth, floorsFor } from './world/growth.ts';
-import { Rng } from './core/rng.ts';
-import { RoadJournal, addCrossing, addUTurn, buildRoad, streetChain, demolishSeg, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, segPreview, snap, splitAt, bulbAt } from './roads/build.ts';
+import { Growth } from './world/growth.ts';
+import { addCrossing, addUTurn, buildRoad, streetChain, demolishSeg, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, segPreview, snap, splitAt, bulbAt } from './roads/build.ts';
 import { BULB_R, BULB_WALK } from './roads/junction.ts';
 import { Zone } from './roads/zones.ts';
 import { RoadPreview } from './render/preview.ts';
@@ -81,8 +78,10 @@ import { repairDanglingEnds } from './roads/repair.ts';
 import { photoView, settlePool } from './app/photoHooks.ts';
 import { loadSession, newMapSession, reloadWithMap, saveSession, type LoadHost, type NewMapHost, type SaveHost } from './app/session.ts';
 import { setTool as setGameTool, skyHint as skyHintOf, type ToolHost } from './app/tools.ts';
-import { clickTool, type ClickHost } from './app/clicks.ts';
+import type { ClickHost } from './app/clicks.ts';
 import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
+import { LotEditing } from './app/lotEditing.ts';
+import { bindInput } from './app/input.ts';
 import { errorText } from './shared/errors.ts';
 
 const SLOT = 'cidade-1';
@@ -204,6 +203,8 @@ export class Game {
   private newArch = -1;
   private newFn = 0;
   private preview = new RoadPreview();
+  /** Lot and building editing (app/lotEditing.ts). */
+  private readonly editing: LotEditing;
   private last = 0;
   private busy = false;
   /** Generating the city: lots wait for the terrain to be conformed. */
@@ -449,6 +450,34 @@ export class Game {
       editProfile: (p, apply) => this.hud.catalog.editFor(p, apply),
       project: (x, z) => { const v = new THREE.Vector3(x, heightAt(this.world.heights, x, z), z).project(this.rig.camera); return { x: v.x * innerWidth / 2, y: -v.y * innerHeight / 2 }; },
       nameStreet: (seg, name) => this.commands.run(nameStreetCommand(this.world, seg, name, () => { this.textSigns.version++; this.unsaved = true; this.inspector.refresh(); })),
+    });
+    const ge = this;
+    this.editing = new LotEditing({
+      world: this.world, preview: this.preview, hud: this.hud, commands: this.commands,
+      get growth() { return ge.growth; },
+      get selected() { return ge.selected; },
+      rig: this.rig, inside: this.inside,
+      get insideId() { return ge.insideId; }, set insideId(v) { ge.insideId = v; },
+      get insideFloor() { return ge.insideFloor; }, set insideFloor(v) { ge.insideFloor = v; },
+      get settings() { return ge.settings; },
+      get transit() { return ge.transit; },
+      get lineSel() { return ge.lineSel; }, set lineSel(v) { ge.lineSel = v; },
+      get lotPts() { return ge.lotPts; }, set lotPts(v) { ge.lotPts = v; },
+      get lotMode() { return ge.lotMode; }, set lotMode(v) { ge.lotMode = v; },
+      get lotExtra() { return ge.lotExtra; }, set lotExtra(v) { ge.lotExtra = v; },
+      get lotExtraPts() { return ge.lotExtraPts; }, set lotExtraPts(v) { ge.lotExtraPts = v; },
+      get polyPts() { return ge.polyPts; },
+      get joinFirst() { return ge.joinFirst; }, set joinFirst(v) { ge.joinFirst = v; },
+      get cornerDrag() { return ge.cornerDrag; }, set cornerDrag(v) { ge.cornerDrag = v; },
+      get splitKind() { return ge.splitKind; },
+      get splitParts() { return ge.splitParts; },
+      get lotUse() { return ge.lotUse; },
+      get newArch() { return ge.newArch; },
+      get newFn() { return ge.newFn; },
+      set unsaved(v: boolean) { ge.unsaved = v; },
+      select: (id) => ge.select(id),
+      setTool: (t) => ge.setTool(t),
+      showSelection: () => ge.showSelection(),
     });
     this.commands.onPush = (c) => {
       const l = c.label;
@@ -961,208 +990,72 @@ export class Game {
   private ndcY(): number { return -(this.pointer.y / this.canvas.clientHeight) * 2 + 1; }
 
   private bindInput(): void {
-    const c = this.canvas;
-    const down = { x: 0, y: 0, button: -1 };
-    c.addEventListener('contextmenu', (e) => e.preventDefault());
-    // two fingers zoom (src/ui/touch.ts runs before the listeners below)
-    attachPinch(c, this.rig);
-    c.addEventListener('pointerdown', (e) => {
-      this.ambient.start();
-      c.setPointerCapture(e.pointerId);
-      this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
-      down.x = e.offsetX; down.y = e.offsetY; down.button = e.button;
-      if (e.button === 2) this.drag = 'rotate';
-      else if (e.button === 1 || (e.button === 0 && this.tool === 'camera')) {
-        this.drag = 'pan';
-        this.rig.beginPan(this.ndcX(), this.ndcY());
-      } else if (e.button === 0 && TERRAIN_TOOLS.includes(this.tool)) {
-        this.drag = 'brush';
-        this.stroke = new BrushStroke(this.world);
-        this.rockStroke = LANDFORM_ROCK[this.brush.mode] !== undefined ? new GroundStroke(this.world) : null;
-      } else if (e.button === 0 && this.tool === 'sky' && this.skyTool.fog !== 'none') {
-        this.drag = 'brush';
-        this.elemStroke = new ElementStroke(this.world.items);
-      } else if (e.button === 0 && this.tool === 'sky' && this.skyTool.cloud === 'move' && this.grabCloud(this.rig.pick(this.ndcX(), this.ndcY()))) {
-        this.drag = 'node';
-      } else if (e.button === 0 && this.tool === 'elements') {
-        this.drag = 'brush';
-        this.elemStroke = new ElementStroke(this.world.items);
-      } else if (e.button === 0 && this.tool === 'forest' && this.forestOne) {
-        this.drag = 'click';
-      } else if (e.button === 0 && GROUND_TOOLS.includes(this.tool)) {
-        this.drag = 'brush';
-        this.stroke = new GroundStroke(this.world);
-      } else if (e.button === 0 && this.tool === 'free' && this.roadTool.freeBegin(this.rig.pick(this.ndcX(), this.ndcY()))) {
-        this.drag = 'free';
-      } else if (e.button === 0 && this.tool === 'move' && this.roadTool.grab(this.rig.pick(this.ndcX(), this.ndcY()))) {
-        this.drag = 'node';
-      } else if (e.button === 0 && this.tool === 'building' && this.lotMode === 'corner' && this.grabCorner(this.rig.pick(this.ndcX(), this.ndcY()))) {
-        this.drag = 'node';
-      } else if (e.button === 0 && this.tool === 'building' && this.lotMode === 'delete' && !this.lotExtra) {
-        const hit = this.rig.pick(this.ndcX(), this.ndcY());
-        this.drag = 'lots';
-        this.lotStroke = hit ? [[hit.x, hit.z]] : [];
-      } else if (e.button === 0 && this.tool === 'zone' && !this.zoneBlock) {
-        this.drag = 'zone';
-        this.zoneTool.begin();
-      } else if (e.button === 0) {
-        this.drag = 'click'; // becomes a camera drag if it moves
-      }
-      e.preventDefault();
-    });
-    c.addEventListener('pointermove', (e) => {
-      const dx = e.offsetX - this.pointer.x, dy = e.offsetY - this.pointer.y;
-      this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
-      this.pointer.inside = true;
-      this.roadTool.shiftHeld = e.shiftKey;
-      if (this.drag === 'click' && (this.tool === 'bulldoze' || this.tool === 'streetscape') && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
-        const px = this.pointer.x, py = this.pointer.y;
-        this.pointer.x = down.x; this.pointer.y = down.y;
-        this.boxStart = this.rig.pick(this.ndcX(), this.ndcY());
-        this.pointer.x = px; this.pointer.y = py;
-        if (this.boxStart) this.drag = this.tool === 'streetscape' ? 'row' : 'box';
-      }
-      if (this.drag === 'click' && Math.hypot(e.offsetX - down.x, e.offsetY - down.y) > 5) {
-        this.drag = 'pan';
-        this.pointer.x = down.x; this.pointer.y = down.y;
-        this.rig.beginPan(this.ndcX(), this.ndcY());
-        this.pointer.x = e.offsetX; this.pointer.y = e.offsetY;
-      }
-      if (this.drag === 'rotate') this.rig.rotate(dx, dy);
-      else if (this.drag === 'pan') this.rig.pan(this.ndcX(), this.ndcY());
-      else if (this.drag === 'lots') {
-        const hit = this.rig.pick(this.ndcX(), this.ndcY()), last = this.lotStroke[this.lotStroke.length - 1];
-        if (hit && (!last || Math.hypot(hit.x - last[0], hit.z - last[1]) > 2)) this.lotStroke.push([hit.x, hit.z]);
-      }
-    });
-    const finishDrag = (e: PointerEvent) => {
-      if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
-      const still = Math.hypot(e.offsetX - down.x, e.offsetY - down.y) <= 5;
-      if (this.drag === 'brush' && this.elemStroke) {
-        if (!this.elemStroke.cmd.empty) this.commands.push(this.elemStroke.cmd);
-        this.elemStroke = null;
-      }
-      if (this.drag === 'brush' && this.stroke) {
-        const rock = this.rockStroke;
-        this.rockStroke = null;
-        if (this.stroke.finish()) {
-          // landform: the terrain and the painted rock are a single undo step
-          const terr = this.stroke;
-          if (rock && rock.finish()) this.commands.push({ label: 'relevo', apply: () => { terr.apply(); rock.apply(); }, invert: () => { rock.invert(); terr.invert(); } });
-          else this.commands.push(terr);
-        }
-        this.stroke = null;
-      }
-      if (this.drag === 'zone') this.zoneTool.end();
-      if (this.drag === 'lots') {
-        const r = this.lotStroke.length ? deleteLotsAlong(this.world, this.lotStroke) : null;
-        this.lotStroke = [];
-        if (typeof r === 'string') this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.');
-        else if (r) { this.commands.push(r); this.hud.toast('Apagado.'); }
-      }
-      if (this.drag === 'free') this.roadTool.freeEnd(this.rig.pick(this.ndcX(), this.ndcY()));
-      if (this.drag === 'row' && this.boxStart) {
-        const b = this.rig.pick(this.ndcX(), this.ndcY());
-        if (b) this.itemTool.row(this.boxStart.x, this.boxStart.z, b.x, b.z);
-        this.preview.hideAll();
-        this.boxStart = null;
-      }
-      if (this.drag === 'box' && this.boxStart) {
-        const b = this.rig.pick(this.ndcX(), this.ndcY());
-        const r = b ? demolishBox(this.world, this.boxStart.x, this.boxStart.z, b.x, b.z) : null;
-        this.preview.hideAll();
-        if (r) { this.commands.push(r.cmd); this.hud.toast((plural('game.toast.demolished', r.count) + (r.charge < 0 ? t('game.toast.refunded', { money: money(-r.charge) }) : '') + '.')); }
-        this.boxStart = null;
-      }
-      if (this.drag === 'node' && this.cloudGrab >= 0) { this.dropCloud(this.rig.pick(this.ndcX(), this.ndcY())); }
-      else if (this.drag === 'node' && this.cornerDrag) this.dropCorner(this.rig.pick(this.ndcX(), this.ndcY()));
-      else if (this.drag === 'node') this.roadTool.drop(this.rig.pick(this.ndcX(), this.ndcY()));
-      if (this.drag === 'click' && still && e.type === 'pointerup') {
-        clickTool(this.clickHost(), this.rig.pick(this.ndcX(), this.ndcY()), e.shiftKey, e.altKey);
-      }
-      if (this.drag === 'rotate' && still && ROAD_TOOLS.includes(this.tool)) this.roadTool.cancel();
-      if (this.drag === 'pan') this.rig.endPan();
-      this.drag = 'none';
-    };
-    // whatever the tool does on release, the drag always ends (an error must not leave the next move panning the camera)
-    const end = (e: PointerEvent) => {
-      try { finishDrag(e); } catch (err) {
-        console.error(err);
-        this.hud.toast(t('tool.failed', { message: (err as Error)?.message ?? String(err) }));
-      } finally { this.drag = 'none'; if (this.commands.holding) this.zoneTool.end(); }
-    };
-    c.addEventListener('pointerup', end);
-    c.addEventListener('dblclick', () => {
-      if (this.tool === 'river') this.finishRiver();
-      if (this.tool === 'building' && this.lotMode === 'poly') this.finishPoly();
-      // the building picked by the first click: see it inside (the hint of "See inside" says so)
-      else if (this.tool === 'building' && this.lotMode === 'edit' && !this.lotExtra && this.selected >= 0 && !(this.inside.on && this.insideId === this.selected)) this.insideCmd('toggle');
-      // a wall ends (the barrier hint: double click or Enter)
-      if (this.tool === 'barrier' && this.wallOpen) { this.itemTool.cancel(); this.wallOpen = false; }
-    });
-    c.addEventListener('pointercancel', end);
-    c.addEventListener('pointerleave', () => { this.pointer.inside = false; });
-    c.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-      this.rig.zoomAt(Math.exp(delta * 0.0012), this.ndcX(), this.ndcY());
-    }, { passive: false });
-
-    // every key in one table (src/ui/keys.ts); the tool reads its own keys in toolKey
-    installKeys({
-      tool: () => this.tool,
-      setTool: (t) => this.setTool(t),
-      openCategory: (c) => this.hud.openCategory(c),
-      dialog: () => this.optionsPanel.isOpen || this.hud.aboutOpen || !!this.startMenu?.open,
-      closeDialog: () => { if (this.optionsPanel.isOpen) this.optionsPanel.close(); else if (this.hud.aboutOpen) this.hud.closeAbout(); else this.startMenu?.hide(); },
-      closeMenu: () => this.hud.escape(),
-      closePanel: () => {
-        if (this.optionsPanel.isOpen) { this.optionsPanel.close(); return true; }
-        if (this.health.close()) return true;
-        if (this.hud.catalog.editor.isOpen) { this.hud.catalog.editor.close(); return true; }
-        if (this.inspector.isOpen) { this.inspector.close(); return true; }
-        return false;
-      },
-      cancelStroke: () => {
-        if (this.vehicles.follow) { this.vehicles.follow = null; return true; }
-        // a wall being traced ends and the tool stays (the next Esc puts it down)
-        if (this.tool === 'barrier' && this.wallOpen) { this.itemTool.cancel(); this.wallOpen = false; return true; }
-        if (this.tool === 'building' && this.lotExtraPts.length) { this.lotExtraPts = []; this.preview.hideAll(); return true; }
-        if (this.tool === 'building' && (this.lotPts?.length || this.polyPts.length || this.joinFirst >= 0)) { if (this.lotPts) this.lotPts.length = 0; this.polyPts.length = 0; this.joinFirst = -1; this.preview.hideAll(); return true; }
-        if (this.tool === 'river' && this.riverPts.length) { this.riverPts.length = 0; this.preview.hideAll(); return true; }
-        if (ROAD_TOOLS.includes(this.tool) && this.roadTool.busy) { this.roadTool.cancel(); return true; }
-        return false;
-      },
-      toolKey: (e) => this.toolKey(e),
-      undo: () => this.history(false),
-      redo: () => this.history(true),
-      save: () => void this.save(),
-      help: () => this.hud.toggleHelp(),
-      health: () => this.health.toggle(),
-      changes: () => this.health.show('world'),
-      developer: () => this.developer,
-      openMap: () => this.hud.openFile(),
-      duplicate: () => {
-        const s = this.inspector.isOpen ? this.inspector.seg : -1;
-        const j = s >= 0 ? duplicateRoad(this.world, s) : null;
-        if (!j) return;
-        if (typeof j === 'string') { this.hud.toast(loose(j)); return; }
-        if (!j.empty && j.settle()) this.commands.push(j);
-      },
-      home: () => { if (this.homeView) this.rig.restore(this.homeView); },
-      // as Q (−1) or E (+1), a quarter at once
-      quarterTurn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 2),
-      pause: () => this.setSpeed(this.paused ? this.simSpeed : 0),
-      nextSpeed: () => this.setSpeed(this.paused ? this.simSpeed : this.simSpeed === 1 ? 2 : this.simSpeed === 2 ? 4 : 1),
-      toggleIso: () => this.setView(this.rig.mode === 'iso' ? 'persp' : 'iso'),
-      congestion: () => this.toggleTrafficView(),
-      follow: () => this.toggleFollow(),
-      wake: () => this.ambient.start(),
-      camera: this.rig,
+    const g = this;
+    bindInput({
+      canvas: this.canvas,
+      ambient: this.ambient,
+      commands: this.commands,
+      rig: this.rig,
+      hud: this.hud,
+      world: this.world,
+      preview: this.preview,
+      roadTool: this.roadTool,
+      itemTool: this.itemTool,
+      zoneTool: this.zoneTool,
+      inspector: this.inspector,
+      health: this.health,
+      optionsPanel: this.optionsPanel,
+      get startMenu() { return g.startMenu; },
+      inside: this.inside,
+      vehicles: this.vehicles,
+      get developer() { return g.developer; },
+      get selected() { return g.selected; },
+      get tool() { return g.tool; },
+      brush: this.brush,
+      skyTool: this.skyTool,
+      get forestOne() { return g.forestOne; },
+      get zoneBlock() { return g.zoneBlock; },
+      get simSpeed() { return g.simSpeed; },
+      get paused() { return g.paused; },
+      get homeView() { return g.homeView; },
+      polyPts: this.polyPts,
+      riverPts: this.riverPts,
+      lotStroke: this.lotStroke,
+      get lotPts() { return g.lotPts; },
+      get lotMode() { return g.lotMode; },
+      get lotExtraPts() { return g.lotExtraPts; }, set lotExtraPts(v) { g.lotExtraPts = v; },
+      get lotExtra() { return g.lotExtra; }, set lotExtra(v) { g.lotExtra = v; },
+      get joinFirst() { return g.joinFirst; }, set joinFirst(v) { g.joinFirst = v; },
+      get cornerDrag() { return g.cornerDrag; }, set cornerDrag(v) { g.cornerDrag = v; },
+      get insideId() { return g.insideId; },
+      get cloudGrab() { return g.cloudGrab; },
+      get pointer() { return g.pointer; },
+      get drag() { return g.drag; }, set drag(v) { g.drag = v; },
+      get stroke() { return g.stroke; }, set stroke(v) { g.stroke = v; },
+      get rockStroke() { return g.rockStroke; }, set rockStroke(v) { g.rockStroke = v; },
+      get elemStroke() { return g.elemStroke; }, set elemStroke(v) { g.elemStroke = v; },
+      get boxStart() { return g.boxStart; }, set boxStart(v) { g.boxStart = v; },
+      get wallOpen() { return g.wallOpen; }, set wallOpen(v) { g.wallOpen = v; },
+      ndcX: () => g.ndcX(), ndcY: () => g.ndcY(),
+      clickHost: () => g.clickHost(),
+      grabCloud: (hit) => g.grabCloud(hit),
+      dropCloud: (hit) => g.dropCloud(hit),
+      grabCorner: (hit) => g.grabCorner(hit),
+      dropCorner: (hit) => g.dropCorner(hit),
+      finishRiver: () => g.finishRiver(),
+      finishPoly: () => g.finishPoly(),
+      insideCmd: (c) => g.insideCmd(c),
+      setTool: (t) => g.setTool(t),
+      setSpeed: (n) => g.setSpeed(n),
+      setView: (v) => g.setView(v),
+      toggleTrafficView: () => g.toggleTrafficView(),
+      toggleFollow: () => g.toggleFollow(),
+      toolKey: (e) => g.toolKey(e),
+      history: (r) => g.history(r),
+      save: () => g.save(),
     });
   }
 
-  /** Remove poles: the pole line under the click goes; walls, fences, hedges and guardrails stay. */
   private removePole(hit: THREE.Vector3 | null): void {
     const items = this.world.items, id = hit ? items.nearest(hit.x, hit.z, 3) : -1;
     if (id < 0 || items.t.cols.type[id] !== Item.PoleLine) return;
@@ -1821,340 +1714,25 @@ export class Game {
     }
   }
 
-  /** Lot rectangle: front A→B, depth out to the cursor's distance from the front. */
-  private lotRect(c: [number, number]): { x: number; z: number; w: number; d: number; rot: number } | null {
-    const [a, b] = this.lotPts!;
-    const ex = b[0] - a[0], ez = b[1] - a[1], W = Math.hypot(ex, ez);
-    if (W < 6) return null;
-    // normal of the front, toward the side of the third point
-    let nx = -ez / W, nz = ex / W;
-    let D = (c[0] - a[0]) * nx + (c[1] - a[1]) * nz;
-    if (D < 0) { nx = -nx; nz = -nz; D = -D; }
-    D = Math.min(120, Math.max(6, D));
-    // the building front (local +z) points at line A-B: (sin rot, cos rot) = −n
-    return { x: (a[0] + b[0]) / 2 + nx * D / 2, z: (a[1] + b[1]) / 2 + nz * D / 2, w: Math.min(160, W), d: D, rot: Math.atan2(-nx, -nz) };
-  }
-
-  private hoverLot(hit: THREE.Vector3 | null): void {
-    const pts = this.lotPts!;
-    if (!hit) return;
-    const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.6;
-    if (pts.length === 0) { this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true); return; }
-    if (pts.length === 1) {
-      const [a] = pts;
-      this.preview.show({ x0: a[0], z0: a[1], cx: (a[0] + hit.x) / 2, cz: (a[1] + hit.z) / 2, x1: hit.x, z1: hit.z }, 0.4, [0, 1], [H(a[0], a[1]), H(hit.x, hit.z)], true, 0xffd36b);
-      return;
-    }
-    const r = this.lotRect([hit.x, hit.z]);
-    if (!r) return;
-    // strip along the lot axis with the width of the front: covers the rectangle
-    const c = Math.cos(r.rot), s = Math.sin(r.rot), fx = s * r.d / 2, fz = c * r.d / 2;
-    this.preview.show({ x0: r.x + fx, z0: r.z + fz, cx: r.x, cz: r.z, x1: r.x - fx, z1: r.z - fz }, r.w / 2, [0, 1], [H(r.x + fx, r.z + fz), H(r.x - fx, r.z - fz)], true, 0x5aa8ff);
-  }
-
-  private clickLot(hit: THREE.Vector3 | null): void {
-    if (!hit || !this.lotPts) return;
-    const pts = this.lotPts;
-    if (pts.length < 2) { pts.push([hit.x, hit.z]); return; }
-    const r = this.lotRect([hit.x, hit.z]);
-    if (!r) { this.hud.toast(t('game.toast.lotNarrow')); pts.length = 0; return; }
-    const fits = lotFits(this.world, [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => lotToWorld(r, u * r.w / 2, v * r.d / 2)));
-    if (fits) { this.hud.toast(fits[0].toUpperCase() + fits.slice(1) + '.'); pts.length = 0; this.preview.hide(); return; }
-    const seed = (Math.random() * 2 ** 31) >>> 0;
-    const zone = this.lotUse;
-    const rec = {
-      ...r, h: 0, color: 0, seed, zone, fn: this.newFn,
-      floors: floorsFor(zone, 0, new Rng(seed)),
-      style: this.newArch >= 0 ? 128 + this.newArch : seed & 127,
-    };
-    const j = new RoadJournal(this.world, 'lote desenhado');
-    const id = j.addBuilding(rec);
-    this.commands.push(j);
-    pts.length = 0;
-    this.preview.hide();
-    this.select(id);
-  }
-
-  private setLotMode(m: LotMode): void {
-    this.lotMode = m;
-    this.lotExtra = null; this.lotExtraPts = [];
-    this.lotPts = m === 'rect' ? [] : null;
-    this.polyPts.length = 0; this.joinFirst = -1; this.cornerDrag = null;
-    this.preview.hideAll();
-    if (m !== 'edit') this.select(-1);
-    this.hud.setLotMode(m);
-    const hints: Record<LotMode, string> = {
-      edit: t('game.hint.lot.edit'),
-      rect: t('game.hint.lot.rect'),
-      poly: t('game.hint.lot.poly'),
-      split: t('game.hint.lot.split'),
-      join: t('game.hint.lot.join'),
-      delete: t('game.hint.lot.delete'),
-      front: t('game.hint.lot.front'),
-      corner: t('game.hint.lot.corner'),
-    };
-    this.hud.setHint(hints[m]);
-  }
-
-  /** Outline of a lot (record) on the ground. */
-  private showLot(id: number, color: number): void {
-    const col = this.world.buildings.cols;
-    const r = { x: col.x[id], z: col.z[id], rot: col.rot[id] };
-    const [fx, fz] = lotToWorld(r, 0, col.d[id] / 2), [bx, bz] = lotToWorld(r, 0, -col.d[id] / 2);
-    const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.7;
-    this.preview.show({ x0: fx, z0: fz, cx: r.x, cz: r.z, x1: bx, z1: bz }, col.w[id] / 2, [0, 1], [H(fx, fz), H(bx, bz)], true, color);
-  }
-
-  private hoverLotTool(hit: THREE.Vector3 | null): void {
-    // split by line, curve side: the line from the first click to the cursor (yellow), or the point to click
-    if (this.lotExtra) {
-      if (!hit) return;
-      const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.7;
-      const p = this.lotExtraPts[0];
-      if (p) this.preview.show({ x0: p[0], z0: p[1], cx: (p[0] + hit.x) / 2, cz: (p[1] + hit.z) / 2, x1: hit.x, z1: hit.z }, 0.4, [0, 1], [H(p[0], p[1]), H(hit.x, hit.z)], true, 0xffd36b);
-      else { this.preview.hide(); this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true); }
-      return;
-    }
-    if (this.lotMode === 'edit') { this.showSelection(); return; }
-    if (this.lotMode === 'rect') { if (this.lotPts) this.hoverLot(hit); return; }
-    if (!hit) return;
-    const H = (x: number, z: number) => heightAt(this.world.heights, x, z) + 0.7;
-    if (this.lotMode === 'poly') {
-      const pts: Array<[number, number]> = [...this.polyPts, [hit.x, hit.z]];
-      const r = pts.length >= 3 ? polygonRect(pts) : null;
-      if (r) {
-        const [fx, fz] = lotToWorld(r, 0, r.d / 2), [bx, bz] = lotToWorld(r, 0, -r.d / 2);
-        this.preview.show({ x0: fx, z0: fz, cx: r.x, cz: r.z, x1: bx, z1: bz }, r.w / 2, [0, 1], [H(fx, fz), H(bx, bz)], true, 0x5aa8ff);
-      } else if (pts.length === 2) {
-        const [a, b] = pts;
-        this.preview.show({ x0: a[0], z0: a[1], cx: (a[0] + b[0]) / 2, cz: (a[1] + b[1]) / 2, x1: b[0], z1: b[1] }, 0.4, [0, 1], [H(a[0], a[1]), H(b[0], b[1])], true, 0xffd36b);
-      } else this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true);
-      return;
-    }
-    if (this.cornerDrag) {
-      this.showLot(this.cornerDrag.id, 0x5aa8ff);
-      this.preview.showCircle(hit.x, H(hit.x, hit.z), hit.z, 2, true);
-      return;
-    }
-    const id = lotAt(this.world, hit.x, hit.z);
-    if (id < 0) { this.preview.hide(); return; }
-    this.showLot(id, this.lotMode === 'delete' ? 0xe2564b : this.lotMode === 'join' && this.joinFirst >= 0 ? 0x4cd28a : 0x5aa8ff);
-  }
-
-  private clickLotTool(hit: THREE.Vector3): void {
-    if (this.lotMode === 'poly') { this.polyPts.push([hit.x, hit.z]); return; }
-    const id = lotAt(this.world, hit.x, hit.z);
-    if (id < 0) { this.hud.toast(t('game.toast.noLot')); return; }
-    let r: RoadJournal | string | null = null;
-    if (this.lotMode === 'split') r = splitLot(this.world, id, this.splitKind, this.splitParts);
-    else if (this.lotMode === 'delete') r = deleteLot(this.world, id);
-    else if (this.lotMode === 'front') { r = setLotFront(this.world, id, hit.x, hit.z); if (!r) { this.hud.toast(t('game.toast.alreadyFront')); return; } }
-    else if (this.lotMode === 'join') {
-      if (this.joinFirst < 0 || !this.world.buildings.alive[this.joinFirst]) { this.joinFirst = id; this.hud.setHint(t('game.hint.lot.joinSecond')); return; }
-      r = joinLots(this.world, this.joinFirst, id);
-      this.joinFirst = -1;
-      this.hud.setHint(t('game.hint.lot.join'));
-    }
-    if (!r) return;
-    if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
-    this.commands.push(r);
-    this.preview.hide();
-    this.hud.toast(this.lotMode === 'split' ? t('game.toast.lotSplit') : this.lotMode === 'join' ? t('game.toast.lotsJoined') : this.lotMode === 'front' ? t('game.toast.frontSet') : t('game.toast.deleted'));
-  }
-
-  private finishPoly(): void {
-    const r = polygonLot(this.polyPts, this.world);
-    this.polyPts.length = 0;
-    this.preview.hideAll();
-    if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
-    const seed = (Math.random() * 2 ** 31) >>> 0, zone = this.lotUse;
-    const j = new RoadJournal(this.world, 'lote desenhado');
-    j.addBuilding({ ...r, h: 0, color: 0, seed, zone, fn: this.newFn, floors: floorsFor(zone, 0, new Rng(seed)), style: this.newArch >= 0 ? 128 + this.newArch : seed & 127 });
-    this.commands.push(j);
-    this.hud.toast(t('game.toast.lotCreated'));
-  }
-
-  private grabCorner(hit: THREE.Vector3 | null): boolean {
-    if (!hit) return false;
-    const id = lotAt(this.world, hit.x, hit.z);
-    if (id < 0) return false;
-    const [k, d] = nearestCorner(this.world, id, hit.x, hit.z);
-    if (d > 8) return false;
-    this.cornerDrag = { id, k };
-    return true;
-  }
-
-  private dropCorner(hit: THREE.Vector3 | null): void {
-    const c = this.cornerDrag;
-    this.cornerDrag = null;
-    this.preview.hideAll();
-    if (!c || !hit || !this.world.buildings.alive[c.id]) return;
-    const [cx, cz] = lotOutlineWorld(this.world, c.id)[c.k];
-    const r = moveSharedCorner(this.world, cx, cz, hit.x, hit.z);
-    if (typeof r === 'string') { this.hud.toast(t('game.toast.notChanged', { why: loose(r) })); return; }
-    this.commands.push(r);
-  }
+  private clickLot(hit: THREE.Vector3 | null): void { this.editing.clickLot(hit); }
+  private setLotMode(m: LotMode): void { this.editing.setLotMode(m); }
+  private hoverLotTool(hit: THREE.Vector3 | null): void { this.editing.hoverLotTool(hit); }
+  private finishPoly(): void { this.editing.finishPoly(); }
+  private grabCorner(hit: THREE.Vector3 | null): boolean { return this.editing.grabCorner(hit); }
+  private dropCorner(hit: THREE.Vector3 | null): void { this.editing.dropCorner(hit); }
+  private featureActions(): FeatureActions { return this.editing.featureActions(); }
+  private clickLotExtra(hit: THREE.Vector3): void { this.editing.clickLotExtra(hit); }
+  private renovate(id: number): void { this.editing.renovate(id); }
+  private clickBuilding(hit: THREE.Vector3 | null, shift = false): void { this.editing.clickBuilding(hit, shift); }
+  private editSelected(dFloors: number, arch?: number, fn?: number): void { this.editing.editSelected(dFloors, arch, fn); }
+  private insideCmd(c: 'toggle' | 'up' | 'down'): void { this.editing.insideCmd(c); }
+  private applyDesign(d: Design | null, floors?: number): void { this.editing.applyDesign(d, floors); }
+  private demolishSelected(): void { this.editing.demolishSelected(); }
 
   private manoeuvreWait: ((m: Extract<FromSim, { type: 'manoeuvres' }>) => void) | null = null;
   /** Lot modes added by the gameplay front (split by line, curve side) and the points clicked so far. */
   private lotExtra: 'line' | 'curve' | null = null;
   private lotExtraPts: Array<[number, number]> = [];
-
-  private featureActions(): FeatureActions {
-    const hints = { line: t('game.hint.lot.line'), curve: t('game.hint.lot.curve') };
-    const enter = (m: 'line' | 'curve') => { this.setTool('building'); this.lotExtra = m; this.lotExtraPts = []; this.hud.setHint(hints[m]); };
-    return {
-      lotLine: () => enter('line'),
-      lotCurve: () => enter('curve'),
-      lotExtraOff: () => { this.lotExtra = null; this.lotExtraPts = []; },
-      renovate: () => this.renovate(this.selected),
-      decayOf: () => this.selected >= 0 && this.world.buildings.alive[this.selected] ? this.world.buildings.cols.decay[this.selected] / 10 : -1,
-      addressOf: () => {
-        const id = this.selected, w = this.world, c = w.buildings.cols;
-        if (id < 0 || !w.buildings.alive[id]) return '';
-        // the door: middle of the lot's front
-        const [x, z] = lotToWorld({ x: c.x[id], z: c.z[id], rot: c.rot[id] }, 0, c.d[id] / 2);
-        const a = addressAt(w, x, z);
-        return a ? `${a.name}, ${a.number}` : '';
-      },
-      streetNameAt: (x, z) => { const a = addressAt(this.world, x, z, 30); return a ? a.name : ''; },
-      mapPaint: (style) => { this.settings.paint = style; setPaintStyle(style); this.unsaved = true; },
-      lineColor: (color) => { const c = this.transit.setColor(this.lineSel, color); if (c) this.commands.run(c); },
-      lineLoop: (loop) => { const c = this.transit.setLoop(this.lineSel, loop); if (c) this.commands.run(c); },
-      impossibleNodes: () => this.world.impossible.count,
-      impossibleAngle: (n) => this.world.impossible.angleAt(n),
-      impossibleList: () => { const nc = this.world.roads.nodes.cols, out: number[] = []; for (const [n, a] of this.world.impossible.nodes) out.push(n, nc.x[n], nc.z[n], a); return out; },
-    };
-  }
-
-  /** Split by line or curve side: the second click does it. */
-  private clickLotExtra(hit: THREE.Vector3): void {
-    const pts = this.lotExtraPts;
-    pts.push([hit.x, hit.z]);
-    if (pts.length < 2) return;
-    const [[ax, az], [bx, bz]] = pts;
-    this.lotExtraPts = [];
-    let r: RoadJournal | string;
-    if (this.lotExtra === 'line') {
-      // the lot the line crosses: under its middle, or under either end
-      r = splitLotsByLine(this.world, ax, az, bx, bz);
-    } else {
-      const id = lotAt(this.world, ax, az);
-      r = id < 0 ? t('game.refuse.curveFirst') : curveLotSide(this.world, id, ax, az, bx, bz);
-    }
-    if (typeof r === 'string') { this.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
-    this.commands.push(r);
-    this.hud.toast(this.lotExtra === 'line' ? t('game.toast.lotSplitLine') : t('game.toast.sideCurved'));
-  }
-
-  /** Renovation (Roadcraft Shift+click): the building is new again; undo brings the old age back. */
-  private renovate(id: number): void {
-    const w = this.world;
-    if (id < 0 || !w.buildings.alive[id] || w.buildings.cols.floors[id] === 0) { this.hud.toast(t('game.toast.renovatePick')); return; }
-    const before = w.buildings.cols.built[id], now = w.clock;
-    if (w.buildings.cols.decay[id] === 0 && now - before < 1) { this.hud.toast(t('game.toast.alreadyNew')); return; }
-    this.commands.run({
-      label: 'reformar prédio',
-      apply: () => { if (w.buildings.alive[id]) w.setBuilt(id, now); },
-      invert: () => { if (w.buildings.alive[id]) w.setBuilt(id, before); },
-    });
-    this.hud.toast(t('game.toast.renovated'));
-  }
-
-  private clickBuilding(hit: THREE.Vector3 | null, shift = false): void {
-    if (!hit) return;
-    if (this.lotExtra) { this.clickLotExtra(hit); return; }
-    if (this.lotMode !== 'edit' && this.lotMode !== 'rect') { this.clickLotTool(hit); return; }
-    if (this.lotPts) { this.clickLot(hit); return; }
-    // building under the click?
-    const col = this.world.buildings.cols;
-    let best = -1, bd = Infinity;
-    this.world.buildingIndex.query(hit.x - 40, hit.z - 40, hit.x + 40, hit.z + 40, (id) => {
-      const dx = hit.x - col.x[id], dz = hit.z - col.z[id];
-      const s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
-      const lx = dx * c - dz * s, lz = dx * s + dz * c;
-      if (Math.abs(lx) <= col.w[id] / 2 + 1 && Math.abs(lz) <= col.d[id] / 2 + 1) {
-        const d = dx * dx + dz * dz;
-        if (d < bd) { bd = d; best = id; }
-      }
-    });
-    if (best >= 0) { if (shift) this.renovate(best); this.select(best); return; }
-    // free lot: build
-    const lot = this.growth.lotAt(hit.x, hit.z);
-    if (!lot) { this.hud.toast(t('game.toast.buildWhere')); return; }
-    const j = new RoadJournal(this.world, 'construir prédio');
-    // the style and function chosen for the next building (the Build panel) win over the neighbourhood's
-    const rec = this.growth.recordFor(lot.lots, lot.i);
-    if (this.newArch >= 0) rec.style = 128 + this.newArch;
-    if (this.newFn > 0) rec.fn = this.newFn;
-    const id = j.addBuilding(rec);
-    this.commands.push(j);
-    this.select(id);
-  }
-
-  /** Changes floors, style (−1 = automatic) and function of the selected building. */
-  private editSelected(dFloors: number, arch?: number, fn?: number): void {
-    const id = this.selected;
-    if (id < 0 || !this.world.buildings.alive[id]) return;
-    const col = this.world.buildings.cols;
-    const from = [col.floors[id], col.style[id], col.fn[id]];
-    const style = arch === undefined ? col.style[id] : arch < 0 ? col.seed[id] & 127 : 128 + arch;
-    const to = [Math.max(1, Math.min(60, col.floors[id] + dFloors)), style, fn ?? col.fn[id]];
-    if (from.every((v, i) => v === to[i])) return;
-    const world = this.world;
-    this.commands.run({
-      label: 'editar prédio',
-      apply: () => { if (world.buildings.alive[id]) world.editBuilding(id, to[0], to[1], to[2]); },
-      invert: () => { if (world.buildings.alive[id]) world.editBuilding(id, from[0], from[1], from[2]); },
-    });
-    this.select(id);
-  }
-
-  /** Inside view: the selected building, or the one at the centre of the screen; floor up and down. */
-  private insideCmd(c: 'toggle' | 'up' | 'down'): void {
-    const w = this.world, col = w.buildings.cols;
-    if (c === 'toggle' && this.inside.on) { this.inside.hide(); this.insideId = -1; this.hud.setInside(-1); return; }
-    if (c === 'toggle') {
-      // the selected building when it is in view; otherwise the one at the centre of the screen; otherwise the
-      // selected one, and the camera goes to it
-      const { id, go } = insideTarget(w, this.selected, this.rig.target.x, this.rig.target.z, this.rig.dist);
-      if (go) { const s = this.rig.state(); s[0] = col.x[id]; s[1] = col.z[id]; this.rig.restore(s); }
-      if (id < 0 || col.floors[id] === 0) { this.hud.toast(t('game.toast.insideNone')); return; }
-      this.insideId = id;
-      this.insideFloor = 0;
-    } else if (!this.inside.on) return;
-    else this.insideFloor += c === 'up' ? 1 : -1;
-    // the storeys, the footprint and the floor height of that building as the generator lays it out
-    if (!this.inside.showBuilding(w, this.insideId, Math.max(0, this.insideFloor))) { this.insideId = -1; this.hud.setInside(-1); return; }
-    this.insideFloor = this.inside.plan!.floor;
-    this.hud.setInside(this.insideFloor);
-  }
-
-  /** Creator: puts (or removes) the design on the selected building; optional floors (ready-made model). */
-  private applyDesign(d: Design | null, floors?: number): void {
-    const id = this.selected;
-    if (id < 0 || !this.world.buildings.alive[id]) { this.hud.toast(t('game.toast.selectFirst')); return; }
-    const col = this.world.buildings.cols, w = this.world;
-    const before = [col.color[id], col.h[id], col.floors[id]];
-    const enc = d ? encodeDesign(d) : { color: 0, h: 0 };
-    const after = [enc.color, enc.h, Math.max(1, Math.min(60, floors ?? col.floors[id]))];
-    if (before.every((v, i) => v === after[i])) return;
-    this.commands.run({
-      label: 'projeto do prédio',
-      apply: () => { if (w.buildings.alive[id]) w.setDesign(id, after[0], after[1], after[2]); },
-      invert: () => { if (w.buildings.alive[id]) w.setDesign(id, before[0], before[1], before[2]); },
-    });
-    this.select(id);
-  }
-
-  private demolishSelected(): void {
-    const id = this.selected;
-    if (id < 0 || !this.world.buildings.alive[id]) return;
-    const j = new RoadJournal(this.world, 'demolir prédio');
-    j.removeBuilding(id);
-    this.commands.push(j);
-    this.select(-1);
-  }
 
   // ------------------------------------------------------ generated city
 
