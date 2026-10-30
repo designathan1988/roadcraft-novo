@@ -566,10 +566,13 @@ export class Game {
 
     // all shaders compiled here, never during play
     this.hud.showLoading(t('game.loading.shaders'));
+    // the sky's light first: the scene's environment map enters every lit material's pipeline key (three r186
+    // NodeManager.getCacheKey), and without it everything compiled here was compiled again in play
+    setTimeOfDay(this.parts, this.skyMode === 'dia' ? 12 : this.skyMode === 'noite' ? 22 : this.hour, cloudsU.value, rainU.value);
     const warm = new THREE.Group();
     for (const l of this.layers) warm.add(l.warmupMesh());
     warm.add(this.textSigns.warmup());
-    for (const o of this.blast.warmup()) warm.add(o);
+    this.blast.warm(true);
     scene.add(warm);
     for (const m of [this.preview.mesh, this.preview.marker, this.preview.circle]) m.visible = true;
     this.inside.warm(); // compiles the inside-view materials at load
@@ -609,9 +612,10 @@ export class Game {
     await this.applySettings(this.settings, false);
     await renderer.compileAsync(scene, this.rig.persp);
     await renderer.compileAsync(scene, this.rig.ortho);
-    this.warmPost();
+    await this.warmPost();
     scene.remove(warm);
     warm.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    this.blast.warm(false);
     this.preview.hideAll();
     this.inside.hide();
     this.transitView.showPaths = false;
@@ -1133,20 +1137,28 @@ export class Game {
     if (want) this.post = new Post(renderer, scene, this.rig.persp, this.parts.sun, { shadows: s.shadows, ao: s.ao, bloom: s.bloom });
     if (compile) {
       this.hud.showLoading(t('game.loading.options'));
+      // the explosion's pieces: shadows switched on are 3 more pipelines for them (compiled here, not at the next bomb)
+      this.blast.warm(true);
       await renderer.compileAsync(scene, this.rig.persp);
-      this.warmPost();
+      await this.warmPost();
+      this.blast.warm(false);
       this.hud.hideLoading();
     }
   }
 
-  /** Renders the final image once with each camera (compiles its shaders at load). */
-  private warmPost(): void {
+  /**
+   * Renders the final image once with each camera (compiles its shaders at load). One animation frame per render: the
+   * scene passes update once per frame (three r186 PassNode, NodeUpdateType.FRAME; the frame id advances in the
+   * renderer's own animation loop), so four renders in a row drew the scene only with the first camera and every
+   * material compiled again for the perspective camera the first time it showed up in play.
+   */
+  private async warmPost(): Promise<void> {
     if (!this.post) return;
     // both outputs (day without bloom, night with it) compiled at load: dusk does not stall
-    for (const night of [true, false]) {
+    for (const night of [true, false]) for (const cam of [this.rig.ortho, this.rig.persp]) {
+      await new Promise((r) => requestAnimationFrame(r));
       this.post.bloomOverride = night;
-      this.post.setCamera(this.rig.ortho); this.post.render();
-      this.post.setCamera(this.rig.persp); this.post.render();
+      this.post.setCamera(cam); this.post.render();
     }
     this.post.bloomOverride = null;
   }
