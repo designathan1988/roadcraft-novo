@@ -646,7 +646,7 @@ export class Game {
     const info = this.parts.renderer.info.render as { drawCalls: number; triangles: number };
     return {
       draws: info.drawCalls, tris: info.triangles,
-      buildings: this.world.buildings.size, segs: this.world.roads.segs.size,
+      buildings: this.world.buildings.size, segs: this.world.roads.segs.size, detail: this.detailAuto,
       cityMB: Math.round(this.city.gpuBytes / 1e6), roadsMB: Math.round(this.roads.gpuBytes / 1e6),
       ...(this.simStats?.type === 'stats' ? { cars: this.simStats.cars, micro: this.simStats.micro, peds: this.simStats.peds } : {}),
     };
@@ -1158,8 +1158,10 @@ export class Game {
    */
   private frameTimes: number[] = [];
   private detailAuto = 1;
+  /** Counting by the tools (`fixDetail`): the detail does not adapt to the frame time while they measure. */
+  private detailFixed = false;
   private adaptDetail(ms: number): void {
-    if (ms <= 0 || ms > 250) return;
+    if (this.detailFixed || ms <= 0 || ms > 250) return;
     const t = this.frameTimes;
     t.push(ms);
     if (t.length < 180) return;
@@ -1170,6 +1172,17 @@ export class Game {
     if (p90 > 20) this.detailAuto = Math.max(0.35, this.detailAuto * 0.85);
     else if (p90 < 17.5) this.detailAuto = Math.min(1, this.detailAuto * 1.1);
     if (this.detailAuto !== before) this.updatePixelScale();
+  }
+
+  /**
+   * For the tools that count what is drawn (tools/budget.mjs): the adaptive detail held at full (`on`) or left to adapt
+   * again. Otherwise the counts depended on how busy the machine was while the city loaded (the detail shrinks when
+   * the 90th percentile frame passes 20 ms), and two builds were not comparable.
+   */
+  fixDetail(on: boolean): void {
+    this.detailFixed = on;
+    this.frameTimes.length = 0;
+    if (on && this.detailAuto !== 1) { this.detailAuto = 1; this.updatePixelScale(); }
   }
 
   /** Detail distances by screen-space error: more pixels, detail reaches farther. */
