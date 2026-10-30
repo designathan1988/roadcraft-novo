@@ -178,6 +178,17 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
           if (water && waterAt(water, px, pz) > y - 0.5) wet = true;
         }
         if (wet) continue; // rio ou lago
+        // water between the corners too: a 4 m lattice over the lot, not only its outline and middle
+        if (water) {
+          const wetStep = 4;
+          outer: for (let a = -w / 2; a <= w / 2; a += wetStep) {
+            for (let b = -D / 2; b <= D / 2; b += wetStep) {
+              const px = cx + tx * a + lx * b, pz = cz + tz * a + lz * b;
+              if (waterAt(water, px, pz) > heightAt(heights, px, pz) - 0.5) { wet = true; break outer; }
+            }
+          }
+        }
+        if (wet) continue;
         if (hi - lo > 10) continue;
         markLot(grid, W, ax, az, cx, cz, tx, tz, lx, lz, w, D);
         taken.push(...corners(cx, cz, tx, tz, lx, lz, w - 0.6, D, 0.15));

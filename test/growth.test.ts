@@ -6,7 +6,7 @@ import { buildRoad, planRoad, snap } from '../src/roads/build.ts';
 import { Growth } from '../src/world/growth.ts';
 import { buildLots } from '../src/jobs/lots.ts';
 import { CELL_SIZE, MAP_CELLS } from '../src/config.ts';
-import { cellOriginX } from '../src/core/grid.ts';
+import { cellId, cellOriginX } from '../src/core/grid.ts';
 import { Fn } from '../src/world/arch.ts';
 import { Zone } from '../src/roads/zones.ts';
 import type { JobPool } from '../src/jobs/pool.ts';
@@ -41,6 +41,18 @@ function growthOf(w: World): Growth {
   }
   return g;
 }
+
+test('loteamento gerado recusa todo lote sobre água', () => {
+  const w = flatWorld();
+  road(w, -100, 0, 100, 0, Zone.Residential);
+  w.water.fill(11); // ground is at 10
+  const c = cellId(MAP_CELLS >> 1, MAP_CELLS >> 1);
+  const segs: number[] = [];
+  const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
+  w.roads.forSegsNear(x0 - 160, z0 - 160, x0 + CELL_SIZE + 160, z0 + CELL_SIZE + 160, (s) => segs.push(s));
+  const lots = buildLots(w.heights, w.roads.gather(segs, []), c, w.water);
+  assert.equal(lots.count, 0);
+});
 
 test('crescimento do roadcraft: o próximo prédio é o lote livre mais perto do último (a rua enche em sequência)', () => {
   const w = flatWorld();
