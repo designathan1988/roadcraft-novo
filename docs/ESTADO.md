@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 23h03.
+Atualizado: 2026-10-29, 23h24.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,22 +39,22 @@ Atualizado: 2026-10-29, 23h03.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `61800d7` (check-save de 10 km), com `126b262` (docs do
-  GenOutputs), `2cbc606` (GenOutputs), `81655fa`/`c522b73` (ônibus), `80bfefc`/`917e88f` (pessoas),
-  `e89f6ed` (vidro, ocupantes e entre-eixos) e `8fb94b2`/`066b047`/`0965073`/`b6f4857`/`084425c`
-  antes. Sem push e sem merge em main; nenhum agente ativo.
+- Branch `port/roadcraft-features`; HEAD `784ca8c` (select acessível do inspetor), com `6482ca0`
+  (finishes), `f195c9b`/`b13594d` (curva do ônibus), `8defbcf`/`61800d7` (10 km), `126b262`/`2cbc606`
+  (GenOutputs), `81655fa`/`c522b73` (ônibus), `80bfefc`/`917e88f` (pessoas), `e89f6ed` (vidro,
+  ocupantes e entre-eixos) e os commits anteriores. Sem push e sem merge em main; nenhum agente ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
   `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
-  `polygon.ts`, `geometry.ts`, `materials.ts` e `outputs.ts`, `src/r40/api.ts` e `src/roads/dash.ts`.
-  `game.ts` 2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 2.368; `arch:check` 248
-  arquivos/66.911 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos. Os quatro sinks do gerador
-  (`detailOut`/`layoutOut`/`footOut`/`partsOut`) deixaram de ser globais: viajam em `GenOutputs`.
+  `polygon.ts`, `geometry.ts`, `materials.ts`, `outputs.ts` e `finishes.ts`, `src/r40/api.ts` e
+  `src/roads/dash.ts`. `game.ts` 2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 2.311;
+  `arch:check` 249 arquivos/66.923 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos. Os quatro sinks
+  do gerador deixaram de ser globais: viajam em `GenOutputs`; os acabamentos saíram para `finishes.ts`.
 - Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
   `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget com o vidro: street 418 draws/
   11.483.609 tris, district 175/7.103.905, city 123/**4.002.312** (limite 4.044.328), map
   178/4.463.246, night 494/14.492.808; MB 611/591/301/261/731, todos dentro.
-- Testes: suíte **371/371 em 62,4 s** depois do GenOutputs; trânsito/defeitos/movimento **61/61 em
-  58,3 s** na extração de regiões; prédios **50/50 em 5,2 s**; tsc/build limpos.
+- Testes: suíte **371/371 em 59,8 s** depois do select do inspetor; trânsito/defeitos/movimento
+  **61/61 em 58,3 s** na extração de regiões; prédios **50/50 em 5,7 s**; tsc/build limpos.
 - Save/reabertura: `generated-close-reopens` deu **5 ok, 0 falhas**: cidade gerada de 10 km, salva,
   app **encerrado e reaberto em outro processo**, mesmas vias/nós/prédios/ladrilhos. `close-saves`
   deu **2 ok, 0 falhas** (mapa pequeno) e `check-user-data.mjs` manteve a pasta do jogador intacta
@@ -62,8 +62,8 @@ Atualizado: 2026-10-29, 23h03.
 - Carros: `test-results/carros-qa-2026-10-29/01..09` (20/100/500 m, dia/noite, seguindo) mostra a
   carroceria opaca; `test-results/carros-vidro-perto-2026-10-29/01,07` mostra o motorista no carro
   preto a 8 m e passageiros brancos dentro do ônibus, com o vidro separado e transparente. O LOD
-  distante mantém o modelo fundido. Caminhão/moto ainda não isolados em foto; ônibus em curva ainda
-  sem foto de rota.
+  distante mantém o modelo fundido. Caminhão/moto ainda não isolados em foto; a curva do ônibus está
+  nas fotos da quadra vazia (abaixo).
 - Pessoas: `test-results/pessoas-qa-2026-10-29/01..05` (2/20/100 m dia, 2/20 m noite) mostra o grupo
   de 8 + 4 andando criado pelo `api.people`: corpo inteiro, roupas/cabelo e sombra, sem buraco ou
   transparência no grupo. A multidão e a animação de skinning não foram isoladas nesta prova.
@@ -71,6 +71,8 @@ Atualizado: 2026-10-29, 23h03.
   de uma curva de 90° numa quadra vazia, com o corpo na faixa e sem salto visível (câmera fixa,
   `tools/fotos-onibus-curva.mjs`). A rodada anterior (`onibus-qa-3`) pegou só reta. Ainda faltam pose/yaw
   numéricos por passo e passageiros embarcando/descendo; não há rotatória na cena.
+- Verificação interna: `node tools/verificar.mjs` **146/146** (71 + 58 + 17), incluindo o select de
+  estacionamento por lado; `node tools/textos.mjs` 985 chaves pedidas, 0 problemas.
 - Pendente: extrair shell/fachada/cívico do `buildingGen` (agora sem sinks), o resto de `traffic`/
   `r40/buildingMesh`, bomba real, construtor completo, multidão, passageiros do ônibus, yaw numérico/rotatória,
   cidade organizada/250 mil. A cidade de 10 km fechada e reaberta em outro processo está provada; a de
