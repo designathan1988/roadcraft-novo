@@ -20,19 +20,20 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 259 |
-| Bytes / linhas | 3.641.931 / 67.109 |
-| Arquivos >= 50 KB | 9 |
-| Arquivos >= 100 KB | 4 |
-| Arquivos >= 150 KB | 2 |
-| Arestas de import | 1104 (196 só de tipo) |
+| Arquivos TS | 268 |
+| Bytes / linhas | 3.643.026 / 67.297 |
+| Arquivos >= 50 KB | 8 |
+| Arquivos >= 100 KB | 3 |
+| Arquivos >= 150 KB | 1 |
+| Arestas de import | 1194 (209 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
-Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.752),
-`game.ts` (2.645), `r40/render/buildings/signature.ts` (1.781), `jobs/buildingGen/plans.ts` (422).
-O catálogo de 38 projetos é `world/catalogData.json` (asset, não código).
+Maiores arquivos: `sim/traffic.ts` (2.401, o motor micro), `game.ts` (2.645, composição),
+`r40/render/buildings/signature.ts` (1.781), `jobs/buildingGen/plans.ts` (422). O pipeline de malha de
+prédios foi dividido (`buildingMesh.ts` 772 + `meshCore`/`facadeEmit`/`roofMesh`/`lotMesh`/`elementMesh`/
+`interiorMesh`); o catálogo de 38 projetos é `world/catalogData.json` (asset, não código).
 
 Vazamentos atuais (linha de base, a pagar em fatias): `render/vehicles.ts -> sim/poses.ts`,
 `roads/build.ts -> ui/i18n.ts`, `roads/network.ts -> jobs/protocol.ts`, `world/* -> jobs/protocol.ts`,
