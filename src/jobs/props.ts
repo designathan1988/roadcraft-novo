@@ -16,7 +16,8 @@ import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from '../shared/contracts/worker.ts';
 import { PART_PROP, POOL_PARTS, partKey, partW } from './parts40.ts';
-import { inFootprints, inPolygon, lotFit, lotParking, lotPolygon, buildBuildingParts, type LotGround40 } from './buildingGen.ts';
+import { inFootprints, lotParking, buildBuildingParts, type LotGround40 } from './buildingGen.ts';
+import { inPolygon, lotFit, lotPolygon } from './buildingGen/polygon.ts';
 
 /** Tipos de peça (4 bits; 15 = vaga livre). */
 export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17, ...PART_PROP } as const;

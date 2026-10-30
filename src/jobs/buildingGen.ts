@@ -20,8 +20,6 @@ import { layLot40, massLot40, volumes40, type Lot40, type PartSink } from './bui
 import { FLAT_ROOFS, ROOF_COLOURS, planRoofPlant, type RoofPlantItem } from '../world/roofPlant.ts';
 import { catalogExtent, planCells, type CellPlan } from './buildingGen/plan.ts';
 import { lotFit } from './buildingGen/polygon.ts';
-export { inPolygon, lotPolygon, type LotFit } from './buildingGen/polygon.ts';
-export { lotFit };
 
 export const GEN_VERSION = 15;
 /** Camada de detalhe: para onde vão as peças 3D das janelas enquanto o gerador roda num descarte. */
