@@ -140,11 +140,12 @@ const allowed = {
   r40: ['core', 'shared', 'r40'],
   app: ['core', 'shared', 'platform', 'world', 'roads', 'jobs', 'sim', 'render', 'r40', 'ui', 'tools', 'features', 'app'],
 };
-const violations = [];
+const violations = [], typeViolations = [];
 for (const e of edges) {
-  if (e.typeOnly) continue;
   const allowedTo = allowed[e.fromLayer];
-  if (allowedTo && !allowedTo.includes(e.toLayer) && e.fromLayer !== e.toLayer) violations.push({ ...e, rule: `${e.fromLayer} must not import ${e.toLayer}` });
+  if (!allowedTo || allowedTo.includes(e.toLayer) || e.fromLayer === e.toLayer) continue;
+  // a type-only import across layers ties the layers too: listed apart, gated like the value leaks
+  (e.typeOnly ? typeViolations : violations).push({ ...e, rule: `${e.fromLayer} must not import ${e.toLayer}` });
 }
 
 const byBytes = [...data.values()].sort((a, b) => b.bytes - a.bytes);
@@ -165,6 +166,7 @@ const summary = {
 
 fs.mkdirSync(outDir, { recursive: true });
 const report = {
+  typeViolations: typeViolations.map(({ from, to, rule }) => ({ from, to, rule })),
   summary,
   files: byBytes.slice(0, 80),
   valueCycles: valueCycles.slice(0, 30),
@@ -214,16 +216,21 @@ if (checkAt >= 0) {
   const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
   const baseCycles = new Set((baseline.valueCycles ?? []).map((c) => c.join('|')));
   const baseLeaks = new Set((baseline.violations ?? []).map((v) => `${v.from}->${v.to}`));
-  const baseFiles = new Set((baseline.files ?? []).map((f) => f.rel));
   const newCycles = valueCycles.filter((c) => !baseCycles.has(c.join('|')));
   const newLeaks = violations.filter((v) => !baseLeaks.has(`${v.from}->${v.to}`));
-  const newBig = byBytes.filter((d) => d.bytes >= 50_000 && !baseFiles.has(d.rel));
-  if (!newCycles.length && !newLeaks.length && !newBig.length) {
+  const baseTypeLeaks = new Set((baseline.typeViolations ?? []).map((v) => `${v.from}->${v.to}`));
+  const newTypeLeaks = typeViolations.filter((v) => !baseTypeLeaks.has(`${v.from}->${v.to}`));
+  // size: none at 150 KB or more; one at 50 KB or more only with a ceiling in the baseline (its size when the ceiling
+  // was set) and never above it: a file that grows past 50 KB, or keeps growing, fails
+  const ceilings = baseline.ceilings ?? {};
+  const newBig = byBytes.filter((d) => d.bytes >= 150_000 || (d.bytes >= 50_000 && !(d.rel in ceilings)) || (d.rel in ceilings && d.bytes > ceilings[d.rel]));
+  if (!newCycles.length && !newLeaks.length && !newTypeLeaks.length && !newBig.length) {
     console.log(`\narch baseline OK (${baselinePath})`);
   } else {
     if (newCycles.length) console.error('\nNEW runtime cycles:\n' + newCycles.map((c) => `  ${c.join(' ')}`).join('\n'));
     if (newLeaks.length) console.error('\nNEW boundary leaks:\n' + newLeaks.map((v) => `  ${v.from} -> ${v.to}`).join('\n'));
-    if (newBig.length) console.error('\nNEW files >=50 KB:\n' + newBig.map((d) => `  ${(d.bytes / 1024).toFixed(1)} KB  ${d.rel}`).join('\n'));
+    if (newTypeLeaks.length) console.error('\nNEW type-only boundary leaks:\n' + newTypeLeaks.map((v) => `  ${v.from} -> ${v.to}`).join('\n'));
+    if (newBig.length) console.error('\nFiles over the size rule (>=150 KB, >=50 KB without a ceiling, or above the ceiling):\n' + newBig.map((d) => `  ${(d.bytes / 1024).toFixed(1)} KB (ceiling ${d.rel in ceilings ? (ceilings[d.rel] / 1024).toFixed(1) + ' KB' : 'none'})  ${d.rel}`).join('\n'));
     process.exitCode = 1;
   }
 }

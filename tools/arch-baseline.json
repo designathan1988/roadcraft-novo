@@ -351,5 +351,34 @@
       "rel": "src/roads/control.ts",
       "bytes": 11825
     }
-  ]
+  ],
+  "ceilings": {
+    "src/r40/render/buildings/signature.ts": 108069,
+    "src/game.ts": 100278,
+    "src/sim/peds.ts": 90606,
+    "src/sim/traffic.ts": 89346,
+    "src/r40/world/growth/lotPlan.ts": 70231,
+    "src/render/terrain.ts": 66020,
+    "src/render/carBody.ts": 63466,
+    "src/ui/roadCatalog.ts": 60976,
+    "src/render/vehicles.ts": 52343
+  },
+  "typeViolations": [
+    {
+      "from": "src/shared/contracts/worker.ts",
+      "to": "src/roads/profiles.ts",
+      "rule": "shared must not import roads"
+    },
+    {
+      "from": "src/ui/hudActions.ts",
+      "to": "src/render/people/creator.ts",
+      "rule": "ui must not import render"
+    },
+    {
+      "from": "src/world/growth.ts",
+      "to": "src/jobs/pool.ts",
+      "rule": "world must not import jobs"
+    }
+  ],
+  "ceilingsNote": "2026-10-30 (audit P4, D22): each file at 50 KB or more may not grow past its size on that day; sim/peds.ts, render/terrain.ts, render/carBody.ts and render/vehicles.ts had grown past the old rule unnoticed and are split in P18/P24; the type-only leaks listed are open (P9/P24)."
 }
