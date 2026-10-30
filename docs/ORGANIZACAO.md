@@ -21,7 +21,7 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 | Medida | Valor |
 |---|---:|
 | Arquivos TS | 247 |
-| Bytes / linhas | 3.721.666 / 66.817 |
+| Bytes / linhas | 3.725.879 / 66.891 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |

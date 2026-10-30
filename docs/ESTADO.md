@@ -1,6 +1,6 @@
 # Estado do trabalho (reescrever a cada mudança; entra sozinho em toda sessão e depois de toda compactação)
 
-Atualizado: 2026-10-29, 22h27.
+Atualizado: 2026-10-29, 22h44.
 
 ## Integrado em `main` (quem integra: a sessão coordenadora, depois de tsc, testes, `npm run budget` e fotos)
 - 20h25: interface do Roadcraft inteira (5 commits, merge `b466b35`); luz e pós (`5ac9b07` + contraste `f475137`);
@@ -39,25 +39,25 @@ Atualizado: 2026-10-29, 22h27.
 
 ## Arquitetura no worktree de port (2026-10-29)
 
-- Branch `port/roadcraft-features`; HEAD `0965073` (ferramenta de fotos), com a extração de
-  regiões em `b6f4857` e a geometria pura em `084425c`. Sem push e sem merge em main; nenhum
-  agente ativo.
+- Branch `port/roadcraft-features`; HEAD `e89f6ed` (vidro transparente, ocupantes e entre-eixos),
+  com `066b047`/`0965073`/`b6f4857`/`084425c` antes. Sem push e sem merge em main; nenhum agente
+  ativo.
 - Extraídos: `src/app/session.ts`, `src/app/tools.ts`, `src/app/clicks.ts`, `src/app/buildings.ts`,
   `src/sim/traffic/laneChanges.ts`, `lines.ts`, `state.ts` e `regions.ts`, `src/jobs/buildingGen/plan.ts`,
   `polygon.ts`, `geometry.ts` e `materials.ts`, `src/r40/api.ts` e `src/roads/dash.ts`. `game.ts`
-  2.645, `traffic.ts` 2.852, `buildingGen.ts` 2.379; `arch:check` 247 arquivos/66.817 linhas,
-  0 ciclos (inclusive de tipos) e 0 vazamentos.
+  2.645, `traffic.ts` 2.852, `vehicles.ts` 790, `buildingGen.ts` 2.379; `arch:check` 247 arquivos/
+  66.891 linhas, 0 ciclos (inclusive de tipos) e 0 vazamentos.
 - Vias: fase contínua das tracejadas entre trechos e máscara de perfil no leque da junção, com
-  `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget válido (medido antes de `b6f4857`): street 480 draws/
-  14.829.010 tris, district 184/7.863.871, city 142/**3.682.157** (limite 4.044.328), map
-  178/4.463.164, night 490/14.659.335; MB 761/622/285/261/745, todos dentro.
-- Testes: suíte **370/370 em 66,0 s** antes da extração de regiões; depois dela,
-  trânsito/defeitos/movimento **61/61 em 58,3 s**, prédios 50/50 em 5,5 s e tsc/build limpos. A suíte
-  completa não foi repetida depois de `b6f4857`.
-- Carros: fotos `test-results/carros-qa-2026-10-29/01..09` (20/100/500 m, dia/noite, seguindo). A
-  20 m e no seguimento a 20/100 m a carroceria é opaca; a 500 m os carros não resolvem no quadro e
-  não há caixa/transparência grosseira. O defeito "carros transparentes" não se reproduziu no HEAD;
-  caminhão/moto ainda não isolados em foto.
+  `test/roadContinuity.test.ts`; `simMotion` 3/3 e vias 54/54. Budget com o vidro: street 418 draws/
+  11.483.609 tris, district 175/7.103.905, city 123/**4.002.312** (limite 4.044.328), map
+  178/4.463.246, night 494/14.492.808; MB 611/591/301/261/731, todos dentro.
+- Testes: suíte **371/371 em 98,7 s** com o vidro; trânsito/defeitos/movimento **61/61 em 58,3 s**
+  na extração de regiões; prédios 50/50 em 5,5 s; tsc/build limpos.
+- Carros: `test-results/carros-qa-2026-10-29/01..09` (20/100/500 m, dia/noite, seguindo) mostra a
+  carroceria opaca; `test-results/carros-vidro-perto-2026-10-29/01,07` mostra o motorista no carro
+  preto a 8 m e passageiros brancos dentro do ônibus, com o vidro separado e transparente. O LOD
+  distante mantém o modelo fundido. Caminhão/moto ainda não isolados em foto; ônibus em curva ainda
+  sem foto de rota.
 - Pendente: sinks do `GenContext` e o resto de `traffic`/`r40/buildingMesh`, bomba real, construtor
   completo, ônibus/pessoas visuais, cidade organizada/250 mil, reabertura de 10 km.
 
