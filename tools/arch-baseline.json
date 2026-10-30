@@ -353,14 +353,14 @@
     }
   ],
   "ceilings": {
-    "src/r40/render/buildings/signature.ts": 108069,
-    "src/game.ts": 100278,
-    "src/sim/peds.ts": 90606,
-    "src/sim/traffic.ts": 89346,
-    "src/r40/world/growth/lotPlan.ts": 70231,
-    "src/render/terrain.ts": 66020,
-    "src/render/carBody.ts": 63466,
-    "src/ui/roadCatalog.ts": 60976,
+    "src/r40/render/buildings/signature.ts": 106289,
+    "src/game.ts": 98289,
+    "src/sim/peds.ts": 88979,
+    "src/sim/traffic.ts": 87620,
+    "src/r40/world/growth/lotPlan.ts": 69139,
+    "src/render/terrain.ts": 64935,
+    "src/render/carBody.ts": 62297,
+    "src/ui/roadCatalog.ts": 59976,
     "src/render/vehicles.ts": 52343
   },
   "typeViolations": [

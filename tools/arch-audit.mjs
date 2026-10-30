@@ -29,7 +29,8 @@ const data = new Map();
 
 for (const abs of files) {
   const rel = relOf(abs);
-  const text = fs.readFileSync(abs, 'utf8');
+  // line endings do not count: the same content measures the same whether checked out with LF or CRLF
+  const text = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
   const source = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const imports = new Map();
   const add = (spec, typeOnly) => {
