@@ -5,6 +5,8 @@ import { BufferAttribute, BufferGeometry, Sphere, Vector3 } from 'three/webgpu';
 
 const FRAGMENT = 3.6;
 const MAX_EDGE = 2.4;
+const WALL = 0.28;
+const BROKEN = [0.46, 0.44, 0.41] as const;
 const STRIDE = 12;
 
 export interface FractureInput {
@@ -97,7 +99,7 @@ export function fractureData(input: FractureInput): StillData {
     const cell = cellOf(cx, cy, cz), list = cells.get(cell);
     if (list) list.push(t); else cells.set(cell, [t]);
   }
-  const keys = [...cells.keys()], vkey = (x: number, y: number, z: number): string => `${Math.round(x * 200)},${Math.round(y * 200)},${Math.round(z * 200)}`;
+  const keys = [...cells.keys()];
   const vertexCells = new Map<string, Set<number>>();
   const pos: number[][] = [], nor: number[][] = [], col: number[][] = [], slots: number[][] = [], frags: Fragment[] = [];
   keys.forEach((cell, fi) => {
@@ -107,17 +109,46 @@ export function fractureData(input: FractureInput): StillData {
     cx /= n; cy /= n; cz /= n;
     let radius = 0, low = Infinity;
     const start = (pos[fi] ??= []).length / 3;
+    const p = pos[fi]!, nn = (nor[fi] ??= []), cc = (col[fi] ??= []);
+    const push = (x: number, y: number, z: number, nx: number, ny: number, nz: number, c: readonly number[]): void => {
+      p.push(x - cx, y - cy, z - cz); nn.push(nx, ny, nz); cc.push(c[0]!, c[1]!, c[2]!);
+      radius = Math.max(radius, Math.hypot(x - cx, y - cy, z - cz)); low = Math.min(low, y);
+    };
+    const vkey = (x: number, y: number, z: number): string => `${Math.round(x * 200)},${Math.round(y * 200)},${Math.round(z * 200)}`;
+    // Every front triangle, plus the cut faces that make the fragments solid masonry instead of paper sheets.
+    const edges = new Map<string, number>();
+    for (const t of list) for (const [i, j] of [[0, 1], [1, 2], [2, 0]] as const) {
+      const a = vkey(t.v[i * STRIDE]!, t.v[i * STRIDE + 1]!, t.v[i * STRIDE + 2]!);
+      const b = vkey(t.v[j * STRIDE]!, t.v[j * STRIDE + 1]!, t.v[j * STRIDE + 2]!);
+      const k = a < b ? `${a}|${b}` : `${b}|${a}`;
+      edges.set(k, (edges.get(k) ?? 0) + 1);
+    }
     for (const t of list) {
+      const v = t.v;
       for (let q = 0; q < 3; q++) {
-        const o = q * STRIDE, x = t.v[o]!, y = t.v[o + 1]!, z = t.v[o + 2]!;
-        pos[fi]!.push(x - cx, y - cy, z - cz); nor[fi] ??= []; col[fi] ??= [];
-        nor[fi]!.push(t.v[o + 3]!, t.v[o + 4]!, t.v[o + 5]!); col[fi]!.push(t.v[o + 6]!, t.v[o + 7]!, t.v[o + 8]!);
-        radius = Math.max(radius, Math.hypot(x - cx, y - cy, z - cz)); low = Math.min(low, y);
+        const o = q * STRIDE, x = v[o]!, y = v[o + 1]!, z = v[o + 2]!;
+        push(x, y, z, v[o + 3]!, v[o + 4]!, v[o + 5]!, [v[o + 6]!, v[o + 7]!, v[o + 8]!]);
         const key = vkey(x, y, z), set = vertexCells.get(key) ?? new Set<number>();
         set.add(fi); vertexCells.set(key, set);
       }
+      // The back of the shell, in broken masonry.
+      const back = (q: number): [number, number, number] => [v[q * STRIDE]! - v[q * STRIDE + 3]! * WALL, v[q * STRIDE + 1]! - v[q * STRIDE + 4]! * WALL, v[q * STRIDE + 2]! - v[q * STRIDE + 5]! * WALL];
+      for (const q of [0, 2, 1]) { const b = back(q); push(b[0], b[1], b[2], -v[q * STRIDE + 3]!, -v[q * STRIDE + 4]!, -v[q * STRIDE + 5]!, BROKEN); }
+      // A side along every edge used by this fragment only (the cuts between fragments).
+      for (const [i, j] of [[0, 1], [1, 2], [2, 0]] as const) {
+        const a = vkey(v[i * STRIDE]!, v[i * STRIDE + 1]!, v[i * STRIDE + 2]!);
+        const b = vkey(v[j * STRIDE]!, v[j * STRIDE + 1]!, v[j * STRIDE + 2]!);
+        if ((edges.get(a < b ? `${a}|${b}` : `${b}|${a}`) ?? 0) !== 1) continue;
+        const pi = [v[i * STRIDE]!, v[i * STRIDE + 1]!, v[i * STRIDE + 2]!], pj = [v[j * STRIDE]!, v[j * STRIDE + 1]!, v[j * STRIDE + 2]!];
+        const bi = back(i), bj = back(j);
+        const ex = pj[0]! - pi[0]!, ey = pj[1]! - pi[1]!, ez = pj[2]! - pi[2]!;
+        const sx = ey * v[5]! - ez * v[4]!, sy = ez * v[3]! - ex * v[5]!, sz = ex * v[4]! - ey * v[3]!;
+        const sl = Math.hypot(sx, sy, sz) || 1, sn = [sx / sl, sy / sl, sz / sl] as const;
+        push(pi[0]!, pi[1]!, pi[2]!, sn[0], sn[1], sn[2], BROKEN); push(bi[0], bi[1], bi[2], sn[0], sn[1], sn[2], BROKEN); push(pj[0]!, pj[1]!, pj[2]!, sn[0], sn[1], sn[2], BROKEN);
+        push(pj[0]!, pj[1]!, pj[2]!, sn[0], sn[1], sn[2], BROKEN); push(bi[0], bi[1], bi[2], sn[0], sn[1], sn[2], BROKEN); push(bj[0], bj[1], bj[2], sn[0], sn[1], sn[2], BROKEN);
+      }
     }
-    slots[fi] = [start, pos[fi]!.length / 3 - start];
+    slots[fi] = [start, p.length / 3 - start];
     frags[fi] = { centre: [cx, cy, cz], radius, low, neighbours: [] };
   });
   const links = frags.map(() => new Set<number>());
