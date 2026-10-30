@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { RoadJournal, buildRoad, buildRoundabout, bulbAt, demolishSeg, planRoad, roundaboutRefusal, snap } from '../src/roads/build.ts';
 import { heightIndex, sampleCoord } from '../src/world/heights.ts';
+import { waterCoord, waterIndex } from '../src/world/ground.ts';
 import { HEIGHT_MAP_RES } from '../src/config.ts';
 import { CommandStack, type Command } from '../src/core/commands.ts';
 import { demolishBox } from '../src/tools/demolish.ts';
@@ -786,6 +787,14 @@ test('D25b: a pole line stays on the footway and above firm ground', async () =>
   const wetTool = new ItemTool(wet, new CommandStack(), stub as never, stub as never);
   assert.equal(wetTool.placePoleLine(0, 6, 64, 6, 2), false, 'poles over water are refused');
   assert.equal(wet.items.size, 0, 'no item was added over water');
+  // water only in the middle of the run: the endpoints are dry, the wire must not jump over it
+  const middle = flatWorld(1e9);
+  road(middle, -100, 0, 100, 0);
+  for (let x = 28; x <= 36; x += 4) for (let z = 4; z <= 8; z += 4) {
+    middle.water[waterIndex(Math.floor(waterCoord(x)), Math.floor(waterCoord(z)))] = 100;
+  }
+  const middleTool = new ItemTool(middle, new CommandStack(), stub as never, stub as never);
+  assert.equal(middleTool.placePoleLine(0, 6, 64, 6, 2), false, 'a dry-ended run over mid-run water is refused');
   assert.equal(w.items.t.cols.type[0], Item.PoleLine);
 });
 

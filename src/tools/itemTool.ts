@@ -18,8 +18,8 @@ import type { World } from '../world/world.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 
-/** Distance between poles of a drawn run (the same 32 m the automatic lines use). */
-const POLE_SPACING = 32;
+/** Every this many metres the drawn line is checked against the ground and the water (the wire is continuous too). */
+const POLE_CHECK = 4;
 
 /** Two commands already applied, as one undo step. */
 function both(a: Command, b: Command): Command {
@@ -202,7 +202,7 @@ export class ItemTool {
 
   /** Every pole and wire in the run must stay on firm footway, not only its two ends. */
   private poleRunGround(a: { x: number; z: number }, b: { x: number; z: number }): boolean {
-    const L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(L / POLE_SPACING));
+    const L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(L / POLE_CHECK));
     for (let i = 0; i <= n; i++) {
       const t = i / n, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
       if (!this.poleGround(this.spot(x, z, true))) return false;
