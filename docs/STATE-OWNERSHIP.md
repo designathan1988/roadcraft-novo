@@ -42,7 +42,8 @@ aqui; antes de ler estado de outro módulo, use a API/porta/snapshot, nunca a c�
   estado de LOD é derivado; não pode virar decisão de gameplay nem duplicar a lista de prédios.
 - `sim` mantém sinais, filas, linhas, ônibus e passageiros; a page não deve manter uma segunda lista de veículos.
   O vocabulário puro do worker está em `sim/traffic/state.ts` (`vehSchema`, `End`, inspeção e tipos); não é uma
-  segunda cópia mutável.
+  segunda cópia mutável. A ocupação de regiões e o governador de frota têm um dono único, `sim/traffic/regions.ts`;
+  `Traffic` só publica getters/setters para scripts e testes.
 - `Game` concentra câmera, seleção, ferramenta, sessão e bomba; `app/session.ts`, `app/tools.ts`, `app/clicks.ts`,
   `app/buildings.ts` e `app/photoHooks.ts` já receberam as portas; a edição de lote/entrada continua nele.
 - O nível de detalhe do gerador viaja em `MeshBuilder.lod`; não há mais `genLod` global. A geometria pura
@@ -55,7 +56,7 @@ aqui; antes de ler estado de outro módulo, use a API/porta/snapshot, nunca a c�
 
 ## Portão
 
-- `npm run arch:check` no HEAD: **246 arquivos/66.788 linhas, 0 ciclos de runtime, 0 de tipos, 0 vazamentos**.
+- `npm run arch:check` no HEAD: **247 arquivos/66.817 linhas, 0 ciclos de runtime, 0 de tipos, 0 vazamentos**.
 - Cada nova feature atualiza esta matriz; nenhum estado novo sem dono.
 - O `MeshBuilder` é contexto de geração passado por prédio; `vehSchema`/`End` são vocabulário puro do worker, não
   estado de jogo.

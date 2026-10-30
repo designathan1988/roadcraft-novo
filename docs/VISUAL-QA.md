@@ -20,6 +20,12 @@ Data: 2026-10-29. Toda mudança visual precisa de foto nas mesmas vistas, 1:1 na
 - Corpo opaco; só vidro transparente; sem “see-through”, sem buraco, sem dither visível no corpo.
 - Rodas no chão, faróis/lanternas/setas corretos, sombra coerente.
 - Comparar com o Roadcraft 4.0.
+- **Estado em 2026-10-29 (árvore de `084425c`, antes de `b6f4857`):** `node tools/fotos-carros-qa.mjs test-results/carros-qa-2026-10-29`
+  gerou `01..09`. A 20 m dia/noite (`01`, `04`) e seguindo a 20 m (`07`) a carroceria é opaca, sem corpo
+  transparente ou buraco. A 100 m (`02`, `05`) e seguindo (`08`) os corpos seguem opacos. A 500 m (`03`, `06`) e
+  seguindo (`09`) os carros não resolvem no quadro; não há caixa nem transparência grosseira, mas isso não prova
+  detalhe a 500 m. O defeito “carros transparentes” **não se reproduziu**; caminhão e moto ainda não foram
+  isolados em foto.
 
 ### Pessoas
 

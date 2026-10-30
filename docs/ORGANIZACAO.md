@@ -20,17 +20,17 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 246 |
-| Bytes / linhas | 3.720.630 / 66.788 |
+| Arquivos TS | 247 |
+| Bytes / linhas | 3.721.666 / 66.817 |
 | Arquivos >= 50 KB | 11 |
 | Arquivos >= 100 KB | 5 |
 | Arquivos >= 150 KB | 4 |
-| Arestas de import | 990 (176 só de tipo) |
+| Arestas de import | 994 (177 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
-Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.894),
+Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.852),
 `game.ts` (2.645), `jobs/buildingGen.ts` (2.379), `r40/render/buildings/signature.ts` (1.781),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
@@ -208,11 +208,15 @@ Ordem por risco e valor (não por tamanho):
 - Feito em 2026-10-29: `buildingGen/geometry.ts` (quadro do lote, `wx/wz/nx/nz`, planos, telhados inclinados,
   toldos e `shadeHex`) e `buildingGen/materials.ts` (`BMAT`/`Facade`), com o gerador de 2.521 para 2.379 linhas;
   junção, platibanda, chaminé e telhado-planta ficam para o `GenContext` porque ainda leem `detailOut`/`layoutOut`.
-- Em andamento: `sim/traffic.ts` por micro/meso/sinais/ônibus; `buildingGen` ainda tem os sinks globais; `r40/buildingMesh.ts`
+- Feito em 2026-10-29: `sim/traffic/regions.ts` (ocupação de 400 m, `regionOf`, governador de frota); `Traffic`
+  publica getters/setters para scripts e testes e caiu de 2.894 para 2.852 linhas. A passagem continua a cada
+  `REGION_EVERY` s, uma vez pelos segmentos; a otimização incremental fica pendente de medição.
+- Em andamento: `sim/traffic.ts` por micro/meso/ônibus; `buildingGen` ainda tem os sinks globais; `r40/buildingMesh.ts`
   continua por último.
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
-  usa saída antecipada (≈13 s reais). A suíte completa deu 363/364 antes do ajuste do telhado 3; o caso foi corrigido
-  isoladamente. Não declarar a suíte completa verde sem rodá-la de novo.
+  usa saída antecipada (≈13 s reais). A suíte completa fechou **370/370 em 66,0 s** antes da extração de regiões;
+  depois dela, trânsito/defeitos/movimento 61/61 em 58,3 s. Não declarar a suíte completa verde depois de `b6f4857`
+  sem rodá-la de novo.
 
 ## 8. Fontes
 
