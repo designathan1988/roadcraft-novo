@@ -1717,6 +1717,8 @@ export class Game {
   private clickLot(hit: THREE.Vector3 | null): void { this.editing.clickLot(hit); }
   private setLotMode(m: LotMode): void { this.editing.setLotMode(m); }
   private hoverLotTool(hit: THREE.Vector3 | null): void { this.editing.hoverLotTool(hit); }
+  /** Lot tool click by the verification scripts (the lot mode decides what it does). */
+  clickLotTool(hit: THREE.Vector3): void { this.editing.clickLotTool(hit); }
   private finishPoly(): void { this.editing.finishPoly(); }
   private grabCorner(hit: THREE.Vector3 | null): boolean { return this.editing.grabCorner(hit); }
   private dropCorner(hit: THREE.Vector3 | null): void { this.editing.dropCorner(hit); }
