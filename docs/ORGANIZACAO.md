@@ -20,17 +20,17 @@ Ferramenta: `node tools/arch-audit.mjs` (grava `test-results/architecture/audit.
 
 | Medida | Valor |
 |---|---:|
-| Arquivos TS | 259 |
-| Bytes / linhas | 3.732.740 / 67.091 |
+| Arquivos TS | 260 |
+| Bytes / linhas | 3.731.037 / 67.114 |
 | Arquivos >= 50 KB | 10 |
 | Arquivos >= 100 KB | 4 |
-| Arquivos >= 150 KB | 3 |
-| Arestas de import | 1102 (196 só de tipo) |
+| Arquivos >= 150 KB | 2 |
+| Arestas de import | 1105 (196 só de tipo) |
 | Ciclos de runtime | **0** |
 | Ciclos de tipos | **0** (eram 4; materialTypes, networkView, interfaces ground/items e hudActions, 2026-10-29) |
 | Vazamentos de camada (valor) | 0 |
 
-Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.809),
+Maiores arquivos: `r40/render/buildings/buildingMesh.ts` (4.119 linhas), `sim/traffic.ts` (2.752),
 `game.ts` (2.645), `r40/render/buildings/signature.ts` (1.781), `jobs/buildingGen/plans.ts` (422),
 `world/catalogData.ts` (87 KB em 5 linhas de dados).
 
@@ -229,6 +229,8 @@ Ordem por risco e valor (não por tamanho):
   1.520 para **250 linhas**, só orquestração, lotes e partes; arquivos >=50 KB caíram para 10.
 - Feito em 2026-10-30: `sim/traffic/measure.ts` (`avgSpeed`, `probe`, `stopped` e acumuladores), com o
   `traffic.ts` de 2.852 para 2.809 linhas.
+- Feito em 2026-10-30: `sim/traffic/stops.ts` (índice de paradas por célula, pessoas esperando, `lineStats`), com
+  `traffic.ts` de 2.809 para 2.752 linhas; arquivos >=150 KB caíram para 2.
 - Em andamento: `sim/traffic.ts` por micro/meso/ônibus; `r40/buildingMesh.ts` continua por último.
 - `simDefects` foi investigado: C48 foi reduzido de >5 min para 12 s; C11 caiu de 300 s para 60 s simulados e C25
   usa saída antecipada (≈13 s reais). A suíte completa fechou **371/371 em 66,7 s** depois da medição; trânsito/
