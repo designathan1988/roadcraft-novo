@@ -15,6 +15,9 @@ import { MAP_CELLS } from '../config.ts';
 import { Fn } from './arch.ts';
 
 /** Buildings. Milestone 1 has only generic boxes; the procedural generator arrives in milestone 4. */
+/** The first day starts at 06:30 (Roadcraft 4.0 sim/city/city.ts:9); minutes in a day. */
+const DAY_START = 6 * 60 + 30, DAY = 24 * 60;
+
 export const buildingSchema = {
   x: Float32Array, z: Float32Array,
   w: Float32Array, d: Float32Array, h: Float32Array,
@@ -105,8 +108,13 @@ export class World {
   readonly items: StreetItems;
   /** Polygon lot corners, SHAPE_STRIDE int16 (decimetres, lot frame) per building id. */
   lotShape = new Int16Array((1 << 16) * SHAPE_STRIDE);
-  /** City clock in minutes since the map began (the hour of day is Game.hour; this one never wraps). */
+  /** City clock in minutes since the map began (building decay; never wraps). */
   clock = 0;
+  /**
+   * Minutes the time of day runs ahead of the city clock: one clock for both, as Roadcraft 4.0 (sim/city/city.ts:9-32,
+   * minutes = DAY_START 06:30 + skipped + the clock). Setting the hour (a save, a photo, ?hour) moves only this shift.
+   */
+  private dayShift = DAY_START;
   /** Each building's next decay tenth (world/decay.ts). */
   private decayHeap = new MinuteHeap();
   /** Buildings that passed a tenth since the start (counted, for the commit messages). */
@@ -158,9 +166,17 @@ export class World {
     }
   }
 
-  /** Sets the clock (loading a save): every building is filed again. */
+  /** The time of day in hours, [0, 24): the city clock and the shift. */
+  get hour(): number { return (((this.clock + this.dayShift) % DAY) + DAY) % DAY / 60; }
+
+  /** Sets the time of day (a save's, a photo's, ?hour); the city clock, and so the decay, does not move. */
+  setHour(h: number): void { this.dayShift = (((h * 60 - this.clock) % DAY) + DAY) % DAY; }
+
+  /** Sets the clock (loading a save): every building is filed again; the time of day stays. */
   setClock(minute: number): void {
+    const h = this.hour;
     this.clock = minute;
+    this.setHour(h);
     this.decayHeap.clear();
     const t = this.buildings;
     for (let id = 0; id < t.end; id++) if (t.alive[id]) this.refreshDecay(id);
@@ -394,7 +410,10 @@ export class World {
     this.squares.fill(0);
     this.residents = 0; this.jobs = 0;
     this.decayHeap.clear();
+    // another city starts its clock again; the time of day goes on
+    const h = this.hour;
     this.clock = 0;
+    this.setHour(h);
   }
 }
 

@@ -197,7 +197,8 @@ export class Game {
   private readonly editing: LotEditing;
   private last = 0;
   /** Time of day and clock speed (game hours per real minute). */
-  private hour = 10;
+  /** The time of day: the World's (one clock with the city's, as Roadcraft 4.0). */
+  private get hour(): number { return this.world.hour; }
   /** Chosen sky and weather set by the player (both go into the save). */
   private skyMode: SkyMode = 'dia'; // as Roadcraft 4.0: a game opens in "always day"
   /** Clouds placed by the player and the state of the Sky tool. */
@@ -244,7 +245,7 @@ export class Game {
       extras: () => ({ skyMode: gs.skyMode, weather: gs.sky.ctl, water: gs.water.ctl, clouds: gs.clouds.list, hour: gs.hour }),
       clearForOpen: () => gs.clearPage(),
       applyExtra: (ex) => gs.applyExtra(ex),
-      setHour: (h) => { gs.hour = h; },
+      setHour: (h) => gs.world.setHour(h),
       setBiome: (b) => gs.setBiome(b),
       insertBoxes: (b) => insertBoxes(gs.world, b),
       resetCity: () => gs.cities.reset(),
@@ -528,7 +529,7 @@ export class Game {
     this.world.seed = Number(params.get('seed') ?? 1) >>> 0;
     this.world.gameId = (Math.random() * 2 ** 32) >>> 0;
     // a photo at a set hour (?hora) shows that hour's light: the sky follows the clock
-    if (params.has('hour')) { this.hour = Number(params.get('hour')) % 24; this.clock.holdHour(); this.skyMode = 'ciclo'; }
+    if (params.has('hour')) { this.world.setHour(Number(params.get('hour')) % 24); this.clock.holdHour(); this.skyMode = 'ciclo'; }
     this.hud.setSky(this.skyMode);
     this.weather.onStrike = (d) => this.ambient.thunder(d);
     const preset = ['tempestade', 'chuva', 'limpo'].find((k) => params.has(k));
@@ -685,7 +686,7 @@ export class Game {
 
   /** Camera and hour for automated photos; waits for the meshes to be ready. */
   async view(x: number, z: number, yaw: number, pitch: number, dist: number, hour?: number): Promise<void> {
-    await photoView(this.rig, (frames) => this.settle(frames), (h) => { this.hour = h; this.clock.holdHour(); }, x, z, yaw, pitch, dist, hour);
+    await photoView(this.rig, (frames) => this.settle(frames), (h) => { this.world.setHour(h); this.clock.holdHour(); }, x, z, yaw, pitch, dist, hour);
   }
 
   /** Waits for the workers to drain (for photos and tests). */
@@ -749,7 +750,6 @@ export class Game {
     }
     const cam = this.rig.camera;
     // always day (or night) fixes the light only: the clock, and the traffic demand that follows it, go on
-    if (!this.clock.paused) this.hour = (this.hour + dt * this.clock.daySpeed / 60) % 24;
     const light = this.skyMode === 'dia' ? 12 : this.skyMode === 'noite' ? 22 : this.hour;
     // city clock in minutes (building decay); the sky mode only fixes the light
     if (!this.clock.paused) this.world.advanceClock(dt * this.clock.daySpeed);
@@ -1383,7 +1383,7 @@ export class Game {
       terminals: () => g.transit.terminals,
       autosaveNow: () => { g.autosaveAt = 0; },
       demandSentAt: () => g.demandSent,
-      setHour: (h) => { g.hour = ((h % 24) + 24) % 24; },
+      setHour: (h) => g.world.setHour(h),
       weather: () => ({ clouds: g.weather.fixed?.clouds ?? cloudsU.value, rain: g.weather.fixed?.rain ?? rainU.value, storm: g.weather.fixed?.storm ?? 0, wind: g.weather.windFixed }),
       inspector: () => ({ open: g.inspector.isOpen, seg: g.inspector.seg }),
       insideId: () => g.insideId,
@@ -1630,7 +1630,8 @@ export class Game {
   private applyExtra(ex: MapExtra): void {
     const w = this.world;
     this.water.set(ex.water ?? DEFAULT_WATER, false);
-    w.clock = ex.clock;
+    // the save's city clock (decay filed again); the time of day it set stays
+    w.setClock(ex.clock);
     if (ex.unlimited !== null) w.unlimited = ex.unlimited;
     // regional road paint is part of the map (Roadcraft): a map saved in "EUA" opens in "EUA"
     if (ex.paint && ex.paint !== this.settings.paint) { this.settings.paint = ex.paint; setPaintStyle(ex.paint); }
