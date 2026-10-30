@@ -669,8 +669,10 @@ export function buildCarBody(a: CarArchetype, styleName: CarStyle, stations0 = 6
     }
     void probeX;
     // painted above the bumper line, dark below it (a whole end painted dark trim, as 4.0 does, made every car's tail a
-    // black panel from the bumper to the boot lid)
-    const cut = (x: number): number => lerp(bottom(x), top(x), 0.4);
+    // black panel from the bumper to the boot lid): the line is the sill row of the end's section, where the side's own
+    // dark band (`valance`, the rows below the sill by the ends) stops, so the band runs on round the corner
+    const sillBack = sections[0]![ROW.sill]!.y, sillFront = sections[sections.length - 1]![ROW.sill]!.y;
+    const cut = (x: number): number => (x > 0 ? sillFront : sillBack);
     const painted: number[] = [], dark: number[] = [];
     const arr = p2.array as Float32Array;
     for (let k = 0; k < arr.length; k += 9) {
