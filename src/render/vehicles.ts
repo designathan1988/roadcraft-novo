@@ -359,32 +359,6 @@ const KIND_DIMS: Array<[number, number, number]> = [[1.8, 1.45, 4.4], [2.5, 3.0,
 /** Index of the detailed model: car styles 0-5, bus 6, truck 7, person 8, wagon 9, bicycle 10. */
 const modelOf = (kind: number, style: number) => (kind === 0 ? style : kind + 5);
 const dimsOf = (kind: number, style: number) => (kind === 0 && style > 0 ? 4 + style : kind === 5 ? 10 : kind);
-
-/**
- * Splits a merged vehicle model into its opaque body and its glass, by the `glow` attribute. The glass gets a
- * transparent material (the cabin's people read through it); the body stays a single opaque draw.
- */
-function splitGlass(g: THREE.BufferGeometry): { solid: THREE.BufferGeometry; glass: THREE.BufferGeometry | null } {
-  const glow = g.getAttribute('glow');
-  const index = g.index ? Array.from(g.index.array as ArrayLike<number>) : null;
-  const count = glow ? glow.count : g.getAttribute('position').count;
-  const tri = (g.index ? g.index.count : count) / 3;
-  const solid: number[] = [], glass: number[] = [];
-  for (let t = 0; t < tri; t++) {
-    const a = index ? index[t * 3] : t * 3, b = index ? index[t * 3 + 1] : a + 1, c = index ? index[t * 3 + 2] : a + 2;
-    (glow && Math.abs(glow.getX(a) - GLASS_GLOW) < 0.01 ? glass : solid).push(a, b, c);
-  }
-  const pick = (indices: number[]): THREE.BufferGeometry => {
-    const out = new THREE.BufferGeometry();
-    for (const [name, src] of Object.entries(g.attributes)) {
-      const item = src.itemSize, data = new Float32Array(indices.length * item);
-      for (let k = 0; k < indices.length; k++) for (let j = 0; j < item; j++) data[k * item + j] = src.getComponent(indices[k], j);
-      out.setAttribute(name, new THREE.BufferAttribute(data, item, src.normalized));
-    }
-    return out;
-  };
-  return { solid: pick(solid), glass: glass.length ? pick(glass) : null };
-}
 /** People: the model up to here, a box up to PERSON_MID. */
 const PERSON_NEAR = 70;
 /** Detailed vehicles cast shadows only up to here; beyond, the same model without (the shadow fades with distance). */
@@ -404,7 +378,7 @@ class Batch {
   count = 0;
   readonly cap: number;
 
-  constructor(base: THREE.BufferGeometry, cap: number, scaled: boolean, shadows = true, animated = false, glass = false) {
+  constructor(base: THREE.BufferGeometry, cap: number, scaled: boolean, shadows = true, animated = false) {
     this.cap = cap;
     const g = new THREE.InstancedBufferGeometry();
     g.index = base.index;
@@ -421,10 +395,10 @@ class Batch {
     g.setAttribute('iinfo', this.infoAttr);
     g.instanceCount = 0;
     this.geo = g;
-    // one material per combination (plain, box, person, glass) for every batch: each extra material is one more shader
-    // to build and compile at load (19 batches were 19 materials and the city opened 1.5 s slower)
-    const key = (scaled ? 1 : 0) + (animated ? 2 : 0) + (glass ? 4 : 0);
-    this.mesh = new THREE.Mesh(g, MATERIALS[key] ??= glass ? vehicleGlassMaterial() : vehicleMaterial(scaled, animated));
+    // one material per combination (plain, box, person) for every batch: each extra material is one more shader to
+    // build and compile at load (19 batches were 19 materials and the city opened 1.5 s slower)
+    const key = (scaled ? 1 : 0) + (animated ? 2 : 0);
+    this.mesh = new THREE.Mesh(g, MATERIALS[key] ??= vehicleMaterial(scaled, animated));
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = shadows;
     this.mesh.receiveShadow = true;
@@ -570,30 +544,6 @@ function vehicleMaterial(scaled: boolean, animated: boolean): THREE.MeshStandard
   return m;
 }
 
-/** The cabin glass: one transparent draw over the opaque body, so the seated people read through the panes. */
-function vehicleGlassMaterial(): THREE.MeshStandardNodeMaterial {
-  const m = new THREE.MeshStandardNodeMaterial();
-  m.transparent = true;
-  m.opacity = 0.34;
-  m.depthWrite = false;
-  m.side = THREE.DoubleSide;
-  m.forceSinglePass = true;
-  m.roughness = 0.08;
-  m.metalness = 0.05;
-  const ipos = attribute('ipos', 'vec4'), iprev = attribute('iprev', 'vec4');
-  const local = attribute('position', 'vec3'), nrm = attribute('normal', 'vec3');
-  const rotBy = (yaw: Node) => {
-    const c = cos(yaw), s = sin(yaw);
-    return (p: Node) => vec3(p.x.mul(c).add(p.z.mul(s)), p.y, p.x.negate().mul(s).add(p.z.mul(c)));
-  };
-  const rot = rotBy(ipos.w);
-  m.positionNode = rot(local).add(ipos.xyz);
-  withPrevious(m, rotBy(iprev.w)(local).add(iprev.xyz));
-  m.normalNode = transformNormalToView(normalize(rot(nrm)));
-  m.colorNode = vec4(vec3(0.10, 0.17, 0.21), float(1));
-  return m;
-}
-
 /** The pose at `o` is the followed vehicle: its own id (pose index 10) and kind and colour (light bits left out). */
 export function followMatch(d: Float32Array, o: number, f: { info: number; id: number }): boolean {
   return d[o + 10] === f.id && d[o + 8] % 65536 === f.info;
@@ -602,8 +552,6 @@ export function followMatch(d: Float32Array, o: number, f: { info: number; id: n
 export class VehicleRenderer {
   readonly group = new THREE.Group();
   private near: Batch[];
-  /** Cabin glass for the near models: the opaque body is drawn by `near`, this transparent draw over it. */
-  private nearGlass: Array<Batch | null> = [];
   /** Detailed cars, buses and trucks beyond SHADOW_NEAR: the same model, without a shadow. */
   private nearFar: Batch[];
   private mid: Batch;
@@ -619,33 +567,21 @@ export class VehicleRenderer {
 
   constructor(reader: PoseReader) {
     this.reader = reader;
-    // one model per car style (the same material: one more call per style on screen). The near models are split into
-    // an opaque body and a transparent glass; the far ones keep the merged model (glass there is a dark pane).
-    const fullCars = [...CAR_BODIES.map((_, i) => carModel(i)), motoModel()];
-    const splitCars = fullCars.map(splitGlass);
-    const cars = splitCars.map((s) => s.solid);
-    const fullBus = busModel(), fullTruck = truckModel();
-    const splitBus = splitGlass(fullBus), splitTruck = splitGlass(fullTruck);
-    const bus = splitBus.solid, truck = splitTruck.solid;
+    // one model per car style (the same material: one more call per style on screen)
+    const cars = [...CAR_BODIES.map((_, i) => carModel(i)), motoModel()];
+    const bus = busModel(), truck = truckModel();
     const carCap = (i: number) => (i < 2 ? CAP_NEAR : CAP_NEAR / 2);
     this.near = [...cars.map((g, i) => new Batch(g, carCap(i), false)), new Batch(bus, 1024, false), new Batch(truck, 1024, false), new Batch(personModel(), 8000, false, true, true), new Batch(model(WAGON), 512, false), new Batch(bikeModel(), 2000, false)];
-    this.nearGlass = [
-      ...splitCars.map((s, i) => s.glass ? new Batch(s.glass, carCap(i), false, false, false, true) : null),
-      splitBus.glass ? new Batch(splitBus.glass, 1024, false, false, false, true) : null,
-      splitTruck.glass ? new Batch(splitTruck.glass, 1024, false, false, false, true) : null,
-    ];
     // beyond the cascades' shadow: the same model with the blob shadow under it
     const blobs = [...CAR_BODIES.map(([, a]) => [a.width, a.length]), [0.7, 2.1]];
-    this.nearFar = [...fullCars.map((g, i) => new Batch(withBlob(g, blobs[i][0], blobs[i][1]), carCap(i), false, false)),
-      new Batch(withBlob(fullBus, 2.5, 11.8), 1024, false, false), new Batch(withBlob(fullTruck, 2.5, 9.5), 1024, false, false)];
+    this.nearFar = [...cars.map((g, i) => new Batch(withBlob(g, blobs[i][0], blobs[i][1]), carCap(i), false, false)),
+      new Batch(withBlob(bus, 2.5, 11.8), 1024, false, false), new Batch(withBlob(truck, 2.5, 9.5), 1024, false, false)];
     // far (boxes up to 1.7 km): no shadow (less than a pixel, and up to 30,000 in the three shadow passes)
     this.mid = new Batch(model(BOX), CAP_MID, true, false);
     // the cars in the middle distance keep their silhouette (not a box): one light model per style
     this.midCars = CAR_BODIES.map((_, i) => new Batch(carMidModel(i), CAP_MID / 2, false, false));
     for (const b of [...this.near, ...this.nearFar, this.mid, ...this.midCars]) this.group.add(b.mesh);
-    for (const b of this.nearGlass) if (b) this.group.add(b.mesh);
     this.group.add(this.people.group);
-    this.people.seatedInCabins = true;
     void this.people.load();
   }
 
@@ -682,7 +618,6 @@ export class VehicleRenderer {
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     for (const b of this.near) b.count = 0;
-    for (const b of this.nearGlass) if (b) b.count = 0;
     for (const b of this.nearFar) b.count = 0;
     this.mid.count = 0;
     for (const b of this.midCars) b.count = 0;
@@ -751,11 +686,7 @@ export class VehicleRenderer {
           const mi = modelOf(kind, style);
           // Opaque bodies: one level or the other at a hard cut, never a dither over the paint (the old
           // complementary masks made the body see-through for the whole 30 m band).
-          const nearBody = !(kind < 3 && dist > SHADOW_NEAR);
-          if (fadeNear > 0.5) {
-            (nearBody ? this.near[mi] : this.nearFar[mi]).push(x, y, z, yaw, color, alpha, kind, 1, px, py, pz, pyaw);
-            if (nearBody && mi < this.nearGlass.length) this.nearGlass[mi]?.push(x, y, z, yaw, color, alpha, kind, 1, px, py, pz, pyaw);
-          }
+          if (fadeNear > 0.5) (kind < 3 && dist > SHADOW_NEAR ? this.nearFar[mi] : this.near[mi]).push(x, y, z, yaw, color, alpha, kind, 1, px, py, pz, pyaw);
           else if (kind === 0 && style < this.midCars.length) this.midCars[style].push(x, y, z, yaw, color, alpha, kind, -1, px, py, pz, pyaw);
           else this.mid.push(x, y, z, yaw, color, alpha, dimsOf(kind, style), -1, px, py, pz, pyaw);
         }
@@ -765,7 +696,6 @@ export class VehicleRenderer {
     this.lastNow = frameNow;
     people?.end();
     for (const b of this.near) b.commit();
-    for (const b of this.nearGlass) if (b) b.commit();
     for (const b of this.nearFar) b.commit();
     this.mid.commit();
     for (const b of this.midCars) b.commit();
