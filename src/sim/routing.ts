@@ -6,7 +6,7 @@ import { MAX_DEG } from '../roads/network.ts';
 import { PROFILES, PROFILE_INFO } from '../roads/profiles.ts';
 import { Ctl, Rule } from '../roads/control.ts';
 import type { SimNet } from './lanes.ts';
-import { asSeg, type NodeId } from '../core/ids.ts';
+import { asNode, asSeg, type NodeId } from '../core/ids.ts';
 
 const MAX_SPEED = 90 / 3.6;
 /**
@@ -159,6 +159,65 @@ export class Router {
   private eclosed = new Uint32Array(1 << 15);
   private ecur = 0;
 
+  /**
+   * A car's way on from each directed segment, kept per node (the node a directed segment arrives at): the segments it
+   * may leave by, in the node's adjacency order (the turns its lanes make, one-way streets and rails excluded), each
+   * with its free-flow time, its capacity (for the load) and the junction's cost (nodeCost). Built again when the
+   * node's junction data was (SimNet.nodeGen / netGen): an edit costs its own nodes, never the map. The search reads
+   * them instead of working out each movement at every expansion; the numbers are the same expressions as `drive`
+   * and `nodeCost`, in the same order, so the routes are the same.
+   */
+  private sN = new Uint8Array(0);
+  private sE = new Int32Array(0);
+  private sT = new Float64Array(0);
+  private sCap = new Float64Array(0);
+  private sC = new Float64Array(0);
+  private builtGen = new Uint32Array(0);
+  private builtNet = new Uint32Array(0);
+  /** Cars only: the successors are read from the per-node lists (false: worked out at each expansion, as for buses). */
+  kept = true;
+
+  private ensureSuccessors(): void {
+    const net = this.sim.net, edges = net.segs.capacity * 2, nodes = net.nodes.capacity;
+    if (this.sN.length < edges) {
+      const g = <T extends Uint8Array | Int32Array | Float64Array>(a: T, n: number): T => { const b = new (a.constructor as new (n: number) => T)(n); b.set(a); return b; };
+      this.sN = g(this.sN, edges); this.sE = g(this.sE, edges * MAX_DEG); this.sT = g(this.sT, edges * MAX_DEG);
+      this.sCap = g(this.sCap, edges * MAX_DEG); this.sC = g(this.sC, edges * MAX_DEG);
+    }
+    if (this.builtGen.length < nodes) {
+      const a = new Uint32Array(nodes).fill(0xffffffff); a.set(this.builtGen); this.builtGen = a;
+      const b = new Uint32Array(nodes); b.set(this.builtNet); this.builtNet = b;
+    }
+  }
+
+  /** Lays out the successors of every directed segment arriving at node `n` (see `sN`). */
+  private buildNode(n: number): void {
+    const sim = this.sim, net = sim.net, nc = net.nodes.cols, sc = net.segs.cols;
+    this.builtGen[n] = sim.nodeGen[n]; this.builtNet[n] = sim.netGen;
+    const o = n * MAX_DEG, d = nc.deg[n];
+    for (let i = 0; i < d; i++) {
+      const sIn = net.adj[o + i];
+      if (sIn < 0) continue;
+      const e = sIn * 2 + (sc.b[sIn] === n ? 0 : 1), at = e * MAX_DEG;
+      let cnt = 0;
+      for (let k = 0; k < d; k++) {
+        const s = net.adj[o + k];
+        if (s < 0 || !net.segs.alive[s]) continue;
+        const info = PROFILE_INFO[sc.profile[s]], p = PROFILES[sc.profile[s]];
+        if (info.rail) continue;
+        const forward = sc.a[s] === n;
+        if (p.oneWay && !forward) continue;
+        if (!sim.turnOk(asNode(n), asSeg(sIn), asSeg(s), false)) continue;
+        this.sE[at + cnt] = s * 2 + (forward ? 0 : 1);
+        this.sT[at + cnt] = sc.len[s] / (p.speed / 3.6) + 2;
+        this.sCap[at + cnt] = Math.max(1, sc.len[s] * Math.max(1, forward ? info.lanesFwd : info.lanesBack) / 7.5);
+        this.sC[at + cnt] = this.nodeCost(n, sIn, s);
+        cnt++;
+      }
+      this.sN[e] = cnt;
+    }
+  }
+
   private ensureEdges(cap: number): void {
     if (cap <= this.eg.length) return;
     let n = this.eg.length;
@@ -226,6 +285,8 @@ export class Router {
       }
     }
     let expanded = 0, found = -1;
+    const kept = this.kept && !rail && !bus;
+    if (kept) this.ensureSuccessors();
     while (this.heapSize > 0) {
       const e = this.pop();
       if (this.eclosed[e] === cur) continue;
@@ -233,6 +294,24 @@ export class Router {
       const n = head(e);
       if (n === dst && e !== start && (goal < 0 || e === goal)) { found = e; break; }
       if (++expanded > this.limit) break;
+      if (kept) {
+        if (this.builtGen[n] !== sim.nodeGen[n] || this.builtNet[n] !== sim.netGen) this.buildNode(n);
+        const at = e * MAX_DEG, cnt = this.sN[e];
+        for (let k = 0; k < cnt; k++) {
+          const e2 = this.sE[at + k];
+          if (e === start && (e2 >> 1) === ban2) continue;
+          if (!net.segs.alive[e2 >> 1]) continue;
+          let t = this.sT[at + k];
+          if (load) { const r = load[e2] / this.sCap[at + k]; t *= 1 + 10 * r * r; }
+          if (this.eclosed[e2] === cur) continue;
+          const cost = this.eg[e] + t + this.sC[at + k];
+          if (this.estamp[e2] !== cur || cost < this.eg[e2]) {
+            this.estamp[e2] = cur; this.eg[e2] = cost; this.efrom[e2] = e;
+            this.push(e2, cost + h(head(e2)));
+          }
+        }
+        continue;
+      }
       const sIn = asSeg(e >> 1), o = n * MAX_DEG, d = nc.deg[n];
       for (let k = 0; k < d; k++) {
         const s = net.adj[o + k];

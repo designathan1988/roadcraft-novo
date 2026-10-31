@@ -94,6 +94,13 @@ export class SimNet {
    *  given to a new node goes there no more (ids are reused, roads/build.ts). */
   epoch = 0;
   nodeBorn = new Uint32Array(1 << 14);
+  /**
+   * Bumped each time a node's junction data (arms, turns, control, stages) is laid out again or cleared, and `netGen`
+   * when the whole network is cleared: whoever keeps something per node built from them (the router's successors)
+   * knows when to build it again.
+   */
+  nodeGen = new Uint32Array(1 << 14);
+  netGen = 0;
   /** Segments whose profile changed since the last step (the vehicles on lanes that are gone move over). */
   readonly reprofiledSegs: number[] = [];
   /** Total length of lanes (for the demand). */
@@ -117,6 +124,7 @@ export class SimNet {
       this.armMain = grow(this.armMain, cap, 0);
       this.nodeAuto = grow(this.nodeAuto, cap, 0);
       this.nodeBorn = grow(this.nodeBorn, cap, 0);
+      this.nodeGen = grow(this.nodeGen, cap, 0);
     });
     this.net.segs.onGrow((cap) => {
       this.arc = grow(this.arc, cap * (ARC_STEPS + 1), 0);
@@ -180,6 +188,7 @@ export class SimNet {
         this.nodePhases.fill(0); this.nodeRing.fill(0); this.dirtyNodes.clear(); this.laneMeters = 0;
         this.turnAll.fill(0); this.turnCar.fill(0);
         this.nodeCtl.fill(0); this.conflicts.clear(); this.nodeFlow.fill(0); this.armMain.fill(0); this.nodeAuto.fill(0);
+        this.netGen++;
         this.removedSegs.length = 0; this.reprofiledSegs.length = 0; this.removedSegEnds.length = 0; this.removedNodes.length = 0;
         for (let s = 0; s < end; s++) this.onSegChanged(s);
         break;
@@ -301,6 +310,7 @@ export class SimNet {
   // ------------------------------------------------------------ nodes
 
   private clearNode(n: NodeId): void {
+    this.nodeGen[n]++;
     const k = this.conns.cols;
     for (let c = this.nodeConn[n]; c >= 0;) {
       const next = k.nextAtNode[c];
@@ -337,6 +347,7 @@ export class SimNet {
   }
 
   private rebuildNode(n: NodeId): void {
+    this.nodeGen[n]++;
     this.clearNode(n);
     const net = this.net, sc = net.segs.cols;
     const segs = net.segsOf(n, []);
