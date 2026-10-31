@@ -79,18 +79,18 @@ export class LotBuilder {
   X(x: number): number { return x - this.W / 2; }
   Y(y: number): number { return y; }
 
-  surface(r: B40Rect, code: number): void {
+  lay(r: B40Rect, code: number): void {
     if (r.x1 - r.x0 < 2 - 1e-6 || r.y1 - r.y0 < 2 - 1e-6) return;
     this.t.block({ x: this.X(r.x0), y: this.Y(r.y0), w: r.x1 - r.x0, d: r.y1 - r.y0, open: code, fill: B40_BAY.Wall });
   }
 
-  rampSurface(r: B40Rect, code: number, from: number, to: number): void {
+  sloped(r: B40Rect, code: number, from: number, to: number): void {
     if (r.x1 - r.x0 < 2 - 1e-6 || r.y1 - r.y0 < 2 - 1e-6) return;
     const v = this.t.block({ x: this.X(r.x0), y: this.Y(r.y0), w: r.x1 - r.x0, d: r.y1 - r.y0, open: code, fill: B40_BAY.Wall });
     this.t.ramp[v] = from; this.t.terrace[v] = to;
   }
 
-  tile(region: B40Rect, holes: readonly B40Rect[], code: number): void {
+  fillAround(region: B40Rect, holes: readonly B40Rect[], code: number): void {
     const inside = holes.map((h) => ({ x0: Math.max(h.x0, region.x0), y0: Math.max(h.y0, region.y0), x1: Math.min(h.x1, region.x1), y1: Math.min(h.y1, region.y1) }))
       .filter((h) => h.x1 > h.x0 && h.y1 > h.y0);
     const ys = [...new Set([region.y0, region.y1, ...inside.flatMap((h) => [h.y0, h.y1])])].sort((a, b) => a - b);
@@ -99,7 +99,7 @@ export class LotBuilder {
       const cuts = inside.filter((h) => h.y0 < y1 - 1e-6 && h.y1 > y0 + 1e-6).map((h) => [h.x0, h.x1] as const).sort((a, b) => a[0] - b[0]);
       let x = region.x0;
       for (const [a, b] of [...cuts, [region.x1, region.x1] as const]) {
-        if (a - x >= 2) this.surface({ x0: x, y0, x1: a, y1 }, code);
+        if (a - x >= 2) this.lay({ x0: x, y0, x1: a, y1 }, code);
         x = Math.max(x, b);
       }
     }
@@ -112,7 +112,7 @@ export class LotBuilder {
     };
   }
 
-  fits(kind: number, x: number, y: number, facing: Side, w: number, d: number, h: number, z = 0, material?: { finish: number; colour: number }): boolean {
+  wouldFit(kind: number, x: number, y: number, facing: Side, w: number, d: number, h: number, z = 0, material?: { finish: number; colour: number }): boolean {
     const boundary = kind === B40_ELEMENT.Wall || kind === B40_ELEMENT.Fence || kind === B40_ELEMENT.Hedge || kind === B40_ELEMENT.Gate || kind === B40_ELEMENT.Railing;
     if (this.t.elN >= 128 - (boundary ? 2 : BOUNDARY_RESERVE) || w < 0.1 || d < 0.1 || h < 0.1) return false;
     if (!(this.laying || kind === B40_ELEMENT.Gate) && z < 2 && !SURFACE_KINDS(kind)) {
@@ -132,8 +132,8 @@ export class LotBuilder {
     return true;
   }
 
-  put(kind: number, x: number, y: number, facing: Side, w: number, d: number, h: number, z = 0, material?: { finish: number; colour: number }): boolean {
-    if (!this.fits(kind, x, y, facing, w, d, h, z, material)) return false;
+  place(kind: number, x: number, y: number, facing: Side, w: number, d: number, h: number, z = 0, material?: { finish: number; colour: number }): boolean {
+    if (!this.wouldFit(kind, x, y, facing, w, d, h, z, material)) return false;
     const c = this.candidate(kind, x, y, facing, w, d, h, z, material);
     if (this.laying || isStructure(c)) {
       for (let i = this.t.elN - 1; i >= 0; i--) {
@@ -145,13 +145,13 @@ export class LotBuilder {
     return true;
   }
 
-  runX(kind: number, y: number, x0: number, x1: number, h: number, gaps: readonly (readonly [number, number])[] = [], z = 0): void {
+  runAcross(kind: number, y: number, x0: number, x1: number, h: number, gaps: readonly (readonly [number, number])[] = [], z = 0): void {
     const cuts = gaps.map(([c, w]) => [c - w / 2, c + w / 2] as const).sort((p, q) => p[0] - q[0]);
     let from = x0;
     const thick = kind === B40_ELEMENT.Fence ? 0.12 : kind === B40_ELEMENT.Hedge ? 0.7 : 0.2;
     const piece = (a: number, b: number): void => {
       this.laying = true;
-      const ok = this.put(kind, (a + b) / 2, y, 0, b - a, thick, h, z);
+      const ok = this.place(kind, (a + b) / 2, y, 0, b - a, thick, h, z);
       this.laying = false;
       if (ok || b - a < 1) return;
       piece(a, (a + b) / 2); piece((a + b) / 2, b);
@@ -164,12 +164,12 @@ export class LotBuilder {
     }
   }
 
-  runY(kind: number, x: number, y0: number, y1: number, h: number, z = 0): void {
+  runAlong(kind: number, x: number, y0: number, y1: number, h: number, z = 0): void {
     const n = Math.ceil((y1 - y0) / 20);
     const thick = kind === B40_ELEMENT.Fence ? 0.12 : kind === B40_ELEMENT.Hedge ? 0.7 : 0.2;
     const piece = (a: number, b: number): void => {
       this.laying = true;
-      const ok = this.put(kind, x, (a + b) / 2, 1, b - a, thick, h, z);
+      const ok = this.place(kind, x, (a + b) / 2, 1, b - a, thick, h, z);
       this.laying = false;
       if (ok || b - a < 1) return;
       piece(a, (a + b) / 2); piece((a + b) / 2, b);
@@ -177,18 +177,18 @@ export class LotBuilder {
     for (let k = 0; k < n && y1 - y0 > 0.3; k++) piece(y0 + ((y1 - y0) * k) / n, y0 + ((y1 - y0) * (k + 1)) / n);
   }
 
-  path(r: B40Rect, material: { finish: number; colour: number } = PAVERS): void {
+  walk(r: B40Rect, material: { finish: number; colour: number } = PAVERS): void {
     if (r.x1 - r.x0 < 0.3 || r.y1 - r.y0 < 0.3) return;
     this.taken.push(r);
-    this.put(B40_ELEMENT.Pavement, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, 0, r.x1 - r.x0, r.y1 - r.y0, 0.1, 0, material);
+    this.place(B40_ELEMENT.Pavement, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, 0, r.x1 - r.x0, r.y1 - r.y0, 0.1, 0, material);
   }
 
-  busy(x: number, y: number, r = 0.8): boolean {
+  occupied(x: number, y: number, r = 0.8): boolean {
     return this.taken.some((t) => x + r > t.x0 && x - r < t.x1 && y + r > t.y0 && y - r < t.y1);
   }
 
   /** Everything laid since index `fromVolume` / id `fromElement` raised (negative: lowered) `rise` metres. */
-  lift(fromVolume: number, fromElement: number, rise: number, behind = -Infinity): void {
+  raiseSince(fromVolume: number, fromElement: number, rise: number, behind = -Infinity): void {
     if (Math.abs(rise) < 1e-6) return;
     for (let v = 0; v < this.t.n; v++) {
       if (this.t.open[v]! < 0 || v < fromVolume || this.t.y[v]! < this.Y(behind) - 1e-6) continue;
@@ -202,29 +202,29 @@ export class LotBuilder {
   }
 
   /** A retaining wall in stone from (x0, y0) to (x1, y1). */
-  retain(x0: number, y0: number, x1: number, y1: number): void {
+  hold(x0: number, y0: number, x1: number, y1: number): void {
     const h = this.backLevel > 0 ? this.backLevel + 0.15 : 0.95;
     const alongY = Math.abs(x1 - x0) < Math.abs(y1 - y0);
     const length = alongY ? y1 - y0 : x1 - x0;
     const n = Math.ceil(length / 20);
     for (let k = 0; k < n && length > 0.4; k++) {
       const a = k / n, b = (k + 1) / n;
-      if (alongY) this.put(B40_ELEMENT.Slab, x0, y0 + (y1 - y0) * (a + b) / 2, 1, (y1 - y0) / n, 0.3, h, 0, RETAINING);
-      else this.put(B40_ELEMENT.Slab, x0 + (x1 - x0) * (a + b) / 2, y0, 0, (x1 - x0) / n, 0.3, h, 0, RETAINING);
+      if (alongY) this.place(B40_ELEMENT.Slab, x0, y0 + (y1 - y0) * (a + b) / 2, 1, (y1 - y0) / n, 0.3, h, 0, RETAINING);
+      else this.place(B40_ELEMENT.Slab, x0 + (x1 - x0) * (a + b) / 2, y0, 0, (x1 - x0) / n, 0.3, h, 0, RETAINING);
     }
   }
 
   /** A flight `width` wide from the street floor's level at `y` to the back level beyond it, at `x`. */
-  flightBack(x: number, y: number, width: number): void {
+  stepsAt(x: number, y: number, width: number): void {
     const risers = Math.max(2, Math.round(Math.abs(this.backLevel) / STEP_RISE_M));
     const run = (risers + 1) * STEP_RUN_M;
     this.taken.push({ x0: x - width / 2, y0: y, x1: x + width / 2, y1: y + run });
-    if (this.backLevel > 0) this.put(B40_ELEMENT.Stair, x, y + run / 2, 0, width, run, this.backLevel, 0, RETAINING);
-    else this.put(B40_ELEMENT.Stair, x, y + run / 2, 2, width, run, -this.backLevel, this.backLevel, RETAINING);
+    if (this.backLevel > 0) this.place(B40_ELEMENT.Stair, x, y + run / 2, 0, width, run, this.backLevel, 0, RETAINING);
+    else this.place(B40_ELEMENT.Stair, x, y + run / 2, 2, width, run, -this.backLevel, this.backLevel, RETAINING);
   }
 
   /** The yard from y0 to y1 laid as a terrace `fall` metres above (or below) the floor, rounded to risers. */
-  stepYard(y0: number, y1: number, fall: number, fromVolume: number, fromElement: number, stairX: number, base = 0): void {
+  terraceYard(y0: number, y1: number, fall: number, fromVolume: number, fromElement: number, stairX: number, base = 0): void {
     const room = MAX_TERRACE_V - Math.max(0, Math.sign(fall) * base);
     const risers = Math.min(TERRACE_MAX_RISERS, Math.round(Math.abs(fall) * 0.85 / STEP_RISE_M), Math.floor(room / STEP_RISE_M));
     if (risers < 4) return;
@@ -235,8 +235,8 @@ export class LotBuilder {
       const fx0 = x - 1.05, fx1 = x + 1.05, fy0 = y0 + 0.05, fy1 = y0 + run + 0.5;
       if (this.taken.some((t) => fx0 < t.x1 && t.x0 < fx1 && fy0 < t.y1 && t.y0 < fy1)) return false;
       return fall > 0
-        ? this.fits(B40_ELEMENT.Stair, x, y0 + run / 2, 0, 1.3, run, risers * STEP_RISE_M, 0)
-        : this.fits(B40_ELEMENT.Stair, x, y0 + run / 2, 2, 1.3, run, risers * STEP_RISE_M, -risers * STEP_RISE_M);
+        ? this.wouldFit(B40_ELEMENT.Stair, x, y0 + run / 2, 0, 1.3, run, risers * STEP_RISE_M, 0)
+        : this.wouldFit(B40_ELEMENT.Stair, x, y0 + run / 2, 2, 1.3, run, risers * STEP_RISE_M, -risers * STEP_RISE_M);
     };
     let sx: number | null = null;
     for (let d = 0; d <= this.W && sx === null; d += 0.5) {
@@ -254,20 +254,20 @@ export class LotBuilder {
       const onStair = Math.abs(ex - sx) < half + 1 && ey > y0 - 0.5 && ey < y0 + run + 0.5;
       if (onWall || onStair) this.t.removeElement(i);
     }
-    if (rise > 0) this.put(B40_ELEMENT.Stair, sx, y0 + run / 2, 0, 1.3, run, rise, 0, RETAINING);
-    else this.put(B40_ELEMENT.Stair, sx, y0 + run / 2, 2, 1.3, run, -rise, rise, RETAINING);
+    if (rise > 0) this.place(B40_ELEMENT.Stair, sx, y0 + run / 2, 0, 1.3, run, rise, 0, RETAINING);
+    else this.place(B40_ELEMENT.Stair, sx, y0 + run / 2, 2, 1.3, run, -rise, rise, RETAINING);
     const wallH = rise > 0 ? rise + 0.15 : 0.95;
     for (const [a, b] of [[0.15, sx - 0.75], [sx + 0.75, this.W - 0.15]] as const) {
       if (b - a < 0.4) continue;
       const n = Math.ceil((b - a) / 20);
       for (let k = 0; k < n; k++) {
         const pa = a + ((b - a) * k) / n, pb = a + ((b - a) * (k + 1)) / n;
-        this.put(B40_ELEMENT.Slab, (pa + pb) / 2, y0 - 0.15, 0, pb - pa, 0.3, wallH, 0, RETAINING);
+        this.place(B40_ELEMENT.Slab, (pa + pb) / 2, y0 - 0.15, 0, pb - pa, 0.3, wallH, 0, RETAINING);
       }
     }
   }
 
-  strip(side: 'left' | 'right'): { drive: B40Rect | null; walk: B40Rect | null; garden: B40Rect | null } {
+  sideStrip(side: 'left' | 'right'): { drive: B40Rect | null; walk: B40Rect | null; garden: B40Rect | null } {
     const s: B40SidePlan = side === 'left' ? this.plan.left : this.plan.right;
     const x0 = side === 'left' ? 0 : this.W - s.width, x1 = side === 'left' ? s.width : this.W;
     const out: { drive: B40Rect | null; walk: B40Rect | null; garden: B40Rect | null } = { drive: null, walk: null, garden: null };
