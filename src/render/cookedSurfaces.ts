@@ -4,6 +4,7 @@
 // makes the mipmaps. Colour maps hold sRGB texels: the shaders convert (sRGBTransferEOTF).
 
 import * as THREE from 'three/webgpu';
+import { bakeSurfaces } from './surfaceBake.ts';
 
 type Fill = [number, number, number, number];
 
@@ -57,7 +58,8 @@ export const cookedLoaded = { count: 0, failed: [] as string[] };
 export function loadCookedSurfaces(): void {
   if (started || typeof Worker === 'undefined' || typeof document === 'undefined') return;
   started = true;
-  const w = new Worker(new URL('./cookedWorker.ts', import.meta.url), { type: 'module', name: 'cooked' });
+  bakeSurfaces();
+  const w =new Worker(new URL('./cookedWorker.ts', import.meta.url), { type: 'module', name: 'cooked' });
   w.onmessage = (e: MessageEvent<{ file?: string; width?: number; layers?: number; data?: Uint8Array; error?: string; done?: boolean }>) => {
     const m = e.data;
     if (m.done) { w.terminate(); console.info(`cooked surfaces: ${cookedLoaded.count} read, ${cookedLoaded.failed.length} failed`); return; }
