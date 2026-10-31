@@ -6,7 +6,7 @@
 
 import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
-import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, type DirtyCells, type DirtyKind, type DirtyReader } from '../core/grid.ts';
+import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, tileX, type DirtyCells, type DirtyKind, type DirtyReader } from '../core/grid.ts';
 import type { PackedMesh } from '../shared/contracts/worker.ts';
 import { SHADOW_LENGTH, SHADOW_REACH, sunDirection } from './sun.ts';
 
@@ -96,6 +96,10 @@ export class CellLayer {
   private plateFar = new Uint8Array(PLATE_COUNT);
   /** None of the plate's tiles held anything when last visited. */
   private plateIdle = new Uint8Array(PLATE_COUNT);
+  /** Tiles that hold a mesh or a request (their L2 or a cell): visited even beyond the camera's reach, so they are evicted. */
+  private held = new Set<number>();
+  /** Tiles visited by the last update (the per-frame cost: it follows the reach, not the map; D40). */
+  visited = 0;
   private frustum = new THREE.Frustum();
   private box = new THREE.Box3();
   private pv = new THREE.Matrix4();
@@ -197,6 +201,7 @@ export class CellLayer {
     const v = this.cellVer[c];
     if (s.requested === v) return;
     s.requested = v;
+    this.held.add(tileOfCell(c));
     if (!this.src.hasContent(c)) { this.setMesh(s, null, v, c, level); return; }
     const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
     const pr = this.distTo(cellOriginX(cx), cellOriginX(cz), CELL_SIZE) + level * 300;
@@ -207,6 +212,7 @@ export class CellLayer {
     const s = this.tiles[t];
     const v = this.tileVer[t];
     s.requested = v;
+    this.held.add(t);
     const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
     const pr = 2000 + this.distTo(tileOriginX(tx), tileOriginX(tz), TILE_SIZE);
     this.src.buildTile(t, pr, (m) => { if (s.requested === v) this.setMesh(s, m, v); });
@@ -291,6 +297,12 @@ export class CellLayer {
     if (this.gpuBytes > budget) this.evictScale = Math.max(0, this.evictScale - 0.02);
     else if (this.gpuBytes < budget * 0.8) this.evictScale = Math.min(1, this.evictScale + 0.005);
     this.next.clear();
+    // the tiles within the layer's reach (the farthest it asks for or evicts anything) plus those still holding a
+    // mesh: the rest of the map is not visited (D40: a moving camera visited every tile of the map each frame)
+    const r = this.reach();
+    this.rect[0] = tileX(this.camPos.x - r); this.rect[1] = tileX(this.camPos.z - r);
+    this.rect[2] = tileX(this.camPos.x + r); this.rect[3] = tileX(this.camPos.z + r);
+    this.visited = 0;
     for (let pz = 0; pz < MAP_PLATES; pz++) for (let px = 0; px < MAP_PLATES; px++) this.visitPlate(px, pz);
     this.applyFades();
   }
@@ -318,9 +330,16 @@ export class CellLayer {
     // there, its tiles are not visited (a moving camera used to visit every tile of the map each frame)
     if (!(plateCovers && this.plateIdle[p])) {
       let idle = true;
+      const rc = this.rect;
       for (let j = 0; j < TILES_PER_PLATE; j++) for (let i = 0; i < TILES_PER_PLATE; i++) {
-        if (!this.manageTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j, limit > 0 && !plateCovers)) tilesCover = false;
-        if (this.tileHolds(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j)) idle = false;
+        const tx = px * TILES_PER_PLATE + i, tz = pz * TILES_PER_PLATE + j;
+        if (tx >= MAP_TILES || tz >= MAP_TILES) continue;
+        const t = tileId(tx, tz);
+        // beyond the reach and holding nothing: nothing to ask for or evict there, and it does not cover its plate
+        if ((tx < rc[0] || tx > rc[2] || tz < rc[1] || tz > rc[3]) && !this.held.has(t)) { tilesCover = false; continue; }
+        this.visited++;
+        if (!this.manageTile(tx, tz, limit > 0 && !plateCovers)) tilesCover = false;
+        if (this.tileHolds(tx, tz)) idle = false; else this.held.delete(t);
       }
       this.plateIdle[p] = idle ? 1 : 0;
     }
@@ -332,6 +351,13 @@ export class CellLayer {
     // the plate is not ready
     if (ps.mesh && (far || !tilesCover)) { this.draw(ps.mesh, x, z, PLATE_SIZE, ps); return; }
     for (let j = 0; j < TILES_PER_PLATE; j++) for (let i = 0; i < TILES_PER_PLATE; i++) this.drawTile(px * TILES_PER_PLATE + i, pz * TILES_PER_PLATE + j);
+  }
+
+  private rect = new Int32Array(4);
+  /** The farthest the layer asks for or evicts anything: what it keeps (tiles), its far limit, its cells' eviction. */
+  private reach(): number {
+    const keep = this.tileKeep();
+    return Math.max(this.evictDist() * 1.15, keep < 1e8 ? keep * 1.15 : 0, this.farLimit(), this.opt.near * this.pixelScale * 1.12, keep < 1e8 ? 0 : Infinity);
   }
 
   private tileKeep(): number {
@@ -546,6 +572,7 @@ export class CellLayer {
     // (back to 1, the new city's first request had the same version as the old city's and took its mesh)
     for (const ver of [this.cellVer, this.tileVer, this.plateVer]) for (let i = 0; i < ver.length; i++) ver[i]++;
     this.shown.clear();
+    this.held.clear();
     this.fading.length = 0;
     this.group.children.length = 0;
   }

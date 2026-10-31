@@ -142,7 +142,7 @@ export function createCityDetail(world: World, pool: JobPool, material: THREE.Ma
     buildTile: (_t, _p, done) => done(null),
     buildPlate: (_p, _q, done) => done(null),
   };
-  return new CellLayer(src, world.dirty, Dirty.Buildings, material, { near: 1100, evict: 1400, margin: 30, detail: 150, budget: 48e6, shadows: false, sparse: true, publish: DETAIL_SHOWN,
+  return new CellLayer(src, world.dirty, Dirty.Buildings, material, { near: 1100, evict: 1400, margin: 30, detail: 150, far: 1400, budget: 48e6, shadows: false, sparse: true, publish: DETAIL_SHOWN,
     eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
 }
 

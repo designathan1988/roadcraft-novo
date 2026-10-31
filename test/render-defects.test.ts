@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three/webgpu';
 import { World } from '../src/world/world.ts';
 import { CellLayer, type LayerSource } from '../src/render/cellLayer.ts';
-import { Dirty } from '../src/core/grid.ts';
+import { TILE_COUNT, Dirty } from '../src/core/grid.ts';
 import type { PackedMesh } from '../src/shared/contracts/worker.ts';
 import { splitGlass } from '../src/render/vehicles.ts';
 
@@ -993,4 +993,21 @@ test('D52: thousands of explosion bursts keep a fixed pool; the newest stay', as
   assert.ok(held <= 128, `${held} bursts held`);
   p.update(1, new THREE.Vector3(0, 50, 0));
   assert.ok(p.count <= 512);
+});
+
+test('D40: a layer visits only the tiles within its reach, not the whole map, when the camera moves', () => {
+  const w = new World();
+  const src = recordingSource();
+  // far 1500 m: the layer asks for, draws and evicts nothing farther than its reach (about 3 km here: a rectangle of
+  // at most 7 x 7 tiles round the camera on the 10 km map's 100)
+  const layer = new CellLayer(src, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40, far: 1500 });
+  const cam = new THREE.PerspectiveCamera(45, 1, 1, 1e5);
+  cam.position.set(0, 300, 0); cam.lookAt(100, 0, 0); cam.updateMatrixWorld(true); cam.updateProjectionMatrix();
+  layer.update(cam, cam.position);
+  const total = TILE_COUNT;
+  assert.ok(layer.visited > 0 && layer.visited <= 49 && layer.visited < total, `visited ${layer.visited} of ${total} tiles`);
+  // the camera moves 100 m: the visit stays bounded (the still-frame gate is not what keeps it small)
+  cam.position.set(100, 300, 0); cam.updateMatrixWorld(true);
+  layer.update(cam, cam.position);
+  assert.ok(layer.visited <= 49, `visited ${layer.visited} after a move`);
 });
