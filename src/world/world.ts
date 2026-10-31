@@ -34,6 +34,9 @@ export const buildingSchema = {
   shapeN: Uint8Array,
   /** City minute built or renovated, decay in tenths, and the minute of its next tenth in the decay heap. */
   built: Float32Array, decay: Uint8Array, due: Float64Array,
+  /** The height its walls were built to over the ground storey (m), as the worker that meshed its cell found it;
+   *  0 until then (jobs/buildingGen/heights.ts estimates). Not saved: the workers fill it again. */
+  top: Float32Array,
 };
 
 /** A building's fields (the rest comes from the generator). */
@@ -396,12 +399,22 @@ export class World {
         out.h[k] = col.h[id]; out.rot[k] = col.rot[id]; out.color[k] = col.color[id];
         out.seed[k] = col.seed[id]; out.zone[k] = col.zone[id]; out.floors[k] = col.floors[id]; out.style[k] = col.style[id]; out.fn[k] = col.fn[id];
         out.shapeN[k] = col.shapeN[id]; out.built[k] = col.built[id]; out.decay[k] = col.decay[id];
+        out.id[k] = id;
         if (col.shapeN[id]) out.shape.set(this.lotShape.subarray(id * SHAPE_STRIDE, (id + 1) * SHAPE_STRIDE), k * SHAPE_STRIDE);
         k++;
       });
     }
     out.count = k;
     return out;
+  }
+
+  /** The heights a worker built the buildings' walls to (`JobResults.buildingMesh.built`), into their `top` column. */
+  setBuiltTops(built: { id: Int32Array; top: Float32Array }): void {
+    const top = this.buildings.cols.top;
+    for (let k = 0; k < built.id.length; k++) {
+      const id = built.id[k];
+      if (id >= 0 && id < this.buildings.end && this.buildings.alive[id] && built.top[k] > 0) top[id] = built.top[k];
+    }
   }
 
   /** Ground with no paint and no water (new map, load). */

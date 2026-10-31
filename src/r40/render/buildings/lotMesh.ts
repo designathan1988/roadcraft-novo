@@ -14,7 +14,7 @@ import { type Entrance, type GroundAt, type PavedAt } from '../../world/building
 
 import { FOLLOWS_GROUND, elementRect, followPieces, onGround, partGroups } from '../../world/buildings/elements.ts';
 import { isRetainingStone } from '../../world/buildings/cityBuildings.ts';
-import { TERRAIN_CELL, TERRAIN_HALF } from '../terrainGrid.ts';
+import { HEIGHT_SPACING, MAP_HALF } from '../../../config.ts';
 import { highestGroundUnder } from './lawnGround.ts';
 import { type Building, type BuildingElement, type Volume, type LotSurface } from '../../world/buildings/types.ts';
 import { LOT_COLOURS } from './massing.ts';
@@ -46,7 +46,12 @@ export const POOL_COPING = paint({ finish: 'stone', colour: 0xeeebe2 });
 
 export const POOL_WATER_DROP = m(0.12);
 
-export const LAWN_LATTICE = { cell: TERRAIN_CELL, half: TERRAIN_HALF } as const;
+/**
+ * The lattice the ground is drawn on, this engine's: height samples every HEIGHT_SPACING from the map's edge
+ * (world/heights.ts, read bilinear). DO NOT use 4.0's plate lattice (6.4 m from a plate's centre): the lawn's
+ * highest point under a laid part was read off the wrong corners, and parts sank into or floated over the ground.
+ */
+export const LAWN_LATTICE = { cell: HEIGHT_SPACING, half: MAP_HALF } as const;
 
 export function emitLots(b: Building, lots: readonly Volume[], withParts: boolean, groundAt: GroundAt, shell: Shell,
   parts: PartSink, buildingFloor?: number, pavedAt?: PavedAt,

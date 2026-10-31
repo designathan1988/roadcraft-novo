@@ -93,7 +93,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
       const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
       const boxes = world.gatherBoxes([c], true);
       pool.submit('buildingMesh', { boxes, originX: cellOriginX(cx), originZ: cellOriginX(cz), extent: CELL_SIZE, lod: level },
-        (r) => done(r.mesh), { key: `cell${level}:${c}`, priority, transfer: boxTransfer(boxes) });
+        (r) => { if (r.built) world.setBuiltTops(r.built); done(r.mesh); }, { key: `cell${level}:${c}`, priority, transfer: boxTransfer(boxes) });
     },
     buildTile: (t, priority, done) => {
       const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
@@ -102,7 +102,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
       const boxes = world.gatherBoxes(cells, true);
       if (boxes.count === 0) { done(null); return; }
       pool.submit('buildingMesh', { boxes, originX: tileOriginX(tx), originZ: tileOriginX(tz), extent: TILE_SIZE, lod: 2 },
-        (r) => done(r.mesh), { key: `tile:${t}`, priority, transfer: boxTransfer(boxes) });
+        (r) => { if (r.built) world.setBuiltTops(r.built); done(r.mesh); }, { key: `tile:${t}`, priority, transfer: boxTransfer(boxes) });
     },
     buildPlate: (p, priority, done) => {
       const per = PLATE_SIZE / TILE_SIZE * CELLS_PER_TILE;
@@ -115,7 +115,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
       const boxes = world.gatherBoxes(cells, true);
       if (boxes.count === 0) { done(null); return; }
       pool.submit('buildingMesh', { boxes, originX: cellOriginX(px * per), originZ: cellOriginX(pz * per), extent: PLATE_SIZE, lod: 3 },
-        (r) => done(r.mesh), { key: `plate:${p}`, priority, transfer: boxTransfer(boxes) });
+        (r) => { if (r.built) world.setBuiltTops(r.built); done(r.mesh); }, { key: `plate:${p}`, priority, transfer: boxTransfer(boxes) });
     },
   };
   // L0 full detail near, L1 facade level in the middle, L2 masses far: `detail` has to stay below `near`, or the cell

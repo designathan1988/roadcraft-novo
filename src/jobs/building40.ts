@@ -5,7 +5,7 @@
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
 import { Rng, madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
-import type { BufferGeometry } from 'three';
+import type { BufferGeometry } from 'three/webgpu';
 import { FIN } from './buildingFinishes.ts';
 import { MeshBuilder } from './meshBuilder.ts';
 
@@ -101,23 +101,44 @@ export type PartSink = (kind: string, x: number, y: number, z: number, yaw: numb
  * either may be null to leave it out. `paneRow`: the facade window row the panes are drawn with (a whole-pane row: the
  * room behind, blinds, night).
  */
+/**
+ * The furnished bodies of the lots laid lately in this worker, by seed. A lot's building is drawn at up to five levels
+ * (the near shell, its parts, the layout, L1 and the mass), each by its own job: the lot was planned, built to measure
+ * and furnished again for every one of them (the whole lot plan, the yard's elements with their O(n²) clash tests).
+ * A body depends on the lot's seed, use, density and size alone, so it is made once and kept for the next jobs.
+ */
+type Body40 = Parameters<typeof furnishLot>[0];
+interface KeptBody { use: string; density: string; W: number; D: number; body: Body40 }
+const BODIES = new Map<number, KeptBody>();
+const BODIES_KEPT = 512;
+
 /** The lot's 4.0 building (the Building record of 4.0, its lot furnished), the same for every level drawn of it. */
 function building40(lot: Lot40): Building {
-  const rng = new Rng(lot.seed >>> 0);
-  const plan = planLot(lotKind(lot.use, lot.density), lot.W, lot.D, rng);
-  const env = plan.building;
-  const made = madeToMeasure(lot.use, lot.density, { W: env.x1 - env.x0, D: env.y1 - env.y0, backDoor: plan.back.use !== 'none' && plan.back.use !== 'loading', character: lot.seed & 0xffff, era: (lot.seed >>> 16) % 3 as 0 | 1 | 2 }, rng);
-  const body = made.body;
-  // the plan's frame (x from the lot's left, y from the front) -> the lot's (x from its middle)
-  const dx = env.x0 - lot.W / 2, dy = env.y0;
-  for (const v of body.volumes) { v.x += dx; v.y += dy; }
-  for (const e of body.elements ?? []) { e.x += dx; e.y += dy; }
-  for (const c of body.cores ?? []) { c.x += dx; c.y += dy; }
-  furnishLot(body, plan, made, rng);
+  const seed = lot.seed >>> 0;
+  const had = BODIES.get(seed);
+  let kept: KeptBody | undefined = had && had.use === lot.use && had.density === lot.density && had.W === lot.W && had.D === lot.D ? had : undefined;
+  if (!kept) {
+    const rng = new Rng(seed);
+    const plan = planLot(lotKind(lot.use, lot.density), lot.W, lot.D, rng);
+    const env = plan.building;
+    const made = madeToMeasure(lot.use, lot.density, { W: env.x1 - env.x0, D: env.y1 - env.y0, backDoor: plan.back.use !== 'none' && plan.back.use !== 'loading', character: lot.seed & 0xffff, era: (lot.seed >>> 16) % 3 as 0 | 1 | 2 }, rng);
+    const body = made.body;
+    // the plan's frame (x from the lot's left, y from the front) -> the lot's (x from its middle)
+    const dx = env.x0 - lot.W / 2, dy = env.y0;
+    for (const v of body.volumes) { v.x += dx; v.y += dy; }
+    for (const e of body.elements ?? []) { e.x += dx; e.y += dy; }
+    for (const c of body.cores ?? []) { c.x += dx; c.y += dy; }
+    furnishLot(body, plan, made, rng);
+    const fresh: KeptBody = { use: lot.use, density: lot.density, W: lot.W, D: lot.D, body };
+    BODIES.delete(seed);
+    BODIES.set(seed, fresh);
+    if (BODIES.size > BODIES_KEPT) BODIES.delete(BODIES.keys().next().value!);
+    kept = fresh;
+  }
   // the 4.0 lot frame: origin at the front's middle, +y away from the street, the map's y = -world z
   const c = Math.cos(lot.rot), s = Math.sin(lot.rot);
   const fx = lot.cx + (lot.D / 2) * s, fz = lot.cz + (lot.D / 2) * c;
-  return { ...body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: -fz, rotation: lot.rot } as Building;
+  return { ...kept.body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: -fz, rotation: lot.rot } as Building;
 }
 
 /** The 4.0 building's volumes as the engine's layout shape: world rects with their storey ranges, grounded at the
@@ -147,10 +168,24 @@ export function volumes40(lot: Lot40): Volume40[] {
   return out;
 }
 
+/** The height the lot's 4.0 walls are built to over their ground floor (m): the highest closed volume's top. */
+export function wallsTop40(lot: Lot40): number {
+  const b = building40(lot);
+  let top = 0;
+  for (const v of b.volumes) {
+    if (v.open) continue;
+    let h = levelElevation(b, v.base);
+    for (let k = 0; k < v.storeys.length; k++) h += levelHeight(b, v.base + k);
+    top = Math.max(top, h);
+  }
+  return top;
+}
+
 export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number, far = false): Laid40 {
   const b = building40(lot);
   // far: 4.0's facade level (L1: the openings drawn by the shader, no small parts), the near level otherwise
-  const chunk = emitChunk(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), undefined, far);
+  // no rooms behind the panes nor light slots: this engine's panes map their rooms in the shader (render/city.ts)
+  const chunk = emitChunk(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), undefined, far, true, undefined, false);
   letGoEmitted(b);
   let laidShell = 0, laidParts = 0;
   const n = [0, 0, 0];

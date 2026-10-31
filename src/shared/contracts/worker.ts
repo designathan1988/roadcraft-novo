@@ -36,6 +36,9 @@ export interface BoxColumns {
    */
   shapeN: Uint8Array;
   shape: Int16Array;
+  /** The world's id of each building (World.buildings), -1 where there is none: a job's answer names the building it
+   *  is about (`JobResults.buildingMesh.built`). Not saved. */
+  id: Int32Array;
   /** City minute the building was built or last renovated (World.clock); decay is derived from it. */
   built: Float32Array;
   /**
@@ -95,7 +98,10 @@ export interface JobPayloads {
 export interface JobResults {
   terrainGen: { tile: number; min: number; max: number; hasWater: boolean };
   debugTile: { tile: number; roadNodes: Float32Array; roadSegs: Int32Array; min: number; max: number };
-  buildingMesh: { mesh: PackedMesh | null };
+  /** `built`: for each box (by its world id), the height its walls were built to over the ground storey (m), 0 where
+   *  the generator did not say (an estimate stands in: jobs/buildingGen/heights.ts). The page keeps it in the
+   *  buildings' `top` column: the camera and the blast read a built height without generating anything. */
+  buildingMesh: { mesh: PackedMesh | null; built?: { id: Int32Array; top: Float32Array } };
   roadMesh: { mesh: PackedMesh | null };
   /** `holes`: per 4 m cell of the road cell, 1 where the terrain does not draw its own cell. */
   terrainSeams: { mesh: PackedMesh | null; holes: Uint8Array };
@@ -149,7 +155,7 @@ export function emptyBoxes(n: number): BoxColumns {
     rot: new Float32Array(n), color: new Uint32Array(n),
     seed: new Uint32Array(n), zone: new Uint8Array(n), floors: new Uint8Array(n), style: new Uint8Array(n),
     fn: new Uint8Array(n),
-    shapeN: new Uint8Array(n), shape: new Int16Array(n * SHAPE_STRIDE), built: new Float32Array(n), decay: new Uint8Array(n),
+    shapeN: new Uint8Array(n), shape: new Int16Array(n * SHAPE_STRIDE), id: new Int32Array(n).fill(-1), built: new Float32Array(n), decay: new Uint8Array(n),
   };
 }
 

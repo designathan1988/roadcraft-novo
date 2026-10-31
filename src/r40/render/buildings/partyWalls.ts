@@ -6,7 +6,6 @@ import { localFootprint } from '../../world/buildings/footprints.ts';
 import { buildingFrame, closedBlocks, frameX, frameY, isMass, storedBounds, volumeElevation, volumeHeight, volumeLift } from '../../world/buildings/geometry.ts';
 import type { Building } from '../../world/buildings/types.ts';
 import { m } from '../../world/units.ts';
-import { drawsSignature } from './signature.ts';
 
 /** PARTY WALLS: a bay inside a neighbour's block, back to back with its wall, is never seen, so it is not laid (as `geometry.ts` `exposedParts` leaves out what one block of a building covers of another). */
 
@@ -78,7 +77,7 @@ export class PartyWalls {
     const was = this.blocks.get(b);
     if (was) return was;
     const known: Cover[] = [];
-    const floor = b.cutaway === undefined && !drawsSignature(b) ? this.floorOf(b) : undefined;
+    const floor = b.cutaway === undefined ? this.floorOf(b) : undefined;
     if (floor !== undefined) {
       const resolved = resolveBlocks(b);
       const body = { ...resolved, volumes: closedBlocks(resolved.volumes) };

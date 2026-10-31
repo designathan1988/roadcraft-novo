@@ -1,5 +1,5 @@
 import { least, most } from '../../core/minMax.ts';
-import { DataUtils } from 'three';
+import { DataUtils } from 'three/webgpu';
 import { CELL } from '../../world/cells.ts';
 import { FINISHES, type Finish } from '../../world/buildings/materials.ts';
 import { FURNITURE_KINDS, type FurnitureKind } from '../../world/buildings/interior.ts';

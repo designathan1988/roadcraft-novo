@@ -4,7 +4,7 @@ import {
   CylinderGeometry,
   MeshStandardMaterial,
   SphereGeometry,
-} from 'three';
+} from 'three/webgpu';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { weldGeometry } from '../mesh/weld.ts';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';

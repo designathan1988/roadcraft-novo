@@ -13,7 +13,7 @@ import { ARCHES, ArchId, Fn, PANE_ROW, chimneyOf, pickArch } from '../world/arch
 import { type BoxColumns, type PackedMesh } from '../shared/contracts/worker.ts';
 import { CIVIC_DESIGNS, decodeDesign, hasDesign } from '../world/design.ts';
 import { catalogProjects } from '../world/catalog.ts';
-import { layLot40, massLot40, setRuinSource, volumes40, type AttachSink, type Lot40, type PartSink } from './building40.ts';
+import { layLot40, massLot40, setRuinSource, volumes40, wallsTop40, type AttachSink, type Lot40, type PartSink } from './building40.ts';
 import { planCells, type CellPlan } from './buildingGen/plan.ts';
 import { lotFit } from './buildingGen/polygon.ts';
 import { type Frame } from './buildingGen/geometry.ts';
@@ -85,7 +85,8 @@ export function buildingTag(seed: number, x: number, z: number): number {
 
 export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: number, originZ: number, extent: number, lod: number, legacy = false, out?: GenOutputs): PackedMesh | null {
   const mb = new MeshBuilder(false, true);
-  const sink = out ?? newOutputs({ detail: lod === -1 ? mb : null });
+  const sink = out ?? newOutputs();
+  if (lod === -1 && !sink.detail) sink.detail = mb;
   const plan = planCells(b);
   for (let i = 0; i < b.count; i++) {
     mb.curTag = buildingTag(b.seed[i], b.x[i], b.z[i]);
@@ -155,11 +156,15 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
   }
   else if (!legacy && lod === 1 && R40_ZONES.has(zone) && !b.shapeN[i]) {
     // the same 4.0 building at 4.0's facade level (L1): its walls, openings and roofs, without the small parts
-    layLot40(lot40Of(b, i, fit, zone, floors, heights), mb, null, PANE_ROW, true);
+    const lot40 = lot40Of(b, i, fit, zone, floors, heights);
+    layLot40(lot40, mb, null, PANE_ROW, true);
+    if (out.tops) out.tops[i] = wallsTop40(lot40);
   }
   else if (!legacy && lod >= 2 && R40_ZONES.has(zone) && !b.shapeN[i]) {
     // the same 4.0 building from afar (jobs/building40.ts massLot40): never another building than the near one
-    massLot40(lot40Of(b, i, fit, zone, floors, heights), mb, lod, arch);
+    const lot40 = lot40Of(b, i, fit, zone, floors, heights);
+    massLot40(lot40, mb, lod, arch);
+    if (out.tops) out.tops[i] = wallsTop40(lot40);
   }
   else if (!legacy && lod <= 0 && R40_ZONES.has(zone) && !b.shapeN[i]) {
     // the Roadcraft 4.0 building (jobs/building40.ts), near: its shell in the cell's mesh (level 0), its parts to the
@@ -168,7 +173,7 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     // 4.0's own volumes, so the inside view, the camera and the collapse read the building actually drawn.
     const lot40 = lot40Of(b, i, fit, zone, floors, heights);
     if (lod === -3) { if (out.layout) for (const v of volumes40(lot40)) out.layout.push(v as Volume); return; }
-    if (lod === 0) layLot40(lot40, mb, null, PANE_ROW);
+    if (lod === 0) { layLot40(lot40, mb, null, PANE_ROW); if (out.tops) out.tops[i] = wallsTop40(lot40); }
     else if (lod === -2) {
       // With the 4.0 sink the parts come from layLot40; without one this pass has to fall back to the generic parts,
       // or a caller that does not ask for the 4.0 pool silently loses every part.

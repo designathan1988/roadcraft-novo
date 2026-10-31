@@ -3,7 +3,7 @@ import { default as earcut } from '../../../vendor/earcut.js';
 import { default as clipping } from '../../../vendor/polygonClipping.js';
 import { SIDE_NORMAL, bayWidth, coveredSpans, exposedParts, ridgeAlongX, roofRise, roofHeightAt, roofSlope, sawtoothRun, shedFall, sideLength, volumeHeight } from '../../world/buildings/geometry.ts';
 import { asPolygon, edgeFrame, localFootprint, volumeSides } from '../../world/buildings/footprints.ts';
-import { Color } from 'three';
+import { Color } from 'three/webgpu';
 import type { Vec2 } from '../../core/vec2.ts';
 import { m } from '../../world/units.ts';
 import { type Building, type FaceId, type Side, SIDES, type Volume, type RoofDetail, volumeTop } from '../../world/buildings/types.ts';

@@ -1,7 +1,7 @@
 // Part of the R40 building mesh pipeline (split by responsibility).
 import { type FacadeBay, bayWidth, baysOn, coveredSpans, exposedParts, sideStart, volumeElevation } from '../../world/buildings/geometry.ts';
 import { edgeFrame, volumeSides } from '../../world/buildings/footprints.ts';
-import { Color } from 'three';
+import { Color } from 'three/webgpu';
 import { GRIME_REACH } from './shellParts.ts';
 import { m } from '../../world/units.ts';
 import { type Entrance } from '../../world/buildings/foundation.ts';

@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { buildBuildingsLegacy as buildBuildings, buildBuildings as buildBuildings40 } from '../src/jobs/buildingGen.ts';
+import { newOutputs } from '../src/jobs/buildingGen/outputs.ts';
 import { emptyBoxes, type BoxColumns, type PackedMesh } from '../src/shared/contracts/worker.ts';
 import { Zone } from '../src/roads/zones.ts';
 import { encodeDesign } from '../src/world/design.ts';
@@ -346,8 +347,10 @@ test('B15: the camera and the collapse use the height the generator builds', asy
     ['flats 9', Zone.Residential, 9, 26, 36, 40], ['house 1', Zone.Residential, 1, 14, 30, 10], ['sobrado 2', Zone.Residential, 2, 12, 30, 90], ['mixed 7', Zone.Mixed, 7, 20, 30, 70]];
   for (const [name, zone, floors, W, D, style] of cases) for (const seed of [5, 77, 901]) {
     const b = oneBuilding(zone, floors, W, D, seed * 7919, style);
-    const top = wallTop(buildBuildings40(heights, b, 0, 0, 256, 0)!), ground = storeyLevels(buildingVolumes(heights, b, 0))[0].y;
-    const est = wallsHeightOf(b, 0) + ground;
+    // the worker's mesh job gives the built height with the mesh; the page reads it from the buildings' top column
+    const tops = new Float32Array(1);
+    const top = wallTop(buildBuildings40(heights, b, 0, 0, 256, 0, false, newOutputs({ tops }))!), ground = storeyLevels(buildingVolumes(heights, b, 0))[0].y;
+    const est = wallsHeightOf({ ...b, top: tops }, 0) + ground;
     if (Math.abs(est - top) > 2.8) failures.push(`${name} seed ${seed}: walls estimated up to ${est.toFixed(2)}, built up to ${top.toFixed(2)}`);
   }
   assert.deepEqual(failures, []);

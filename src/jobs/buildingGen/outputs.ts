@@ -22,8 +22,11 @@ export interface GenOutputs {
   /** Building index and ground of the footprints being captured. */
   footI: number;
   footGround: number;
+  /** Per building of the pass, the height its walls were built to over the ground storey (m); left 0 where the
+   *  generator does not say (the page estimates). */
+  tops: Float32Array | null;
 }
 
 export function newOutputs(init: Partial<GenOutputs> = {}): GenOutputs {
-  return { detail: null, layout: null, foot: null, part: null, footI: -1, footGround: 0, ...init };
+  return { detail: null, layout: null, foot: null, part: null, footI: -1, footGround: 0, tops: null, ...init };
 }

@@ -1,4 +1,4 @@
-import { type BufferAttribute, type BufferGeometry, Uint16BufferAttribute, Uint32BufferAttribute } from 'three';
+import { type BufferAttribute, type BufferGeometry, Uint16BufferAttribute, Uint32BufferAttribute } from 'three/webgpu';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /** Three's `mergeVertices` (BufferGeometryUtils, r186): the same keys, the same vertex order, the same result, hashed on numbers in a table instead of a string a vertex (most of a vehicle's levels, 2026-10-18). */

@@ -1,7 +1,7 @@
 import earcut from '../../../vendor/earcut.js';
 import { hypot2 } from '../../core/hypot.ts';
 import clipping from '../../../vendor/polygonClipping.js';
-import { Color } from 'three';
+import { Color } from 'three/webgpu';
 import { resolveBlocks } from '../../world/buildings/blocks.ts';
 import { floorHeight, type GroundAt, type PavedAt } from '../../world/buildings/foundation.ts';
 import { asPolygon, edgeFrame, localFootprint, volumeSides } from '../../world/buildings/footprints.ts';

@@ -173,6 +173,7 @@ export function debugTileBoxes(tile: number, seed: number): BoxColumns {
     x: out.x.slice(0, n), z: out.z.slice(0, n), w: out.w.slice(0, n), d: out.d.slice(0, n),
     h: out.h.slice(0, n), rot: out.rot.slice(0, n), color: out.color.slice(0, n),
     seed: out.seed.slice(0, n), zone: out.zone.slice(0, n), floors: out.floors.slice(0, n), style: out.style.slice(0, n), fn: out.fn.slice(0, n),
+    id: new Int32Array(n).fill(-1),
     shapeN: out.shapeN.slice(0, n), shape: out.shape.slice(0, n * SHAPE_STRIDE), built: out.built.slice(0, n), decay: out.decay.slice(0, n),
   };
 }

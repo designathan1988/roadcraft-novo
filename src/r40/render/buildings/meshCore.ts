@@ -5,7 +5,7 @@ import { worldToLocal, type FacadeBay, sideStart } from '../../world/buildings/g
 import { type FurnitureKind } from '../../world/buildings/interior.ts';
 import { ROOM_FLOATS } from './roomBehind.ts';
 import { edgeFrame } from '../../world/buildings/footprints.ts';
-import { Color, DataUtils } from 'three';
+import { Color, DataUtils } from 'three/webgpu';
 import { COLOURED_PARTS, FACADE_BYTES, FACADE_FLOATS, FACADE_GRID, NORMAL_SHORTS, SHELL_SHORTS, WEAR_STEPS, finishId, finishWear, octNormal, paintShort, wearByte } from './cellArrays.ts';
 import { COVER_INSET, GRIME_REACH, LOOK_FLOATS, MACRO_SCALE, NO_GROUND, SHELL_PARTS, type ShellPartKind, macroNoiseInto } from './shellParts.ts';
 import { m } from '../../world/units.ts';

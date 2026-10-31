@@ -4,26 +4,19 @@ import { deriveSpaces } from '../../world/buildings/spaces.ts';
 import { spaceSeed } from './lightSlots.ts';
 import { letGoLayout, bayWidth, closedBlocks, coveredSpans, facadeBays, levelElevation, levelHeight, projectionRect, volumeElevation, volumeHeight, volumeLift } from '../../world/buildings/geometry.ts';
 import { FURNITURE_KINDS, type Furniture, type FurnitureKind, interiorAt, letGoInterior } from '../../world/buildings/interior.ts';
-import { ROOM_FLOATS, roomsOfStorey } from './roomBehind.ts';
+import { roomsOfStorey } from './roomBehind.ts';
+import { Color } from 'three/webgpu';
 import { edgeFrame } from '../../world/buildings/footprints.ts';
-import { BufferAttribute, BufferGeometry, Color, Group, InstancedBufferAttribute, InstancedInterleavedBuffer, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Mesh, Sphere, Vector3, Box3 } from 'three';
-import { type Bounds, type CellArrays, FACADE_BYTES, FACADE_FLOATS, FACADE_GRID, FINISH_ATTRIBUTE, type KitBoxes, NORMAL_SHORTS, type ShellGrid, PAINT_ATTRIBUTE, SHELL_MESH, SHELL_NORMAL } from './cellArrays.ts';
-import { GROUND_ATTRIBUTE, LOOK_FLOATS } from './shellParts.ts';
-import { partLook } from './fade.ts';
 import { m } from '../../world/units.ts';
+import { PART_KINDS, type PartKind } from './kit.ts';
 import { type Entrance, type Foundation, type GroundAt, type PavedAt, PLINTH_BURY, STEP_RUN, foundationOf, floorHeight } from '../../world/buildings/foundation.ts';
 import { type Finish, paletteOf, plinthMaterial, roofMaterial, trimMaterial, wallMaterial } from '../../world/buildings/materials.ts';
 import { FOLLOWS_GROUND, followPieces } from '../../world/buildings/elements.ts';
 import { type BayComponent, type Building, type BuildingElement, type FaceId, type Volume, volumeTop } from '../../world/buildings/types.ts';
-import { type BuildingKit, PART_KINDS, type PartKind } from './kit.ts';
-import { gpuOnlyAttributes } from '../mesh/gpuOnly.ts';
 import { machineRooms } from './roofPlan.ts';
 import type { FlagInstance } from './flagLayer.ts';
 import type { BuildingChunk, PartBatch, RunChunk, ShellChunk } from './chunk.ts';
-import { drawsSignature } from './signature.ts';
 import { type Cover, type PartyWalls, hiddenByCovers } from './partyWalls.ts';
-import { POSE_FLOATS, letGoPosed, partPoseDepth, posedCopy } from './partPose.ts';
-import { partBandings } from './partFiling.ts';
 import { Shell, Emitter, bayKey, openingOf, REVEAL, paint, shaded, sideFrame, PLINTH_RISE, PLINTH_GROW, sideFrameInto, FLAT_DEPTH, slotOfBay, BAND_OUT, BAND_H, ROOF_PLANT, partSink, setFlagSink, ShellPart, type PartSink, type FurnitureSink, type SlotAllocator, type Opening, type Paint, type V3, type BayFace } from './meshCore.ts';
 import { emitPlinth, streakOf, emitBay, emitFacadeRuns, emitRelief, emitRecessedFlight, type FarBay } from './facadeEmit.ts';
 import { bothCovered, band, flushBand, emitRoof, emitRoofDetails } from './roofMesh.ts';
@@ -31,13 +24,6 @@ import { emitInterior } from './interiorMesh.ts';
 import { emitLots } from './lotMesh.ts';
 import { emitLot, looseParts, elementPaint, emitElement } from './elementMesh.ts';
 
-export interface BuildingMeshes {
-  readonly group: Group;
-  readonly triangles: number;
-  /** Shown or hidden as a whole. */
-  setVisible(visible: boolean): void;
-  dispose(): void;
-}
 
 export function emitBuilding(
   b: Building,
@@ -51,6 +37,10 @@ export function emitBuilding(
   slots: SlotAllocator = spaceSeed,
   /** The neighbours' blocks a party wall stands against (`partyWalls.ts`): a bay inside them is not laid. */
   covers: readonly Cover[] = [],
+  /** Whether the panes' rooms and light slots are worked out (the room behind each pane, ray cast through the plan;
+   *  a slot per space): only for a reader of them. Roadcraft 5 reads neither (its panes map their rooms in the
+   *  shader): the furnishing of every floor and a ray cast per pane were done for nothing, per lot per job. */
+  rooms = true,
 ): Foundation {
   const e = new Emitter(b, shell, parts, furniture);
   // Put in the world off the layout kept for the blocks (`bayLayout`): the flights' feet and the like buildings of the job read the same one.
@@ -176,8 +166,8 @@ export function emitBuilding(
       e.flat = false;
       shell.ground = floor;
     } else {
-      e.slot = slotOfBay(b, v, bay, spacesOf, slots);
-      if (b.id >= 0 && b.cutaway === undefined) {
+      e.slot = rooms ? slotOfBay(b, v, bay, spacesOf, slots) : -1;
+      if (rooms && b.id >= 0 && b.cutaway === undefined) {
         // The levels of one type share their pieces (`interiorAt`), and so their rooms, a pane alike looked at once.
         const inside = interiorAt(b, bay.level);
         let byBlock = roomsOf.get(inside.furniture);
@@ -316,47 +306,31 @@ export function letGoEmitted(b: Building): void {
   letGoLayout(closed);
 }
 
-export class ShellWriter {
-  private readonly shell = new Shell();
-  /** The parts' and the furniture's rows, written again the same way. */
-  readonly parts = partSink();
-  readonly furniture: FurnitureSink = {};
-  constructor() { this.shell.reused = true; }
-  /** The shell and the rows emptied for the next building. */
-  next(): Shell {
-    this.shell.clear();
-    for (const kind of PART_KINDS) this.parts[kind].clear();
-    for (const kind of FURNITURE_KINDS) this.furniture[kind]?.clear();
-    return this.shell;
-  }
-}
 
 export function emitChunk(b: Building, groundAt: GroundAt, pavedAt?: PavedAt, naturalAt: GroundAt = groundAt, slots: SlotAllocator = spaceSeed, far = false, apart = true,
-  party?: PartyWalls, writer?: ShellWriter): BuildingChunk {
-  const shell = writer ? writer.next() : new Shell();
+  party?: PartyWalls, rooms = true): BuildingChunk {
+  const shell = new Shell();
   shell.decay = b.decay ?? 0;
   shell.far = far;
   shell.apart = apart;
-  const parts = writer ? writer.parts : partSink();
+  const parts = partSink();
   // The blocks as drawn: unions, cuts and intersections resolved, the stored blocks untouched (`world/buildings/blocks.ts`).
   const resolved = resolveBlocks(b);
   // Open blocks are lots: laid on the ground, not built.
   const lots = resolved.volumes.filter((v) => v.open);
   // One list for the blocks: their bays laid out and their floors furnished once (`bayLayout`, `interiorAt`) for every reader and like building.
   const closed = closedBlocks(resolved.volumes);
-  const furnished: FurnitureSink = writer ? writer.furniture : {};
+  const furnished: FurnitureSink = {};
   const inLot = (el: BuildingElement): boolean =>
     lots.some((v) => el.x >= v.x && el.x <= v.x + v.w && el.y >= v.y && el.y <= v.y + v.d);
   // The terrain is graded from this natural-ground floor.
   const designedFloor = party ? party.floorOf(b) : closed.length > 0 ? floorHeight(resolved, naturalAt, pavedAt) : undefined;
   const flags: FlagInstance[] = [];
   setFlagSink(flags);
-  // A signature building's body is drawn with its own parts (`signature.ts`).
-  const signature = closed.length > 0 && drawsSignature(b);
-  const body = !signature && closed.length > 0
-    ? emitBuilding({ ...resolved, volumes: closed }, groundAt, shell, parts, pavedAt, furnished, inLot, designedFloor, slots, party?.coversNear(b))
+  const body = closed.length > 0
+    ? emitBuilding({ ...resolved, volumes: closed }, groundAt, shell, parts, pavedAt, furnished, inLot, designedFloor, slots, party?.coversNear(b), rooms)
     : undefined;
-  const floor = signature ? designedFloor : body?.floor;
+  const floor = body?.floor;
   setFlagSink(null);
   const lotGround = emitLots(resolved, lots, closed.length === 0, groundAt, shell, parts, floor, pavedAt, inLot, body?.entrances);
   const batches = {} as Record<PartKind, PartBatch>;
@@ -372,8 +346,7 @@ export function emitChunk(b: Building, groundAt: GroundAt, pavedAt?: PavedAt, na
   const laid = runs ? { shells, runs } : { shells };
   const out = furniture ? { ...laid, parts: batches, furniture } : { ...laid, parts: batches };
   const withGround = lotGround ? { ...out, lotGround } : out;
-  const withSignature = signature && floor !== undefined ? { ...withGround, signatureFloor: floor } : withGround;
-  return flags.length ? { ...withSignature, flags } : withSignature;
+  return flags.length ? { ...withGround, flags } : withGround;
 }
 
 export const shellChunkOf = (part: ShellPart, copy: boolean): ShellChunk => (copy
@@ -398,238 +371,5 @@ export function runChunks(shell: Shell): Partial<Record<Finish, RunChunk>> | und
   return runs;
 }
 
-export const KIT_BOXES = new WeakMap<BuildingKit, KitBoxes>();
 
-export function kitBoxes(kit: BuildingKit): KitBoxes {
-  let boxes = KIT_BOXES.get(kit);
-  if (!boxes) {
-    const boxOf = (g: BufferGeometry): number[] => {
-      if (!g.boundingBox) g.computeBoundingBox();
-      const b = g.boundingBox!;
-      return [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z];
-    };
-    const furniture = kit.furniture();
-    boxes = {
-      parts: Object.fromEntries(PART_KINDS.map((kind) => [kind, boxOf(kit.geometry[kind])])) as Record<PartKind, number[]>,
-      furniture: Object.fromEntries(FURNITURE_KINDS.map((kind) => [kind, boxOf(furniture.geometry[kind])])) as Record<FurnitureKind, number[]>,
-    };
-    KIT_BOXES.set(kit, boxes);
-  }
-  // The bandings as the kit's levels are now: a small prop's simplified levels come in once loaded.
-  return { ...boxes, bandings: partBandings(kit.screen) };
-}
-
-export function meshesOf(arrays: CellArrays, kit: BuildingKit, ghost: boolean, dim: boolean, refill?: () => CellArrays): BuildingMeshes {
-  const group = new Group();
-  group.name = ghost ? 'building-preview' : 'buildings';
-  group.matrixAutoUpdate = false;
-  group.updateMatrix();
-  const meshes: (Mesh | InstancedMesh)[] = [];
-  let triangles = 0;
-
-  // A restored context refills every piece from one batch made again, not one per piece (`gpuOnly.ts` `refillArrays` runs them in one go).
-  let again: CellArrays | null = null;
-  const refilled = (): CellArrays | null => {
-    if (!again && refill) {
-      again = refill();
-      queueMicrotask(() => { again = null; });
-    }
-    return again;
-  };
-  // Every finish of a piece in one geometry, one draw: each vertex's finish picks its layer of the maps (`finishes.ts`).
-  arrays.shells.forEach((shell, piece) => {
-    const g = new BufferGeometry();
-    // DO NOT wrap them in a Float32BufferAttribute or Uint32BufferAttribute: those copy the array they are given
-    // Floats, or on the cell's grid: four unsigned shorts read normalised, the mesh's matrix putting them in place (`cellArrays.ts` `ShellGrid`).
-    const place = shell.place;
-    g.setAttribute('position', place ? new BufferAttribute(shell.position, 4, true) : new BufferAttribute(shell.position, 3));
-    // Two signed shorts a vertex, the normal octahedral: unfolded by the shell's program (`finishes.ts` `SHELL_NORMAL`).
-    const normal = new BufferAttribute(shell.normal, NORMAL_SHORTS, true);
-    g.setAttribute(SHELL_NORMAL, normal);
-    // Four unsigned shorts, normalised: the paint, and the finish id with the wear; the uv is the shader's (`finishes.ts`).
-    g.setAttribute(PAINT_ATTRIBUTE, new BufferAttribute(shell.paint, 4, true));
-    // The far level's window grid and openings, for its shader (`facadeLevel.ts`).
-    const opening = shell.opening ? new InterleavedBuffer(shell.opening, FACADE_BYTES) : null;
-    let far: { facade: BufferAttribute; grid: BufferAttribute; opening: InterleavedBuffer } | null = null;
-    if (shell.facade && shell.grid && opening) {
-      // The bay's width and storey's height in half floats: HALF_FLOAT where the attribute says so (r186 `WebGLAttributes.createBuffer`).
-      far = { facade: Object.assign(new BufferAttribute(shell.facade, FACADE_FLOATS), { isFloat16BufferAttribute: true }), grid: new BufferAttribute(shell.grid, FACADE_GRID), opening };
-      g.setAttribute('facadeSize', far.facade);
-      g.setAttribute('facadeCell', far.grid);
-      g.setAttribute('facadeOpening', new InterleavedBufferAttribute(opening, 4, 0, true));
-      g.setAttribute('facadeTrim', new InterleavedBufferAttribute(opening, 4, 4, true));
-    }
-    g.setIndex(new BufferAttribute(shell.index, 1));
-    // One Mesh a piece, its arrays let go once on the GPU (below).
-    // The bounds in the mesh's own frame: on a grid, its points over its step from its origin.
-    g.boundingBox = place ? boxOf(gridBounds(shell.bounds, place)) : boxOf(shell.bounds);
-    g.boundingSphere = place ? sphereOf(gridBounds(shell.bounds, place)) : sphereOf(shell.bounds);
-    const mesh = new Mesh(g, ghost ? kit.ghostShell : dim ? kit.dimShell : far ? kit.facade : kit.shellMaterial);
-    if (place) {
-      mesh.position.set(place.x, place.y, place.z);
-      mesh.scale.setScalar(place.step * 65535);
-    }
-    // The town's shells live on the GPU only: their arrays are let go once uploaded
-    if (!ghost) {
-      const kept = {
-        position: g.attributes.position as BufferAttribute, normal, paint: g.attributes[PAINT_ATTRIBUTE] as BufferAttribute, index: g.index!, ...(far ?? {}),
-      };
-      gpuOnlyAttributes(mesh, kept, () => {
-        // The same chunks make the same pieces in the same order.
-        const same = refilled()?.shells[piece];
-        return same ? {
-          position: same.position, normal: same.normal, paint: same.paint, index: same.index,
-          ...(same.facade && same.grid && same.opening ? { facade: same.facade, grid: same.grid, opening: same.opening } : {}),
-        } : {};
-      });
-    }
-    mesh.name = ghost ? 'building-preview-shell' : SHELL_MESH;
-    mesh.castShadow = !ghost;
-    mesh.receiveShadow = !ghost;
-    meshes.push(mesh);
-    triangles += shell.index.length / 3;
-  });
-
-  for (const kind of PART_KINDS) {
-    const part = arrays.parts[kind];
-    if (!part) continue;
-    const { count } = part;
-    // Window panes carry their room's light slot, per instance, on their own copy of the pane geometry
-    const glassy = part.litSlot !== undefined;
-    // And the shell's parts their finish, wear and ground (`shellParts.ts`).
-    const looked = part.looks !== undefined;
-    // The kit's model with this batch's poses (`partPose.ts`): its own attributes shared, never copied.
-    const poseBuffer = new InstancedInterleavedBuffer(part.poses, POSE_FLOATS);
-    const geometry = posedCopy(kit.geometry[kind], poseBuffer);
-    let roomBuffer: InstancedInterleavedBuffer | null = null;
-    if (glassy) {
-      geometry.setAttribute('litSlot', new InstancedBufferAttribute(part.litSlot!, 1));
-      // And the room behind each, for the interior drawn through it (`kit.ts`).
-      roomBuffer = new InstancedInterleavedBuffer(part.rooms!, ROOM_FLOATS);
-      // Half floats: three uploads a Uint16Array as HALF_FLOAT where its buffer says so (r186 `WebGLAttributes.createBuffer`, an interleaved attribute by its buffer).
-      (roomBuffer as InstancedInterleavedBuffer & { isFloat16BufferAttribute: boolean }).isFloat16BufferAttribute = true;
-      geometry.setAttribute('roomA', new InterleavedBufferAttribute(roomBuffer, 4, 0));
-      geometry.setAttribute('roomB', new InterleavedBufferAttribute(roomBuffer, 4, 4));
-      geometry.setAttribute('roomC', new InterleavedBufferAttribute(roomBuffer, 4, 8));
-    }
-    const lookBuffer = looked ? new InstancedInterleavedBuffer(part.looks!, LOOK_FLOATS) : null;
-    if (lookBuffer) {
-      geometry.setAttribute(FINISH_ATTRIBUTE, new InterleavedBufferAttribute(lookBuffer, 1, 0));
-      geometry.setAttribute('aDecay', new InterleavedBufferAttribute(lookBuffer, 1, 1));
-      geometry.setAttribute(GROUND_ATTRIBUTE, new InterleavedBufferAttribute(lookBuffer, 1, 2));
-    }
-    // Faded, each kind as `fade.ts` fades it: the shell's parts with the shell. No matrix of three's (`posePart`): the poses are the instances.
-    const material = ghost ? kit.ghostParts : partLook(kit, kind, dim).material;
-    const mesh = new InstancedMesh(geometry, material, 0);
-    mesh.count = count;
-    mesh.userData['posedFrom'] = kit.geometry[kind];
-    mesh.name = `building-${kind}${ghost ? '-preview' : ''}`;
-    mesh.castShadow = !ghost && kit.castsShadow.has(kind);
-    if (mesh.castShadow) mesh.customDepthMaterial = partPoseDepth(material);
-    mesh.receiveShadow = !ghost;
-    // Tints in half floats: HALF_FLOAT where the attribute says so (r186 `WebGLAttributes.createBuffer`).
-    if (part.instanceColor) mesh.instanceColor = Object.assign(new InstancedBufferAttribute(part.instanceColor, 3), { isFloat16BufferAttribute: true });
-    mesh.boundingBox = boxOf(part.bounds);
-    mesh.boundingSphere = sphereOf(part.bounds);
-    // DO NOT let go of the kit's model it draws: it is shared by every batch of the kind; only its own instance buffers go.
-    if (!ghost) {
-      const own: Record<string, BufferAttribute | InstancedInterleavedBuffer> = { poses: poseBuffer };
-      if (mesh.instanceColor) own.instanceColor = mesh.instanceColor;
-      if (glassy) {
-        own.litSlot = geometry.getAttribute('litSlot') as BufferAttribute;
-        own.rooms = roomBuffer!;
-      }
-      if (lookBuffer) own.looks = lookBuffer;
-      gpuOnlyAttributes(mesh, own, () => {
-        const again = refill?.().parts[kind];
-        if (!again) return {};
-        const out: Record<string, ArrayLike<number>> = { poses: again.poses };
-        if (again.instanceColor) out.instanceColor = again.instanceColor;
-        if (glassy) {
-          out.litSlot = again.litSlot!;
-          out.rooms = again.rooms!;
-        }
-        if (looked) out.looks = again.looks!;
-        return out;
-      });
-    }
-    meshes.push(mesh);
-    const g = kit.geometry[kind];
-    triangles += ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * count;
-  }
-  // Furniture, only where an interior is drawn: one batch per kind.
-  // DO NOT read `arrays` in a closure here: V8 would keep it in this function's context, held by every closure of the batch (`setVisible`, the refills), and every cell's CPU arrays would outlive their upload.
-  const pieces = arrays.furniture;
-  const furnished: FurnitureKind[] = [];
-  for (const kind of FURNITURE_KINDS) if (pieces[kind]) furnished.push(kind);
-  if (furnished.length) {
-    const furniture = kit.furniture();
-    for (const kind of furnished) {
-      const piece = pieces[kind]!;
-      const poseBuffer = new InstancedInterleavedBuffer(piece.poses, POSE_FLOATS);
-      const material = dim ? kit.dimParts : furniture.material;
-      const mesh = new InstancedMesh(posedCopy(furniture.geometry[kind], poseBuffer), material, 0);
-      mesh.count = piece.count;
-      mesh.userData['posedFrom'] = furniture.geometry[kind];
-      mesh.name = `building-furniture-${kind}`;
-      mesh.castShadow = true;
-      mesh.customDepthMaterial = partPoseDepth(material);
-      mesh.receiveShadow = true;
-      // Faded, white instance colours as every faded part has (`cellArrays.ts`): one program variant of `dimParts`.
-      if (dim) mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(piece.count * 3).fill(1), 3);
-      mesh.boundingBox = boxOf(piece.bounds);
-      mesh.boundingSphere = sphereOf(piece.bounds);
-      // On the GPU only, made again from the chunks (`mesh/gpuOnly.ts`).
-      gpuOnlyAttributes(mesh, { poses: poseBuffer }, () => {
-        const again = refill?.().furniture[kind];
-        return again ? { poses: again.poses } : {};
-      });
-      meshes.push(mesh);
-      const g = furniture.geometry[kind];
-      triangles += ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * piece.count;
-    }
-  }
-  // Shell vertices and part instance matrices are already in world space.
-  for (const mesh of meshes) {
-    mesh.matrixAutoUpdate = false;
-    mesh.updateMatrix();
-    group.add(mesh);
-  }
-
-  return {
-    group,
-    triangles,
-    setVisible(visible) {
-      group.visible = visible;
-    },
-    dispose() {
-      for (const mesh of meshes) {
-        // The shell geometry is this build's own; the part geometries are the kit's.
-        if (mesh instanceof InstancedMesh) {
-          // A part's posed copy of the kit's model: its own buffers freed, the model's kept (`partPose.ts`).
-          letGoPosed(mesh.geometry, mesh.userData['posedFrom'] as BufferGeometry);
-          mesh.dispose();
-        } else mesh.geometry.dispose();
-      }
-      group.clear();
-    },
-  };
-}
-
-export function gridBounds(b: Bounds, grid: ShellGrid): Bounds {
-  const span = grid.step * 65535;
-  const at = (v: number, o: number): number => (v - o) / span;
-  return Float64Array.of(at(b[0]!, grid.x), at(b[1]!, grid.y), at(b[2]!, grid.z), at(b[3]!, grid.x), at(b[4]!, grid.y), at(b[5]!, grid.z), at(b[6]!, grid.x), at(b[7]!, grid.y), at(b[8]!, grid.z), b[9]! / span);
-}
-
-export const boxOf = (b: Bounds): Box3 => new Box3(new Vector3(b[0], b[1], b[2]), new Vector3(b[3], b[4], b[5]));
-
-export const sphereOf = (b: Bounds): Sphere => new Sphere(new Vector3(b[6], b[7], b[8]), b[9]);
-
-export type { BuildingChunk, LotGround, LotGroundRecipe, PartBatch,  } from './chunk.ts';
-export { COLOURED_PARTS } from './cellArrays.ts';
-
-export { FLAT_DEPTH } from './meshCore.ts';
-export type { SlotAllocator } from './meshCore.ts';
-export { lotGroundAgain } from './lotMesh.ts';
 export { interiorFurniture } from './interiorMesh.ts';

@@ -8,6 +8,7 @@ import { boxTransfer, lotTransfer, meshTransfer, propTransfer } from '../shared/
 import { generateTerrainTile } from './terrainGen.ts';
 import { conformTileToGrid, debugTileRoads } from './debugCity.ts';
 import { buildBuildings } from './buildingGen.ts';
+import { newOutputs } from './buildingGen/outputs.ts';
 import { buildRoadMesh } from './roadMesh.ts';
 import { buildTerrainSeams } from './terrainSeams.ts';
 import { coarsen, paintRoadTile } from './roadPaint.ts';
@@ -43,8 +44,10 @@ const handlers: { [K in JobKind]: Handler<K> } = {
       [roads.nodes.buffer as ArrayBuffer, roads.segs.buffer as ArrayBuffer]];
   },
   buildingMesh: (p) => {
-    const mesh = buildBuildings(H(), p.boxes, p.originX, p.originZ, p.extent, p.lod);
-    return [{ mesh }, mesh ? meshTransfer(mesh) : []];
+    // with the mesh, the height each building's walls were built to (the page keeps it: no generating there)
+    const top = new Float32Array(p.boxes.count);
+    const mesh = buildBuildings(H(), p.boxes, p.originX, p.originZ, p.extent, p.lod, false, newOutputs({ tops: top }));
+    return [{ mesh, built: { id: p.boxes.id, top } }, [...(mesh ? meshTransfer(mesh) : []), top.buffer as ArrayBuffer, p.boxes.id.buffer as ArrayBuffer]];
   },
   roadMesh: (p) => {
     const mesh = buildRoadMesh(H(), p.graph, p.originX, p.originZ, p.extent, p.lod);

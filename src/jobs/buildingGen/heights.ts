@@ -4,8 +4,7 @@
 import { ArchId, ARCHES, Fn, pickArch } from '../../world/arch.ts';
 import { CAT_UNIT, catalogProjects } from '../../world/catalog.ts';
 import { CIVIC_DESIGNS, decodeDesign, hasDesign } from '../../world/design.ts';
-import { Zone, zoneDensity } from '../../roads/zones.ts';
-import { volumes40, type Lot40 } from '../building40.ts';
+import { Zone } from '../../roads/zones.ts';
 
 /** Zones whose buildings are the Roadcraft 4.0 ones near the camera (jobs/building40.ts). */
 export const R40_ZONES = new Set<number>([Zone.Residential, Zone.ResLow, Zone.ResHigh, Zone.Commercial, Zone.ComLow, Zone.ComHigh, Zone.Mixed]);
@@ -22,29 +21,17 @@ CIVIC_TOP[Fn.SportsCourt] = 4; CIVIC_TOP[Fn.Cemetery] = 5; CIVIC_TOP[Fn.Playgrou
  * rules (style, shop ground storey, design, catalog project, civic shape). Cheap: for the camera and the collapse,
  * which ask every frame or for many buildings; the inside view takes the exact layout (buildingVolumes).
  */
-export interface HeightRec { x: Float32Array; z: Float32Array; w: Float32Array; d: Float32Array; rot: Float32Array; zone: Uint8Array; floors: Uint8Array; seed: Uint32Array; style: Uint8Array; fn: Uint8Array; color: Uint32Array; h: Float32Array; shapeN?: Uint8Array }
-const walls40Top = new Map<string, number>();
-/** Built wall height for a record: the 4.0's own volumes where it draws the building, the old estimate otherwise. */
+export interface HeightRec { x: Float32Array; z: Float32Array; w: Float32Array; d: Float32Array; rot: Float32Array; zone: Uint8Array; floors: Uint8Array; seed: Uint32Array; style: Uint8Array; fn: Uint8Array; color: Uint32Array; h: Float32Array; shapeN?: Uint8Array; top?: Float32Array }
+/**
+ * Built wall height for a record: the height the worker that meshed its cell built it to (the `top` column,
+ * World.setBuiltTops), the estimate from the record until then. DO NOT generate the building here to read its height:
+ * the page ran the whole 4.0 lot plan, massing and yard per building asked (a blast, the camera), and kept a string
+ * key per call (2026-10-31).
+ */
 export function wallsHeightOf(b: HeightRec, i: number): number {
-  const zone = b.zone[i];
-  if (R40_ZONES.has(zone) && !b.fn[i] && !hasDesign(b.color[i]) && !b.shapeN?.[i]) {
-    // the effective seed and the exact size: what volumes40 reads (D65: seed 0 and a rounded size made different
-    // buildings share one height)
-    const seed = b.seed[i] || i + 1;
-    const key = seed + '|' + zone + '|' + b.floors[i] + '|' + b.w[i] + 'x' + b.d[i];
-    let top = walls40Top.get(key);
-    if (top === undefined) {
-      const dens = zoneDensity(zone);
-      const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
-      const density = dens === 0 || (use === 'residential' && b.floors[i] <= 2) ? 'low' : dens === 2 || (use === 'commercial' && b.floors[i] >= 8) ? 'high' : 'medium';
-      const lot: Lot40 = { cx: b.x[i], cz: b.z[i], W: b.w[i], D: b.d[i], rot: b.rot[i], use, density, seed, groundAt: () => 0 };
-      top = Math.max(0, ...volumes40(lot).map((v) => v.y1));
-      if (walls40Top.size > 4096) walls40Top.clear();
-      walls40Top.set(key, top);
-    }
-    return top;
-  }
-  return wallsHeight(zone, b.floors[i], b.x[i], b.z[i], b.style[i], b.fn[i], b.color[i], b.h[i]);
+  const top = b.top?.[i] ?? 0;
+  if (top > 0) return top;
+  return wallsHeight(b.zone[i], b.floors[i], b.x[i], b.z[i], b.style[i], b.fn[i], b.color[i], b.h[i]);
 }
 
 export function wallsHeight(zone: number, floors: number, x: number, z: number, style: number, fn: number, color: number, h: number): number {

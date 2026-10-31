@@ -8,7 +8,7 @@ import {
   IcosahedronGeometry,
   RingGeometry,
   SphereGeometry,
-} from 'three';
+} from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { weldGeometry } from '../mesh/weld.ts';
 import { AC, type FacadePropKind, POT_HIGH } from './facadeProps.ts';
