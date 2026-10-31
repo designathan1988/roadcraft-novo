@@ -167,6 +167,9 @@ export const Dirty = {
 export type DirtyKind = (typeof Dirty)[keyof typeof Dirty];
 
 /** One consumer's own list of dirty cells of a kind: draining it leaves the other consumers' lists alone. */
+/** The answer of an empty drain, shared (frozen: whoever pushes into it throws instead of corrupting the next frame). */
+const NONE_DIRTY: number[] = Object.freeze([]) as unknown as number[];
+
 export class DirtyReader {
   readonly kind: DirtyKind;
   private flags = new Uint8Array(CELL_COUNT);
@@ -181,10 +184,10 @@ export class DirtyReader {
     this.list.push(cid);
   }
 
-  /** Removes and returns this consumer's dirty cells. */
+  /** Removes and returns this consumer's dirty cells (nothing: a shared empty list, not a new one per frame). */
   drain(): number[] {
     const l = this.list;
-    if (l.length === 0) return [];
+    if (l.length === 0) return NONE_DIRTY;
     this.list = [];
     for (const c of l) this.flags[c] = 0;
     return l;
@@ -246,7 +249,7 @@ export class DirtyCells {
   drain(kind: DirtyKind): number[] {
     if (kind & this.readKinds) throw new Error(`dirty kind ${kind} is read through readers: drain the reader`);
     const l = this.lists.get(kind);
-    if (!l || l.length === 0) return [];
+    if (!l || l.length === 0) return NONE_DIRTY;
     this.lists.set(kind, []);
     for (const c of l) this.flags[c] &= ~kind;
     return l;
