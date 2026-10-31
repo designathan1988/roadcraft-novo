@@ -1,0 +1,32 @@
+{
+ "lod0": {
+  "Concrete": 1472630,
+  "Asphalt": 2452004,
+  "Curb": 5646050,
+  "Sidewalk": 3448332,
+  "Zone": 1296492,
+  "Plain": 233064,
+  "Grass": 159264,
+  "Pavers": 18696
+ },
+ "lod1": {
+  "Concrete": 383786,
+  "Asphalt": 657640,
+  "Curb": 917748,
+  "Sidewalk": 804296,
+  "Zone": 346432,
+  "Plain": 118048,
+  "Grass": 13786,
+  "Pavers": 2456
+ },
+ "tile": {
+  "Concrete": 383786,
+  "Asphalt": 657640,
+  "Curb": 917748,
+  "Sidewalk": 804296,
+  "Zone": 346432,
+  "Plain": 118048,
+  "Grass": 13786,
+  "Pavers": 2456
+ }
+}

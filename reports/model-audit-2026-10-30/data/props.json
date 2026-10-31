@@ -1,0 +1,6032 @@
+{
+ "propTypes": 31,
+ "kinds": 84,
+ "rows": [
+  {
+   "kind": 0,
+   "type": 0,
+   "typeName": "Tree",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 10.42,
+   "dist": [
+    200,
+    650,
+    3600
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 200,
+     "vertices": 540,
+     "triangles": 180,
+     "indexed": false,
+     "uniquePositions": 108,
+     "weldable": 68,
+     "degenerate": 68,
+     "tiny": 0,
+     "duplicate": 34,
+     "area": 17.345461415798166,
+     "bbox": [
+      -1.740965485572815,
+      -0.0009246263070963323,
+      -1.638768196105957,
+      1.3998663425445557,
+      7.838391304016113,
+      1.6399344205856323
+     ],
+     "medianEdge": 0.41168161585552177,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 30240,
+     "sizeM": 7.84,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 200,
+     "to": 650,
+     "vertices": 168,
+     "triangles": 56,
+     "indexed": false,
+     "uniquePositions": 36,
+     "weldable": 24,
+     "degenerate": 24,
+     "tiny": 0,
+     "duplicate": 12,
+     "area": 12.33678282619998,
+     "bbox": [
+      -1.6943674087524414,
+      -0.0008769151172600687,
+      -1.4031398296356201,
+      1.5858707427978516,
+      6.831243991851807,
+      1.6035902500152588
+     ],
+     "medianEdge": 0.6934550432885278,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 9408,
+     "sizeM": 6.83,
+     "maxPx": 44.5,
+     "trisPerMaxPx": 0.028
+    },
+    {
+     "level": 2,
+     "from": 650,
+     "to": 3600,
+     "vertices": 6,
+     "triangles": 2,
+     "indexed": false,
+     "uniquePositions": 4,
+     "weldable": 2,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4,
+     "bbox": [
+      -1,
+      -1,
+      0,
+      1,
+      1,
+      0
+     ],
+     "medianEdge": 2,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 336,
+     "sizeM": 2,
+     "maxPx": 4,
+     "trisPerMaxPx": 0.124
+    }
+   ]
+  },
+  {
+   "kind": 1,
+   "type": 0,
+   "typeName": "Tree",
+   "sub": 1,
+   "variants": [
+    3
+   ],
+   "radius": 10.87,
+   "dist": [
+    200,
+    650,
+    3600
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 200,
+     "vertices": 720,
+     "triangles": 240,
+     "indexed": false,
+     "uniquePositions": 148,
+     "weldable": 108,
+     "degenerate": 108,
+     "tiny": 0,
+     "duplicate": 54,
+     "area": 27.519328241991907,
+     "bbox": [
+      -3.1974503993988037,
+      -0.006678651086986065,
+      -2.3786323070526123,
+      2.5224783420562744,
+      7.108275413513184,
+      2.8462095260620117
+     ],
+     "medianEdge": 0.2097203092744916,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 40320,
+     "sizeM": 7.11,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 200,
+     "to": 650,
+     "vertices": 210,
+     "triangles": 70,
+     "indexed": false,
+     "uniquePositions": 43,
+     "weldable": 38,
+     "degenerate": 38,
+     "tiny": 0,
+     "duplicate": 19,
+     "area": 15.383576589648259,
+     "bbox": [
+      -2.807849168777466,
+      -0.006023145280778408,
+      -2.9037184715270996,
+      3.2304253578186035,
+      6.341832637786865,
+      3.1278069019317627
+     ],
+     "medianEdge": 0.424161783724177,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 11760,
+     "sizeM": 6.35,
+     "maxPx": 41.4,
+     "trisPerMaxPx": 0.041
+    },
+    {
+     "level": 2,
+     "from": 650,
+     "to": 3600,
+     "vertices": 6,
+     "triangles": 2,
+     "indexed": false,
+     "uniquePositions": 4,
+     "weldable": 2,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4,
+     "bbox": [
+      -1,
+      -1,
+      0,
+      1,
+      1,
+      0
+     ],
+     "medianEdge": 2,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 336,
+     "sizeM": 2,
+     "maxPx": 4,
+     "trisPerMaxPx": 0.124
+    }
+   ]
+  },
+  {
+   "kind": 2,
+   "type": 1,
+   "typeName": "Conifer",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 10.55,
+   "dist": [
+    200,
+    650,
+    3600
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 200,
+     "vertices": 474,
+     "triangles": 158,
+     "indexed": false,
+     "uniquePositions": 89,
+     "weldable": 140,
+     "degenerate": 140,
+     "tiny": 0,
+     "duplicate": 70,
+     "area": 14.809285594539482,
+     "bbox": [
+      -1.8762141466140747,
+      0,
+      -1.7759978771209717,
+      2.4685845375061035,
+      9.770796775817871,
+      2.1588478088378906
+     ],
+     "medianEdge": 0,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 26544,
+     "sizeM": 9.77,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 200,
+     "to": 650,
+     "vertices": 204,
+     "triangles": 68,
+     "indexed": false,
+     "uniquePositions": 44,
+     "weldable": 50,
+     "degenerate": 50,
+     "tiny": 0,
+     "duplicate": 25,
+     "area": 14.001870354503355,
+     "bbox": [
+      -2.1657216548919678,
+      0,
+      -1.4447523355484009,
+      2.8961668014526367,
+      9.500707626342773,
+      2.1872081756591797
+     ],
+     "medianEdge": 0,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 11424,
+     "sizeM": 9.5,
+     "maxPx": 61.9,
+     "trisPerMaxPx": 0.018
+    },
+    {
+     "level": 2,
+     "from": 650,
+     "to": 3600,
+     "vertices": 6,
+     "triangles": 2,
+     "indexed": false,
+     "uniquePositions": 4,
+     "weldable": 2,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4,
+     "bbox": [
+      -1,
+      -1,
+      0,
+      1,
+      1,
+      0
+     ],
+     "medianEdge": 2,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 336,
+     "sizeM": 2,
+     "maxPx": 4,
+     "trisPerMaxPx": 0.124
+    }
+   ]
+  },
+  {
+   "kind": 3,
+   "type": 2,
+   "typeName": "Bush",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 1.83,
+   "dist": [
+    130,
+    420,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 130,
+     "vertices": 396,
+     "triangles": 132,
+     "indexed": false,
+     "uniquePositions": 68,
+     "weldable": 52,
+     "degenerate": 52,
+     "tiny": 0,
+     "duplicate": 26,
+     "area": 1.9802413407004367,
+     "bbox": [
+      -0.7256728410720825,
+      -0.040731243789196014,
+      -0.8170007467269897,
+      0.7699632048606873,
+      1.161054253578186,
+      0.8426134586334229
+     ],
+     "medianEdge": 0.2130914103658326,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 22176,
+     "sizeM": 1.66,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 130,
+     "to": 420,
+     "vertices": 114,
+     "triangles": 38,
+     "indexed": false,
+     "uniquePositions": 21,
+     "weldable": 18,
+     "degenerate": 18,
+     "tiny": 0,
+     "duplicate": 9,
+     "area": 0.8769790685799409,
+     "bbox": [
+      -0.635425329208374,
+      -0.030683528631925583,
+      -0.58579021692276,
+      0.5669606924057007,
+      0.996884286403656,
+      0.6578223705291748
+     ],
+     "medianEdge": 0.3125453396904484,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 6384,
+     "sizeM": 1.24,
+     "maxPx": 12.5,
+     "trisPerMaxPx": 0.244
+    },
+    null
+   ]
+  },
+  {
+   "kind": 4,
+   "type": 2,
+   "typeName": "Bush",
+   "sub": 1,
+   "variants": [
+    2
+   ],
+   "radius": 2.62,
+   "dist": [
+    130,
+    420,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 130,
+     "vertices": 336,
+     "triangles": 112,
+     "indexed": false,
+     "uniquePositions": 58,
+     "weldable": 32,
+     "degenerate": 32,
+     "tiny": 0,
+     "duplicate": 16,
+     "area": 1.8198524845038315,
+     "bbox": [
+      -1.0501539707183838,
+      0.1058141365647316,
+      -0.7868902683258057,
+      0.8392704129219055,
+      1.1270898580551147,
+      0.591554582118988
+     ],
+     "medianEdge": 0.22661166315834708,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 18816,
+     "sizeM": 1.89,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 130,
+     "to": 420,
+     "vertices": 96,
+     "triangles": 32,
+     "indexed": false,
+     "uniquePositions": 18,
+     "weldable": 12,
+     "degenerate": 12,
+     "tiny": 0,
+     "duplicate": 6,
+     "area": 1.884990014801628,
+     "bbox": [
+      -1.1739751100540161,
+      -0.1882103681564331,
+      -0.6288155913352966,
+      1.0143877267837524,
+      0.9752845168113708,
+      0.5433359146118164
+     ],
+     "medianEdge": 0.46782092032842176,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 5376,
+     "sizeM": 2.19,
+     "maxPx": 21.9,
+     "trisPerMaxPx": 0.066
+    },
+    null
+   ]
+  },
+  {
+   "kind": 5,
+   "type": 2,
+   "typeName": "Bush",
+   "sub": 2,
+   "variants": [
+    3
+   ],
+   "radius": 1.68,
+   "dist": [
+    150,
+    480,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 150,
+     "vertices": 360,
+     "triangles": 120,
+     "indexed": false,
+     "uniquePositions": 62,
+     "weldable": 40,
+     "degenerate": 40,
+     "tiny": 0,
+     "duplicate": 20,
+     "area": 1.3498955852645877,
+     "bbox": [
+      -0.9790606498718262,
+      0.009066014550626278,
+      -0.40726250410079956,
+      0.8171407580375671,
+      0.9931851029396057,
+      0.4170176088809967
+     ],
+     "medianEdge": 0.18086454206194807,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 20160,
+     "sizeM": 1.8,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 150,
+     "to": 480,
+     "vertices": 102,
+     "triangles": 34,
+     "indexed": false,
+     "uniquePositions": 19,
+     "weldable": 14,
+     "degenerate": 14,
+     "tiny": 0,
+     "duplicate": 7,
+     "area": 0.8734281889076724,
+     "bbox": [
+      -0.823085367679596,
+      0.05175831541419029,
+      -0.3695951998233795,
+      0.7906296849250793,
+      0.8941316604614258,
+      0.37966805696487427
+     ],
+     "medianEdge": 0.20073971208109084,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 5712,
+     "sizeM": 1.61,
+     "maxPx": 14,
+     "trisPerMaxPx": 0.173
+    },
+    null
+   ]
+  },
+  {
+   "kind": 6,
+   "type": 3,
+   "typeName": "Lamp",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 9.65,
+   "dist": [
+    220,
+    750,
+    2200
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 220,
+     "vertices": 276,
+     "triangles": 92,
+     "indexed": false,
+     "uniquePositions": 58,
+     "weldable": 122,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 12.406060354702735,
+     "bbox": [
+      -0.8500000238418579,
+      1.9073486612342094e-7,
+      -0.5699999928474426,
+      0.8500000238418579,
+      9.649999618530273,
+      2.299999952316284
+     ],
+     "medianEdge": 0.15999984741210938,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 15456,
+     "sizeM": 9.65,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 220,
+     "to": 750,
+     "vertices": 144,
+     "triangles": 48,
+     "indexed": false,
+     "uniquePositions": 32,
+     "weldable": 48,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 12.982398966169265,
+     "bbox": [
+      -0.8500000238418579,
+      1.9073486612342094e-7,
+      -0.12999999523162842,
+      0.8500000238418579,
+      9.649999618530273,
+      2.299999952316284
+     ],
+     "medianEdge": 0.7999999523162842,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 8064,
+     "sizeM": 9.65,
+     "maxPx": 57.2,
+     "trisPerMaxPx": 0.015
+    },
+    {
+     "level": 2,
+     "from": 750,
+     "to": 2200,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.7399989700318201,
+     "bbox": [
+      -0.25,
+      7.849999904632568,
+      1.4500000476837158,
+      0.25,
+      8.149999618530273,
+      2.3499999046325684
+     ],
+     "medianEdge": 0.5,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 0.9,
+     "maxPx": 1.6,
+     "trisPerMaxPx": 4.903
+    }
+   ]
+  },
+  {
+   "kind": 7,
+   "type": 4,
+   "typeName": "LampDouble",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 8.49,
+   "dist": [
+    220,
+    750,
+    2200
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 220,
+     "vertices": 408,
+     "triangles": 136,
+     "indexed": false,
+     "uniquePositions": 79,
+     "weldable": 205,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 9.867054900407734,
+     "bbox": [
+      -0.20000000298023224,
+      0,
+      -2.299999952316284,
+      0.20000000298023224,
+      8.199999809265137,
+      2.299999952316284
+     ],
+     "medianEdge": 0.15999984741210938,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 22848,
+     "sizeM": 8.2,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 220,
+     "to": 750,
+     "vertices": 180,
+     "triangles": 60,
+     "indexed": false,
+     "uniquePositions": 36,
+     "weldable": 68,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 9.608804346752061,
+     "bbox": [
+      -0.18000000715255737,
+      9.536743306171047e-8,
+      -2.299999952316284,
+      0.18000000715255737,
+      8.199999809265137,
+      2.299999952316284
+     ],
+     "medianEdge": 0.36000001430511475,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 10080,
+     "sizeM": 8.2,
+     "maxPx": 48.6,
+     "trisPerMaxPx": 0.025
+    },
+    {
+     "level": 2,
+     "from": 750,
+     "to": 2200,
+     "vertices": 72,
+     "triangles": 24,
+     "indexed": false,
+     "uniquePositions": 16,
+     "weldable": 24,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 3.4799979400636403,
+     "bbox": [
+      -0.25,
+      7.849999904632568,
+      -2.3499999046325684,
+      0.25,
+      8.149999618530273,
+      2.3499999046325684
+     ],
+     "medianEdge": 0.5,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 4032,
+     "sizeM": 4.7,
+     "maxPx": 8.2,
+     "trisPerMaxPx": 0.36
+    }
+   ]
+  },
+  {
+   "kind": 8,
+   "type": 5,
+   "typeName": "Signal",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 6.7,
+   "dist": [
+    260,
+    1100,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 2508,
+     "triangles": 836,
+     "indexed": false,
+     "uniquePositions": 602,
+     "weldable": 1538,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 15.186357750377955,
+     "bbox": [
+      -3.5999999046325684,
+      -9.536743306171047e-8,
+      -0.30000001192092896,
+      0.24799999594688416,
+      5.800000190734863,
+      0.4000000059604645
+     ],
+     "medianEdge": 0.060000017285346985,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 140448,
+     "sizeM": 5.8,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 260,
+     "to": 1100,
+     "vertices": 468,
+     "triangles": 156,
+     "indexed": false,
+     "uniquePositions": 90,
+     "weldable": 270,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 8.742337959727763,
+     "bbox": [
+      -3.5999999046325684,
+      -9.536743306171047e-8,
+      -0.10000000149011612,
+      0.10000000149011612,
+      5.800000190734863,
+      0.23000000417232513
+     ],
+     "medianEdge": 0.0679838857749558,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 26208,
+     "sizeM": 5.8,
+     "maxPx": 29.1,
+     "trisPerMaxPx": 0.184
+    },
+    null
+   ]
+  },
+  {
+   "kind": 9,
+   "type": 6,
+   "typeName": "Bench",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 1.3,
+   "dist": [
+    150,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 150,
+     "vertices": 144,
+     "triangles": 48,
+     "indexed": false,
+     "uniquePositions": 32,
+     "weldable": 48,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4.407799686384207,
+     "bbox": [
+      -0.8500000238418579,
+      5.9604645663569045e-9,
+      -0.25,
+      0.8500000238418579,
+      0.949999988079071,
+      0.22499999403953552
+     ],
+     "medianEdge": 0.41999998688697815,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 8064,
+     "sizeM": 1.7,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 10,
+   "type": 7,
+   "typeName": "Bin",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0.99,
+   "dist": [
+    130,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 130,
+     "vertices": 240,
+     "triangles": 80,
+     "indexed": false,
+     "uniquePositions": 43,
+     "weldable": 156,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 2.3865727544346154,
+     "bbox": [
+      -0.27580639719963074,
+      1.1920929132713809e-8,
+      -0.28999999165534973,
+      0.27580639719963074,
+      0.949999988079071,
+      0.28999999165534973
+     ],
+     "medianEdge": 0.1792298533431523,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 13440,
+     "sizeM": 0.95,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 11,
+   "type": 8,
+   "typeName": "Wire",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 9.37,
+   "dist": [
+    90,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 90,
+     "vertices": 1200,
+     "triangles": 400,
+     "indexed": false,
+     "uniquePositions": 208,
+     "weldable": 752,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.5698045367418842,
+     "bbox": [
+      -0.7674999833106995,
+      8.332500457763672,
+      0,
+      0.7674999833106995,
+      9.287500381469727,
+      1
+     ],
+     "medianEdge": 0.08333325386047363,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 67200,
+     "sizeM": 1.53,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 12,
+   "type": 9,
+   "typeName": "Sign",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 2.6,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 84,
+     "triangles": 28,
+     "indexed": false,
+     "uniquePositions": 22,
+     "weldable": 50,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 8.632313803524717,
+     "bbox": [
+      -1,
+      -1,
+      -0.03999999910593033,
+      1,
+      2.5999999046325684,
+      0.04500000178813934
+     ],
+     "medianEdge": 0.03999999988327485,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 4704,
+     "sizeM": 3.6,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 13,
+   "type": 9,
+   "typeName": "Sign",
+   "sub": 1,
+   "variants": [
+    2
+   ],
+   "radius": 2.73,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 192,
+     "triangles": 64,
+     "indexed": false,
+     "uniquePositions": 46,
+     "weldable": 86,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 9.91521386020576,
+     "bbox": [
+      -1,
+      -1,
+      -0.550000011920929,
+      1,
+      2.6700000762939453,
+      0.550000011920929
+     ],
+     "medianEdge": 0.2200000286102295,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 10752,
+     "sizeM": 3.67,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 14,
+   "type": 10,
+   "typeName": "ParkedCar",
+   "sub": 0,
+   "variants": [
+    0,
+    3,
+    6,
+    9,
+    12,
+    15
+   ],
+   "radius": 2.44,
+   "dist": [
+    55,
+    320,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 55,
+     "vertices": 17484,
+     "triangles": 5828,
+     "indexed": false,
+     "uniquePositions": 2828,
+     "weldable": 12751,
+     "degenerate": 440,
+     "tiny": 272,
+     "duplicate": 312,
+     "area": 35.82520627579734,
+     "bbox": [
+      -1.1697489023208618,
+      -1.3113021779531664e-8,
+      -2.209689140319824,
+      1.1697489023208618,
+      1.4949876070022583,
+      2.2089385986328125
+     ],
+     "medianEdge": 0.105355179003056,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 979104,
+     "sizeM": 4.42,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 55,
+     "to": 320,
+     "vertices": 1512,
+     "triangles": 504,
+     "indexed": false,
+     "uniquePositions": 262,
+     "weldable": 694,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 29.002688309079204,
+     "bbox": [
+      -0.9200000166893005,
+      0.04421161115169525,
+      -2.200000047683716,
+      0.9200000166893005,
+      1.4677531719207764,
+      2.200000047683716
+     ],
+     "medianEdge": 0.3781896798024402,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 84672,
+     "sizeM": 4.4,
+     "maxPx": 104.3,
+     "trisPerMaxPx": 0.046
+    },
+    null
+   ]
+  },
+  {
+   "kind": 15,
+   "type": 10,
+   "typeName": "ParkedCar",
+   "sub": 1,
+   "variants": [
+    1,
+    4,
+    7,
+    10,
+    13
+   ],
+   "radius": 2.27,
+   "dist": [
+    55,
+    320,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 55,
+     "vertices": 16656,
+     "triangles": 5552,
+     "indexed": false,
+     "uniquePositions": 2730,
+     "weldable": 11988,
+     "degenerate": 360,
+     "tiny": 310,
+     "duplicate": 252,
+     "area": 31.888809262522958,
+     "bbox": [
+      -1.1092493534088135,
+      -2.38418573772492e-9,
+      -1.9597446918487549,
+      1.1092493534088135,
+      1.523213267326355,
+      1.9589006900787354
+     ],
+     "medianEdge": 0.10470713799568888,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 932736,
+     "sizeM": 3.92,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 55,
+     "to": 320,
+     "vertices": 1512,
+     "triangles": 504,
+     "indexed": false,
+     "uniquePositions": 262,
+     "weldable": 684,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 26.014287182492467,
+     "bbox": [
+      -0.8600000143051147,
+      0.04153212532401085,
+      -1.9500000476837158,
+      0.8600000143051147,
+      1.4982131719589233,
+      1.9500000476837158
+     ],
+     "medianEdge": 0.3400366943557448,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 84672,
+     "sizeM": 3.9,
+     "maxPx": 92.4,
+     "trisPerMaxPx": 0.059
+    },
+    null
+   ]
+  },
+  {
+   "kind": 16,
+   "type": 10,
+   "typeName": "ParkedCar",
+   "sub": 2,
+   "variants": [
+    2,
+    5,
+    8,
+    11,
+    14
+   ],
+   "radius": 2.82,
+   "dist": [
+    55,
+    320,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 55,
+     "vertices": 17484,
+     "triangles": 5828,
+     "indexed": false,
+     "uniquePositions": 2876,
+     "weldable": 12686,
+     "degenerate": 344,
+     "tiny": 222,
+     "duplicate": 240,
+     "area": 43.50877514607087,
+     "bbox": [
+      -1.22342050075531,
+      -4.76837147544984e-9,
+      -2.3097710609436035,
+      1.22342050075531,
+      1.8244208097457886,
+      2.3085896968841553
+     ],
+     "medianEdge": 0.11114464521233555,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 979104,
+     "sizeM": 4.62,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 55,
+     "to": 320,
+     "vertices": 1512,
+     "triangles": 504,
+     "indexed": false,
+     "uniquePositions": 262,
+     "weldable": 688,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 36.13115065452641,
+     "bbox": [
+      -0.9750000238418579,
+      0.04957061633467674,
+      -2.299999952316284,
+      0.9750000238418579,
+      1.7993178367614746,
+      2.299999952316284
+     ],
+     "medianEdge": 0.39616213644355924,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 84672,
+     "sizeM": 4.6,
+     "maxPx": 109,
+     "trisPerMaxPx": 0.042
+    },
+    null
+   ]
+  },
+  {
+   "kind": 17,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 0,
+   "variants": [
+    0
+   ],
+   "radius": 0.79,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 432,
+     "triangles": 144,
+     "indexed": false,
+     "uniquePositions": 78,
+     "weldable": 322,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.1722261238635832,
+     "bbox": [
+      -0.20999999344348907,
+      -2.38418573772492e-9,
+      -0.1599999964237213,
+      0.20999999344348907,
+      0.7900000214576721,
+      0.1599999964237213
+     ],
+     "medianEdge": 0.0927050860990293,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 24192,
+     "sizeM": 0.79,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 18,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 1,
+   "variants": [
+    1
+   ],
+   "radius": 1.45,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 144,
+     "triangles": 48,
+     "indexed": false,
+     "uniquePositions": 30,
+     "weldable": 70,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.7755059941817952,
+     "bbox": [
+      -0.23999999463558197,
+      -5.9604645663569045e-9,
+      -0.1899999976158142,
+      0.23999999463558197,
+      1.4199999570846558,
+      0.20999999344348907
+     ],
+     "medianEdge": 0.05999999821181425,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 8064,
+     "sizeM": 1.42,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 19,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 2,
+   "variants": [
+    2
+   ],
+   "radius": 2.67,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 348,
+     "triangles": 116,
+     "indexed": false,
+     "uniquePositions": 64,
+     "weldable": 256,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 5.444296485482027,
+     "bbox": [
+      -0.6200000047683716,
+      1.1920929132713809e-8,
+      -0.40700000524520874,
+      0.6200000047683716,
+      2.6630001068115234,
+      0.6470000147819519
+     ],
+     "medianEdge": 0.34365276152726076,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 19488,
+     "sizeM": 2.66,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 20,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 3,
+   "variants": [
+    3
+   ],
+   "radius": 0.52,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.0679999695420266,
+     "bbox": [
+      -0.44999998807907104,
+      -0.03999999910593033,
+      -0.25,
+      0.44999998807907104,
+      0.019999999552965164,
+      0.25
+     ],
+     "medianEdge": 0.8999999761581421,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 0.9,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 21,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 4,
+   "variants": [
+    4
+   ],
+   "radius": 0.76,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 120,
+     "triangles": 40,
+     "indexed": false,
+     "uniquePositions": 22,
+     "weldable": 78,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.7975025026336899,
+     "bbox": [
+      -0.15216904878616333,
+      0,
+      -0.1599999964237213,
+      0.15216904878616333,
+      0.75,
+      0.1599999964237213
+     ],
+     "medianEdge": 0.09888544418005643,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 6720,
+     "sizeM": 0.75,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 22,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 5,
+   "variants": [
+    5
+   ],
+   "radius": 1.03,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 276,
+     "triangles": 92,
+     "indexed": false,
+     "uniquePositions": 50,
+     "weldable": 210,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 6.848786533484857,
+     "bbox": [
+      -0.550000011920929,
+      0,
+      -0.550000011920929,
+      0.550000011920929,
+      1.034999966621399,
+      0.550000011920929
+     ],
+     "medianEdge": 0.30059318547112934,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 15456,
+     "sizeM": 1.1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 23,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 6,
+   "variants": [
+    6
+   ],
+   "radius": 0,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 24,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 7,
+   "variants": [
+    7
+   ],
+   "radius": 0,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 25,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 8,
+   "variants": [
+    8
+   ],
+   "radius": 0.78,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 144,
+     "triangles": 48,
+     "indexed": false,
+     "uniquePositions": 32,
+     "weldable": 48,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 2.0932001137062954,
+     "bbox": [
+      -0.4000000059604645,
+      4.4703482582342247e-10,
+      -1.7881393032936899e-9,
+      0.4000000059604645,
+      0.5900000333786011,
+      0.3400000035762787
+     ],
+     "medianEdge": 0.35999999940395355,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 8064,
+     "sizeM": 0.8,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 26,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 9,
+   "variants": [
+    9
+   ],
+   "radius": 1.17,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 276,
+     "triangles": 92,
+     "indexed": false,
+     "uniquePositions": 54,
+     "weldable": 146,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 11.404101276590179,
+     "bbox": [
+      -0.6100000143051147,
+      1.1920929132713809e-8,
+      -0.46000000834465027,
+      0.6100000143051147,
+      1.0399999618530273,
+      0.46000000834465027
+     ],
+     "medianEdge": 0.15131425389862133,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 15456,
+     "sizeM": 1.22,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 27,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 10,
+   "variants": [
+    10
+   ],
+   "radius": 0.89,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 360,
+     "triangles": 120,
+     "indexed": false,
+     "uniquePositions": 64,
+     "weldable": 276,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.6493853091245065,
+     "bbox": [
+      -0.30000001192092896,
+      2.38418573772492e-9,
+      -0.30000001192092896,
+      0.30000001192092896,
+      0.8899999856948853,
+      0.30000001192092896
+     ],
+     "medianEdge": 0.16395991949569075,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 20160,
+     "sizeM": 0.89,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 28,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 11,
+   "variants": [
+    11
+   ],
+   "radius": 1.67,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 288,
+     "triangles": 96,
+     "indexed": false,
+     "uniquePositions": 64,
+     "weldable": 96,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.9181499475169899,
+     "bbox": [
+      -0.9150000214576721,
+      1.1920929132713809e-8,
+      -0.12999999523162842,
+      0.9150000214576721,
+      1.399999976158142,
+      0.12999999523162842
+     ],
+     "medianEdge": 0.29999998211860657,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 16128,
+     "sizeM": 1.83,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 29,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 12,
+   "variants": [
+    12
+   ],
+   "radius": 1.24,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 312,
+     "triangles": 104,
+     "indexed": false,
+     "uniquePositions": 58,
+     "weldable": 222,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.1336895701767642,
+     "bbox": [
+      -0.3799999952316284,
+      0,
+      -0.02500000037252903,
+      0.3799999952316284,
+      1.2300000190734863,
+      0.4749999940395355
+     ],
+     "medianEdge": 0.17917781401865016,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 17472,
+     "sizeM": 1.23,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 30,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 13,
+   "variants": [
+    13
+   ],
+   "radius": 0.88,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 336,
+     "triangles": 112,
+     "indexed": false,
+     "uniquePositions": 60,
+     "weldable": 260,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.9955869689743242,
+     "bbox": [
+      -0.2199999988079071,
+      -1.1920929132713809e-8,
+      -0.2199999988079071,
+      0.2199999988079071,
+      0.8849999904632568,
+      0.2199999988079071
+     ],
+     "medianEdge": 0.12008454527451355,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 18816,
+     "sizeM": 0.89,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 31,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 14,
+   "variants": [
+    14
+   ],
+   "radius": 0.97,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 216,
+     "triangles": 72,
+     "indexed": false,
+     "uniquePositions": 48,
+     "weldable": 72,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.2169999782085439,
+     "bbox": [
+      -0.22499999403953552,
+      6.556510889765832e-9,
+      -0.23000000417232513,
+      0.22499999403953552,
+      0.9200000166893005,
+      0.22499999403953552
+     ],
+     "medianEdge": 0.050000011920928955,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 12096,
+     "sizeM": 0.92,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 32,
+   "type": 11,
+   "typeName": "Furniture",
+   "sub": 15,
+   "variants": [
+    15
+   ],
+   "radius": 1.12,
+   "dist": [
+    140,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 140,
+     "vertices": 336,
+     "triangles": 112,
+     "indexed": false,
+     "uniquePositions": 59,
+     "weldable": 220,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 9.080747714502719,
+     "bbox": [
+      -0.7019481062889099,
+      -1.1920929132713809e-8,
+      -0.7200000286102295,
+      0.7019481062889099,
+      0.9200000166893005,
+      0.7200000286102295
+     ],
+     "medianEdge": 0.2848267762537451,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 18816,
+     "sizeM": 1.44,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 33,
+   "type": 12,
+   "typeName": "Barrier",
+   "sub": 0,
+   "variants": [
+    0
+   ],
+   "radius": 1.54,
+   "dist": [
+    180,
+    700,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 180,
+     "vertices": 144,
+     "triangles": 48,
+     "indexed": false,
+     "uniquePositions": 32,
+     "weldable": 48,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.7087999816715722,
+     "bbox": [
+      -0.05999999865889549,
+      2.3841858265427618e-8,
+      0,
+      0.05999999865889549,
+      1.2999999523162842,
+      1
+     ],
+     "medianEdge": 0.12000000476837158,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 8064,
+     "sizeM": 1.3,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 180,
+     "to": 700,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.3520000116825104,
+     "bbox": [
+      -0.02500000037252903,
+      0.699999988079071,
+      0,
+      0.02500000037252903,
+      0.8199999928474426,
+      1
+     ],
+     "medianEdge": 0.12000000476837158,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1,
+     "maxPx": 7.2,
+     "trisPerMaxPx": 0.229
+    },
+    null
+   ]
+  },
+  {
+   "kind": 34,
+   "type": 12,
+   "typeName": "Barrier",
+   "sub": 1,
+   "variants": [
+    1
+   ],
+   "radius": 2.22,
+   "dist": [
+    180,
+    700,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 180,
+     "vertices": 72,
+     "triangles": 24,
+     "indexed": false,
+     "uniquePositions": 16,
+     "weldable": 24,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 5.884000043153764,
+     "bbox": [
+      -0.15000000596046448,
+      1.1920929132713809e-8,
+      0,
+      0.15000000596046448,
+      1.9800000190734863,
+      1
+     ],
+     "medianEdge": 0.30000001192092896,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 4032,
+     "sizeM": 1.98,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 180,
+     "to": 700,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 5.198000167489052,
+     "bbox": [
+      -0.10999999940395355,
+      -2.3841858265427618e-8,
+      0,
+      0.10999999940395355,
+      1.9500000476837158,
+      1
+     ],
+     "medianEdge": 1.950000071525574,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1.95,
+     "maxPx": 14.1,
+     "trisPerMaxPx": 0.06
+    },
+    null
+   ]
+  },
+  {
+   "kind": 35,
+   "type": 12,
+   "typeName": "Barrier",
+   "sub": 2,
+   "variants": [
+    2
+   ],
+   "radius": 1.69,
+   "dist": [
+    180,
+    700,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 180,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 6.279999797344207,
+     "bbox": [
+      -0.4000000059604645,
+      2.3841858265427618e-8,
+      0,
+      0.4000000059604645,
+      1.2999999523162842,
+      1
+     ],
+     "medianEdge": 1.299999928474426,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1.3,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 180,
+     "to": 700,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 6.279999797344207,
+     "bbox": [
+      -0.4000000059604645,
+      2.3841858265427618e-8,
+      0,
+      0.4000000059604645,
+      1.2999999523162842,
+      1
+     ],
+     "medianEdge": 1.299999928474426,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1.3,
+     "maxPx": 9.4,
+     "trisPerMaxPx": 0.135
+    },
+    null
+   ]
+  },
+  {
+   "kind": 36,
+   "type": 12,
+   "typeName": "Barrier",
+   "sub": 3,
+   "variants": [
+    3
+   ],
+   "radius": 1.25,
+   "dist": [
+    180,
+    700,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 180,
+     "vertices": 72,
+     "triangles": 24,
+     "indexed": false,
+     "uniquePositions": 16,
+     "weldable": 24,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.1183999777942897,
+     "bbox": [
+      -0.05000000074505806,
+      0,
+      -7.450580707946131e-10,
+      0.08999999612569809,
+      0.75,
+      1
+     ],
+     "medianEdge": 0.3199999928474426,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 4032,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 180,
+     "to": 700,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.7983999714612962,
+     "bbox": [
+      0.030000001192092896,
+      0.42000001668930054,
+      0,
+      0.08999999612569809,
+      0.7400000095367432,
+      1
+     ],
+     "medianEdge": 0.3199999928474426,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1,
+     "maxPx": 7.2,
+     "trisPerMaxPx": 0.229
+    },
+    null
+   ]
+  },
+  {
+   "kind": 37,
+   "type": 12,
+   "typeName": "Barrier",
+   "sub": 4,
+   "variants": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 1.52,
+   "dist": [
+    180,
+    700,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 180,
+     "vertices": 252,
+     "triangles": 84,
+     "indexed": false,
+     "uniquePositions": 56,
+     "weldable": 84,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.958000173734499,
+     "bbox": [
+      -0.02500000037252903,
+      -1.1920929132713809e-8,
+      0,
+      0.02500000037252903,
+      1.100000023841858,
+      1
+     ],
+     "medianEdge": 0.05000000074505806,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 14112,
+     "sizeM": 1.1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 180,
+     "to": 700,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 2.1599999344348912,
+     "bbox": [
+      -0.019999999552965164,
+      0.15000000596046448,
+      0,
+      0.019999999552965164,
+      1.149999976158142,
+      1
+     ],
+     "medianEdge": 0.9999999701976776,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1,
+     "maxPx": 7.2,
+     "trisPerMaxPx": 0.229
+    },
+    null
+   ]
+  },
+  {
+   "kind": 38,
+   "type": 13,
+   "typeName": "Pole",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 9.65,
+   "dist": [
+    220,
+    750,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 220,
+     "vertices": 240,
+     "triangles": 80,
+     "indexed": false,
+     "uniquePositions": 50,
+     "weldable": 110,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 9.054060608201421,
+     "bbox": [
+      -0.8500000238418579,
+      1.9073486612342094e-7,
+      -0.17000000178813934,
+      0.8500000238418579,
+      9.649999618530273,
+      0.17000000178813934
+     ],
+     "medianEdge": 0.1301123670588997,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 13440,
+     "sizeM": 9.65,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 220,
+     "to": 750,
+     "vertices": 72,
+     "triangles": 24,
+     "indexed": false,
+     "uniquePositions": 16,
+     "weldable": 24,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 11.16239680967327,
+     "bbox": [
+      -0.8500000238418579,
+      1.9073486612342094e-7,
+      -0.12999999523162842,
+      0.8500000238418579,
+      9.649999618530273,
+      0.12999999523162842
+     ],
+     "medianEdge": 1.7000000476837158,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 4032,
+     "sizeM": 9.65,
+     "maxPx": 57.2,
+     "trisPerMaxPx": 0.007
+    },
+    null
+   ]
+  },
+  {
+   "kind": 39,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 0,
+   "variants": [
+    0
+   ],
+   "radius": 1.57,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 300,
+     "triangles": 100,
+     "indexed": false,
+     "uniquePositions": 60,
+     "weldable": 0,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 3.801276072469387,
+     "bbox": [
+      -0.4801586866378784,
+      -0.14668120443820953,
+      -1.3938379287719727,
+      1.5596758127212524,
+      0.24668119847774506,
+      0.25919681787490845
+     ],
+     "medianEdge": 0.28165450606219794,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 16800,
+     "sizeM": 2.04,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 40,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 1,
+   "variants": [
+    1
+   ],
+   "radius": 1.42,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 720,
+     "triangles": 240,
+     "indexed": false,
+     "uniquePositions": 144,
+     "weldable": 0,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.43708071371086415,
+     "bbox": [
+      -1.4124361276626587,
+      -0.0287932176142931,
+      -0.9167957901954651,
+      1.159156084060669,
+      0.06879321485757828,
+      1.2947875261306763
+     ],
+     "medianEdge": 0.06136194695112144,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 40320,
+     "sizeM": 2.57,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 41,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 2,
+   "variants": [
+    2
+   ],
+   "radius": 1.4,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 648,
+     "triangles": 216,
+     "indexed": false,
+     "uniquePositions": 144,
+     "weldable": 216,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.3383999929029088,
+     "bbox": [
+      -1.3012672662734985,
+      4.4703482582342247e-10,
+      -1.3052749633789062,
+      1.2060984373092651,
+      0.03999999910593033,
+      1.2335264682769775
+     ],
+     "medianEdge": 0.05999999884379935,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 36288,
+     "sizeM": 2.54,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 42,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 3,
+   "variants": [
+    3
+   ],
+   "radius": 1.43,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 504,
+     "triangles": 168,
+     "indexed": false,
+     "uniquePositions": 112,
+     "weldable": 168,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.5207999962662555,
+     "bbox": [
+      -0.6845675110816956,
+      0.009999999776482582,
+      -1.1883150339126587,
+      1.4256492853164673,
+      0.019999999552965164,
+      0.94631427526474
+     ],
+     "medianEdge": 0.10000001226629131,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 28224,
+     "sizeM": 2.13,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 43,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 4,
+   "variants": [
+    4
+   ],
+   "radius": 1.41,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 252,
+     "triangles": 84,
+     "indexed": false,
+     "uniquePositions": 70,
+     "weldable": 112,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.7407568477212149,
+     "bbox": [
+      -1.2604079246520996,
+      -6.743890335059177e-9,
+      -1.3742157220840454,
+      1.1558852195739746,
+      0.4478222727775574,
+      1.0761082172393799
+     ],
+     "medianEdge": 0.08660253711660845,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 14112,
+     "sizeM": 2.45,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 44,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 5,
+   "variants": [
+    5
+   ],
+   "radius": 1.77,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 216,
+     "triangles": 72,
+     "indexed": false,
+     "uniquePositions": 60,
+     "weldable": 96,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.9280275808793397,
+     "bbox": [
+      -0.6286129951477051,
+      -1.4113601842780099e-8,
+      -1.2737414836883545,
+      1.1390061378479004,
+      1.1782993078231812,
+      0.7173808813095093
+     ],
+     "medianEdge": 0.10392305254936218,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 12096,
+     "sizeM": 1.99,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 45,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 6,
+   "variants": [
+    6
+   ],
+   "radius": 1.53,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 300,
+     "triangles": 100,
+     "indexed": false,
+     "uniquePositions": 60,
+     "weldable": 0,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 7.356956959351829,
+     "bbox": [
+      -0.7965497374534607,
+      -0.12225256860256195,
+      -0.6329514384269714,
+      1.0322084426879883,
+      0.5222525596618652,
+      1.4810816049575806
+     ],
+     "medianEdge": 0.3983260869863443,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 16800,
+     "sizeM": 2.11,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 46,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 7,
+   "variants": [
+    7
+   ],
+   "radius": 1.58,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 252,
+     "triangles": 84,
+     "indexed": false,
+     "uniquePositions": 56,
+     "weldable": 84,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.4056000543353835,
+     "bbox": [
+      -1.445344090461731,
+      0.25,
+      -1.1902713775634766,
+      1.4513620138168335,
+      0.27000001072883606,
+      0.7083044052124023
+     ],
+     "medianEdge": 0.12000000380157923,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 14112,
+     "sizeM": 2.9,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 47,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 8,
+   "variants": [
+    8
+   ],
+   "radius": 1.49,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 600,
+     "triangles": 200,
+     "indexed": false,
+     "uniquePositions": 120,
+     "weldable": 0,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.8791731865630781,
+     "bbox": [
+      -1.467276692390442,
+      -0.000831238052342087,
+      -1.225921392440796,
+      1.0648646354675293,
+      0.08083123713731766,
+      0.6465050578117371
+     ],
+     "medianEdge": 0.1121472116318655,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 33600,
+     "sizeM": 2.53,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 48,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 9,
+   "variants": [
+    9
+   ],
+   "radius": 1.48,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 768,
+     "triangles": 256,
+     "indexed": false,
+     "uniquePositions": 160,
+     "weldable": 176,
+     "degenerate": 0,
+     "tiny": 48,
+     "duplicate": 0,
+     "area": 0.5529057331086089,
+     "bbox": [
+      -0.16190434992313385,
+      2.9802322831784522e-9,
+      -1.4239810705184937,
+      1.1225600242614746,
+      0.4295455515384674,
+      1.3070971965789795
+     ],
+     "medianEdge": 0.07360234119690116,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 43008,
+     "sizeM": 2.73,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 49,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 10,
+   "variants": [
+    10
+   ],
+   "radius": 1.41,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 510,
+     "triangles": 170,
+     "indexed": false,
+     "uniquePositions": 105,
+     "weldable": 290,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.4349624704521731,
+     "bbox": [
+      -1.3219749927520752,
+      1.3411045607369942e-9,
+      -1.0850465297698975,
+      -0.05212007835507393,
+      0.1899999976158142,
+      1.2504082918167114
+     ],
+     "medianEdge": 0.08677671288080777,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 28560,
+     "sizeM": 2.34,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 50,
+   "type": 14,
+   "typeName": "Ground",
+   "sub": 11,
+   "variants": [
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 7.79,
+   "dist": [
+    260,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 260,
+     "vertices": 792,
+     "triangles": 264,
+     "indexed": false,
+     "uniquePositions": 154,
+     "weldable": 426,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 37.7733392575269,
+     "bbox": [
+      -2.526566505432129,
+      1.1920929132713809e-8,
+      -3.026566505432129,
+      3.526566505432129,
+      7.756362438201904,
+      3.026566505432129
+     ],
+     "medianEdge": 0.18799999276282578,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 44352,
+     "sizeM": 7.76,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 51,
+   "type": 15,
+   "typeName": "Person",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 1.83,
+   "dist": [
+    90,
+    260,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 90,
+     "vertices": 840,
+     "triangles": 280,
+     "indexed": false,
+     "uniquePositions": 164,
+     "weldable": 516,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 3.54384979730151,
+     "bbox": [
+      -0.3449999988079071,
+      8.940696516468449e-10,
+      -0.16175000369548798,
+      0.3449999988079071,
+      1.8347500562667847,
+      0.1599999964237213
+     ],
+     "medianEdge": 0.08286001745668713,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 47040,
+     "sizeM": 1.83,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 90,
+     "to": 260,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 2.8950000035762784,
+     "bbox": [
+      -0.22499999403953552,
+      0,
+      -0.15000000596046448,
+      0.22499999403953552,
+      1.75,
+      0.15000000596046448
+     ],
+     "medianEdge": 1.75,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1.75,
+     "maxPx": 25.3,
+     "trisPerMaxPx": 0.019
+    },
+    null
+   ]
+  },
+  {
+   "kind": 52,
+   "type": 16,
+   "typeName": "Oak",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 10.04,
+   "dist": [
+    200,
+    650,
+    3600
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 200,
+     "vertices": 846,
+     "triangles": 282,
+     "indexed": false,
+     "uniquePositions": 165,
+     "weldable": 80,
+     "degenerate": 80,
+     "tiny": 0,
+     "duplicate": 41,
+     "area": 26.274867654120207,
+     "bbox": [
+      -2.7462379932403564,
+      -0.025753488764166832,
+      -1.7411688566207886,
+      2.2712674140930176,
+      6.646402359008789,
+      1.5805329084396362
+     ],
+     "medianEdge": 0.36442472069338266,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 47376,
+     "sizeM": 6.67,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 200,
+     "to": 650,
+     "vertices": 240,
+     "triangles": 80,
+     "indexed": false,
+     "uniquePositions": 50,
+     "weldable": 28,
+     "degenerate": 28,
+     "tiny": 0,
+     "duplicate": 14,
+     "area": 14.614445568758315,
+     "bbox": [
+      -2.0411643981933594,
+      -0.022455653175711632,
+      -2.8542263507843018,
+      1.3379464149475098,
+      5.412806987762451,
+      1.610682487487793
+     ],
+     "medianEdge": 0.5362723055523807,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 13440,
+     "sizeM": 5.44,
+     "maxPx": 35.4,
+     "trisPerMaxPx": 0.064
+    },
+    {
+     "level": 2,
+     "from": 650,
+     "to": 3600,
+     "vertices": 6,
+     "triangles": 2,
+     "indexed": false,
+     "uniquePositions": 4,
+     "weldable": 2,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4,
+     "bbox": [
+      -1,
+      -1,
+      0,
+      1,
+      1,
+      0
+     ],
+     "medianEdge": 2,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 336,
+     "sizeM": 2,
+     "maxPx": 4,
+     "trisPerMaxPx": 0.124
+    }
+   ]
+  },
+  {
+   "kind": 53,
+   "type": 16,
+   "typeName": "Oak",
+   "sub": 1,
+   "variants": [
+    3
+   ],
+   "radius": 10.87,
+   "dist": [
+    200,
+    650,
+    3600
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 200,
+     "vertices": 720,
+     "triangles": 240,
+     "indexed": false,
+     "uniquePositions": 148,
+     "weldable": 108,
+     "degenerate": 108,
+     "tiny": 0,
+     "duplicate": 54,
+     "area": 27.519328241991907,
+     "bbox": [
+      -3.1974503993988037,
+      -0.006678651086986065,
+      -2.3786323070526123,
+      2.5224783420562744,
+      7.108275413513184,
+      2.8462095260620117
+     ],
+     "medianEdge": 0.2097203092744916,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 40320,
+     "sizeM": 7.11,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 200,
+     "to": 650,
+     "vertices": 210,
+     "triangles": 70,
+     "indexed": false,
+     "uniquePositions": 43,
+     "weldable": 38,
+     "degenerate": 38,
+     "tiny": 0,
+     "duplicate": 19,
+     "area": 15.383576589648259,
+     "bbox": [
+      -2.807849168777466,
+      -0.006023145280778408,
+      -2.9037184715270996,
+      3.2304253578186035,
+      6.341832637786865,
+      3.1278069019317627
+     ],
+     "medianEdge": 0.424161783724177,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 11760,
+     "sizeM": 6.35,
+     "maxPx": 41.4,
+     "trisPerMaxPx": 0.041
+    },
+    {
+     "level": 2,
+     "from": 650,
+     "to": 3600,
+     "vertices": 6,
+     "triangles": 2,
+     "indexed": false,
+     "uniquePositions": 4,
+     "weldable": 2,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4,
+     "bbox": [
+      -1,
+      -1,
+      0,
+      1,
+      1,
+      0
+     ],
+     "medianEdge": 2,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 336,
+     "sizeM": 2,
+     "maxPx": 4,
+     "trisPerMaxPx": 0.124
+    }
+   ]
+  },
+  {
+   "kind": 54,
+   "type": 17,
+   "typeName": "Palm",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 10.62,
+   "dist": [
+    200,
+    650,
+    3600
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 200,
+     "vertices": 1200,
+     "triangles": 400,
+     "indexed": false,
+     "uniquePositions": 323,
+     "weldable": 510,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 80.15260165323816,
+     "bbox": [
+      -3.2192230224609375,
+      -0.014213993214070797,
+      -5.198480606079102,
+      4.8136467933654785,
+      9.985786437988281,
+      2.6957850456237793
+     ],
+     "medianEdge": 0.8050798049773646,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 67200,
+     "sizeM": 10,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    {
+     "level": 1,
+     "from": 200,
+     "to": 650,
+     "vertices": 372,
+     "triangles": 124,
+     "indexed": false,
+     "uniquePositions": 110,
+     "weldable": 168,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 58.87623021412195,
+     "bbox": [
+      -2.7930004596710205,
+      -0.03607606887817383,
+      -3.5099685192108154,
+      3.99346923828125,
+      9.963924407958984,
+      2.3904099464416504
+     ],
+     "medianEdge": 0.8709322385301044,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 20832,
+     "sizeM": 10,
+     "maxPx": 65.2,
+     "trisPerMaxPx": 0.029
+    },
+    {
+     "level": 2,
+     "from": 650,
+     "to": 3600,
+     "vertices": 6,
+     "triangles": 2,
+     "indexed": false,
+     "uniquePositions": 4,
+     "weldable": 2,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4,
+     "bbox": [
+      -1,
+      -1,
+      0,
+      1,
+      1,
+      0
+     ],
+     "medianEdge": 2,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 336,
+     "sizeM": 2,
+     "maxPx": 4,
+     "trisPerMaxPx": 0.124
+    }
+   ]
+  },
+  {
+   "kind": 55,
+   "type": 18,
+   "typeName": "type18",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0,
+   "dist": [
+    0,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 56,
+   "type": 19,
+   "typeName": "type19",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0,
+   "dist": [
+    0,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 57,
+   "type": 20,
+   "typeName": "type20",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0,
+   "dist": [
+    0,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 58,
+   "type": 21,
+   "typeName": "type21",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0,
+   "dist": [
+    0,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 59,
+   "type": 22,
+   "typeName": "type22",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0,
+   "dist": [
+    0,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 60,
+   "type": 23,
+   "typeName": "type23",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0,
+   "dist": [
+    0,
+    0,
+    0
+   ],
+   "levels": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 61,
+   "type": 24,
+   "typeName": "BFrame",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0.87,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 168,
+     "triangles": 56,
+     "indexed": false,
+     "uniquePositions": 40,
+     "weldable": 72,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 12.683999836444855,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "medianEdge": 1,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 9408,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 62,
+   "type": 25,
+   "typeName": "BBox",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0.87,
+   "dist": [
+    600,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 600,
+     "vertices": 144,
+     "triangles": 48,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 48,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 36,
+     "area": 24,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "medianEdge": 1,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 8064,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 63,
+   "type": 26,
+   "typeName": "BRail",
+   "sub": 0,
+   "variants": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 1.52,
+   "dist": [
+    300,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 300,
+     "vertices": 756,
+     "triangles": 252,
+     "indexed": false,
+     "uniquePositions": 168,
+     "weldable": 252,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.78685038242081,
+     "bbox": [
+      -0.5249999761581421,
+      0.030000001192092896,
+      0,
+      0.5249999761581421,
+      1,
+      1.024999976158142
+     ],
+     "medianEdge": 0.01500004529953003,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 42336,
+     "sizeM": 1.05,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 64,
+   "type": 27,
+   "typeName": "BMisc",
+   "sub": 0,
+   "variants": [
+    0
+   ],
+   "radius": 1.76,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 216,
+     "triangles": 72,
+     "indexed": false,
+     "uniquePositions": 48,
+     "weldable": 72,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 8.119000291287904,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      1.7000000476837158
+     ],
+     "medianEdge": 0.36000002548098564,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 12096,
+     "sizeM": 2.2,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 65,
+   "type": 27,
+   "typeName": "BMisc",
+   "sub": 1,
+   "variants": [
+    1
+   ],
+   "radius": 1.44,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 72,
+     "triangles": 24,
+     "indexed": false,
+     "uniquePositions": 16,
+     "weldable": 24,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 2.950399915492537,
+     "bbox": [
+      -0.5,
+      -0.9700000286102295,
+      0.0559999942779541,
+      0.5,
+      -0.03999999538064003,
+      0.9440000057220459
+     ],
+     "medianEdge": 1,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 4032,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 66,
+   "type": 27,
+   "typeName": "BMisc",
+   "sub": 2,
+   "variants": [
+    2
+   ],
+   "radius": 0.71,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 72,
+     "triangles": 24,
+     "indexed": false,
+     "uniquePositions": 24,
+     "weldable": 48,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 3.1058285133581855,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "medianEdge": 1,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 4032,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 67,
+   "type": 27,
+   "typeName": "BMisc",
+   "sub": 3,
+   "variants": [
+    3
+   ],
+   "radius": 0.87,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 408,
+     "triangles": 136,
+     "indexed": false,
+     "uniquePositions": 104,
+     "weldable": 152,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 22.145200206374234,
+     "bbox": [
+      -0.5,
+      -0.6465116143226624,
+      -0.5,
+      0.5,
+      0.6465116143226624,
+      0.5
+     ],
+     "medianEdge": 0.7000000141000405,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 22848,
+     "sizeM": 1.29,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 68,
+   "type": 27,
+   "typeName": "BMisc",
+   "sub": 4,
+   "variants": [
+    4
+   ],
+   "radius": 0.87,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 216,
+     "triangles": 72,
+     "indexed": false,
+     "uniquePositions": 48,
+     "weldable": 72,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 12.839999914169312,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "medianEdge": 1,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 12096,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 69,
+   "type": 27,
+   "typeName": "BMisc",
+   "sub": 5,
+   "variants": [
+    5
+   ],
+   "radius": 1.06,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 36,
+     "triangles": 12,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 12,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.9168000095307827,
+     "bbox": [
+      -0.5,
+      0.019999992102384567,
+      -0.009999999776482582,
+      0.5,
+      0.9399999976158142,
+      0.009999999776482582
+     ],
+     "medianEdge": 1,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 2016,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 70,
+   "type": 27,
+   "typeName": "BMisc",
+   "sub": 6,
+   "variants": [
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 1.12,
+   "dist": [
+    400,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 400,
+     "vertices": 252,
+     "triangles": 84,
+     "indexed": false,
+     "uniquePositions": 56,
+     "weldable": 84,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.7483999045550804,
+     "bbox": [
+      -0.5099999904632568,
+      0.030000001192092896,
+      -0.02500000037252903,
+      0.5099999904632568,
+      1,
+      0.02500000037252903
+     ],
+     "medianEdge": 0.03999999165534973,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 14112,
+     "sizeM": 1.02,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 71,
+   "type": 28,
+   "typeName": "BPropA",
+   "sub": 0,
+   "variants": [
+    0
+   ],
+   "radius": 0.62,
+   "dist": [
+    250,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 250,
+     "vertices": 948,
+     "triangles": 316,
+     "indexed": false,
+     "uniquePositions": 257,
+     "weldable": 451,
+     "degenerate": 0,
+     "tiny": 28,
+     "duplicate": 0,
+     "area": 2.1813729253154626,
+     "bbox": [
+      -0.36500000953674316,
+      -0.5278857946395874,
+      -0.2150000035762787,
+      0.4090525507926941,
+      0.2549999952316284,
+      0.17999999225139618
+     ],
+     "medianEdge": 0.034999996423721313,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 53088,
+     "sizeM": 0.78,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 72,
+   "type": 28,
+   "typeName": "BPropA",
+   "sub": 1,
+   "variants": [
+    1
+   ],
+   "radius": 0.36,
+   "dist": [
+    250,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 250,
+     "vertices": 378,
+     "triangles": 126,
+     "indexed": false,
+     "uniquePositions": 75,
+     "weldable": 247,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.6637902932498471,
+     "bbox": [
+      -0.1706123799085617,
+      -5.9604643443123e-10,
+      -0.17499999701976776,
+      0.1706123799085617,
+      0.3199999928474426,
+      0.17499999701976776
+     ],
+     "medianEdge": 0.07120669406343627,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 21168,
+     "sizeM": 0.35,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 73,
+   "type": 28,
+   "typeName": "BPropA",
+   "sub": 2,
+   "variants": [
+    2
+   ],
+   "radius": 0.56,
+   "dist": [
+    250,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 250,
+     "vertices": 576,
+     "triangles": 192,
+     "indexed": false,
+     "uniquePositions": 370,
+     "weldable": 196,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.42730887356621483,
+     "bbox": [
+      -0.34418028593063354,
+      0.012147314846515656,
+      -0.36781686544418335,
+      0.258204847574234,
+      0.4925008714199066,
+      0.29986414313316345
+     ],
+     "medianEdge": 0.06412088416695763,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 32256,
+     "sizeM": 0.67,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 74,
+   "type": 28,
+   "typeName": "BPropA",
+   "sub": 3,
+   "variants": [
+    3
+   ],
+   "radius": 0.34,
+   "dist": [
+    250,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 250,
+     "vertices": 504,
+     "triangles": 168,
+     "indexed": false,
+     "uniquePositions": 340,
+     "weldable": 154,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.41916666213475384,
+     "bbox": [
+      -0.2577938437461853,
+      0.009999999776482582,
+      -0.2416360080242157,
+      0.23813548684120178,
+      0.340635746717453,
+      0.19435431063175201
+     ],
+     "medianEdge": 0.0955926556661561,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 28224,
+     "sizeM": 0.5,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 75,
+   "type": 28,
+   "typeName": "BPropA",
+   "sub": 4,
+   "variants": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 1.18,
+   "dist": [
+    250,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 250,
+     "vertices": 252,
+     "triangles": 84,
+     "indexed": false,
+     "uniquePositions": 56,
+     "weldable": 84,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4.4216002065763025,
+     "bbox": [
+      -0.863864541053772,
+      -5.9604645663569045e-9,
+      -0.3100000023841858,
+      0.8999999761581421,
+      0.7796002626419067,
+      0.3100000023841858
+     ],
+     "medianEdge": 0.3000000178813935,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 14112,
+     "sizeM": 1.76,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 76,
+   "type": 29,
+   "typeName": "BPropB",
+   "sub": 0,
+   "variants": [
+    0
+   ],
+   "radius": 1.04,
+   "dist": [
+    150,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 150,
+     "vertices": 720,
+     "triangles": 240,
+     "indexed": false,
+     "uniquePositions": 208,
+     "weldable": 384,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.7588162193781288,
+     "bbox": [
+      -0.8600000143051147,
+      0.005165364593267441,
+      -0.25,
+      0.8600000143051147,
+      0.9399999976158142,
+      0.25
+     ],
+     "medianEdge": 0.04000002145767212,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 40320,
+     "sizeM": 1.72,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 77,
+   "type": 29,
+   "typeName": "BPropB",
+   "sub": 1,
+   "variants": [
+    1
+   ],
+   "radius": 0.92,
+   "dist": [
+    150,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 150,
+     "vertices": 288,
+     "triangles": 96,
+     "indexed": false,
+     "uniquePositions": 64,
+     "weldable": 96,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.0973999446355724,
+     "bbox": [
+      -0.22499999403953552,
+      -3.5762786065873797e-9,
+      -0.23989425599575043,
+      0.22499999403953552,
+      0.8688450455665588,
+      0.2199999988079071
+     ],
+     "medianEdge": 0.0299999862909317,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 16128,
+     "sizeM": 0.87,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 78,
+   "type": 29,
+   "typeName": "BPropB",
+   "sub": 2,
+   "variants": [
+    2
+   ],
+   "radius": 0.81,
+   "dist": [
+    150,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 150,
+     "vertices": 480,
+     "triangles": 160,
+     "indexed": false,
+     "uniquePositions": 85,
+     "weldable": 314,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 1.2190825338650395,
+     "bbox": [
+      -0.33483463525772095,
+      -1.8626451769865326e-10,
+      -0.3400000035762787,
+      0.33483463525772095,
+      0.7350000143051147,
+      0.3400000035762787
+     ],
+     "medianEdge": 0.09790920888421781,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 26880,
+     "sizeM": 0.74,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 79,
+   "type": 29,
+   "typeName": "BPropB",
+   "sub": 3,
+   "variants": [
+    3
+   ],
+   "radius": 1.11,
+   "dist": [
+    150,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 150,
+     "vertices": 504,
+     "triangles": 168,
+     "indexed": false,
+     "uniquePositions": 112,
+     "weldable": 168,
+     "degenerate": 0,
+     "tiny": 16,
+     "duplicate": 0,
+     "area": 1.7757691074466706,
+     "bbox": [
+      -0.6100000143051147,
+      -0.003100224770605564,
+      -0.3095073103904724,
+      0.6100000143051147,
+      0.9231002330780029,
+      0.3095073103904724
+     ],
+     "medianEdge": 0.020000040531158447,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 28224,
+     "sizeM": 1.22,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 80,
+   "type": 29,
+   "typeName": "BPropB",
+   "sub": 4,
+   "variants": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0.93,
+   "dist": [
+    150,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 150,
+     "vertices": 438,
+     "triangles": 146,
+     "indexed": false,
+     "uniquePositions": 89,
+     "weldable": 285,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 0.4772132804021738,
+     "bbox": [
+      -0.30128955841064453,
+      -0.503363847732544,
+      -5.9604645663569045e-9,
+      0.30128955841064453,
+      0.15000000596046448,
+      0.9163672924041748
+     ],
+     "medianEdge": 0.0838600624797118,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 24528,
+     "sizeM": 0.92,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 81,
+   "type": 30,
+   "typeName": "BLot",
+   "sub": 0,
+   "variants": [
+    0
+   ],
+   "radius": 0.87,
+   "dist": [
+    800,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 800,
+     "vertices": 30,
+     "triangles": 10,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 10,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 5,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "medianEdge": 1.4142135623730951,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 1680,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 82,
+   "type": 30,
+   "typeName": "BLot",
+   "sub": 1,
+   "variants": [
+    1
+   ],
+   "radius": 0.87,
+   "dist": [
+    800,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 800,
+     "vertices": 24,
+     "triangles": 8,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 8,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 4,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "medianEdge": 1.4142135623730951,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 1344,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  },
+  {
+   "kind": 83,
+   "type": 30,
+   "typeName": "BLot",
+   "sub": 2,
+   "variants": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+   ],
+   "radius": 0.87,
+   "dist": [
+    800,
+    0,
+    0
+   ],
+   "levels": [
+    {
+     "level": 0,
+     "from": 0,
+     "to": 800,
+     "vertices": 30,
+     "triangles": 10,
+     "indexed": false,
+     "uniquePositions": 8,
+     "weldable": 10,
+     "degenerate": 0,
+     "tiny": 0,
+     "duplicate": 0,
+     "area": 5,
+     "bbox": [
+      -0.5,
+      -0.5,
+      -0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "medianEdge": 1.4142135623730951,
+     "bytesPerVertex": 56,
+     "layout": "position:3xFloat32=12B normal:3xFloat32=12B pcol:4xFloat32=16B pext:4xFloat32=16B",
+     "indexBytes": 0,
+     "bytes": 1680,
+     "sizeM": 1,
+     "maxPx": null,
+     "trisPerMaxPx": null
+    },
+    null,
+    null
+   ]
+  }
+ ],
+ "kit": [
+  {
+   "kind": "glass",
+   "pooled": null,
+   "vertices": 4,
+   "triangles": 2,
+   "indexed": true,
+   "uniquePositions": 4,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 1,
+   "bbox": [
+    -0.5,
+    -0.5,
+    0,
+    0.5,
+    0.5,
+    0
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 12,
+   "bytes": 140
+  },
+  {
+   "kind": "frame",
+   "pooled": [
+    24,
+    0
+   ],
+   "vertices": 144,
+   "triangles": 56,
+   "indexed": true,
+   "uniquePositions": 40,
+   "weldable": 24,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 12.683999836444855,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 336,
+   "bytes": 4944
+  },
+  {
+   "kind": "concrete",
+   "pooled": [
+    25,
+    0
+   ],
+   "vertices": 24,
+   "triangles": 12,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 6,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 72,
+   "bytes": 840
+  },
+  {
+   "kind": "door",
+   "pooled": [
+    27,
+    0
+   ],
+   "vertices": 144,
+   "triangles": 72,
+   "indexed": true,
+   "uniquePositions": 48,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 8.119000291287904,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    1.7000000476837158
+   ],
+   "medianEdge": 0.36000002548098564,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 432,
+   "bytes": 5040
+  },
+  {
+   "kind": "shutter",
+   "pooled": [
+    25,
+    0
+   ],
+   "vertices": 24,
+   "triangles": 12,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 6,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 72,
+   "bytes": 840
+  },
+  {
+   "kind": "railing",
+   "pooled": [
+    26,
+    0
+   ],
+   "vertices": 504,
+   "triangles": 252,
+   "indexed": true,
+   "uniquePositions": 168,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 1.78685038242081,
+   "bbox": [
+    -0.5249999761581421,
+    0.030000001192092896,
+    0,
+    0.5249999761581421,
+    1,
+    1.024999976158142
+   ],
+   "medianEdge": 0.01500004529953003,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 1512,
+   "bytes": 17640
+  },
+  {
+   "kind": "roofRailing",
+   "pooled": [
+    27,
+    6
+   ],
+   "vertices": 168,
+   "triangles": 84,
+   "indexed": true,
+   "uniquePositions": 56,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 0.7483999045550804,
+   "bbox": [
+    -0.5099999904632568,
+    0.030000001192092896,
+    -0.02500000037252903,
+    0.5099999904632568,
+    1,
+    0.02500000037252903
+   ],
+   "medianEdge": 0.03999999165534973,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 504,
+   "bytes": 5880
+  },
+  {
+   "kind": "awning",
+   "pooled": [
+    27,
+    1
+   ],
+   "vertices": 48,
+   "triangles": 24,
+   "indexed": true,
+   "uniquePositions": 16,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 2.950399915492537,
+   "bbox": [
+    -0.5,
+    -0.9700000286102295,
+    0.0559999942779541,
+    0.5,
+    -0.03999999538064003,
+    0.9440000057220459
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 144,
+   "bytes": 1680
+  },
+  {
+   "kind": "column",
+   "pooled": [
+    27,
+    2
+   ],
+   "vertices": 26,
+   "triangles": 24,
+   "indexed": true,
+   "uniquePositions": 24,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 3.1058285133581855,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 144,
+   "bytes": 976
+  },
+  {
+   "kind": "glassDark",
+   "pooled": null,
+   "vertices": 4,
+   "triangles": 2,
+   "indexed": true,
+   "uniquePositions": 4,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 1,
+   "bbox": [
+    -0.5,
+    -0.5,
+    0,
+    0.5,
+    0.5,
+    0
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 12,
+   "bytes": 140
+  },
+  {
+   "kind": "water",
+   "pooled": null,
+   "vertices": 24,
+   "triangles": 12,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 6,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 72,
+   "bytes": 840
+  },
+  {
+   "kind": "lamp",
+   "pooled": [
+    25,
+    0
+   ],
+   "vertices": 24,
+   "triangles": 12,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 6,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 72,
+   "bytes": 840
+  },
+  {
+   "kind": "wash",
+   "pooled": null,
+   "vertices": 4,
+   "triangles": 2,
+   "indexed": true,
+   "uniquePositions": 4,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 1,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.05000000074505806,
+    0.5,
+    0.5,
+    -0.05000000074505806
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 12,
+   "bytes": 140
+  },
+  {
+   "kind": "fin",
+   "pooled": [
+    25,
+    0
+   ],
+   "vertices": 24,
+   "triangles": 12,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 6,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 72,
+   "bytes": 840
+  },
+  {
+   "kind": "louvre",
+   "pooled": [
+    27,
+    3
+   ],
+   "vertices": 336,
+   "triangles": 136,
+   "indexed": true,
+   "uniquePositions": 104,
+   "weldable": 24,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 22.145200206374234,
+   "bbox": [
+    -0.5,
+    -0.6465116143226624,
+    -0.5,
+    0.5,
+    0.6465116143226624,
+    0.5
+   ],
+   "medianEdge": 0.7000000141000405,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 816,
+   "bytes": 11568
+  },
+  {
+   "kind": "glassRail",
+   "pooled": [
+    27,
+    5
+   ],
+   "vertices": 24,
+   "triangles": 12,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 1.9168000095307827,
+   "bbox": [
+    -0.5,
+    0.019999992102384567,
+    -0.009999999776482582,
+    0.5,
+    0.9399999976158142,
+    0.009999999776482582
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 72,
+   "bytes": 840
+  },
+  {
+   "kind": "brise",
+   "pooled": [
+    27,
+    4
+   ],
+   "vertices": 144,
+   "triangles": 72,
+   "indexed": true,
+   "uniquePositions": 48,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 12.839999914169312,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1,
+   "bytesPerVertex": 32,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B",
+   "indexBytes": 432,
+   "bytes": 5040
+  },
+  {
+   "kind": "acUnit",
+   "pooled": [
+    28,
+    0
+   ],
+   "vertices": 508,
+   "triangles": 316,
+   "indexed": true,
+   "uniquePositions": 257,
+   "weldable": 11,
+   "degenerate": 0,
+   "tiny": 28,
+   "duplicate": 0,
+   "area": 2.1813729253154626,
+   "bbox": [
+    -0.36500000953674316,
+    -0.5278857946395874,
+    -0.2150000035762787,
+    0.4090525507926941,
+    0.2549999952316284,
+    0.17999999225139618
+   ],
+   "medianEdge": 0.034999996423721313,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 1896,
+   "bytes": 20184
+  },
+  {
+   "kind": "pot",
+   "pooled": [
+    28,
+    1
+   ],
+   "vertices": 192,
+   "triangles": 126,
+   "indexed": true,
+   "uniquePositions": 75,
+   "weldable": 61,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 0.6637902932498471,
+   "bbox": [
+    -0.1706123799085617,
+    -5.9604643443123e-10,
+    -0.17499999701976776,
+    0.1706123799085617,
+    0.3199999928474426,
+    0.17499999701976776
+   ],
+   "medianEdge": 0.07120669406343627,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 756,
+   "bytes": 7668
+  },
+  {
+   "kind": "foliage",
+   "pooled": [
+    28,
+    2
+   ],
+   "vertices": 380,
+   "triangles": 192,
+   "indexed": true,
+   "uniquePositions": 370,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 0.42730887356621483,
+   "bbox": [
+    -0.34418028593063354,
+    0.012147314846515656,
+    -0.36781686544418335,
+    0.258204847574234,
+    0.4925008714199066,
+    0.29986414313316345
+   ],
+   "medianEdge": 0.06412088416695763,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 1152,
+   "bytes": 14832
+  },
+  {
+   "kind": "bush",
+   "pooled": [
+    28,
+    3
+   ],
+   "vertices": 372,
+   "triangles": 168,
+   "indexed": true,
+   "uniquePositions": 340,
+   "weldable": 22,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 0.41916666213475384,
+   "bbox": [
+    -0.2577938437461853,
+    0.009999999776482582,
+    -0.2416360080242157,
+    0.23813548684120178,
+    0.340635746717453,
+    0.19435431063175201
+   ],
+   "medianEdge": 0.0955926556661561,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 1008,
+   "bytes": 14400
+  },
+  {
+   "kind": "lounger",
+   "pooled": [
+    28,
+    4
+   ],
+   "vertices": 168,
+   "triangles": 84,
+   "indexed": true,
+   "uniquePositions": 56,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 4.4216002065763025,
+   "bbox": [
+    -0.863864541053772,
+    -5.9604645663569045e-9,
+    -0.3100000023841858,
+    0.8999999761581421,
+    0.7796002626419067,
+    0.3100000023841858
+   ],
+   "medianEdge": 0.3000000178813935,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 504,
+   "bytes": 6552
+  },
+  {
+   "kind": "bike",
+   "pooled": [
+    29,
+    0
+   ],
+   "vertices": 344,
+   "triangles": 240,
+   "indexed": true,
+   "uniquePositions": 208,
+   "weldable": 8,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 0.7588162193781288,
+   "bbox": [
+    -0.8600000143051147,
+    0.005165364593267441,
+    -0.25,
+    0.8600000143051147,
+    0.9399999976158142,
+    0.25
+   ],
+   "medianEdge": 0.04000002145767212,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 1440,
+   "bytes": 13824
+  },
+  {
+   "kind": "chair",
+   "pooled": [
+    29,
+    1
+   ],
+   "vertices": 192,
+   "triangles": 96,
+   "indexed": true,
+   "uniquePositions": 64,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 1.0973999446355724,
+   "bbox": [
+    -0.22499999403953552,
+    -3.5762786065873797e-9,
+    -0.23989425599575043,
+    0.22499999403953552,
+    0.8688450455665588,
+    0.2199999988079071
+   ],
+   "medianEdge": 0.0299999862909317,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 576,
+   "bytes": 7488
+  },
+  {
+   "kind": "table",
+   "pooled": [
+    29,
+    2
+   ],
+   "vertices": 252,
+   "triangles": 160,
+   "indexed": true,
+   "uniquePositions": 85,
+   "weldable": 86,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 1.2190825338650395,
+   "bbox": [
+    -0.33483463525772095,
+    -1.8626451769865326e-10,
+    -0.3400000035762787,
+    0.33483463525772095,
+    0.7350000143051147,
+    0.3400000035762787
+   ],
+   "medianEdge": 0.09790920888421781,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 960,
+   "bytes": 10032
+  },
+  {
+   "kind": "airer",
+   "pooled": [
+    29,
+    3
+   ],
+   "vertices": 336,
+   "triangles": 168,
+   "indexed": true,
+   "uniquePositions": 112,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 16,
+   "duplicate": 0,
+   "area": 1.7757691074466706,
+   "bbox": [
+    -0.6100000143051147,
+    -0.003100224770605564,
+    -0.3095073103904724,
+    0.6100000143051147,
+    0.9231002330780029,
+    0.3095073103904724
+   ],
+   "medianEdge": 0.020000040531158447,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 1008,
+   "bytes": 13104
+  },
+  {
+   "kind": "dish",
+   "pooled": [
+    29,
+    4
+   ],
+   "vertices": 171,
+   "triangles": 146,
+   "indexed": true,
+   "uniquePositions": 89,
+   "weldable": 18,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 0.4772132804021738,
+   "bbox": [
+    -0.30128955841064453,
+    -0.503363847732544,
+    -5.9604645663569045e-9,
+    0.30128955841064453,
+    0.15000000596046448,
+    0.9163672924041748
+   ],
+   "medianEdge": 0.0838600624797118,
+   "bytesPerVertex": 36,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B color:3xFloat32=12B",
+   "indexBytes": 876,
+   "bytes": 7032
+  },
+  {
+   "kind": "lotBox",
+   "pooled": [
+    30,
+    0
+   ],
+   "vertices": 20,
+   "triangles": 10,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 5,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1.4142135623730951,
+   "bytesPerVertex": 44,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B color:3xFloat32=12B",
+   "indexBytes": 60,
+   "bytes": 940
+  },
+  {
+   "kind": "lotRail",
+   "pooled": [
+    30,
+    1
+   ],
+   "vertices": 16,
+   "triangles": 8,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 4,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1.4142135623730951,
+   "bytesPerVertex": 44,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B color:3xFloat32=12B",
+   "indexBytes": 48,
+   "bytes": 752
+  },
+  {
+   "kind": "lotSlab",
+   "pooled": [
+    30,
+    2
+   ],
+   "vertices": 20,
+   "triangles": 10,
+   "indexed": true,
+   "uniquePositions": 8,
+   "weldable": 0,
+   "degenerate": 0,
+   "tiny": 0,
+   "duplicate": 0,
+   "area": 5,
+   "bbox": [
+    -0.5,
+    -0.5,
+    -0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "medianEdge": 1.4142135623730951,
+   "bytesPerVertex": 44,
+   "layout": "position:3xFloat32=12B normal:3xFloat32=12B uv:2xFloat32=8B color:3xFloat32=12B",
+   "indexBytes": 60,
+   "bytes": 940
+  }
+ ]
+}

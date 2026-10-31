@@ -1,0 +1,503 @@
+{
+ "ktx": [
+  {
+   "file": "asphalt.detail-normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 577,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "asphalt.detail.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 244,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "asphalt.map.ktx2",
+   "vkFormat": "R8G8B8A8_SRGB",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 372,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "asphalt.normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 782,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "asphalt.rough.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 186,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "building-finishes.map.ktx2",
+   "vkFormat": "R8G8B8A8_SRGB",
+   "width": 512,
+   "height": 512,
+   "layers": 13,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 1001,
+   "gpuMB": 17.33,
+   "bc7MB": 4.33
+  },
+  {
+   "file": "building-finishes.normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 13,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 1546,
+   "gpuMB": 17.33,
+   "bc7MB": 4.33
+  },
+  {
+   "file": "building-finishes.rough.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 13,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 42,
+   "gpuMB": 17.33,
+   "bc7MB": 4.33
+  },
+  {
+   "file": "concrete.detail-normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 817,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "concrete.detail.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 250,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "footway.map.ktx2",
+   "vkFormat": "R8G8B8A8_SRGB",
+   "width": 1024,
+   "height": 1024,
+   "layers": 1,
+   "levels": 11,
+   "supercompression": "Zstandard",
+   "fileKB": 1264,
+   "gpuMB": 5.33,
+   "bc7MB": 1.33
+  },
+  {
+   "file": "footway.normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 1024,
+   "height": 1024,
+   "layers": 1,
+   "levels": 11,
+   "supercompression": "Zstandard",
+   "fileKB": 1598,
+   "gpuMB": 5.33,
+   "bc7MB": 1.33
+  },
+  {
+   "file": "footway.rough.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 1024,
+   "height": 1024,
+   "layers": 1,
+   "levels": 11,
+   "supercompression": "Zstandard",
+   "fileKB": 710,
+   "gpuMB": 5.33,
+   "bc7MB": 1.33
+  },
+  {
+   "file": "kerb.map.ktx2",
+   "vkFormat": "R8G8B8A8_SRGB",
+   "width": 256,
+   "height": 256,
+   "layers": 1,
+   "levels": 9,
+   "supercompression": "Zstandard",
+   "fileKB": 87,
+   "gpuMB": 0.33,
+   "bc7MB": 0.08
+  },
+  {
+   "file": "kerb.normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 256,
+   "height": 256,
+   "layers": 1,
+   "levels": 9,
+   "supercompression": "Zstandard",
+   "fileKB": 82,
+   "gpuMB": 0.33,
+   "bc7MB": 0.08
+  },
+  {
+   "file": "kerb.rough.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 256,
+   "height": 256,
+   "layers": 1,
+   "levels": 9,
+   "supercompression": "Zstandard",
+   "fileKB": 35,
+   "gpuMB": 0.33,
+   "bc7MB": 0.08
+  },
+  {
+   "file": "terrain-grass.map.ktx2",
+   "vkFormat": "R8G8B8A8_SRGB",
+   "width": 1024,
+   "height": 1024,
+   "layers": 1,
+   "levels": 11,
+   "supercompression": "Zstandard",
+   "fileKB": 2049,
+   "gpuMB": 5.33,
+   "bc7MB": 1.33
+  },
+  {
+   "file": "terrain-grass.normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 1024,
+   "height": 1024,
+   "layers": 1,
+   "levels": 11,
+   "supercompression": "Zstandard",
+   "fileKB": 2843,
+   "gpuMB": 5.33,
+   "bc7MB": 1.33
+  },
+  {
+   "file": "terrain-land.map.ktx2",
+   "vkFormat": "R8G8B8A8_SRGB",
+   "width": 512,
+   "height": 512,
+   "layers": 9,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 3614,
+   "gpuMB": 12,
+   "bc7MB": 3
+  },
+  {
+   "file": "terrain-land.normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 8,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 5347,
+   "gpuMB": 10.67,
+   "bc7MB": 2.67
+  },
+  {
+   "file": "verge.map.ktx2",
+   "vkFormat": "R8G8B8A8_SRGB",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 376,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  },
+  {
+   "file": "verge.normal.ktx2",
+   "vkFormat": "R8G8B8A8_UNORM",
+   "width": 512,
+   "height": 512,
+   "layers": 1,
+   "levels": 10,
+   "supercompression": "Zstandard",
+   "fileKB": 659,
+   "gpuMB": 1.33,
+   "bc7MB": 0.33
+  }
+ ],
+ "code": [
+  {
+   "name": "building finishes albedo (13 layers)",
+   "site": "src/render/city.ts:30-42 finishArray",
+   "size": "512x512x13",
+   "format": "RGBA8 sRGB, mips, aniso 8",
+   "bytes": 18175317.333333332,
+   "MB": 17.33
+  },
+  {
+   "name": "building finishes normal+metal (13 layers)",
+   "site": "src/render/city.ts:30-42",
+   "size": "512x512x13",
+   "format": "RGBA8, mips",
+   "bytes": 18175317.333333332,
+   "MB": 17.33
+  },
+  {
+   "name": "wall noise",
+   "site": "src/render/city.ts:62-81",
+   "size": "128x128",
+   "format": "RGBA8 (B, A unused), mips",
+   "bytes": 87381.33333333333,
+   "MB": 0.08
+  },
+  {
+   "name": "terrain heights (one layer per tile)",
+   "site": "src/render/terrain.ts:152-158",
+   "size": "256x256x100",
+   "format": "R32F, no mips",
+   "bytes": 26214400,
+   "MB": 25
+  },
+  {
+   "name": "road paint fine (per tile)",
+   "site": "src/render/terrain.ts:160-171",
+   "size": "256x256x100",
+   "format": "RGBA8, no mips",
+   "bytes": 26214400,
+   "MB": 25
+  },
+  {
+   "name": "road paint coarse (per tile)",
+   "site": "src/render/terrain.ts:172",
+   "size": "32x32x100",
+   "format": "RGBA8",
+   "bytes": 409600,
+   "MB": 0.39
+  },
+  {
+   "name": "painted ground",
+   "site": "src/render/terrain.ts:173-179",
+   "size": "128x128x100",
+   "format": "RGBA8, nearest",
+   "bytes": 6553600,
+   "MB": 6.25
+  },
+  {
+   "name": "water level",
+   "site": "src/render/terrain.ts:180-186",
+   "size": "128x128x100",
+   "format": "R32F",
+   "bytes": 6553600,
+   "MB": 6.25
+  },
+  {
+   "name": "ecology",
+   "site": "src/render/terrain.ts:188-195",
+   "size": "128x128x100",
+   "format": "RGBA8",
+   "bytes": 6553600,
+   "MB": 6.25
+  },
+  {
+   "name": "grass / asphalt / footway bake",
+   "site": "src/render/surfaceBake.ts:56-151",
+   "size": "3 x 512x512",
+   "format": "RGBA8, mips",
+   "bytes": 4194304,
+   "MB": 4
+  },
+  {
+   "name": "rock albedo + normal",
+   "site": "src/render/surfaceBake.ts:191-223",
+   "size": "2 x 512x512",
+   "format": "RGBA8, mips",
+   "bytes": 2796202.6666666665,
+   "MB": 2.67
+  },
+  {
+   "name": "water normals, terrain noise",
+   "site": "src/render/surfaceBake.ts:160-237",
+   "size": "2 x 256x256",
+   "format": "RGBA8, mips",
+   "bytes": 699050.6666666666,
+   "MB": 0.67
+  },
+  {
+   "name": "traffic occupancy",
+   "site": "src/render/roads.ts:40-46 (OCCUPANCY_SEGS 1<<17 x 4 B)",
+   "size": "512x256",
+   "format": "RGBA8",
+   "bytes": 524288,
+   "MB": 0.5
+  },
+  {
+   "name": "lane arrows",
+   "site": "src/render/roads.ts:47",
+   "size": "512x256",
+   "format": "RG32F",
+   "bytes": 1048576,
+   "MB": 1
+  },
+  {
+   "name": "road profile table",
+   "site": "src/render/roads.ts:152",
+   "size": "18x512",
+   "format": "RGBA32F",
+   "bytes": 147456,
+   "MB": 0.14
+  },
+  {
+   "name": "signal states",
+   "site": "src/render/props.ts:150 (signalsSab 1<<17)",
+   "size": "512x256",
+   "format": "R8, re-uploaded every 250 ms",
+   "bytes": 131072,
+   "MB": 0.13
+  },
+  {
+   "name": "sign atlas",
+   "site": "src/render/propMeshes.ts:181-260",
+   "size": "1024x384",
+   "format": "canvas RGBA8 (+mips if three generates)",
+   "bytes": 2097152,
+   "MB": 2
+  },
+  {
+   "name": "leaf atlas",
+   "site": "src/render/treeMeshes.ts:290-320",
+   "size": "512x256",
+   "format": "canvas RGBA8, mips",
+   "bytes": 699050.6666666666,
+   "MB": 0.67
+  },
+  {
+   "name": "tree impostor colour atlas",
+   "site": "src/render/impostor.ts:73-77, 80-81 (SIZE 128, IMP_G 8, IMP_TYPES 6)",
+   "size": "6144x1024",
+   "format": "RGBA8 render target + mips",
+   "bytes": 33554432,
+   "MB": 32
+  },
+  {
+   "name": "tree impostor normal atlas",
+   "site": "src/render/impostor.ts:73-77",
+   "size": "6144x1024",
+   "format": "RGBA8 render target + mips",
+   "bytes": 33554432,
+   "MB": 32
+  },
+  {
+   "name": "impostor depth buffers (2, kept with the targets)",
+   "site": "src/render/impostor.ts:74 depthBuffer: true; props.ts:488 keeps impRT",
+   "size": "2 x 6144x1024",
+   "format": "depth24/32 (backend picks)",
+   "bytes": 50331648,
+   "MB": 48
+  },
+  {
+   "name": "street-name text signs",
+   "site": "src/render/textSigns.ts:39-50",
+   "size": "512x128 each",
+   "format": "canvas RGBA8, per sign",
+   "bytes": 349525.3333333333,
+   "MB": 0.33
+  },
+  {
+   "name": "blast crater / soot decals",
+   "site": "src/features/demolition/blast/marks.ts:111-198",
+   "size": "2 x 512x512 + 128x128",
+   "format": "canvas RGBA8",
+   "bytes": 2883584,
+   "MB": 2.75
+  },
+  {
+   "name": "particles emitters",
+   "site": "src/render/particles.ts:52 (MAX_EMIT 512)",
+   "size": "512x1",
+   "format": "RGBA32F",
+   "bytes": 8192,
+   "MB": 0.01
+  },
+  {
+   "name": "cloud shadow table",
+   "site": "src/render/cloudShadow.ts:16 (MAX_CLOUDS 24)",
+   "size": "24x2",
+   "format": "RGBA32F",
+   "bytes": 768,
+   "MB": 0
+  },
+  {
+   "name": "sun shadow cascades",
+   "site": "src/render/post.ts:73-80 (mapSize 2048, 3 cascades)",
+   "size": "3 x 2048x2048",
+   "format": "depth (32-bit assumed)",
+   "bytes": 50331648,
+   "MB": 48
+  },
+  {
+   "name": "people palettes (storage buffer, not a texture)",
+   "site": "src/render/people/crowd.ts:103; people.json layout.palette",
+   "size": "22528 frames x 23 bones x 12 floats",
+   "format": "f32 storage",
+   "bytes": 24870912,
+   "MB": 23.72
+  },
+  {
+   "name": "people vertices + attributes + index (storage)",
+   "site": "src/render/people/crowd.ts:100-102",
+   "size": "89188 vertices, 451935 indices",
+   "format": "f32x4 + u32x4 + u32",
+   "bytes": 4661756,
+   "MB": 4.45
+  },
+  {
+   "name": "props pool (storage)",
+   "site": "src/render/props.ts:33-36, 70-71, 142-145 (CAP 1<<20)",
+   "size": "1,048,576 instances",
+   "format": "vec4 f32 pose + u32 extra + 2M u32 visible list",
+   "bytes": 29360128,
+   "MB": 28
+  }
+ ],
+ "totalMB": 449.18
+}

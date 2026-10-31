@@ -1,0 +1,1097 @@
+{
+ "maxTris": [
+  4138,
+  636,
+  166
+ ],
+ "meanTris": [
+  3979.84375,
+  579,
+  148.8125
+ ],
+ "heldPropTrisMean": [
+  220,
+  220,
+  52
+ ],
+ "vertices": 89188,
+ "bones": 23,
+ "paletteFrames": 22528,
+ "bytes": 29533184,
+ "layout": {
+  "vpos": {
+   "byteOffset": 0,
+   "count": 356752
+  },
+  "vattr": {
+   "byteOffset": 1427200,
+   "count": 356752
+  },
+  "index": {
+   "byteOffset": 2854400,
+   "count": 451935
+  },
+  "palette": {
+   "byteOffset": 4662272,
+   "count": 6217728
+  }
+ },
+ "rows": [
+  {
+   "variation": 0,
+   "sex": "female",
+   "band": "child",
+   "outfit": "female_casualsuit01",
+   "height": 1.333,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3996,
+     "padded": 4138,
+     "wasted": 142,
+     "vertices": 2697,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 553,
+     "padded": 636,
+     "wasted": 83,
+     "vertices": 423,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 132,
+     "padded": 166,
+     "wasted": 34,
+     "vertices": 101,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 1,
+   "sex": "female",
+   "band": "child",
+   "outfit": "female_sportsuit01",
+   "height": 1.245,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2724,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 547,
+     "padded": 636,
+     "wasted": 89,
+     "vertices": 432,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 150,
+     "padded": 166,
+     "wasted": 16,
+     "vertices": 118,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 2,
+   "sex": "female",
+   "band": "child",
+   "outfit": "female_casualsuit02",
+   "height": 1.042,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3998,
+     "padded": 4138,
+     "wasted": 140,
+     "vertices": 2839,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 519,
+     "padded": 636,
+     "wasted": 117,
+     "vertices": 361,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 157,
+     "padded": 166,
+     "wasted": 9,
+     "vertices": 122,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 3,
+   "sex": "female",
+   "band": "child",
+   "outfit": "female_casualsuit01",
+   "height": 1.132,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3998,
+     "padded": 4138,
+     "wasted": 140,
+     "vertices": 2675,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 596,
+     "padded": 636,
+     "wasted": 40,
+     "vertices": 438,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 153,
+     "padded": 166,
+     "wasted": 13,
+     "vertices": 113,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 4,
+   "sex": "female",
+   "band": "young",
+   "outfit": "female_casualsuit02",
+   "height": 1.637,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3995,
+     "padded": 4138,
+     "wasted": 143,
+     "vertices": 2955,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 611,
+     "padded": 636,
+     "wasted": 25,
+     "vertices": 554,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 150,
+     "padded": 166,
+     "wasted": 16,
+     "vertices": 114,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 5,
+   "sex": "female",
+   "band": "young",
+   "outfit": "female_sportsuit01",
+   "height": 1.66,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3620,
+     "padded": 4138,
+     "wasted": 518,
+     "vertices": 2172,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 564,
+     "padded": 636,
+     "wasted": 72,
+     "vertices": 434,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 146,
+     "padded": 166,
+     "wasted": 20,
+     "vertices": 111,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 6,
+   "sex": "female",
+   "band": "young",
+   "outfit": "female_casualsuit01",
+   "height": 1.673,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3997,
+     "padded": 4138,
+     "wasted": 141,
+     "vertices": 2828,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 636,
+     "padded": 636,
+     "wasted": 0,
+     "vertices": 611,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 166,
+     "padded": 166,
+     "wasted": 0,
+     "vertices": 130,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 7,
+   "sex": "female",
+   "band": "young",
+   "outfit": "female_elegantsuit01",
+   "height": 1.667,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3633,
+     "padded": 4138,
+     "wasted": 505,
+     "vertices": 2238,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 565,
+     "padded": 636,
+     "wasted": 71,
+     "vertices": 463,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 143,
+     "padded": 166,
+     "wasted": 23,
+     "vertices": 114,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 8,
+   "sex": "female",
+   "band": "adult",
+   "outfit": "female_elegantsuit01",
+   "height": 1.689,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2822,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 605,
+     "padded": 636,
+     "wasted": 31,
+     "vertices": 477,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 136,
+     "padded": 166,
+     "wasted": 30,
+     "vertices": 112,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 9,
+   "sex": "female",
+   "band": "adult",
+   "outfit": "female_casualsuit02",
+   "height": 1.525,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3864,
+     "padded": 4138,
+     "wasted": 274,
+     "vertices": 2295,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 579,
+     "padded": 636,
+     "wasted": 57,
+     "vertices": 380,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 159,
+     "padded": 166,
+     "wasted": 7,
+     "vertices": 124,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 10,
+   "sex": "female",
+   "band": "adult",
+   "outfit": "female_casualsuit01",
+   "height": 1.804,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2732,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 604,
+     "padded": 636,
+     "wasted": 32,
+     "vertices": 439,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 152,
+     "padded": 166,
+     "wasted": 14,
+     "vertices": 107,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 11,
+   "sex": "female",
+   "band": "adult",
+   "outfit": "female_elegantsuit01",
+   "height": 1.567,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3877,
+     "padded": 4138,
+     "wasted": 261,
+     "vertices": 2297,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 618,
+     "padded": 636,
+     "wasted": 18,
+     "vertices": 486,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 149,
+     "padded": 166,
+     "wasted": 17,
+     "vertices": 120,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 12,
+   "sex": "female",
+   "band": "senior",
+   "outfit": "female_casualsuit01",
+   "height": 1.514,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2681,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 596,
+     "padded": 636,
+     "wasted": 40,
+     "vertices": 446,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 160,
+     "padded": 166,
+     "wasted": 6,
+     "vertices": 115,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 13,
+   "sex": "female",
+   "band": "senior",
+   "outfit": "female_elegantsuit01",
+   "height": 1.691,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3997,
+     "padded": 4138,
+     "wasted": 141,
+     "vertices": 2793,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 559,
+     "padded": 636,
+     "wasted": 77,
+     "vertices": 465,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 148,
+     "padded": 166,
+     "wasted": 18,
+     "vertices": 120,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 14,
+   "sex": "female",
+   "band": "senior",
+   "outfit": "female_casualsuit02",
+   "height": 1.616,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3997,
+     "padded": 4138,
+     "wasted": 141,
+     "vertices": 2798,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 511,
+     "padded": 636,
+     "wasted": 125,
+     "vertices": 356,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 157,
+     "padded": 166,
+     "wasted": 9,
+     "vertices": 124,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 15,
+   "sex": "female",
+   "band": "senior",
+   "outfit": "female_elegantsuit01",
+   "height": 1.63,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2786,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 620,
+     "padded": 636,
+     "wasted": 16,
+     "vertices": 487,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 149,
+     "padded": 166,
+     "wasted": 17,
+     "vertices": 119,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 16,
+   "sex": "male",
+   "band": "child",
+   "outfit": "male_casualsuit02",
+   "height": 1.054,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2610,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 591,
+     "padded": 636,
+     "wasted": 45,
+     "vertices": 443,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 159,
+     "padded": 166,
+     "wasted": 7,
+     "vertices": 111,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 17,
+   "sex": "male",
+   "band": "child",
+   "outfit": "male_casualsuit04",
+   "height": 1.377,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 4000,
+     "padded": 4138,
+     "wasted": 138,
+     "vertices": 2560,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 627,
+     "padded": 636,
+     "wasted": 9,
+     "vertices": 511,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 159,
+     "padded": 166,
+     "wasted": 7,
+     "vertices": 114,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 18,
+   "sex": "male",
+   "band": "child",
+   "outfit": "male_casualsuit03",
+   "height": 1.239,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2968,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 586,
+     "padded": 636,
+     "wasted": 50,
+     "vertices": 467,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 158,
+     "padded": 166,
+     "wasted": 8,
+     "vertices": 117,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 19,
+   "sex": "male",
+   "band": "child",
+   "outfit": "male_casualsuit06",
+   "height": 1.199,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3999,
+     "padded": 4138,
+     "wasted": 139,
+     "vertices": 2707,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 569,
+     "padded": 636,
+     "wasted": 67,
+     "vertices": 374,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 137,
+     "padded": 166,
+     "wasted": 29,
+     "vertices": 105,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 20,
+   "sex": "male",
+   "band": "young",
+   "outfit": "male_casualsuit03",
+   "height": 1.72,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3997,
+     "padded": 4138,
+     "wasted": 141,
+     "vertices": 2968,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 573,
+     "padded": 636,
+     "wasted": 63,
+     "vertices": 467,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 144,
+     "padded": 166,
+     "wasted": 22,
+     "vertices": 105,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 21,
+   "sex": "male",
+   "band": "young",
+   "outfit": "male_casualsuit05",
+   "height": 1.783,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 4000,
+     "padded": 4138,
+     "wasted": 138,
+     "vertices": 2953,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 500,
+     "padded": 636,
+     "wasted": 136,
+     "vertices": 343,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 148,
+     "padded": 166,
+     "wasted": 18,
+     "vertices": 107,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 22,
+   "sex": "male",
+   "band": "young",
+   "outfit": "male_casualsuit02",
+   "height": 1.722,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3997,
+     "padded": 4138,
+     "wasted": 141,
+     "vertices": 2677,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 578,
+     "padded": 636,
+     "wasted": 58,
+     "vertices": 435,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 139,
+     "padded": 166,
+     "wasted": 27,
+     "vertices": 105,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 23,
+   "sex": "male",
+   "band": "young",
+   "outfit": "male_casualsuit04",
+   "height": 1.842,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3997,
+     "padded": 4138,
+     "wasted": 141,
+     "vertices": 2606,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 631,
+     "padded": 636,
+     "wasted": 5,
+     "vertices": 475,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 146,
+     "padded": 166,
+     "wasted": 20,
+     "vertices": 109,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 24,
+   "sex": "male",
+   "band": "adult",
+   "outfit": "male_casualsuit01",
+   "height": 1.73,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3997,
+     "padded": 4138,
+     "wasted": 141,
+     "vertices": 2706,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 536,
+     "padded": 636,
+     "wasted": 100,
+     "vertices": 355,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 148,
+     "padded": 166,
+     "wasted": 18,
+     "vertices": 112,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 25,
+   "sex": "male",
+   "band": "adult",
+   "outfit": "male_worksuit01",
+   "height": 1.631,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 4000,
+     "padded": 4138,
+     "wasted": 138,
+     "vertices": 2690,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 556,
+     "padded": 636,
+     "wasted": 80,
+     "vertices": 370,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 145,
+     "padded": 166,
+     "wasted": 21,
+     "vertices": 106,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 26,
+   "sex": "male",
+   "band": "adult",
+   "outfit": "male_elegantsuit01",
+   "height": 1.806,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 4138,
+     "padded": 4138,
+     "wasted": 0,
+     "vertices": 2741,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 623,
+     "padded": 636,
+     "wasted": 13,
+     "vertices": 451,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 152,
+     "padded": 166,
+     "wasted": 14,
+     "vertices": 115,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 27,
+   "sex": "male",
+   "band": "adult",
+   "outfit": "male_casualsuit05",
+   "height": 1.745,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3998,
+     "padded": 4138,
+     "wasted": 140,
+     "vertices": 3268,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 561,
+     "padded": 636,
+     "wasted": 75,
+     "vertices": 365,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 152,
+     "padded": 166,
+     "wasted": 14,
+     "vertices": 106,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 28,
+   "sex": "male",
+   "band": "senior",
+   "outfit": "male_casualsuit06",
+   "height": 1.775,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 3998,
+     "padded": 4138,
+     "wasted": 140,
+     "vertices": 2546,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 611,
+     "padded": 636,
+     "wasted": 25,
+     "vertices": 440,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 147,
+     "padded": 166,
+     "wasted": 19,
+     "vertices": 107,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 29,
+   "sex": "male",
+   "band": "senior",
+   "outfit": "male_elegantsuit01",
+   "height": 1.871,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 4135,
+     "padded": 4138,
+     "wasted": 3,
+     "vertices": 3204,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 549,
+     "padded": 636,
+     "wasted": 87,
+     "vertices": 378,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 139,
+     "padded": 166,
+     "wasted": 27,
+     "vertices": 108,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 30,
+   "sex": "male",
+   "band": "senior",
+   "outfit": "male_casualsuit02",
+   "height": 1.749,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 4000,
+     "padded": 4138,
+     "wasted": 138,
+     "vertices": 2686,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 582,
+     "padded": 636,
+     "wasted": 54,
+     "vertices": 442,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 144,
+     "padded": 166,
+     "wasted": 22,
+     "vertices": 104,
+     "heldPropTris": 52
+    }
+   ]
+  },
+  {
+   "variation": 31,
+   "sex": "male",
+   "band": "senior",
+   "outfit": "male_worksuit01",
+   "height": 1.937,
+   "levels": [
+    {
+     "level": 0,
+     "triangles": 4134,
+     "padded": 4138,
+     "wasted": 4,
+     "vertices": 2891,
+     "heldPropTris": 220
+    },
+    {
+     "level": 1,
+     "triangles": 572,
+     "padded": 636,
+     "wasted": 64,
+     "vertices": 383,
+     "heldPropTris": 220
+    },
+    {
+     "level": 2,
+     "triangles": 138,
+     "padded": 166,
+     "wasted": 28,
+     "vertices": 108,
+     "heldPropTris": 52
+    }
+   ]
+  }
+ ]
+}

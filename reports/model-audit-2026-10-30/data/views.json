@@ -1,0 +1,514 @@
+{
+ "seed": 1,
+ "buildings": 37750,
+ "segments": 20220,
+ "views": [
+  {
+   "view": "street",
+   "eye": [
+    49.1,
+    23.8,
+    70.1
+   ],
+   "layers": {
+    "buildings L3 plate": {
+     "draws": 1,
+     "tris": 714
+    },
+    "buildings L2 tile": {
+     "draws": 16,
+     "tris": 399648
+    },
+    "buildings L1 cell": {
+     "draws": 57,
+     "tris": 2324578
+    },
+    "buildings L0 cell": {
+     "draws": 14,
+     "tris": 2148380
+    },
+    "building detail L-1 cell": {
+     "draws": 3,
+     "tris": 146446
+    },
+    "roads tile (lod 1)": {
+     "draws": 18,
+     "tris": 812029
+    },
+    "roads L1 cell": {
+     "draws": 43,
+     "tris": 204302
+    },
+    "roads L0 cell": {
+     "draws": 12,
+     "tris": 243515
+    },
+    "terrain patches": {
+     "draws": 1,
+     "tris": 206848
+    },
+    "grass tufts": {
+     "draws": 1,
+     "tris": 179200
+    },
+    "props street/vegetation": {
+     "draws": 31,
+     "tris": 132932
+    },
+    "props building parts": {
+     "draws": 9,
+     "tris": 1351648
+    }
+   },
+   "total": {
+    "draws": 206,
+    "tris": 8150240
+   },
+   "propCells": 176,
+   "propInstancesResidentInView": 452757,
+   "topKinds": [
+    {
+     "kind": 62,
+     "type": 25,
+     "level": 0,
+     "instances": 12305,
+     "tris": 590640,
+     "trisEach": 48
+    },
+    {
+     "kind": 83,
+     "type": 30,
+     "level": 0,
+     "instances": 34348,
+     "tris": 343480,
+     "trisEach": 10
+    },
+    {
+     "kind": 61,
+     "type": 24,
+     "level": 0,
+     "instances": 5457,
+     "tris": 305592,
+     "trisEach": 56
+    },
+    {
+     "kind": 70,
+     "type": 27,
+     "level": 0,
+     "instances": 1154,
+     "tris": 96936,
+     "trisEach": 84
+    },
+    {
+     "kind": 6,
+     "type": 3,
+     "level": 2,
+     "instances": 1282,
+     "tris": 15384,
+     "trisEach": 12
+    },
+    {
+     "kind": 0,
+     "type": 0,
+     "level": 2,
+     "instances": 6718,
+     "tris": 13436,
+     "trisEach": 2
+    },
+    {
+     "kind": 14,
+     "type": 10,
+     "level": 1,
+     "instances": 22,
+     "tris": 11088,
+     "trisEach": 504
+    },
+    {
+     "kind": 0,
+     "type": 0,
+     "level": 1,
+     "instances": 163,
+     "tris": 9128,
+     "trisEach": 56
+    },
+    {
+     "kind": 7,
+     "type": 4,
+     "level": 2,
+     "instances": 367,
+     "tris": 8808,
+     "trisEach": 24
+    },
+    {
+     "kind": 15,
+     "type": 10,
+     "level": 1,
+     "instances": 17,
+     "tris": 8568,
+     "trisEach": 504
+    },
+    {
+     "kind": 6,
+     "type": 3,
+     "level": 1,
+     "instances": 161,
+     "tris": 7728,
+     "trisEach": 48
+    },
+    {
+     "kind": 16,
+     "type": 10,
+     "level": 1,
+     "instances": 15,
+     "tris": 7560,
+     "trisEach": 504
+    },
+    {
+     "kind": 52,
+     "type": 16,
+     "level": 2,
+     "instances": 3737,
+     "tris": 7474,
+     "trisEach": 2
+    },
+    {
+     "kind": 52,
+     "type": 16,
+     "level": 1,
+     "instances": 88,
+     "tris": 7040,
+     "trisEach": 80
+    },
+    {
+     "kind": 66,
+     "type": 27,
+     "level": 0,
+     "instances": 219,
+     "tris": 5256,
+     "trisEach": 24
+    }
+   ],
+   "s": 11.6
+  },
+  {
+   "view": "district",
+   "eye": [
+    154.8,
+    317.8,
+    221.1
+   ],
+   "layers": {
+    "buildings L1 cell": {
+     "draws": 11,
+     "tris": 507032
+    },
+    "buildings L0 cell": {
+     "draws": 17,
+     "tris": 2469136
+    },
+    "roads L1 cell": {
+     "draws": 12,
+     "tris": 54026
+    },
+    "roads L0 cell": {
+     "draws": 16,
+     "tris": 314780
+    },
+    "terrain patches": {
+     "draws": 1,
+     "tris": 96256
+    },
+    "props street/vegetation": {
+     "draws": 19,
+     "tris": 38976
+    },
+    "props building parts": {
+     "draws": 6,
+     "tris": 1366472
+    }
+   },
+   "total": {
+    "draws": 82,
+    "tris": 4846678
+   },
+   "propCells": 28,
+   "propInstancesResidentInView": 434620,
+   "topKinds": [
+    {
+     "kind": 62,
+     "type": 25,
+     "level": 0,
+     "instances": 14865,
+     "tris": 713520,
+     "trisEach": 48
+    },
+    {
+     "kind": 61,
+     "type": 24,
+     "level": 0,
+     "instances": 5699,
+     "tris": 319144,
+     "trisEach": 56
+    },
+    {
+     "kind": 83,
+     "type": 30,
+     "level": 0,
+     "instances": 26074,
+     "tris": 260740,
+     "trisEach": 10
+    },
+    {
+     "kind": 70,
+     "type": 27,
+     "level": 0,
+     "instances": 841,
+     "tris": 70644,
+     "trisEach": 84
+    },
+    {
+     "kind": 0,
+     "type": 0,
+     "level": 1,
+     "instances": 157,
+     "tris": 8792,
+     "trisEach": 56
+    },
+    {
+     "kind": 52,
+     "type": 16,
+     "level": 1,
+     "instances": 92,
+     "tris": 7360,
+     "trisEach": 80
+    },
+    {
+     "kind": 6,
+     "type": 3,
+     "level": 1,
+     "instances": 146,
+     "tris": 7008,
+     "trisEach": 48
+    },
+    {
+     "kind": 1,
+     "type": 0,
+     "level": 1,
+     "instances": 65,
+     "tris": 4550,
+     "trisEach": 70
+    },
+    {
+     "kind": 7,
+     "type": 4,
+     "level": 1,
+     "instances": 49,
+     "tris": 2940,
+     "trisEach": 60
+    },
+    {
+     "kind": 53,
+     "type": 16,
+     "level": 1,
+     "instances": 40,
+     "tris": 2800,
+     "trisEach": 70
+    },
+    {
+     "kind": 2,
+     "type": 1,
+     "level": 1,
+     "instances": 37,
+     "tris": 2516,
+     "trisEach": 68
+    },
+    {
+     "kind": 66,
+     "type": 27,
+     "level": 0,
+     "instances": 100,
+     "tris": 2400,
+     "trisEach": 24
+    },
+    {
+     "kind": 54,
+     "type": 17,
+     "level": 1,
+     "instances": 12,
+     "tris": 1488,
+     "trisEach": 124
+    },
+    {
+     "kind": 8,
+     "type": 5,
+     "level": 1,
+     "instances": 4,
+     "tris": 624,
+     "trisEach": 156
+    },
+    {
+     "kind": 3,
+     "type": 2,
+     "level": 1,
+     "instances": 10,
+     "tris": 380,
+     "trisEach": 38
+    }
+   ],
+   "s": 2.8
+  },
+  {
+   "view": "city",
+   "eye": [
+    892.3,
+    1551.7,
+    1274.3
+   ],
+   "layers": {
+    "buildings L3 plate": {
+     "draws": 3,
+     "tris": 241002
+    },
+    "buildings L2 tile": {
+     "draws": 17,
+     "tris": 510054
+    },
+    "buildings L1 cell": {
+     "draws": 57,
+     "tris": 1807804
+    },
+    "roads tile (lod 1)": {
+     "draws": 19,
+     "tris": 1241398
+    },
+    "roads L1 cell": {
+     "draws": 72,
+     "tris": 319811
+    },
+    "roads L0 cell": {
+     "draws": 10,
+     "tris": 208382
+    },
+    "terrain patches": {
+     "draws": 1,
+     "tris": 124928
+    },
+    "props street/vegetation": {
+     "draws": 8,
+     "tris": 40880
+    }
+   },
+   "total": {
+    "draws": 187,
+    "tris": 4494259
+   },
+   "propCells": 228,
+   "propInstancesResidentInView": 689241,
+   "topKinds": [
+    {
+     "kind": 6,
+     "type": 3,
+     "level": 2,
+     "instances": 982,
+     "tris": 11784,
+     "trisEach": 12
+    },
+    {
+     "kind": 0,
+     "type": 0,
+     "level": 2,
+     "instances": 5570,
+     "tris": 11140,
+     "trisEach": 2
+    },
+    {
+     "kind": 52,
+     "type": 16,
+     "level": 2,
+     "instances": 3098,
+     "tris": 6196,
+     "trisEach": 2
+    },
+    {
+     "kind": 1,
+     "type": 0,
+     "level": 2,
+     "instances": 1895,
+     "tris": 3790,
+     "trisEach": 2
+    },
+    {
+     "kind": 2,
+     "type": 1,
+     "level": 2,
+     "instances": 1464,
+     "tris": 2928,
+     "trisEach": 2
+    },
+    {
+     "kind": 7,
+     "type": 4,
+     "level": 2,
+     "instances": 113,
+     "tris": 2712,
+     "trisEach": 24
+    },
+    {
+     "kind": 53,
+     "type": 16,
+     "level": 2,
+     "instances": 1022,
+     "tris": 2044,
+     "trisEach": 2
+    },
+    {
+     "kind": 54,
+     "type": 17,
+     "level": 2,
+     "instances": 143,
+     "tris": 286,
+     "trisEach": 2
+    }
+   ],
+   "s": 9.3
+  },
+  {
+   "view": "map",
+   "eye": [
+    0,
+    10621.2,
+    2847
+   ],
+   "layers": {
+    "buildings L3 plate": {
+     "draws": 23,
+     "tris": 1437486
+    },
+    "roads tile (lod 1)": {
+     "draws": 45,
+     "tris": 2263615
+    },
+    "roads L1 cell": {
+     "draws": 113,
+     "tris": 360893
+    },
+    "roads L0 cell": {
+     "draws": 25,
+     "tris": 241604
+    },
+    "terrain patches": {
+     "draws": 1,
+     "tris": 51200
+    }
+   },
+   "total": {
+    "draws": 207,
+    "tris": 4354798
+   },
+   "propCells": 566,
+   "propInstancesResidentInView": 680635,
+   "topKinds": [],
+   "s": 10
+  }
+ ]
+}
