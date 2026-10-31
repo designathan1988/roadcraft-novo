@@ -7,6 +7,7 @@ import type { World } from '../world/world.ts';
 import { Ctl, Rule, effectiveControl, type JunctionSpec } from './control.ts';
 import { PROFILE_INFO } from './profiles.ts';
 import type { NodeId, SegId } from '../core/ids.ts';
+import { t } from '../shared/i18n/index.ts';
 
 /** Sign variants that are rules (jobs/props.ts SIGN). */
 export const SIGN_STOP = 4, SIGN_YIELD = 1;
@@ -37,7 +38,7 @@ export function signRuleCommand(world: World, x: number, z: number, variant: num
   const net = world.roads;
   const before = net.junctions.get(node) ?? null;
   const ctl = effectiveControl(net, node, before ?? undefined, net.flow.get(node)).ctl;
-  if (ctl === Ctl.Signal || ctl === Ctl.Ring || ctl === Ctl.Crossing) return 'o cruzamento tem semáforo ou é rotatória: a placa não muda a regra';
+  if (ctl === Ctl.Signal || ctl === Ctl.Ring || ctl === Ctl.Crossing) return t('refuse.sign.noRule');
   const legs = (before?.legs ?? []).filter(([s]) => s !== seg);
   if (adding) legs.push([seg, variant === SIGN_STOP ? Rule.Stop : Rule.Yield]);
   // the rules by arm count only with signs: an automatic junction without signs becomes "signs"

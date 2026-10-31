@@ -45,8 +45,8 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
   let pr = heightProfile(world.heights, q, table, offset, maxGrade, fixed, 6, world.water);
 
   const fail = (reason: string): RoadPlan => ({ ok: false, reason, quad: q, profile: pr, len, junctions: [] });
-  if (len < MIN_LEN) return fail('curta demais');
-  if (start.node >= 0 && start.node === end.node) return fail('liga o nó a ele mesmo');
+  if (len < MIN_LEN) return fail(text('refuse.road.tooShort'));
+  if (start.node >= 0 && start.node === end.node) return fail(text('refuse.road.selfLoop'));
 
   // junctions with the roads crossed
   const junctions: Array<[number, SegId, number]> = [];
@@ -70,7 +70,7 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
         // junction angle
         bezD(q, tn, d1); bezD(eq, to, d2);
         const cos = Math.abs(d1[0] * d2[0] + d1[1] * d2[1]) / (Math.hypot(d1[0], d1[1]) * Math.hypot(d2[0], d2[1]) || 1);
-        if (cos > 0.94) { bad = 'ângulo fechado demais com outra via'; return; }
+        if (cos > 0.94) { bad = text('refuse.road.sharpAngle'); return; }
         junctions.push([tn, s, to]);
       }
     }
@@ -102,10 +102,10 @@ export function planRoad(world: World, start: Anchor, control: { x: number; z: n
   for (const [n, k] of extra) if (nc.deg[n] + k > MAX_DEG) return { ...fail(text('road.reason.fullNode', { max: MAX_DEG })), junctions };
   // fixed points too close together
   const ats = [0, ...junctions.map((j) => arcAtT(table, j[0])), len];
-  for (let i = 1; i < ats.length; i++) if (ats[i] - ats[i - 1] < 6) return { ...fail('cruzamentos muito próximos'), junctions };
+  for (let i = 1; i < ats.length; i++) if (ats[i] - ats[i - 1] < 6) return { ...fail(text('refuse.road.junctionsClose')), junctions };
   // is the grade possible?
   for (let i = 1; i < pr.at.length; i++) {
-    if (Math.abs(pr.y[i] - pr.y[i - 1]) / (pr.at[i] - pr.at[i - 1]) > maxGrade * 1.9) return { ...fail('rampa íngreme demais'), junctions };
+    if (Math.abs(pr.y[i] - pr.y[i - 1]) / (pr.at[i] - pr.at[i - 1]) > maxGrade * 1.9) return { ...fail(text('refuse.road.steep')), junctions };
   }
   return { ok: true, reason: '', quad: q, profile: pr, len, junctions };
 }

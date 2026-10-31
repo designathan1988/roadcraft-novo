@@ -11,6 +11,7 @@ import { baseZone, zoneDensity } from '../../roads/zones.ts';
 const LOW_DENSITY_FLOORS = 4;
 import type { World } from '../../world/world.ts';
 import { NO_SEG, type SegId } from '../../core/ids.ts';
+import { t } from '../../shared/i18n/index.ts';
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
 
@@ -83,7 +84,7 @@ export class ZoneTool {
   fillBlock(x: number, z: number): string {
     const net = this.world.roads, sc = net.segs.cols;
     const near = net.nearestSeg(x, z, 200);
-    if (!near) return 'Nenhuma via perto: desenhe as ruas da quadra primeiro.';
+    if (!near) return t('tools.toast.zoneNoRoad');
     const [s0, t0] = near;
     const q = net.quad(s0);
     bez(q, t0, p2); bezD(q, t0, d2);
@@ -119,9 +120,9 @@ export class ZoneTool {
       }
       if (best < 0) { fwd = !fwd; continue; } // dead end: come back along the other side
       s = best; fwd = bestFwd;
-      if (step === 299) { j.invert(); return 'Isso não é uma quadra fechada: feche as ruas em volta.'; }
+      if (step === 299) { j.invert(); return t('tools.toast.zoneNotBlock'); }
     }
-    if (j.empty) return 'Essa quadra já tem essa zona.';
+    if (j.empty) return t('tools.toast.zoneSame');
     this.commands.push(j);
     return 'ok';
   }

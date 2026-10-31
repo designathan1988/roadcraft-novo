@@ -79,15 +79,15 @@ export class RoadTool {
   private updateHint(): void {
     const h = this.hud;
     switch (this.mode) {
-      case 'road': h.setHint(this.start ? 'Clique para terminar o trecho (continua a partir dele). Esc encerra.' : 'Clique para começar a via.'); break;
-      case 'curve': h.setHint(!this.start ? 'Clique para começar a curva.' : !this.control ? 'Clique para o ponto de controle da curva.' : 'Clique para terminar a curva.'); break;
-      case 'roundabout': h.setHint(`Clique para pôr uma rotatória (raio ${this.ringRadius} m; [ e ] mudam o raio).`); break;
-      case 'upgrade': h.setHint(`Clique numa via para trocar para "${PROFILE_INFO[this.profile].name}" (Shift: a rua inteira; Alt: copiar o perfil da via).`); break;
-      case 'bulldoze': h.setHint('Clique numa via, prédio, item ou muro para demolir; arraste para demolir tudo num retângulo.'); break;
-      case 'move': h.setHint(this.moving >= 0 ? 'Solte onde o nó deve ficar; as vias ligadas acompanham. Esc cancela.' : 'Arraste um nó (ponta ou cruzamento) para mudá-lo de lugar.'); break;
-      case 'free': h.setHint('Arraste para desenhar a via livre: ela segue o cursor em curvas suaves; solte para construir.'); break;
-      case 'blocks': h.setHint('Clique para construir a grade de quarteirões com o perfil escolhido (colunas, linhas, quadra e giro no painel).'); break;
-      case 'split': h.setHint('Clique numa via para dividi-la em duas naquele ponto.'); break;
+      case 'road': h.setHint(this.start ? t('tools.hint.roadEnd') : t('tools.hint.roadStart')); break;
+      case 'curve': h.setHint(!this.start ? t('tools.hint.curveStart') : !this.control ? t('tools.hint.curveControl') : t('tools.hint.curveEnd')); break;
+      case 'roundabout': h.setHint(t('tools.hint.roundabout', { radius: this.ringRadius })); break;
+      case 'upgrade': h.setHint(t('tools.hint.upgrade', { profile: PROFILE_INFO[this.profile].name })); break;
+      case 'bulldoze': h.setHint(t('tools.hint.bulldoze')); break;
+      case 'move': h.setHint(this.moving >= 0 ? t('tools.hint.moveDrop') : t('tools.hint.move')); break;
+      case 'free': h.setHint(t('tools.hint.free')); break;
+      case 'blocks': h.setHint(t('tools.hint.blocks')); break;
+      case 'split': h.setHint(t('tools.hint.split')); break;
       default: h.setHint('');
     }
   }
@@ -194,14 +194,14 @@ export class RoadTool {
     if (!hit) return;
     const net = this.world.roads;
     if (this.mode === 'bulldoze') {
-      const t = this.target ?? targetAt(this.world, hit.x, hit.z);
+      const target = this.target ?? targetAt(this.world, hit.x, hit.z);
       this.target = null;
-      if (!t) return;
-      const alive = t.kind === 'item' ? this.world.items.t.alive[t.id] : t.kind === 'building' ? this.world.buildings.alive[t.id] : net.segs.alive[t.id];
+      if (!target) return;
+      const alive = target.kind === 'item' ? this.world.items.t.alive[target.id] : target.kind === 'building' ? this.world.buildings.alive[target.id] : net.segs.alive[target.id];
       if (!alive) return;
-      const { cmd, charge } = demolishTarget(this.world, t);
+      const { cmd, charge } = demolishTarget(this.world, target);
       this.commands.push(cmd);
-      if (charge < 0) this.hud.toast(`Devolvido R$ ${(-charge).toLocaleString('pt-BR')}`);
+      if (charge < 0) this.hud.toast(t('ui.insp.refund', { value: money(-charge) }));
       this.preview.hideAll();
       return;
     }
@@ -209,7 +209,7 @@ export class RoadTool {
     if (this.mode === 'split') {
       if (this.hoverSeg >= 0 && net.segs.alive[this.hoverSeg]) {
         const j = splitAt(this.world, this.hoverSeg, this.hoverT);
-        if (j.empty) this.hud.toast('Perto demais da ponta: clique mais para o meio.'); else this.commit(j);
+        if (j.empty) this.hud.toast(t('tools.toast.splitNearEnd')); else this.commit(j);
       }
       return;
     }
@@ -228,7 +228,7 @@ export class RoadTool {
       const cut = shift || a.node >= 0;
       const why = roundaboutRefusal(this.world, a.x, a.z, this.ringRadius, cut);
       const j = why ? null : buildRoundabout(this.world, a.x, a.z, this.ringRadius, cut);
-      if (!j) this.hud.toast(why || 'Já existe uma rotatória aqui.');
+      if (!j) this.hud.toast(why || t('road.ring.exists'));
       else this.commit(j);
       return;
     }
@@ -236,7 +236,7 @@ export class RoadTool {
     if (!this.start) { this.start = a; this.updateHint(); return; }
     if (this.mode === 'curve' && !this.control) { this.control = { x: a.x, z: a.z }; this.updateHint(); return; }
     const plan = planRoad(this.world, this.start, this.control, a, this.profile, this.elevation);
-    if (!plan.ok) { this.hud.toast(`Não dá para construir aqui: ${plan.reason}.`); return; }
+    if (!plan.ok) { this.hud.toast(t('tools.toast.cannotBuild', { why: plan.reason })); return; }
     const j = buildRoad(this.world, plan, this.start, a, this.profile, this.segFlags());
     if (!this.commit(j)) return;
     // goes on from the end of the segment
@@ -251,7 +251,7 @@ export class RoadTool {
   private commit(j: RoadJournal): boolean {
     if (j.empty) return true;
     const price = j.price;
-    if (!j.settle()) { this.hud.toast(`Dinheiro insuficiente: custa R$ ${price.toLocaleString('pt-BR')}.`); return false; }
+    if (!j.settle()) { this.hud.toast(t('ui.insp.noMoney', { price: money(price) })); return false; }
     this.commands.push(j);
     if (j.charge !== 0) this.hud.toast(j.charge > 0 ? `− R$ ${j.charge.toLocaleString('pt-BR')}` : `Devolvido R$ ${(-j.charge).toLocaleString('pt-BR')}`);
     return true;
@@ -315,7 +315,7 @@ export class RoadTool {
     for (const [p, c, q] of pieces) {
       const a = snap(net, p[0], p[1], 2.5), b = snap(net, q[0], q[1], pieces[pieces.length - 1][2] === q ? this.snapRadius() : 2.5);
       const plan = planRoad(this.world, a, c ? { x: c[0], z: c[1] } : null, b, this.profile, this.elevation);
-      if (!plan.ok) { total.invert(); this.hud.toast(`Não dá para construir aqui: ${plan.reason}.`); return; }
+      if (!plan.ok) { total.invert(); this.hud.toast(t('tools.toast.cannotBuild', { why: plan.reason })); return; }
       total.append(buildRoad(this.world, plan, a, b, this.profile, this.segFlags()));
     }
     this.commit(total);
@@ -335,10 +335,10 @@ export class RoadTool {
     for (const [[ax, az], [bx, bz]] of lines) {
       const a = snap(net, ax, az, 6), b = snap(net, bx, bz, 6);
       const plan = planRoad(this.world, a, null, b, this.profile, 0);
-      if (!plan.ok) { total.invert(); this.hud.toast(`Não dá para construir aqui: ${plan.reason}.`); return; }
+      if (!plan.ok) { total.invert(); this.hud.toast(t('tools.toast.cannotBuild', { why: plan.reason })); return; }
       total.append(buildRoad(this.world, plan, a, b, this.profile, this.segFlags(), 'quarteirões'));
     }
-    if (this.commit(total)) this.hud.toast(`Quarteirões construídos: ${cols} × ${rows}.`);
+    if (this.commit(total)) this.hud.toast(t('tools.toast.blocksBuilt', { cols, rows }));
   }
 
   /** Move node: grabs the node near the point (true if it did). */
@@ -359,7 +359,7 @@ export class RoadTool {
     const nc = this.world.roads.nodes.cols;
     if (Math.hypot(hit.x - nc.x[n], hit.z - nc.z[n]) < 1) return;
     const r = moveNode(this.world, n, hit.x, hit.z);
-    if (typeof r === 'string') { this.hud.toast(`Não movido: ${r}.`); return; }
+    if (typeof r === 'string') { this.hud.toast(t('tools.toast.notMoved', { why: r })); return; }
     this.commit(r);
   }
 

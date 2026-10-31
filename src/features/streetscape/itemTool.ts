@@ -69,8 +69,8 @@ export class ItemTool {
   }
 
   hint(): void {
-    if (this.mode === 'streetscape') this.hud.setHint('Clique numa calçada (ou no chão) para pôr o item escolhido; arraste ao longo dela para uma fileira. Shift+clique remove.');
-    else this.hud.setHint(this.last ? 'Clique para continuar o traço; Enter ou Esc termina, Backspace volta um ponto.' : 'Clique para começar o traço. Perto de uma via ele vai para as costas da calçada. Shift+clique remove.');
+    if (this.mode === 'streetscape') this.hud.setHint(t('tools.hint.streetscape'));
+    else this.hud.setHint(this.last ? t('tools.hint.barrierNext') : t('tools.hint.barrierStart'));
   }
 
   /** Snapped point: on the sidewalk (curb side for objects, back for barriers) or free on the ground. */
@@ -135,7 +135,7 @@ export class ItemTool {
       c.add([sp.x, sp.z, sp.yaw, sp.onWalk ? sp.y : 0, this.item, this.item === Item.Sign ? this.sign : isElement(this.item) ? 4 : 0]);
       // "a sign is a rule": a Stop/Give-way sign next to a junction arm sets that arm's rule (one undo for both)
       const rule = this.item === Item.Sign ? signRuleCommand(this.world, sp.x, sp.z, this.sign, true) : '';
-      if (typeof rule !== 'string') { rule.apply(); this.commands.push(both(c, rule)); this.hud.toast(this.sign === SIGN_STOP ? 'Placa de Pare: quem chega por esta via para no cruzamento.' : 'Dê a preferência: quem chega por esta via dá a vez no cruzamento.'); }
+      if (typeof rule !== 'string') { rule.apply(); this.commands.push(both(c, rule)); this.hud.toast(this.sign === SIGN_STOP ? t('tools.toast.signStop') : t('tools.toast.signYield')); }
       else { this.commands.push(c); if (rule) this.hud.toast(rule[0].toUpperCase() + rule.slice(1) + '.'); }
       if (this.item === Item.Sign && this.signText.trim()) {
         const near = this.world.roads.nearestSeg(sp.x, sp.z, 30);
@@ -185,9 +185,9 @@ export class ItemTool {
 
   /** A pole must stand on the footway and above the water, never on the carriageway or in a river. */
   private poleGround(sp: Spot): boolean {
-    if (!sp.onWalk) { this.hud.toast('Postes vão na calçada.'); return false; }
+    if (!sp.onWalk) { this.hud.toast(t('tools.toast.lampOnWalk')); return false; }
     const ground = heightAt(this.world.heights, sp.x, sp.z);
-    if (waterAt(this.world.water, sp.x, sp.z) > ground - 0.5) { this.hud.toast('Não dá para pôr postes na água.'); return false; }
+    if (waterAt(this.world.water, sp.x, sp.z) > ground - 0.5) { this.hud.toast(t('tools.toast.lampOnWater')); return false; }
     return true;
   }
 
@@ -229,7 +229,7 @@ export class ItemTool {
       if (this.world.items.nearest(sp.x, sp.z, Math.min(1.5, step * 0.5)) >= 0 || this.onCarriageway(sp)) continue;
       c.add([sp.x, sp.z, sp.yaw, sp.onWalk ? sp.y : 0, this.item, this.item === Item.Sign ? this.sign : isElement(this.item) ? 4 : 0]);
     }
-    if (!c.empty) { this.commands.push(c); this.hud.toast('Fileira posta ao longo da calçada.'); }
+    if (!c.empty) { this.commands.push(c); this.hud.toast(t('tools.toast.row')); }
     return n;
   }
 

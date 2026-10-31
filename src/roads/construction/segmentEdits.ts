@@ -55,9 +55,9 @@ export function splitAt(world: World, s: SegId, t = 0.5): RoadJournal {
 /** Pedestrian crossing mid-segment: a new node at `t` with the control (zebra or traffic light). */
 export function addCrossing(world: World, s: SegId, t: number, ctl: number): RoadJournal | string {
   const net = world.roads, sc = net.segs.cols;
-  if (!PROFILE_INFO[sc.profile[s]].walk) return 'Esta via não tem pedestres.';
+  if (!PROFILE_INFO[sc.profile[s]].walk) return text('refuse.crossing.noWalk');
   const L = sc.len[s];
-  if (t * L < 14 || (1 - t) * L < 14) return 'A faixa precisa de espaço para uma fila de carros dos dois lados.';
+  if (t * L < 14 || (1 - t) * L < 14) return text('refuse.crossing.room');
   const j = new RoadJournal(world, 'faixa de pedestres');
   const n = splitSeg(j, net, s, t, null);
   j.setJunction(n, { ctl });
@@ -69,10 +69,10 @@ export function addUTurn(world: World, s: SegId, t: number): RoadJournal | strin
   const net = world.roads, sc = net.segs.cols;
   const info = PROFILE_INFO[sc.profile[s]];
   const med = info.edges.find((e) => e.strip.kind === 'median');
-  if (info.oneWay || !med) return 'O retorno precisa de uma via de mão dupla com canteiro central.';
-  if (med.u1 - med.u0 < 1.5) return 'Canteiro estreito demais para um retorno.';
+  if (info.oneWay || !med) return text('refuse.uturn.median');
+  if (med.u1 - med.u0 < 1.5) return text('refuse.uturn.narrow');
   const L = sc.len[s];
-  if (t * L < 16 || (1 - t) * L < 16) return 'O retorno precisa de espaço para uma fila de carros dos dois lados.';
+  if (t * L < 16 || (1 - t) * L < 16) return text('refuse.uturn.room');
   const j = new RoadJournal(world, 'retorno');
   const n = splitSeg(j, net, s, t, null);
   j.setJunction(n, { ctl: 11 });
@@ -133,13 +133,13 @@ export function moveNode(world: World, n: NodeId, x: number, z: number): RoadJou
   const eq: Quad = { x0: 0, z0: 0, cx: 0, cz: 0, x1: 0, z1: 0 };
   for (const s of segs) {
     const o = sc.a[s] === n ? sc.b[s] : sc.a[s];
-    if (Math.hypot(nc.x[o] - x, nc.z[o] - z) < 8) return 'uma via ali ficaria curta demais';
+    if (Math.hypot(nc.x[o] - x, nc.z[o] - z) < 8) return text('refuse.move.tooShort');
     // the curve's length after the move (control point translated by half), within the spatial index's limit
     const q = net.quad(s);
     if (sc.a[s] === n) { q.x0 = x; q.z0 = z; } else { q.x1 = x; q.z1 = z; }
     q.cx += dx / 2; q.cz += dz / 2;
     if (bezLength(q) > MAX_SEG_LEN) return text('road.move.tooLong', { max: MAX_SEG_LEN });
-    if (sc.flags[s] & SegFlag.Ring) return 'nó de rotatória não se move';
+    if (sc.flags[s] & SegFlag.Ring) return text('refuse.move.roundabout');
     // the moved road may not run into another one at its level (that would need a junction)
     let crosses = false;
     const yo = nc.y[o];
