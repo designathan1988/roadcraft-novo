@@ -142,7 +142,7 @@ export function createScriptApi(h: ScriptApiHost) {
       if (g && rk !== undefined) g.dab(x, z, radius * 0.95, 'paint', rk, 1, 1);
       // the label is the legacy dictionary's key the undo toast translates with loose() (shared/i18n), as the brush's own
       // (app/input.ts); command labels become t() keys with the text tables (plan P21)
-      if (st.finish()) { if (g?.finish()) h.commands.push({ label: 'relevo', apply: () => { st.apply(); g.apply(); }, invert: () => { g.invert(); st.invert(); } }); else h.commands.push(st); }
+      if (st.finish()) { if (g?.finish()) h.commands.push({ label: 'cmd.place.terrain', apply: () => { st.apply(); g.apply(); }, invert: () => { g.invert(); st.invert(); } }); else h.commands.push(st); }
     },
     /** Ground elements (kind 30..40) scattered in a circle. */
     elements: (kind: number, x: number, z: number, r = 12, density = 20, size = 7) => {

@@ -45,7 +45,7 @@ export function roundaboutRefusal(world: World, cx: number, cz: number, radius: 
 export function buildRoundabout(world: World, cx: number, cz: number, radius: number, cutRoads = true): RoadJournal | null {
   const net = world.roads;
   if (roundaboutRefusal(world, cx, cz, radius, cutRoads)) return null;
-  const j = new RoadJournal(world, 'rotatória');
+  const j = new RoadJournal(world, 'cmd.build.roundabout');
   const y = smoothGround(world.heights, cx, cz);
   const cut = radius;
   const p = new Float64Array(2);

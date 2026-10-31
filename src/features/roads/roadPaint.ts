@@ -18,7 +18,7 @@ export function chooseRoadPaint(h: RoadPaintHost, style: string): void {
   const before = h.look.paint;
   if (style === before) return;
   const set = (s: string) => { h.look.paint = s; setPaintStyle(s); h.changed(); };
-  h.run({ label: 'road paint', apply: () => set(style), invert: () => set(before) });
+  h.run({ label: 'cmd.place.roadPaint', apply: () => set(style), invert: () => set(before) });
 }
 
 /** Shows the map's paint (after a map is opened or made). */

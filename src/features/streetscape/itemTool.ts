@@ -118,7 +118,7 @@ export class ItemTool {
       const id = items.nearest(hit.x, hit.z, 3);
       if (id >= 0 && isBarrier(items.t.cols.type[id]) === (this.mode === 'barrier')) {
         const ic = items.t.cols, sx = ic.x0[id], sz = ic.z0[id], kind = ic.type[id], variant = ic.variant[id];
-        const c = new ItemsCommand(items, 'remover item');
+        const c = new ItemsCommand(items, 'cmd.demolish.item');
         c.remove(id);
         // a Stop/Give-way sign taken away gives its junction arm back to the automatic rule
         const rule = kind === Item.Sign ? signRuleCommand(this.world, sx, sz, variant, false) : '';
@@ -129,7 +129,7 @@ export class ItemTool {
     if (this.mode === 'streetscape') {
       const sp = this.spot(hit.x, hit.z, false);
       if (this.onCarriageway(sp)) { this.hud.toast(t('tools.item.notOnRoad')); return; }
-      const c = new ItemsCommand(items, 'pôr item');
+      const c = new ItemsCommand(items, 'cmd.place.item');
       // objects: x1 = heading, z1 = height (0 = from the ground)
       // elements (smoke, fire…): variant = strength
       c.add([sp.x, sp.z, sp.yaw, sp.onWalk ? sp.y : 0, this.item, this.item === Item.Sign ? this.sign : isElement(this.item) ? 4 : 0]);
@@ -158,14 +158,14 @@ export class ItemTool {
     if (this.barrier === Item.PoleLine) {
       if (!this.poleGround(sp) || !this.poleRunGround(a, sp)) return;
       // The run keeps its ends on the footway; the props job puts a pole every 32 m and the wires between them.
-      const c = new ItemsCommand(items, 'postes com fios');
+      const c = new ItemsCommand(items, 'cmd.place.wiredPoles');
       c.add([a.x, a.z, sp.x, sp.z, Item.PoleLine, this.poleLights]);
       this.commands.push(c);
       this.runs.push({ cmd: c, from: a });
       this.last = { x: sp.x, z: sp.z };
       return;
     }
-    const c = new ItemsCommand(items, 'muro');
+    const c = new ItemsCommand(items, 'cmd.build.wall');
     const n = Math.ceil(L / MAX_RUN);
     for (let i = 0; i < n; i++) {
       const t0 = i / n, t1 = (i + 1) / n;
@@ -206,7 +206,7 @@ export class ItemTool {
     this.mode = 'barrier'; this.barrier = Item.PoleLine; this.poleLights = lights;
     const a = this.spot(ax, az, true), b = this.spot(bx, bz, true);
     if (!this.poleGround(a) || !this.poleGround(b) || !this.poleRunGround(a, b)) return false;
-    const c = new ItemsCommand(this.world.items, 'postes com fios');
+    const c = new ItemsCommand(this.world.items, 'cmd.place.wiredPoles');
     c.add([a.x, a.z, b.x, b.z, Item.PoleLine, lights]);
     this.commands.push(c);
     return true;
@@ -222,7 +222,7 @@ export class ItemTool {
     const L = Math.hypot(bx - ax, bz - az);
     const step = ItemTool.spacing(this.item);
     const n = Math.max(1, Math.floor(L / step) + 1);
-    const c = new ItemsCommand(this.world.items, 'fileira');
+    const c = new ItemsCommand(this.world.items, 'cmd.place.row');
     for (let i = 0; i < n; i++) {
       const t = n === 1 ? 0 : i * step / L;
       const sp = this.spot(ax + (bx - ax) * t, az + (bz - az) * t, false);

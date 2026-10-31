@@ -117,7 +117,7 @@ export class LotEditing {
       floors: floorsFor(zone, 0, new Rng(seed)),
       style: this.newArch >= 0 ? 128 + this.newArch : seed & 127,
     };
-    const j = new RoadJournal(this.h.world, 'lote desenhado');
+    const j = new RoadJournal(this.h.world, 'cmd.build.lotDrawn');
     const id = j.addBuilding(rec);
     this.h.commands.push(j);
     pts.length = 0;
@@ -218,7 +218,7 @@ export class LotEditing {
     this.h.preview.hideAll();
     if (typeof r === 'string') { this.h.hud.toast(r[0].toUpperCase() + r.slice(1) + '.'); return; }
     const seed = (Math.random() * 2 ** 31) >>> 0, zone = this.lotUse;
-    const j = new RoadJournal(this.h.world, 'lote desenhado');
+    const j = new RoadJournal(this.h.world, 'cmd.build.lotDrawn');
     j.addBuilding({ ...r, h: 0, color: 0, seed, zone, fn: this.newFn, floors: floorsFor(zone, 0, new Rng(seed)), style: this.newArch >= 0 ? 128 + this.newArch : seed & 127 });
     this.h.commands.push(j);
     this.h.hud.toast(t('game.toast.lotCreated'));
@@ -296,7 +296,7 @@ export class LotEditing {
     const before = w.buildings.cols.built[id], now = w.clock;
     if (w.buildings.cols.decay[id] === 0 && now - before < 1) { this.h.hud.toast(t('game.toast.alreadyNew')); return; }
     this.h.commands.run({
-      label: 'reformar prédio',
+      label: 'cmd.place.renovateBuilding',
       apply: () => { if (w.buildings.alive[id]) w.setBuilt(id, now); },
       invert: () => { if (w.buildings.alive[id]) w.setBuilt(id, before); },
     });
@@ -324,7 +324,7 @@ export class LotEditing {
     // free lot: build
     const lot = this.h.growth.lotAt(hit.x, hit.z);
     if (!lot) { this.h.hud.toast(t('game.toast.buildWhere')); return; }
-    const j = new RoadJournal(this.h.world, 'construir prédio');
+    const j = new RoadJournal(this.h.world, 'cmd.build.building');
     // the style and function chosen for the next building (the Build panel) win over the neighbourhood's
     const rec = this.h.growth.recordFor(lot.lots, lot.i);
     if (this.newArch >= 0) rec.style = 128 + this.newArch;
@@ -345,7 +345,7 @@ export class LotEditing {
     if (from.every((v, i) => v === to[i])) return;
     const world = this.h.world;
     this.h.commands.run({
-      label: 'editar prédio',
+      label: 'cmd.place.editBuilding',
       apply: () => { if (world.buildings.alive[id]) world.editBuilding(id, to[0], to[1], to[2]); },
       invert: () => { if (world.buildings.alive[id]) world.editBuilding(id, from[0], from[1], from[2]); },
     });
@@ -382,7 +382,7 @@ export class LotEditing {
     const after = [enc.color, enc.h, Math.max(1, Math.min(60, floors ?? col.floors[id]))];
     if (before.every((v, i) => v === after[i])) return;
     this.h.commands.run({
-      label: 'projeto do prédio',
+      label: 'cmd.place.buildingDesign',
       apply: () => { if (w.buildings.alive[id]) w.setDesign(id, after[0], after[1], after[2]); },
       invert: () => { if (w.buildings.alive[id]) w.setDesign(id, before[0], before[1], before[2]); },
     });
@@ -392,7 +392,7 @@ export class LotEditing {
   demolishSelected(): void {
     const id = this.h.selected;
     if (id < 0 || !this.h.world.buildings.alive[id]) return;
-    const j = new RoadJournal(this.h.world, 'demolir prédio');
+    const j = new RoadJournal(this.h.world, 'cmd.demolish.building');
     j.removeBuilding(id);
     this.h.commands.push(j);
     this.h.select(-1);

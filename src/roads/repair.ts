@@ -18,7 +18,7 @@ export function repairDanglingEnds(world: World): number {
   const ends: NodeId[] = [];
   for (let n = 0; n < net.nodes.end; n++) if (net.nodes.alive[n] && nc.deg[n] === 1) ends.push(asNode(n));
   let fixed = 0;
-  const j = new RoadJournal(world, 'reparar mapa');
+  const j = new RoadJournal(world, 'cmd.place.repairMap');
   for (const n of ends) {
     if (!net.nodes.alive[n] || nc.deg[n] !== 1) continue;
     const own = net.segsOf(n, [])[0];

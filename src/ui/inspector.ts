@@ -146,7 +146,7 @@ export class Inspector {
     if (p.volume !== undefined) this.setLive('volume', fmtInt(p.volume));
   }
 
-  private apply(spec: JunctionSpec | null, label = 'controle do cruzamento'): void {
+  private apply(spec: JunctionSpec | null, label = 'cmd.place.junctionControl'): void {
     const j = new RoadJournal(this.world, label);
     j.setJunction(this.node, spec);
     this.commands.push(j);
@@ -203,9 +203,9 @@ export class Inspector {
       impossible();
       box.append(height);
       const sp0 = net.junctions.get(n);
-      if (sp0 && sp0.ctl === Ctl.UTurn) box.append(note(t('hint.uturn.placed')), actions(btn(t('ui.insp.closeUturn'), () => this.apply(null, 'fechar retorno'))));
+      if (sp0 && sp0.ctl === Ctl.UTurn) box.append(note(t('hint.uturn.placed')), actions(btn(t('ui.insp.closeUturn'), () => this.apply(null, 'cmd.place.closeUTurn'))));
       if (sp0 && (sp0.ctl === Ctl.Zebra || sp0.ctl === Ctl.PedSignal)) {
-        box.append(note(t(sp0.ctl === Ctl.Zebra ? 'inspector.crossingZebra' : 'inspector.crossingSignal')), actions(btn(t('inspector.removeCrossing'), () => this.apply(null, 'remover faixa'))));
+        box.append(note(t(sp0.ctl === Ctl.Zebra ? 'inspector.crossingZebra' : 'inspector.crossingSignal')), actions(btn(t('inspector.removeCrossing'), () => this.apply(null, 'cmd.demolish.crossing'))));
       }
       box.append(actions(btn(t('inspector.joinAligned'), () => {
         const j = joinAt(this.world, n);
@@ -226,7 +226,7 @@ export class Inspector {
           const s0 = net.junctions.get(n);
           const next = s0 ? { ...s0, end } : end ? { ctl: Ctl.Auto, end } : null;
           if (next && !next.end) delete next.end;
-          this.apply(next && (next.end || next.ctl !== Ctl.Auto) ? next : null, 'ponta da via');
+          this.apply(next && (next.end || next.ctl !== Ctl.Auto) ? next : null, 'cmd.place.roadEnd');
         }));
       }
       box.append(r, note(t(bulbAt(net, n) ? 'insp.end.hasBulb' : 'insp.end.noBulb')));
@@ -275,7 +275,7 @@ export class Inspector {
     }));
     if (!spec || spec.ctl === Ctl.Auto) {
       box.append(note(t('ui.insp.autoChoice', { choice: t(CTL_KEY[eff.ctl] ?? 'control.none').toLowerCase() })));
-      box.append(actions(btn(t('ui.insp.lock'), () => this.apply({ ...this.spec(), ctl: eff.ctl }, 'travar controle'))));
+      box.append(actions(btn(t('ui.insp.lock'), () => this.apply({ ...this.spec(), ctl: eff.ctl }, 'cmd.place.lockControl'))));
     } else box.append(row(label(t('junction.locked')), btn(t('junction.unlock'), () => this.apply(null))));
     // the flow of each leg, the main road's marked (4.0 :90-106)
     const prio = (s: SegId) => PROFILE_INFO[sc.profile[s]].priority ?? 0;
@@ -301,10 +301,10 @@ export class Inspector {
           const sp = this.spec();
           if (sp.ctl === Ctl.Auto) sp.ctl = eff.ctl;
           sp.legs = [...(sp.legs ?? []).filter(([x]) => x !== s), [s, v]];
-          this.apply(sp, 'regra da via');
+          this.apply(sp, 'cmd.place.roadRule');
         })));
       }
-      if (spec?.legs?.length) box.append(actions(btn(t('junction.rulesReset'), () => { const sp = this.spec(); delete sp.legs; this.apply(sp, 'regras automáticas'); })));
+      if (spec?.legs?.length) box.append(actions(btn(t('junction.rulesReset'), () => { const sp = this.spec(); delete sp.legs; this.apply(sp, 'cmd.place.autoRules'); })));
     }
 
     // the signal (4.0 :130-172): adaptive or fixed; in fixed time each stage's green in 2 s steps within 6..90 s and
@@ -315,7 +315,7 @@ export class Inspector {
         const sp = this.spec(); if (sp.ctl === Ctl.Auto) sp.ctl = Ctl.Signal;
         sp.fixed = v === 1;
         if (sp.fixed && !sp.greens) sp.greens = greensNow.map((g) => Math.round(g));
-        this.apply(sp, 'tempos do semáforo');
+        this.apply(sp, 'cmd.place.signalTimes');
       })));
       if (spec?.fixed) {
         for (let k = 0; k < stageCount; k++) {
@@ -325,16 +325,16 @@ export class Inspector {
             const sp = this.spec();
             const greens = greensNow.slice();
             greens[k] = Math.max(GREEN_MIN, Math.min(GREEN_MAX, g + d));
-            sp.greens = greens; this.apply(sp, 'verde do semáforo');
+            sp.greens = greens; this.apply(sp, 'cmd.place.signalGreen');
           };
           box.append(row(label(`${t('junction.stage', { n: k + 1 })} (${legs})`), stepper(`${g} s`, () => setG(-2), () => setG(2))));
         }
         const off = Math.max(0, Math.min(OFFSET_MAX, spec.offset ?? 0));
-        const setOff = (d: number): void => { const sp = this.spec(); sp.offset = Math.max(0, Math.min(OFFSET_MAX, off + d)); this.apply(sp, 'defasagem'); };
+        const setOff = (d: number): void => { const sp = this.spec(); sp.offset = Math.max(0, Math.min(OFFSET_MAX, off + d)); this.apply(sp, 'cmd.place.signalOffset'); };
         box.append(row(label(t('junction.offset')), stepper(`${off} s`, () => setOff(-2), () => setOff(2))));
       }
       box.append(actions(btn(t('junction.greenWave'), () => this.greenWave())));
-      box.append(toggle(t('junction.busPriority'), !!spec?.bus, (on) => { const sp = this.spec(); if (sp.ctl === Ctl.Auto) sp.ctl = Ctl.Signal; sp.bus = on; this.apply(sp, 'prioridade ao ônibus'); }));
+      box.append(toggle(t('junction.busPriority'), !!spec?.bus, (on) => { const sp = this.spec(); if (sp.ctl === Ctl.Auto) sp.ctl = Ctl.Signal; sp.bus = on; this.apply(sp, 'cmd.place.busPriority'); }));
     }
 
     // the lane connectors as a plan of the junction turned as the player sees it (4.0 ui/roads/connectorPanel.ts:40-167)
@@ -359,7 +359,7 @@ export class Inspector {
           for (let i = 0; i + 1 < bans.length; i += 2) if (bans[i] === from && bans[i + 1] === to) found = i;
           if (found >= 0) bans.splice(found, 2); else bans.push(from, to);
           sp.bans = bans;
-          this.apply(sp, 'movimento proibido');
+          this.apply(sp, 'cmd.place.bannedTurn');
         });
         chips.append(c);
       }
@@ -470,7 +470,7 @@ export class Inspector {
       const sp = this.spec();
       sp.lanes = [...(sp.lanes ?? []).filter(([s2, i2]) => !(s2 === lit[0] && i2 === lit[1])), [lit[0], lit[1], next]];
       this.focusEnd = key;
-      this.apply(sp, 'conexão de faixa');
+      this.apply(sp, 'cmd.place.laneLink');
     };
     art.addEventListener('click', (ev) => { const key = (ev.target as Element).closest('[data-end]')?.getAttribute('data-end'); if (key) { ev.stopPropagation(); press(key); } });
     art.addEventListener('keydown', (ev) => {
@@ -481,7 +481,7 @@ export class Inspector {
       press(key);
     });
     root.append(art, hint);
-    if (spec?.lanes?.length) root.append(actions(btn(t('connectors.reset'), () => { const sp = this.spec(); delete sp.lanes; this.laneIn = null; this.apply(sp, 'conexões automáticas'); })));
+    if (spec?.lanes?.length) root.append(actions(btn(t('connectors.reset'), () => { const sp = this.spec(); delete sp.lanes; this.laneIn = null; this.apply(sp, 'cmd.place.autoLaneLinks'); })));
     // the end the keyboard was on keeps the focus through the panel built again
     if (this.focusEnd) { const f = this.focusEnd; this.focusEnd = null; requestAnimationFrame(() => art.querySelector<SVGElement>(`[data-end="${f}"]`)?.focus()); }
     return root;
@@ -506,7 +506,7 @@ export class Inspector {
   }
 
   private raise(dy: number): void {
-    const j = new RoadJournal(this.world, 'altura do nó');
+    const j = new RoadJournal(this.world, 'cmd.place.nodeHeight');
     j.moveNodeY(this.node, this.world.roads.nodes.cols.y[this.node] + dy);
     if (j.settle()) this.commands.push(j);
     this.render();
@@ -524,7 +524,7 @@ export class Inspector {
     const base = this.spec();
     const greens = base.greens ?? [20, 20, 20, 20];
     const speed = PROFILE_INFO[sc.profile[main]].speed / 3.6;
-    const j = new RoadJournal(this.world, 'onda verde');
+    const j = new RoadJournal(this.world, 'cmd.place.greenWave');
     let count = 0;
     for (const m of nodes) {
       if (nc.deg[m] < 3 || effectiveControl(net, m, net.junctions.get(m), net.flow.get(m)).ctl !== Ctl.Signal) continue;
@@ -614,7 +614,7 @@ export class Inspector {
         const s0 = net.junctions.get(n);
         const next: JunctionSpec | null = s0 ? { ...s0, end } : end ? { ctl: Ctl.Auto, end } : null;
         if (next && !next.end) delete next.end;
-        const j = new RoadJournal(w, 'ponta da via');
+        const j = new RoadJournal(w, 'cmd.place.roadEnd');
         j.setJunction(n, next && (next.end || next.ctl !== Ctl.Auto) ? next : null);
         this.commands.push(j);
         this.render();
@@ -686,7 +686,7 @@ export class Inspector {
 
   /** A node raised or lowered by `dy` (half a metre a step), from the road's panel. */
   private raiseNode(n: NodeId, dy: number): void {
-    const j = new RoadJournal(this.world, 'altura do nó');
+    const j = new RoadJournal(this.world, 'cmd.place.nodeHeight');
     j.moveNodeY(n, this.world.roads.nodes.cols.y[n] + dy);
     if (j.settle()) this.commands.push(j);
     this.render();

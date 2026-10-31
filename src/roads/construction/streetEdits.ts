@@ -12,14 +12,14 @@ import { NO_SEG, type SegId } from '../../core/ids.ts';
 /** Demolishes a segment; nodes left loose go with it. */
 export function demolishSeg(world: World, s: SegId): RoadJournal {
   const net = world.roads;
-  const j = new RoadJournal(world, 'demolir via');
+  const j = new RoadJournal(world, 'cmd.demolish.road');
   const rec = j.removeSeg(s);
   for (const n of [rec.a, rec.b]) if (net.nodes.alive[n] && net.nodes.cols.deg[n] === 0) j.removeNode(n);
   return j;
 }
 
 export function changeProfile(world: World, s: SegId, profile: number): RoadJournal {
-  const j = new RoadJournal(world, 'trocar perfil');
+  const j = new RoadJournal(world, 'cmd.build.changeProfile');
   if (world.roads.segs.cols.flags[s] & SegFlag.Ring) return j;
   j.guard(() => { j.setProfile(s, profile); settleUnder(j, world, s); });
   return j;
@@ -73,7 +73,7 @@ export function streetChain(world: World, s0: SegId, anyProfile = false): SegId[
 
 /** Changes the profile of several segments in a single command. */
 export function changeProfiles(world: World, segs: SegId[], profile: number, ref = segs[0]): RoadJournal {
-  const j = new RoadJournal(world, 'trocar perfil da rua');
+  const j = new RoadJournal(world, 'cmd.build.changeStreetProfile');
   const net = world.roads;
   // a profile that is not the same seen from both ends (parking on one side, a bus lane…) is laid the way `ref` runs:
   // segments of the street drawn the other way are turned round first, so it lands on the same side of every block

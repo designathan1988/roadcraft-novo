@@ -235,7 +235,7 @@ export function splitLot(world: World, id: number, kind: SplitKind, n: number): 
     if (piece.length < 3) return t('refuse.lot.noRoom');
     pieces.push(piece.map(([x, z]) => lotToWorld(f, x, z)));
   }
-  return replaceBy(world, id, pieces, 'dividir lote');
+  return replaceBy(world, id, pieces, 'cmd.place.splitLot');
 }
 
 /** Cuts the lot in two along the line through (ax, az) and (bx, bz) (Roadcraft "split by line"). */
@@ -246,7 +246,7 @@ export function splitLotByLine(world: World, id: number, ax: number, az: number,
   const poly = lotOutlineWorld(world, id);
   const one = clipHalf(poly, nx, nz, c), two = clipHalf(poly, -nx, -nz, -c);
   if (one.length < 3 || two.length < 3) return t('refuse.lot.lineMisses');
-  return replaceBy(world, id, [one, two], 'dividir lote por linha');
+  return replaceBy(world, id, [one, two], 'cmd.place.splitLotByLine');
 }
 
 /**
@@ -302,7 +302,7 @@ export function joinLots(world: World, a: number, b: number): RoadJournal | stri
   if (!f) return t('refuse.lot.noCommonSide');
   const fits = lotFits(world, merged, [a, b]);
   if (fits) return fits;
-  const j = new RoadJournal(world, 'juntar lotes');
+  const j = new RoadJournal(world, 'cmd.place.mergeLots');
   j.removeBuilding(a); j.removeBuilding(b);
   j.addBuilding({ ...ra, ...f, shape: f.shape, built: undefined, floors: ra.floors === 0 && rb.floors === 0 ? 0 : Math.max(ra.floors, rb.floors, 1), fn: 0 });
   return j;
@@ -311,7 +311,7 @@ export function joinLots(world: World, a: number, b: number): RoadJournal | stri
 /** Delete: a building becomes an empty marked lot; an empty lot goes away (a zoned street may grow again). */
 export function deleteLot(world: World, id: number): RoadJournal {
   const r = rec(world, id);
-  const j = new RoadJournal(world, r.floors === 0 ? 'apagar lote' : 'demolir prédio');
+  const j = new RoadJournal(world, r.floors === 0 ? 'cmd.demolish.lot' : 'cmd.demolish.building');
   j.removeBuilding(id);
   if (r.floors !== 0) j.addBuilding({ ...r, floors: 0, fn: 0 });
   return j;
@@ -328,7 +328,7 @@ export function setLotFront(world: World, id: number, x: number, z: number): Roa
   if (turn === 0) return null;
   const f = frameLot(lotOutlineWorld(world, id), r.rot + turn);
   if (!f) return null;
-  const j = new RoadJournal(world, 'frente do lote');
+  const j = new RoadJournal(world, 'cmd.place.lotFront');
   j.removeBuilding(id);
   j.addBuilding({ ...r, ...f, shape: f.shape });
   return j;
@@ -371,7 +371,7 @@ export function moveLotCorner(world: World, id: number, k: number, x: number, z:
     const fits = lotFits(world, o, [id]);
     if (fits) return fits;
   }
-  const j = new RoadJournal(world, 'cantos do lote');
+  const j = new RoadJournal(world, 'cmd.place.lotCorners');
   j.removeBuilding(id);
   j.addBuilding({ ...r, ...f, shape: f.shape });
   return j;
@@ -408,7 +408,7 @@ export function curveLotSide(world: World, id: number, x: number, z: number, px:
   if (!f) return t('refuse.lot.tooSmall');
   const fits = lotFits(world, out, [id]);
   if (fits) return fits;
-  const j = new RoadJournal(world, 'curvar lado do lote');
+  const j = new RoadJournal(world, 'cmd.place.lotSideCurve');
   j.removeBuilding(id);
   j.addBuilding({ ...r, ...f, shape: f.shape });
   return j;
@@ -494,7 +494,7 @@ export function moveSharedCorner(world: World, fromX: number, fromZ: number, x: 
     if (fits) return fits;
     next.push([id, { ...r, ...f, shape: f.shape }]);
   }
-  const j = new RoadJournal(world, 'cantos do lote');
+  const j = new RoadJournal(world, 'cmd.place.lotCorners');
   for (const [id] of next) j.removeBuilding(id);
   for (const [, r] of next) j.addBuilding(r);
   return j;
@@ -514,7 +514,7 @@ export function splitLotsByLine(world: World, ax: number, az: number, bx: number
     for (let k = 0; k <= 20; k++) if (pointInPolygon(o, ax + (bx - ax) * k / 20, az + (bz - az) * k / 20)) { hit.push(id); return; }
   });
   if (!hit.length) return t('refuse.lot.lineMissesAll');
-  const all = new RoadJournal(world, 'dividir lotes por linha');
+  const all = new RoadJournal(world, 'cmd.place.splitLotsByLine');
   let why = '';
   for (const id of hit) {
     const r = splitLotByLine(world, id, ax, az, bx, bz);
@@ -536,7 +536,7 @@ export function deleteLotsAlong(world: World, pts: Pt[]): RoadJournal | string {
     for (let k = 0; k <= n && hit.size < 400; k++) visit(ax + (bx - ax) * k / n, az + (bz - az) * k / n);
   }
   if (!hit.size) return t('refuse.lot.noneOnStroke');
-  const all = new RoadJournal(world, 'apagar lotes');
+  const all = new RoadJournal(world, 'cmd.demolish.lots');
   for (const id of hit) all.append(deleteLot(world, id));
   return all;
 }

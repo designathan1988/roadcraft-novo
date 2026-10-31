@@ -145,7 +145,7 @@ export class ElementStroke {
   private items: StreetItems;
   private acc = 0;
   private seed = (Math.random() * 2 ** 31) >>> 0;
-  constructor(items: StreetItems) { this.items = items; this.cmd = new ItemsCommand(items, 'elementos'); }
+  constructor(items: StreetItems) { this.items = items; this.cmd = new ItemsCommand(items, 'cmd.place.elements'); }
   private rnd(): number { this.seed = (this.seed * 1103515245 + 12345) >>> 0; return this.seed / 4294967296; }
 
   /** density: tufts per 100 m²; size 0..15; mode lay | eraseKind | eraseAll. */

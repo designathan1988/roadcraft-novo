@@ -60,7 +60,7 @@ function anchorNode(j: RoadJournal, net: RoadNetwork, a: Anchor, y: number): Nod
 }
 
 /** Builds a planned road. If anything throws half way, the whole build goes back before the error goes on. */
-export function buildRoad(world: World, plan: RoadPlan, start: Anchor, end: Anchor, profile: number, flags = 0, label = 'construir via'): RoadJournal {
+export function buildRoad(world: World, plan: RoadPlan, start: Anchor, end: Anchor, profile: number, flags = 0, label = 'cmd.build.road'): RoadJournal {
   const j = new RoadJournal(world, label);
   j.guard(() => buildLive(j, world, plan, start, end, profile, flags));
   return j;

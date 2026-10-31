@@ -104,8 +104,8 @@ function toFootprint(w: World, id: number, x: number, z: number): [number, numbe
  */
 export function buildingDown(w: World, id: number, push: (cmd: Command) => void, forget: (id: number) => void): void {
   if (!w.buildings.alive[id]) return;
-  const j = new RoadJournal(w, 'bomba');
-  const items = new ItemsCommand(w.items, 'entulho');
+  const j = new RoadJournal(w, 'cmd.place.bomb');
+  const items = new ItemsCommand(w.items, 'cmd.place.rubble');
   const rec = w.buildingRec(id);
   j.removeBuilding(id);
   j.addBuilding({ x: rec[1], z: rec[2], w: rec[3], d: rec[4], h: 0, rot: rec[6], color: 0, seed: rec[8], zone: rec[9], floors: 0, style: rec[11], fn: 0 });
@@ -114,7 +114,7 @@ export function buildingDown(w: World, id: number, push: (cmd: Command) => void,
     const lx = (Math.random() - 0.5) * rec[3] * 0.85, lz = (Math.random() - 0.5) * rec[4] * 0.85, c = Math.cos(rec[6]), s = Math.sin(rec[6]);
     items.add([rec[1] + lx * c + lz * s, rec[2] - lx * s + lz * c, Math.random() * 6, 0, k % 3 === 0 ? Item.Gravel : Item.Stones, 12]);
   }
-  push({ label: 'bomba', apply: () => { j.apply(); items.apply(); }, invert: () => { items.invert(); j.invert(); forget(id); } });
+  push({ label: 'cmd.place.bomb', apply: () => { j.apply(); items.apply(); }, invert: () => { items.invert(); j.invert(); forget(id); } });
 }
 
 const found: number[] = [];
@@ -159,7 +159,7 @@ export function dropBomb(ctx: BombContext, x: number, z: number): void {
     ctx.thrown.vehicle(found[o + 4], found[o], found[o + 1], found[o + 2], found[o + 3], found[o + 5], bx, bz, r);
   }
   // the things standing in the street within reach: thrown and gone
-  const items = new ItemsCommand(w.items, 'bomba');
+  const items = new ItemsCommand(w.items, 'cmd.place.bomb');
   const ic = w.items.t.cols, struck: number[] = [];
   w.items.index.query(bx - r, bz - r, bx + r, bz + r, (id) => {
     if (!ctx.thrown.struck(ic.type[id]) || (ic.x0[id] - bx) ** 2 + (ic.z0[id] - bz) ** 2 > r * r) return;
@@ -170,7 +170,7 @@ export function dropBomb(ctx: BombContext, x: number, z: number): void {
     ctx.thrown.item(ic.type[id], ix, heightAt(w.heights, ix, iz), iz, bx, bz, r);
     items.remove(id);
   }
-  if (struck.length) ctx.push({ label: 'bomba', apply: () => items.apply(), invert: () => items.invert() });
+  if (struck.length) ctx.push({ label: 'cmd.place.bomb', apply: () => items.apply(), invert: () => items.invert() });
   // soot and ash over the ground round it: streets and lots left dirty (4.0: 6 + one per 3 m of reach, at most 40)
   const blots = Math.min(40, Math.round(6 + r / 3));
   for (let k = 0; k < blots; k++) {

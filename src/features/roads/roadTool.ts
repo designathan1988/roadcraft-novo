@@ -302,7 +302,7 @@ export class RoadTool {
     if (hit) { const [lx, lz] = pts[pts.length - 1] ?? [hit.x, hit.z]; if (Math.hypot(hit.x - lx, hit.z - lz) > 6) pts.push([hit.x, hit.z]); }
     if (pts.length < 2) return;
     const net = this.world.roads;
-    const total = new RoadJournal(this.world, 'construir via');
+    const total = new RoadJournal(this.world, 'cmd.build.road');
     const mid = (i: number): [number, number] => [(pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2];
     // pieces: p0 → m0 (straight), m(i-1) → m(i) with control p(i), m(n-2) → p(n-1) (straight)
     const pieces: Array<[[number, number], [number, number] | null, [number, number]]> = [];
@@ -330,13 +330,13 @@ export class RoadTool {
     const lines: Array<[[number, number], [number, number]]> = [];
     for (let i = 0; i <= rows; i++) lines.push([P(0, i * size), P(W, i * size)]);
     for (let k = 0; k <= cols; k++) lines.push([P(k * size, 0), P(k * size, D)]);
-    const total = new RoadJournal(this.world, 'quarteirões');
+    const total = new RoadJournal(this.world, 'cmd.place.blocks');
     const net = this.world.roads;
     for (const [[ax, az], [bx, bz]] of lines) {
       const a = snap(net, ax, az, 6), b = snap(net, bx, bz, 6);
       const plan = planRoad(this.world, a, null, b, this.profile, 0);
       if (!plan.ok) { total.invert(); this.hud.toast(t('tools.toast.cannotBuild', { why: plan.reason })); return; }
-      total.append(buildRoad(this.world, plan, a, b, this.profile, this.segFlags(), 'quarteirões'));
+      total.append(buildRoad(this.world, plan, a, b, this.profile, this.segFlags(), 'cmd.place.blocks'));
     }
     if (this.commit(total)) this.hud.toast(t('tools.toast.blocksBuilt', { cols, rows }));
   }

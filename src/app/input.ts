@@ -202,7 +202,7 @@ export function bindInput(h: InputHost, gs: Gesture = new Gesture()): InputContr
         if (h.stroke.finish()) {
           // landform: the terrain and the painted rock are a single undo step
           const terr = h.stroke;
-          if (rock && rock.finish()) h.commands.push({ label: 'relevo', apply: () => { terr.apply(); rock.apply(); }, invert: () => { rock.invert(); terr.invert(); } });
+          if (rock && rock.finish()) h.commands.push({ label: 'cmd.place.terrain', apply: () => { terr.apply(); rock.apply(); }, invert: () => { rock.invert(); terr.invert(); } });
           else h.commands.push(terr);
         }
         h.stroke = null;

@@ -114,7 +114,7 @@ export function nameStreetCommand(world: World, seg: SegId, name: string, change
   const before = segs.map((x) => world.streetNames.get(x));
   const text = name.trim();
   return {
-    label: 'nome da rua',
+    label: 'cmd.place.streetName',
     apply: () => { for (const x of segs) world.setStreetName(x, text || undefined); changed(); },
     invert: () => { segs.forEach((x, i) => world.setStreetName(x, before[i])); changed(); },
   };

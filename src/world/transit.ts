@@ -30,7 +30,7 @@ export class Transit {
     const color = LINE_COLORS[(id - 1) % LINE_COLORS.length];
     const line: Line = { id, color, buses: mode === Mode.Bus ? 3 : 2, stops: [], mode };
     const cmd: Command = {
-      label: 'nova linha',
+      label: 'cmd.place.newLine',
       apply: () => { this.lines.push({ ...line, stops: [...line.stops] }); this.touch(); },
       invert: () => { const i = this.lines.findIndex((l) => l.id === id); if (i >= 0) this.lines.splice(i, 1); this.touch(); },
     };
@@ -42,7 +42,7 @@ export class Transit {
     if (i < 0) return null;
     const saved = { ...this.lines[i], stops: [...this.lines[i].stops] };
     return {
-      label: 'apagar linha',
+      label: 'cmd.demolish.line',
       apply: () => { const k = this.lines.findIndex((l) => l.id === id); if (k >= 0) this.lines.splice(k, 1); this.touch(); },
       invert: () => { this.lines.splice(Math.min(i, this.lines.length), 0, { ...saved, stops: [...saved.stops] }); this.touch(); },
     };
@@ -54,7 +54,7 @@ export class Transit {
     if (!l) return null;
     const k = at < 0 ? l.stops.length / 2 : at;
     return {
-      label: 'parada',
+      label: 'cmd.place.stop',
       apply: () => { this.line(id)?.stops.splice(k * 2, 0, x, z); this.touch(); },
       invert: () => { this.line(id)?.stops.splice(k * 2, 2); this.touch(); },
     };
@@ -65,7 +65,7 @@ export class Transit {
     if (!l || k * 2 >= l.stops.length) return null;
     const x = l.stops[k * 2], z = l.stops[k * 2 + 1];
     return {
-      label: 'tirar parada',
+      label: 'cmd.demolish.stop',
       apply: () => { this.line(id)?.stops.splice(k * 2, 2); this.touch(); },
       invert: () => { this.line(id)?.stops.splice(k * 2, 0, x, z); this.touch(); },
     };
@@ -77,7 +77,7 @@ export class Transit {
     const before = l.buses, after = Math.max(0, Math.min(40, n));
     if (before === after) return null;
     return {
-      label: 'ônibus',
+      label: 'cmd.place.bus',
       apply: () => { const x = this.line(id); if (x) x.buses = after; this.touch(); },
       invert: () => { const x = this.line(id); if (x) x.buses = before; this.touch(); },
     };
@@ -89,7 +89,7 @@ export class Transit {
     if (!l || l.color === color) return null;
     const before = l.color;
     return {
-      label: 'cor da linha',
+      label: 'cmd.place.lineColour',
       apply: () => { const x = this.line(id); if (x) x.color = color; this.touch(); },
       invert: () => { const x = this.line(id); if (x) x.color = before; this.touch(); },
     };
@@ -100,7 +100,7 @@ export class Transit {
     const l = this.line(id);
     if (!l || !!l.loop === loop) return null;
     return {
-      label: loop ? 'linha circular' : 'linha de ida e volta',
+      label: loop ? 'cmd.place.loopLine' : 'cmd.place.outAndBackLine',
       apply: () => { const x = this.line(id); if (x) x.loop = loop; this.touch(); },
       invert: () => { const x = this.line(id); if (x) x.loop = !loop; this.touch(); },
     };
@@ -112,7 +112,7 @@ export class Transit {
     const before = [...this.terminals];
     const after = i >= 0 ? before.filter((_, k) => k !== i * 2 && k !== i * 2 + 1) : [...before, x, z];
     return {
-      label: 'terminal',
+      label: 'cmd.place.terminal',
       apply: () => { this.terminals = [...after]; this.touch(); },
       invert: () => { this.terminals = [...before]; this.touch(); },
     };

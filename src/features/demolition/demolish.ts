@@ -54,8 +54,8 @@ function both(label: string, j: RoadJournal, items: Command | null): Command {
 
 /** Demolishes the target (already applied; the command comes back to be recorded). */
 export function demolishTarget(world: World, t: NonNullable<Target>): { cmd: Command; charge: number } {
-  if (t.kind === 'item') return { cmd: removeItems(world, 'remover item', [t.id]), charge: 0 };
-  const j = new RoadJournal(world, t.kind === 'building' ? 'demolir prédio' : 'demolir via');
+  if (t.kind === 'item') return { cmd: removeItems(world, 'cmd.demolish.item', [t.id]), charge: 0 };
+  const j = new RoadJournal(world, t.kind === 'building' ? 'cmd.demolish.building' : 'cmd.demolish.road');
   if (t.kind === 'building') j.removeBuilding(t.id);
   else removeSegAndOrphans(world, j, t.id);
   j.settle();
@@ -79,10 +79,10 @@ export function demolishBox(world: World, x0: number, z0: number, x1: number, z1
   const ic = world.items.t.cols;
   world.items.index.query(ax - MAX_RUN, az - MAX_RUN, bx + MAX_RUN, bz + MAX_RUN, (i) => { if (inside(ic.x0[i], ic.z0[i])) its.push(i); });
   if (!segs.length && !blds.length && !its.length) return null;
-  const j = new RoadJournal(world, 'demolir área');
+  const j = new RoadJournal(world, 'cmd.demolish.area');
   for (const id of blds) j.removeBuilding(id);
   for (const s of segs) if (net.segs.alive[s]) removeSegAndOrphans(world, j, s);
   j.settle();
-  const items = its.length ? removeItems(world, 'demolir área', its) : null;
+  const items = its.length ? removeItems(world, 'cmd.demolish.area', its) : null;
   return { cmd: both('demolir área', j, items), count: segs.length + blds.length + its.length, charge: j.charge };
 }

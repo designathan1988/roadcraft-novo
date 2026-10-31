@@ -45,7 +45,7 @@ export function roadBetweenJunctions(world: World, s0: SegId): SegId[] {
 
 /** Splits the segment at `t` (0..1) with a new node. */
 export function splitAt(world: World, s: SegId, t = 0.5): RoadJournal {
-  const j = new RoadJournal(world, 'dividir via');
+  const j = new RoadJournal(world, 'cmd.place.splitRoad');
   const L = world.roads.segs.cols.len[s];
   if (t * L < 4 || (1 - t) * L < 4) return j;
   splitSeg(j, world.roads, s, t, null);
@@ -58,7 +58,7 @@ export function addCrossing(world: World, s: SegId, t: number, ctl: number): Roa
   if (!PROFILE_INFO[sc.profile[s]].walk) return text('refuse.crossing.noWalk');
   const L = sc.len[s];
   if (t * L < 14 || (1 - t) * L < 14) return text('refuse.crossing.room');
-  const j = new RoadJournal(world, 'faixa de pedestres');
+  const j = new RoadJournal(world, 'cmd.place.crossing');
   const n = splitSeg(j, net, s, t, null);
   j.setJunction(n, { ctl });
   return j;
@@ -73,7 +73,7 @@ export function addUTurn(world: World, s: SegId, t: number): RoadJournal | strin
   if (med.u1 - med.u0 < 1.5) return text('refuse.uturn.narrow');
   const L = sc.len[s];
   if (t * L < 16 || (1 - t) * L < 16) return text('refuse.uturn.room');
-  const j = new RoadJournal(world, 'retorno');
+  const j = new RoadJournal(world, 'cmd.place.uTurn');
   const n = splitSeg(j, net, s, t, null);
   j.setJunction(n, { ctl: 11 });
   return j;
@@ -81,7 +81,7 @@ export function addUTurn(world: World, s: SegId, t: number): RoadJournal | strin
 
 /** Reverses the direction of the one-way road between two junctions (each segment's ends swap). */
 export function reverseRoad(world: World, s: SegId): RoadJournal {
-  const net = world.roads, j = new RoadJournal(world, 'inverter mão');
+  const net = world.roads, j = new RoadJournal(world, 'cmd.place.reverseRoad');
   if (!PROFILE_INFO[net.segs.cols.profile[s]].oneWay) return j;
   for (const id of roadBetweenJunctions(world, s)) {
     const r = j.removeSeg(id);
@@ -93,7 +93,7 @@ export function reverseRoad(world: World, s: SegId): RoadJournal {
 /** Joins the two roads of a degree-2 node (same profile) into one segment. Empty if not possible. */
 export function joinAt(world: World, n: NodeId): RoadJournal {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
-  const j = new RoadJournal(world, 'unir vias');
+  const j = new RoadJournal(world, 'cmd.place.joinRoads');
   const segs = net.segsOf(n, []);
   if (segs.length !== 2) return j;
   const [s1, s2] = segs;
@@ -124,7 +124,7 @@ export function joinAt(world: World, n: NodeId): RoadJournal {
 /** Moves the node to (x, z): attached roads follow (curves translated by half). Refuses roads that get too short. */
 export function moveNode(world: World, n: NodeId, x: number, z: number): RoadJournal | string {
   const net = world.roads, sc = net.segs.cols, nc = net.nodes.cols;
-  const j = new RoadJournal(world, 'mover nó');
+  const j = new RoadJournal(world, 'cmd.place.moveNode');
   const dx = x - nc.x[n], dz = z - nc.z[n];
   if (Math.abs(x) > MAP_HALF - 20 || Math.abs(z) > MAP_HALF - 20) return text('road.move.outside');
   const ground = heightAt(world.heights, x, z);
@@ -205,7 +205,7 @@ export function bendRoad(world: World, s: SegId, t: number, h: number): RoadJour
       if (gap < MIN_LEG_ANGLE) return text('road.bend.sharp', { angle: Math.round(gap) });
     }
   }
-  const j = new RoadJournal(world, 'curvar via');
+  const j = new RoadJournal(world, 'cmd.place.bendRoad');
   const r = j.removeSeg(s);
   j.guard(() => {
     const id = j.addSeg({ ...r, cx, cz });
@@ -235,7 +235,7 @@ export function upgradeStep(profile: number): number {
 export function addHeightPoint(world: World, s: SegId): { journal: RoadJournal; node: NodeId } | string {
   const L = world.roads.segs.cols.len[s];
   if (L < 16) return text('road.heightPoint.short');
-  const j = new RoadJournal(world, 'ponto de altura');
+  const j = new RoadJournal(world, 'cmd.place.heightPoint');
   const node = splitSeg(j, world.roads, s, 0.5, null);
   return { journal: j, node };
 }
@@ -250,7 +250,7 @@ export function duplicateRoad(world: World, s: SegId): RoadJournal | string {
   // points in order along the road
   const first = road[0];
   let start = road.length > 1 && (sc.a[first] === sc.a[road[1]] || sc.a[first] === sc.b[road[1]]) ? sc.b[first] : sc.a[first];
-  const total = new RoadJournal(world, 'duplicar via');
+  const total = new RoadJournal(world, 'cmd.place.duplicateRoad');
   let prev: Anchor | null = null;
   const d = new Float64Array(2);
   // the pieces inside the guard: if building one throws, the pieces already built go too (D67)
@@ -270,7 +270,7 @@ export function duplicateRoad(world: World, s: SegId): RoadJournal | string {
       const b = snap(net, shifted[4], shifted[5], 2);
       const plan = planRoad(world, a, { x: shifted[2], z: shifted[3] }, b, prof, 0);
       if (!plan.ok) return plan.reason;
-      const j = buildRoad(world, plan, a, b, prof, 0, 'duplicar via');
+      const j = buildRoad(world, plan, a, b, prof, 0, 'cmd.place.duplicateRoad');
       total.append(j);
       prev = snap(net, shifted[4], shifted[5], 1.5);
       start = fwd ? sc.b[id] : sc.a[id];

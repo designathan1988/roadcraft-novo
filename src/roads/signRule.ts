@@ -47,7 +47,7 @@ export function signRuleCommand(world: World, x: number, z: number, variant: num
     ? { ...(before ?? { ctl: baseCtl }), ctl: legs.length ? baseCtl : before!.ctl, legs }
     : null;
   return {
-    label: adding ? 'placa com regra' : 'tirar placa com regra',
+    label: adding ? 'cmd.place.signRule' : 'cmd.demolish.signRule',
     apply: () => { if (net.nodes.alive[node]) net.setJunction(node, after); },
     invert: () => { if (net.nodes.alive[node]) net.setJunction(node, before); },
   };

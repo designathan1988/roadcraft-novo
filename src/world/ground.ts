@@ -68,7 +68,7 @@ export type GroundMode = 'paint' | 'forest' | 'cut';
 
 /** Stroke of the ground brush: paint, forest (plants) or cut (clearing). */
 export class GroundStroke implements Command {
-  readonly label = 'pintar o chão';
+  readonly label = 'cmd.place.paintGround';
   private world: GroundWorld;
   private before = new Map<number, number>();
   private idx = new Int32Array(0);
@@ -144,7 +144,7 @@ function touchGround(world: GroundWorld, gx0: number, gz0: number, gx1: number, 
  * down (never up river) and stays a little below the banks.
  */
 export class RiverCommand implements Command {
-  readonly label = 'rio';
+  readonly label = 'cmd.place.river';
   private world: GroundWorld;
   private hIdx: Int32Array; private hOld: Float32Array; private hNew: Float32Array;
   private wIdx: Int32Array; private wOld: Float32Array; private wNew: Float32Array;

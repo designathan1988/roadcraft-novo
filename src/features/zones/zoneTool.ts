@@ -35,7 +35,7 @@ export class ZoneTool {
 
   begin(): void {
     if (!this.stroke) this.commands.hold();
-    this.stroke = new RoadJournal(this.world, 'zonear');
+    this.stroke = new RoadJournal(this.world, 'cmd.place.zone');
   }
 
   end(): void {
@@ -91,7 +91,7 @@ export class ZoneTool {
     // side 0 of the segment is the normal (dz, −dx) in the a → b direction
     const u = (x - p2[0]) * d2[1] - (z - p2[1]) * d2[0];
     let s = s0, fwd = u > 0; // walks with the block always on side 0 of the walking direction
-    const j = new RoadJournal(this.world, 'zonear quadra');
+    const j = new RoadJournal(this.world, 'cmd.place.zoneBlock');
     const done = new Set<number>();
     const h = new Float64Array(2), o = new Float64Array(2);
     for (let step = 0; step < 300; step++) {

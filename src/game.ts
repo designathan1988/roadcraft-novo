@@ -32,7 +32,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windU } from './render/weather.ts';
 import { Ambient } from './platform/audio.ts';
 import { Particles } from './render/particles.ts';
-import { fmtInt, followLanguage, loose, onLanguageChange, plural, t } from './shared/i18n/index.ts';
+import { fmtInt, followLanguage, onLanguageChange, plural, t } from './shared/i18n/index.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import type { Design } from './world/design.ts';
@@ -518,8 +518,9 @@ export class Game {
       const l = c.label;
       this.changesLog.unshift([Date.now(), l]);
       if (this.changesLog.length > 40) this.changesLog.pop();
-      this.ambient.sfx(l.startsWith('demolir') || l.startsWith('remover') || l.startsWith('tirar') || l.startsWith('apagar') ? 'demolish'
-        : l.startsWith('construir') || l === 'rotatória' || l.startsWith('trocar') || l === 'lote desenhado' || l === 'muro' ? 'build' : 'place'); // not for the player: undo labels pick the sound (B60)
+      // the label is a language key, cmd.<sound>.<name>: its middle part is the sound (build, demolish or place)
+      const sound = l.split('.')[1];
+      this.ambient.sfx(sound === 'demolish' || sound === 'build' ? sound : 'place');
     };
     this.commands.onChange = () => {
       this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh();
@@ -528,7 +529,7 @@ export class Game {
     };
     this.commands.onError = (err, c, redo) => {
       console.error(err);
-      this.hud.toast(t(redo ? 'history.redoFailed' : 'history.undoFailed', { label: loose(c.label), message: (err as Error)?.message ?? String(err) }));
+      this.hud.toast(t(redo ? 'history.redoFailed' : 'history.undoFailed', { label: t(c.label), message: (err as Error)?.message ?? String(err) }));
     };
     // the language changes without reloading (Roadcraft 4.0, main.ts:3832): the panels the game fills write again
     onLanguageChange(() => { this.inspector.refresh(); if (this.selected >= 0) this.select(this.selected); });
@@ -1118,7 +1119,7 @@ export class Game {
   private removePole(hit: THREE.Vector3 | null): void {
     const items = this.world.items, id = hit ? items.nearest(hit.x, hit.z, 3) : -1;
     if (id < 0 || items.t.cols.type[id] !== Item.PoleLine) return;
-    const c = new ItemsCommand(items, 'remover item');
+    const c = new ItemsCommand(items, 'cmd.demolish.item');
     c.remove(id);
     this.commands.push(c);
   }
@@ -1399,7 +1400,7 @@ export class Game {
       this.hud.toast(p.count === 1 ? t('game.toast.personWalks') : t('game.toast.peopleWalk', { n: p.count }));
       return;
     }
-    const c = new ItemsCommand(this.world.items, 'pôr pessoa');
+    const c = new ItemsCommand(this.world.items, 'cmd.place.person');
     for (let k = 0; k < p.count; k++) {
       const a = (k / Math.max(1, p.count)) * Math.PI * 2, d = k ? 1.4 + k * 0.15 : 0;
       const yaw = Math.atan2(this.rig.eye.x - x, this.rig.eye.z - z);
@@ -1430,7 +1431,7 @@ export class Game {
   private plantTree(x: number, z: number): void {
     const sp = this.forestSpecies === 0 ? (Math.random() < 0.5 ? 1 : 2) : this.forestSpecies;
     const type = sp === 1 ? Item.Tree : sp === 2 ? Item.Conifer : Item.Palm;
-    const c = new ItemsCommand(this.world.items, 'plantar árvore');
+    const c = new ItemsCommand(this.world.items, 'cmd.place.tree');
     c.add([x, z, Math.random() * Math.PI * 2, 0, type, 0]);
     this.commands.push(c);
   }
@@ -1520,7 +1521,7 @@ export class Game {
       ['buildings', String(w.buildings.size)], ['segments', String(w.roads.segs.size)], ['nodes', String(w.roads.nodes.size)],
       ['items', String(w.items.size)], ['impossible nodes', String(w.impossible.count)], ['lines', String(this.transit.lines.length)],
       ['unsaved tiles', String(dirty)], ['jobs idle', String(this.pool.isIdle())],
-      ...this.changesLog.slice(0, 20).map(([at, label]): [string, string] => [`${((now - at) / 1000).toFixed(0)} s`, label]),
+      ...this.changesLog.slice(0, 20).map(([at, label]): [string, string] => [`${((now - at) / 1000).toFixed(0)} s`, t(label)]),
     ];
   }
 

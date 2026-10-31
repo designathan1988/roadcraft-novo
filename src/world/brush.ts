@@ -47,7 +47,7 @@ function extendBounds(world: World, idx: number, v: number): void {
  * once); the undo keeps the old heights quantized to 16 bits (2 bytes per sample).
  */
 export class FlattenMap implements Command {
-  readonly label = 'aplainar mapa';
+  readonly label = 'cmd.place.flattenMap';
   private world: World;
   private old: Uint16Array;
   /** The water samples the new level dries (as BrushStroke's syncWater: ground above level - 0.5) and their levels. */
@@ -98,7 +98,7 @@ export class FlattenMap implements Command {
 }
 
 export class BrushStroke implements Command {
-  readonly label = 'pincel de terreno';
+  readonly label = 'cmd.place.terrainBrush';
   private world: World;
   private before = new Map<number, number>();
   private idx: Int32Array = new Int32Array(0);

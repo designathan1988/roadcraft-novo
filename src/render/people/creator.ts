@@ -82,7 +82,7 @@ export class PeopleCreator {
   placeCommand(x: number, z: number, y: number, options: Partial<PersonOptions> = {}) {
     let id = 0;
     return {
-      label: 'pessoas', apply: () => { id = this.place(x, z, y, options, id); }, invert: () => { this.remove(id); },
+      label: 'cmd.place.people', apply: () => { id = this.place(x, z, y, options, id); }, invert: () => { this.remove(id); },
       get id() { return id; },
     };
   }

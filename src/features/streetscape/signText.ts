@@ -11,7 +11,7 @@ export function signTextCommand(world: World, key: string, text: string, chain: 
   const prev = world.signTexts.get(key);
   const before = chain.map((s) => world.streetNames.get(s));
   return {
-    label: 'texto da placa',
+    label: 'cmd.place.signText',
     apply: () => { world.setSignText(key, text); for (const s of chain) world.setStreetName(s, text); changed(); },
     invert: () => {
       world.setSignText(key, prev);
