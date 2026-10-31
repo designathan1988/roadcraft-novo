@@ -7,13 +7,43 @@
 // history: each frame came out raw, with the ±½ pixel jitter, and the whole image shook while still (the "camera
 // shake"). Here the reprojection is done outside the Fn, with the camera type in a uniform (perspective/isometric switch).
 import { HalfFloatType, NoBlending, Vector2, RenderTarget, RendererUtils, QuadMesh, NodeMaterial, TempNode, NodeUpdateType, Matrix4, DepthTexture, FloatType } from 'three/webgpu';
-import { float, Fn, max, texture, uniform, uv, vec2, vec4, convertToTexture, passTexture, velocity, ivec2, mix, context, getViewPosition, viewZToPerspectiveDepth, viewZToOrthographicDepth, OnBeforeRenderPipeline, OnAfterRenderPipeline } from 'three/tsl';
+import { float, Fn, max, floor, texture, uniform, uv, vec2, vec4, convertToTexture, passTexture, velocity, ivec2, mix, context, getViewPosition, viewZToPerspectiveDepth, viewZToOrthographicDepth, OnBeforeRenderPipeline, OnAfterRenderPipeline } from 'three/tsl';
 import { clipAABB, computeHaltonOffsets, flickerReduction, sampleCurrentDepth } from 'three/addons/tsl/utils/TAAUtils.js';
 
 const _quadMesh = /*@__PURE__*/ new QuadMesh();
 /** 1 = shows the history validity and the current frame's weight. */
 export const traaDebug = /*@__PURE__*/ uniform( 0 );
 const _size = /*@__PURE__*/ new Vector2();
+
+/**
+ * The least weight of the current frame where the surface itself moved (a walker, a vehicle; velocity z, see
+ * render/velocity.ts). Exponential smoothing with weight α gathers (2 − α) / α samples a pixel at best (Yang et al. 2009,
+ * eq. 30; the TAA survey of Yang, Liu and Salvi 2020, fig. 4): 0.4 gives 4, the samples Roadcraft 4.0 gives every pixel
+ * of its image (MSAA 4×, r40 quality.ts). A small figure 3 to 5 pixels wide is all edge: its 3×3 neighbourhood holds the
+ * pavement too, the colour box the history is clipped to spans both and let older poses through at 86–95 % a frame
+ * (the survey's §6.2, fig. 10: "a running character leaves a ghosting trail"); Unreal Engine 4 and Uncharted 4 raise
+ * the weight on such pixels through a mask (the velocity is read at the nearest texel of the 3×3, so this mask is
+ * dilated by a pixel as Uncharted 4's).
+ */
+export const MOVER_WEIGHT = 0.4;
+
+/**
+ * The Catmull-Rom spline's weights for the four texels round a point a fraction `f` past the second (texels at −1, 0,
+ * 1, 2 from it), on anything with mul/add/sub (TSL nodes; numbers wrapped in the tests): the middle two are both
+ * positive for f in [0, 1], so one bilinear read between them carries both (vec3.ca, "bicubic filtering in fewer
+ * taps"; MJP's 9-tap Catmull-Rom). Returns the weights of the outer texels, of the middle pair, and where in the pair
+ * (0..1 past the second texel) the bilinear read lands.
+ */
+export function catmullRomTaps( f ) {
+
+	const w0 = f.mul( f.mul( f.mul( - 0.5 ).add( 1 ) ).sub( 0.5 ) );
+	const w1 = f.mul( f ).mul( f.mul( 1.5 ).sub( 2.5 ) ).add( 1 );
+	const w2 = f.mul( f.mul( f.mul( - 1.5 ).add( 2 ) ).add( 0.5 ) );
+	const w3 = f.mul( f ).mul( f.mul( 0.5 ).sub( 0.5 ) );
+	const w12 = w1.add( w2 );
+	return { w0, w12, w3, at12: w2.div( w12 ) };
+
+}
 
 let _rendererState;
 
@@ -579,6 +609,31 @@ class TRAANode extends TempNode {
 
 		const historyNode = texture( this._historyRenderTarget.texture );
 
+		// The history at a point between texels, through the Catmull-Rom spline (9 bilinear reads). A bilinear read
+		// softens what it reads, and the history is read again every frame it moves: the softening piles up (the TAA
+		// survey's §6.1.1 "resampling blur"; walkers and anything the camera turns past went soft). Catmull-Rom keeps
+		// the detail (the survey's fig. 8; Unreal Engine 4's TAA and SMAA T2x read the history so); where the history
+		// lands on a texel (nothing moved) it reads that texel alone, as bilinear did. Its lobes can overshoot below 0.
+		const sampleHistory = ( historyUV, textureSize ) => {
+
+			const size = vec2( textureSize );
+			const at = historyUV.mul( size );
+			const t1 = floor( at.sub( 0.5 ) ).add( 0.5 );
+			const { w0, w12, w3, at12 } = catmullRomTaps( at.sub( t1 ) );
+			const xs = [ t1.x.sub( 1 ), t1.x.add( at12.x ), t1.x.add( 2 ) ], wx = [ w0.x, w12.x, w3.x ];
+			const ys = [ t1.y.sub( 1 ), t1.y.add( at12.y ), t1.y.add( 2 ) ], wy = [ w0.y, w12.y, w3.y ];
+			let sum = null;
+			for ( let j = 0; j < 3; j ++ ) for ( let i = 0; i < 3; i ++ ) {
+
+				const tap = historyNode.sample( vec2( xs[ i ], ys[ j ] ).div( size ) ).mul( wx[ i ].mul( wy[ j ] ) );
+				sum = sum === null ? tap : sum.add( tap );
+
+			}
+
+			return vec4( sum.rgb.max( 0 ), sum.a.saturate() );
+
+		};
+
 		const resolve = Fn( () => {
 
 			const uvNode = uv();
@@ -619,7 +674,7 @@ class TRAANode extends TempNode {
 			// sample the current and previous colors
 
 			const currentColor = this.beautyNode.sample( uvNode );
-			const historyColor = historyNode.sample( historyUV );
+			const historyColor = sampleHistory( historyUV, textureSize ).toVar();
 
 			// increase the weight towards the current frame under motion
 
@@ -634,6 +689,8 @@ class TRAANode extends TempNode {
 			}
 
 			currentWeight.assign( hasValidHistory.select( currentWeight.add( motionFactor ).saturate(), 1 ) );
+			// a surface that moved itself: at least MOVER_WEIGHT of this frame (no trail of its older poses)
+			currentWeight.assign( objectMoved.select( currentWeight.max( MOVER_WEIGHT ), currentWeight ) );
 
 			// Perform neighborhood clipping/clamping. We use variance clipping here.
 

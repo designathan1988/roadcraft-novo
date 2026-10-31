@@ -1138,3 +1138,38 @@ test('D40: a layer visits only the tiles within its reach, not the whole map, wh
   layer.update(cam, cam.position);
   assert.ok(layer.visited <= 49, `visited ${layer.visited} after a move`);
 });
+
+test('TRAA: the history read through Catmull-Rom keeps its detail when read again every frame (walkers went soft)', async () => {
+  const { catmullRomTaps } = await import('../src/render/traa.ts');
+  // numbers with the node methods the taps use
+  class Num {
+    readonly v: number;
+    constructor(v: number) { this.v = v; }
+    private n(o: Num | number) { return typeof o === 'number' ? o : o.v; }
+    mul(o: Num | number) { return new Num(this.v * this.n(o)); }
+    add(o: Num | number) { return new Num(this.v + this.n(o)); }
+    sub(o: Num | number) { return new Num(this.v - this.n(o)); }
+    div(o: Num | number) { return new Num(this.v / this.n(o)); }
+  }
+  // on a texel nothing changes: the read lands on it alone
+  const still = catmullRomTaps(new Num(0));
+  assert.deepEqual([still.w0.v, still.w12.v, still.w3.v, still.at12.v].map((v) => v + 0), [0, 1, 0, 0]);
+  // a periodic row of 3-pixel bars; texel centres at i + ½; a bilinear read between texels, as the GPU does
+  const W = 64, row: number[] = Array.from({ length: W }, (_, i) => (i % 11 < 3 ? 1 : 0.1));
+  const texel = (s: number[], i: number) => s[((i % W) + W) % W];
+  const bilinear = (s: number[], p: number) => { const a = Math.floor(p - 0.5), t = p - 0.5 - a; return texel(s, a) * (1 - t) + texel(s, a + 1) * t; };
+  const catmull = (s: number[], p: number) => {
+    const t1 = Math.floor(p - 0.5) + 0.5, { w0, w12, w3, at12 } = catmullRomTaps(new Num(p - t1));
+    return bilinear(s, t1 - 1) * w0.v + bilinear(s, t1 + at12.v) * w12.v + bilinear(s, t1 + 2) * w3.v;
+  };
+  // the survey's fig. 8 worst case: the history moves half a pixel every frame, 100 frames
+  const energy = (s: number[]) => s.reduce((e, v, i) => e + (texel(s, i + 1) - v) ** 2, 0);
+  const moved = (read: (s: number[], p: number) => number) => {
+    let s = row;
+    for (let k = 0; k < 100; k++) s = s.map((_, i) => read(s, i + 0.5 - 0.5));
+    return energy(s) / energy(row);
+  };
+  const bl = moved(bilinear), cr = moved(catmull);
+  // bilinear wipes the bars out (1e-4 of their detail left); Catmull-Rom keeps two orders of magnitude more (0.13)
+  assert.ok(cr > 100 * bl, `detail kept after 100 half-pixel reads: Catmull-Rom ${cr.toExponential(2)}, bilinear ${bl.toExponential(2)}`);
+});
