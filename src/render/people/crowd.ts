@@ -318,7 +318,8 @@ export class PeopleRenderer {
     // Opaque people: one level at a time. The old complementary dither made the body see-through in every band.
     if (f0 >= 1) {
       this.write(0, x, y, z, yaw, px, py, pz, pyaw, l, 1, alpha, scale, slope, false);
-      this.write(1, x, y, z, yaw, px, py, pz, pyaw, l, 2, alpha, scale, slope, dist < SHADOW_NEAR);
+      // the LOD1 copy only casts the near shadow (fade 2: the main pass discards it): none when it would cast nothing (D72)
+      if (dist < SHADOW_NEAR) this.write(1, x, y, z, yaw, px, py, pz, pyaw, l, 2, alpha, scale, slope, true);
     } else if (f1 >= 1) this.write(1, x, y, z, yaw, px, py, pz, pyaw, l, 1, alpha, scale, slope, false);
     else this.write(2, x, y, z, yaw, px, py, pz, pyaw, l, 1, alpha * Math.min(1, (px1 - MIN_PX) / 2), scale, slope, false);
   }
