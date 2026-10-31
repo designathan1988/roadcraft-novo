@@ -197,11 +197,12 @@ export class TerrainRenderer {
       this.ecoWorker = new Worker(new URL('./ecologyWorker.ts', import.meta.url), { type: 'module', name: `ecology ${MAP_TAG}` });
       this.ecoWorker.postMessage({ heights: world.heightsSab, water: world.waterSab, field: ecoSab });
       this.ecoWorker.onmessage = (e: MessageEvent<number>) => {
-        this.ecoTex.addLayerUpdate(e.data);
-        this.ecoTex.needsUpdate = true;
+        // a tile that failed answers -1 - tile: the queue goes on (D34: a thrown tile left ecoBusy set for good)
+        if (e.data >= 0) { this.ecoTex.addLayerUpdate(e.data); this.ecoTex.needsUpdate = true; }
         this.ecoBusy = -1;
         this.nextEcology();
       };
+      this.ecoWorker.onerror = (e) => { console.error('ecology worker:', e.message); this.ecoBusy = -1; this.nextEcology(); };
     }
 
     // unit grid (u, v) in [0, 1]
