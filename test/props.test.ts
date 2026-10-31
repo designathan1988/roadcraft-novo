@@ -51,6 +51,30 @@ test('peças: determinísticas, cada uma na sua célula, semáforo por braço', 
   assert.ok(total < 2000);
 });
 
+test('no wild tree roots on a cliff (Roadcraft 4.0 renderer.ts:2984 natureOpen: grade over 0.75)', async () => {
+  const { sampleOfIndex, worldOfSample } = await import('../src/world/heights.ts');
+  const { cellOriginX } = await import('../src/core/grid.ts');
+  const { wildGrade, WILD_MAX_GRADE } = await import('../src/jobs/props.ts');
+  const w = new World();
+  const cx = cellX(300), ox = cellOriginX(cx);
+  // a mesa's wall across the cell: flat, 60 m up over 40 m (grade 1.5), flat on top
+  for (let i = 0; i < w.heights.length; i++) {
+    const [gx] = sampleOfIndex(i);
+    const x = worldOfSample(gx) - ox;
+    w.heights[i] = 10 + Math.min(60, Math.max(0, (x - 100) * 1.5));
+  }
+  const r = buildProps(w.heights, new World().roads.gather([], []), emptyBoxes(0), cellId(cx, cx));
+  let flat = 0, steep = 0;
+  for (let k = 0; k < r.count; k++) {
+    const t = propType(r.extra[k]);
+    if (t !== PROP.Tree && t !== PROP.Oak && t !== PROP.Conifer && t !== PROP.Palm && t !== PROP.Bush) continue;
+    const g = wildGrade(w.heights, r.data[k * 4], r.data[k * 4 + 2]);
+    if (g > WILD_MAX_GRADE) steep++; else flat++;
+  }
+  assert.ok(flat > 100, `plants on the level ground ${flat}`);
+  assert.equal(steep, 0, 'plants on the cliff');
+});
+
 test('D15: a prop type is read with its 5 bits (a type over 15 is not the signal)', () => {
   // the format: type & 31, the key above it (src/jobs/props.ts); the old & 15 read type 16 + Signal as a Signal
   const extra = ((PROP.Signal + 16) | (7 << 5)) >>> 0;

@@ -12,9 +12,6 @@ export const SHADOW_REACH = 1600;
 /** Longest shadow a caster is followed for (m): a low sun makes shadows kilometres long that no cascade shows. */
 export const SHADOW_LENGTH = 600;
 
-/** Layer of the meshes only the shadow cascades draw (the terrain's coarse shadow copy); the views never enable it. */
-export const SHADOW_ONLY_LAYER = 3;
-
 /**
  * Layer of the small casters (props under SMALL_CASTER m): the views and the near cascade draw it, the two far cascades
  * do not (Roadcraft 4.0 drew a caster into a cascade only if it was bigger than that cascade's texel).

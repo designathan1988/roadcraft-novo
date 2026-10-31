@@ -1,4 +1,4 @@
-// Final image: the sun's shadows in 3 cascades (near only), ambient occlusion (GTAO at half resolution), the glow
+// Final image: the sun's shadows in 3 cascades (near only), ambient occlusion (GTAO at full resolution), the glow
 // of lights at night (bloom), temporal anti-aliasing (TRAA), ACES tone mapping and Roadcraft's grade (CAS sharpening,
 // S curve, vibrance, split toning, vignette). Each part switches with the options; in compatibility mode (WebGL 2)
 // everything is off.
@@ -11,13 +11,13 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { SHADOW_ONLY_LAYER, SHADOW_REACH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
+import { SHADOW_REACH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
 import { cloudShadowAt, cloudShadowStrength } from './cloudShadow.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
 const {
-  pass, mrt, output, normalView, packNormalToRGB, unpackRGBToNormal, sample, vec2, vec4, vec3, mix, float, dot, renderOutput,
+  pass, mrt, output, vec2, vec4, vec3, mix, float, dot, renderOutput,
   smoothstep, max, min, clamp, screenUV, select, pow, sqrt, screenSize, cameraProjectionMatrix, getViewPosition,
 } = T;
 
@@ -75,8 +75,6 @@ export class Post {
       sun.shadow.camera.far = 4000;
       sun.shadow.bias = -0.0004;
       sun.shadow.normalBias = 0.4;
-      // the cascades also draw what only casts (the terrain's coarse shadow copy); cloned into each cascade
-      sun.shadow.camera.layers.enable(SHADOW_ONLY_LAYER);
       const csm = new FadingCSM(sun, { cascades: 3, maxFar: PERSP_SHADOW_FAR, mode: 'practical', lightMargin: 300 });
       csm.fade = true;
       sun.shadow.shadowNode = csm;
@@ -88,29 +86,34 @@ export class Post {
     const scenePass = pass(scene, camera, { samples: 0 });
     this.scenePass = scenePass;
     this.owned.push(scenePass);
-    // normal and velocity blend by material: opaque overwrites, colorOnly's transparent leaves them
-    const outs = mrt({ output, normal: packNormalToRGB(normalView), velocity: stableVelocity });
-    outs.setBlendMode('normal', new THREE.BlendMode(THREE.MaterialBlending));
+    // velocity blends by material: opaque overwrites, colorOnly's transparent leaves it
+    const outs = mrt({ output, velocity: stableVelocity });
     outs.setBlendMode('velocity', new THREE.BlendMode(THREE.MaterialBlending));
     scenePass.setMRT(outs);
-    const nTex = scenePass.getTexture('normal');
-    nTex.type = THREE.UnsignedByteType;
     let color: Node = scenePass.getTextureNode('output');
     const depthTex = scenePass.getTextureNode('depth');
     if (opts.ao) {
-      const normal = sample((uv: Node) => unpackRGBToNormal(scenePass.getTextureNode('normal').sample(uv)));
+      // Roadcraft 4.0's occlusion (postprocess.ts:185-228, quality.ts:234 ultra): from the depth alone, its normals
+      // rebuilt from it, at the scene's full resolution. DO NOT feed it the shading normal (the grass's and the rock's
+      // relief): it leans the hemisphere into a flat ground. DO NOT halve it: r186 GTAONode takes the centre's depth as
+      // the nearest of four texels at a scale under 1 (sampleCenterDepth), above the ground's own plane, and the ground
+      // round it reads as a horizon wherever its samples pass the thickness test; both darkened the ground up to a
+      // line straight across the view (21 levels of grey at 11 h, the empty map, 2026-10-31).
       const depth = depthTex;
-      const aoPass = ao(depth, normal, camera);
+      // no normal node: rebuilt from the depth (r186 GTAONode.js:61 and DenoiseNode.js:29 take null; the types do not)
+      const fromDepth = null as unknown as Node;
+      const aoPass = ao(depth, fromDepth, camera);
       this.owned.push(aoPass);
-      aoPass.resolutionScale = 0.5;
-      aoPass.radius.value = 3.5;
-      aoPass.distanceExponent.value = 1.5;
-      aoPass.thickness.value = 2;
-      const clean: Node = denoise(aoPass.getTextureNode(), depth, normal, camera);
+      aoPass.resolutionScale = 1;
+      aoPass.radius.value = 1.3;
+      aoPass.distanceExponent.value = 1.6;
+      aoPass.thickness.value = 0.8;
+      aoPass.scale.value = 1.05;
+      aoPass.samples.value = 8;
+      const clean: Node = denoise(aoPass.getTextureNode(), depth, fromDepth, camera);
       this.owned.push(clean);
       const occ = clean.r;
-      color = vec4(color.rgb.mul(mix(float(1), occ, 0.85)), color.a);
-    }
+      color = vec4(color.rgb.mul(mix(float(1), occ, 0.85)), color.a);    }
     // the clouds' shadows on the ground (Roadcraft 4.0): each pixel's world position from the depth, carried up
     // along the sun to the clouds (not on the sky)
     {
@@ -279,7 +282,6 @@ export class Post {
     // the near cascade draws the small casters too; the far ones only what is bigger than their texel
     (csm as unknown as { lights: Array<{ shadow: THREE.LightShadow }> }).lights.forEach((l, i) => {
       l.shadow.camera.layers.set(0);
-      l.shadow.camera.layers.enable(SHADOW_ONLY_LAYER);
       if (i === 0) l.shadow.camera.layers.enable(SMALL_CASTER_LAYER);
     });
   }

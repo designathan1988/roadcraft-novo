@@ -65,33 +65,22 @@ test('E33: water is drawn only on the tiles in view, with a coarse grid far away
   assert.ok(tris < 2e6, `${(tris / 1e6).toFixed(1)} M water triangles for one river`);
 });
 
-test('E36: the terrain casts sun shadows round the camera, seen only by the shadow cascades', async () => {
-  const sunMod = await import('../src/render/sun.ts') as Record<string, unknown>;
-  const { Post } = await import('../src/render/post.ts');
+test('E36 (reversed): the ground casts no sun shadow, nor is any copy of it drawn into the cascades', async () => {
+  // The earlier E36 asked the opposite, for a shadow copy of the terrain this engine had invented (coarser than the
+  // view, sunk 1.5 m): it drew a terrain per cascade per frame and threw polygonal shadows off the landforms' feet
+  // (2026-10-31). Roadcraft 4.0's ground does NOT cast (render/terrain.ts:1401-1402); it receives.
   const w = new World();
   w.tileMin.fill(0); w.tileMax.fill(300);
   const terrain = new TerrainRenderer(w);
   const { camera, eye } = centreCamera();
   terrain.update(camera, eye);
-  const casters: THREE.Mesh[] = [];
-  terrain.mesh.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.castShadow && (m.geometry as THREE.InstancedBufferGeometry).instanceCount > 0) casters.push(m); });
-  if (terrain.mesh.castShadow) casters.push(terrain.mesh);
-  for (const m of [(terrain as unknown as { shadowMesh?: THREE.Mesh }).shadowMesh]) if (m?.castShadow && (m.geometry as THREE.InstancedBufferGeometry).instanceCount > 0) casters.push(m);
-  assert.ok(casters.length > 0, 'some terrain mesh casts a shadow');
-  const caster = casters[0];
-  // it covers the ground behind the camera too (a ridge behind the camera shadows the valley in view)
-  const g = caster.geometry as THREE.InstancedBufferGeometry, node = g.attributes.node as THREE.InstancedBufferAttribute;
-  let behind = false;
-  for (let i = 0; i < g.instanceCount; i++) if (node.getY(i) > 200) behind = true;
-  assert.ok(behind, 'patches south of the camera (behind it) cast too');
-  // the main view does not draw the shadow copy; the cascades do
-  if (caster !== terrain.mesh) {
-    assert.equal(caster.layers.test(camera.layers), false, 'the main camera does not see the shadow copy');
-    const sun = new THREE.DirectionalLight();
-    new Post({ shadowMap: {}, coordinateSystem: THREE.WebGPUCoordinateSystem, reversedDepthBuffer: false } as unknown as THREE.WebGPURenderer, new THREE.Scene(), camera, sun, { shadows: true, ao: false, bloom: false });
-    assert.ok(caster.layers.test(sun.shadow.camera.layers), 'the cascades\' cameras see it');
-    assert.ok(typeof sunMod.SHADOW_ONLY_LAYER === 'number');
-  }
+  const casters: string[] = [];
+  terrain.mesh.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.castShadow) casters.push(o.name || o.type); });
+  assert.deepEqual(casters, [], 'no terrain mesh casts a shadow');
+  assert.equal(terrain.mesh.receiveShadow, true, 'the ground receives the sun\'s shadows');
+  // no layer is set aside for shadow-only meshes any more
+  const sunMod = await import('../src/render/sun.ts') as Record<string, unknown>;
+  assert.equal(sunMod.SHADOW_ONLY_LAYER, undefined);
 });
 
 test('E35: the grass shows by the eye\'s height over the ground under it, not over the tile\'s mean', async () => {
@@ -145,7 +134,8 @@ test('terrain (4.0 port): the grass, dirt and rock come from the 4.0 baked surfa
   const fs = await import('node:fs');
   const { COOKED } = await import('../src/render/cookedSurfaces.ts');
   for (const name of Object.keys(COOKED)) assert.ok(fs.existsSync(`public/cooked/surfaces/${name}.ktx2`), `${name}.ktx2 is in public/cooked/surfaces`);
-  const src = fs.readFileSync('src/render/terrain.ts', 'utf8');
+  // the ground's shader (terrain.ts) and its rock's (terrainRock.ts: the geology's layers of the land array)
+  const src = fs.readFileSync('src/render/terrain.ts', 'utf8') + fs.readFileSync('src/render/terrainRock.ts', 'utf8');
   for (const k of ["COOKED['terrain-grass.map']", "COOKED['terrain-land.map']", "COOKED['terrain-land.normal']", "COOKED['terrain-grass.normal']"]) assert.ok(src.includes(k), `the terrain reads ${k}`);
 });
 

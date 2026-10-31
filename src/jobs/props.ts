@@ -499,9 +499,9 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
       return true;
     };
     // a wild tree drawn as ever (the same draws, the forest away from the roads unchanged), kept only when its crown
-    // is clear of the road ground
+    // is clear of the road ground and its ground is no cliff
     const plant = (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => {
-      if (crownClear(x, z, CROWN_R[kind] * scale)) out.add(kind, x, y, z, yaw, variant, scale, key);
+      if (wildGrade(heights, x, z) <= WILD_MAX_GRADE && crownClear(x, z, CROWN_R[kind] * scale)) out.add(kind, x, y, z, yaw, variant, scale, key);
     };
     for (let i = 0; i < b.count; i++) {
       // the whole lot is taken (building, yard, walls); a polygon lot only inside its outline
@@ -552,6 +552,20 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
 
   const count = out.extra.length;
   return { count, data: new Float32Array(out.data), extra: new Uint32Array(out.extra) };
+}
+
+/**
+ * Steepest a wild plant roots on (rise over run, 37°): nothing grows on a cliff. Roadcraft 4.0 renderer.ts:2984-2993
+ * natureOpen: the ground's grade by central differences 2 m to each side, over 0.75 none.
+ */
+export const WILD_MAX_GRADE = 0.75;
+const GRADE_STEP = 2;
+
+/** The ground's grade at (x, z), read as 4.0 reads it (`WILD_MAX_GRADE`). */
+export function wildGrade(heights: Float32Array, x: number, z: number): number {
+  const dx = heightAt(heights, x + GRADE_STEP, z) - heightAt(heights, x - GRADE_STEP, z);
+  const dz = heightAt(heights, x, z + GRADE_STEP) - heightAt(heights, x, z - GRADE_STEP);
+  return Math.hypot(dx, dz) / (2 * GRADE_STEP);
 }
 
 function yAt(g: RoadGraph, s: number, len: number, v: number): number {

@@ -8,7 +8,7 @@ import { World } from '../src/world/world.ts';
 import { CellLayer, type LayerSource } from '../src/render/cellLayer.ts';
 import { TILE_COUNT, Dirty } from '../src/core/grid.ts';
 import type { PackedMesh } from '../src/shared/contracts/worker.ts';
-import { splitGlass } from '../src/render/vehicles.ts';
+import { splitGlass } from '../src/render/vehicleModels.ts';
 
 /** A one-triangle packed mesh. */
 function triangle(): PackedMesh {
@@ -269,6 +269,21 @@ test('E18: the ambient occlusion reads the depth with the matrices of the camera
   assert.ok(aoNode._cameraProjectionMatrixInverse!.value === iso.projectionMatrixInverse, 'GTAO unprojects with the isometric camera');
   assert.ok(aoNode._cameraNear!.object === iso, 'GTAO reads the isometric camera\'s near and far');
   assert.ok(denoiseNode._cameraProjectionMatrixInverse!.value === iso.projectionMatrixInverse, 'the denoise unprojects with the isometric camera');
+});
+
+test('the ambient occlusion reads the depth alone, at full resolution (no false occlusion on flat ground)', async () => {
+  // Roadcraft 4.0 postprocess.ts:214 (normals rebuilt from the depth), quality.ts:234 (ultra: full resolution). The
+  // shading normal and r186's half-resolution centre (nearest of four texels) both shaded a flat ground up to a line.
+  const { Post } = await import('../src/render/post.ts');
+  const persp = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), sun = new THREE.DirectionalLight();
+  const post = new Post(fakeRenderer(), new THREE.Scene(), persp, sun, { shadows: false, ao: true, bloom: false });
+  type AONode = { _cameraProjectionMatrix?: unknown; _cameraProjectionMatrixInverse?: unknown; normalNode?: unknown; resolutionScale?: number };
+  const owned = (post as unknown as { owned: AONode[] }).owned;
+  const aoNode = owned.find((n) => n._cameraProjectionMatrix)!;
+  const denoiseNode = owned.find((n) => n._cameraProjectionMatrixInverse && !n._cameraProjectionMatrix)!;
+  assert.equal(aoNode.normalNode, null, 'GTAO rebuilds its normals from the depth');
+  assert.equal(denoiseNode.normalNode, null, 'the denoise rebuilds its normals from the depth');
+  assert.equal(aoNode.resolutionScale, 1, 'GTAO at the scene\'s full resolution');
 });
 
 test('E5, E25: each prop draw carries one variant only (a hydrant does not process the vertices of 13 other pieces)', async () => {
@@ -770,7 +785,8 @@ test('vehicles: the glass is split from the opaque body for the transparent cabi
 });
 
 test('cars: from above, the road never shows through the near car\'s glass (the cabin fills the body)', async () => {
-  const { CAR_SIZES, buildCarBody, buildCarCabin } = await import('../src/render/carBody.ts');
+  const { CAR_SIZES, buildCarBody } = await import('../src/render/carBody.ts');
+  const { buildCarCabin } = await import('../src/render/carCabin.ts');
   // the triangles of a geometry, and the heights where a vertical ray at (x, z) crosses them
   const tris = (g: THREE.BufferGeometry): number[][] => {
     const p = g.getAttribute('position').array, idx = g.index?.array, n = idx ? idx.length : p.length / 3, out: number[][] = [];
@@ -808,7 +824,8 @@ test('cars: from above, the road never shows through the near car\'s glass (the 
 });
 
 test('cars: seen at a slant through the glass, the near car is closed (cabin, and its body\'s inner side drawn)', async () => {
-  const { CAR_SIZES, buildCarBody, buildCarCabin } = await import('../src/render/carBody.ts');
+  const { CAR_SIZES, buildCarBody } = await import('../src/render/carBody.ts');
+  const { buildCarCabin } = await import('../src/render/carCabin.ts');
   const flat = (g: THREE.BufferGeometry): Float64Array => {
     const p = g.getAttribute('position').array, idx = g.index?.array, n = idx ? idx.length : p.length / 3, out = new Float64Array(n * 3);
     for (let i = 0; i < n; i++) { const k = idx ? idx[i] : i; out[i * 3] = p[k * 3]; out[i * 3 + 1] = p[k * 3 + 1]; out[i * 3 + 2] = p[k * 3 + 2]; }
@@ -856,7 +873,8 @@ test('cars: seen at a slant through the glass, the near car is closed (cabin, an
 });
 
 test('cars: every level of a car is built facing outward (the far silhouette was inside out: a car seen on its side)', async () => {
-  const { CAR_SIZES, buildCarBody, buildCarCabin, buildCarSilhouette } = await import('../src/render/carBody.ts');
+  const { CAR_SIZES, buildCarBody, buildCarSilhouette } = await import('../src/render/carBody.ts');
+  const { buildCarCabin } = await import('../src/render/carCabin.ts');
   // rays from all round; the first triangle each meets must face it (met from behind, the GPU culls it)
   const backShare = (g: THREE.BufferGeometry): number => {
     const p = g.getAttribute('position').array, idx = g.index?.array, n = idx ? idx.length : p.length / 3;
@@ -952,7 +970,8 @@ function triBox(t: number[], m: number[], h: number[]): boolean {
 }
 
 test('cars: the cabin stays clear of the wheels (its door trim stood in the rear arch, over the wheel)', async () => {
-  const { CAR_SIZES, buildCarCabin, axlesOf } = await import('../src/render/carBody.ts');
+  const { CAR_SIZES, axlesOf } = await import('../src/render/carBody.ts');
+  const { buildCarCabin } = await import('../src/render/carCabin.ts');
   for (const style of ['sedan', 'hatch', 'suv', 'van', 'pickup'] as const) {
     const a = CAR_SIZES[style], g = buildCarCabin(a, style), archR = a.wheelRadius + 0.07;
     const p = g.getAttribute('position').array, idx = g.index ? g.index.array : null;

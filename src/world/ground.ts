@@ -28,6 +28,18 @@ export const Ground = {
   Auto: 0, Sand: 1, Soil: 2, Meadow: 3, Snow: 4, Gravel: 5, Asphalt: 6, Concrete: 7,
   Granite: 8, Sandstone: 9, Basalt: 10, Cerrado: 11, Flowers: 12, Rocks: 13, Mud: 14,
 } as const;
+/** The geology kinds: the rock the slope bares (render/terrainRock.ts), not a colour of the ground. */
+export const isGeology = (kind: number): boolean => kind >= Ground.Granite && kind <= Ground.Basalt;
+
+/**
+ * Weight of a geology dab at `d` (0 centre, 1 rim): flat to 0.78 of its radius, a smoothstep down to its rim (Roadcraft
+ * 4.0 render/coverRaster.ts:23-25 rasterGeology: a landform's cliff stands at the rim of its dabs).
+ */
+export function geologyFalloff(d: number): number {
+  const t = Math.min(1, Math.max(0, (d - 0.78) / 0.22));
+  return 1 - t * t * (3 - 2 * t);
+}
+
 /** sRGB colour of each type (the shader reads this table). */
 export const GROUND_COLORS = [
   0x6b8545, 0xb8a882, 0x85715a, 0x7a8a4a, 0xeef0f2, 0x9a958c, 0x45484c, 0xa9a59d,
@@ -87,15 +99,21 @@ export class GroundStroke implements Command {
     const gx0 = Math.max(0, Math.floor(cx - r)), gx1 = Math.min(WATER_MAP_RES - 1, Math.ceil(cx + r));
     const gz0 = Math.max(0, Math.floor(cz - r)), gz1 = Math.min(WATER_MAP_RES - 1, Math.ceil(cz + r));
     const k = Math.min(1, strength * dt * 3);
+    const rock = mode === 'paint' && isGeology(kind);
     for (let gz = gz0; gz <= gz1; gz++) for (let gx = gx0; gx <= gx1; gx++) {
       const d = Math.hypot(gx - cx, gz - cz) / Math.max(r, 0.75);
       if (d >= 1) continue;
-      const f = (0.5 + 0.5 * Math.cos(d * Math.PI)) * k;
+      const f = (rock ? geologyFalloff(d) : 0.5 + 0.5 * Math.cos(d * Math.PI)) * k;
       const i = waterIndex(gx, gz);
       const v = g[i];
       if (!this.before.has(i)) this.before.set(i, v);
       let R = v & 255, G = (v >> 8) & 255, B = (v >> 16) & 255, A = (v >>> 24) & 255;
-      if (mode === 'paint') {
+      if (rock) {
+        // the rock moves toward the dab's (4.0 rasterGeology); another kind still held is wiped first
+        if (R === kind) G = Math.round(G + (255 - G) * f);
+        else if (G < 40) { R = kind; G = Math.round(255 * f); }
+        else G = Math.max(0, G - Math.round(255 * f));
+      } else if (mode === 'paint') {
         if (kind === Ground.Auto) G = Math.max(0, G - Math.round(255 * f));
         else if (R === kind || G < 40) { R = kind; G = Math.min(255, G + Math.round(255 * f)); }
         else G = Math.max(0, G - Math.round(255 * f)); // first wipes the other type, then paints
