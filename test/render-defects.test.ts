@@ -982,3 +982,15 @@ test('D53: reset uninstalls through the source every cell that held a mesh (the 
   layer.reset();
   assert.deepEqual(uninstalled, [[9, 0]]);
 });
+
+test('D52: thousands of explosion bursts keep a fixed pool; the newest stay', async () => {
+  const { Particles } = await import('../src/render/particles.ts');
+  const w = new World();
+  const p = new Particles(w);
+  for (let i = 0; i < 10_000; i++) p.burst(i % 100, 10, 0, 1, 3, 5 + i * 1e-4);
+  const inner = p as unknown as { burstN?: number; bursts: ArrayLike<unknown> };
+  const held = inner.burstN ?? inner.bursts.length;
+  assert.ok(held <= 128, `${held} bursts held`);
+  p.update(1, new THREE.Vector3(0, 50, 0));
+  assert.ok(p.count <= 512);
+});

@@ -27,6 +27,8 @@ const {
 export const Puff = { Smoke: 0, Steam: 1, Fire: 2, Fountain: 3, Dust: 4, Soot: 5, Sparks: 6, Spray: 7, Mist: 8 } as const;
 const PER = 24;
 const MAX_EMIT = 512;
+/** Explosion emitters held at once (a fixed pool: a bomb run of thousands of bursts keeps the newest, D52). */
+const MAX_BURSTS = 128;
 const RADIUS = 1600;
 
 export class Particles {
@@ -141,7 +143,8 @@ export class Particles {
 
   /** Rebuilds the list if the camera moved or the items/buildings changed (at most 2× per second). */
   /** Short-lived emitters (explosion): x, y, z, kind, strength, until when (s of the page clock). */
-  private bursts: Array<[number, number, number, number, number, number]> = [];
+  private bursts = new Float64Array(MAX_BURSTS * 6);
+  private burstN = 0;
   private clock = 0;
 
   /**
@@ -160,7 +163,14 @@ export class Particles {
 
   /** Smoke, fire, dust and sparks for a few seconds at a point. */
   burst(x: number, y: number, z: number, kind: number, strength: number, seconds: number): void {
-    this.bursts.push([x, y, z, kind, strength, this.clock + seconds]);
+    // full: the burst that ends soonest gives its place
+    let k = this.burstN;
+    if (k === MAX_BURSTS) {
+      k = 0;
+      for (let i = 1; i < MAX_BURSTS; i++) if (this.bursts[i * 6 + 5] < this.bursts[k * 6 + 5]) k = i;
+    } else this.burstN++;
+    const b = this.bursts, o = k * 6;
+    b[o] = x; b[o + 1] = y; b[o + 2] = z; b[o + 3] = kind; b[o + 4] = strength; b[o + 5] = this.clock + seconds;
     this.due = true;
     this.timer = 0;
   }
@@ -170,9 +180,14 @@ export class Particles {
     this.timer -= dt;
     if (this.timer > 0) return;
     this.timer = 0.5;
-    const before = this.bursts.length;
-    this.bursts = this.bursts.filter((b) => b[5] > this.clock);
-    if (before !== this.bursts.length) this.due = true;
+    // the ended bursts go (swap with the last, no new list)
+    const b = this.bursts;
+    for (let i = 0; i < this.burstN;) {
+      if (b[i * 6 + 5] > this.clock) { i++; continue; }
+      const last = --this.burstN;
+      if (i !== last) b.copyWithin(i * 6, last * 6, last * 6 + 6);
+      this.due = true;
+    }
     // an edit within reach of the emitters gathered last time
     const reach = RADIUS + CELL_SIZE;
     for (const r of [this.builtEdits, this.itemEdits]) {
@@ -198,7 +213,8 @@ export class Particles {
       d[n * 4] = px; d[n * 4 + 1] = py; d[n * 4 + 2] = pz; d[n * 4 + 3] = kind + 16 * Math.max(0, Math.min(15, strength));
       n++;
     };
-    for (const [bx, by, bz, k, st] of this.bursts) if (n < MAX_EMIT) put(bx, by, bz, k, st);
+    const b = this.bursts;
+    for (let i = 0; i < this.burstN && n < MAX_EMIT; i++) put(b[i * 6], b[i * 6 + 1], b[i * 6 + 2], b[i * 6 + 3], b[i * 6 + 4]);
     const found: number[] = [];
     const push = (px: number, py: number, pz: number, kind: number, strength: number) => { found.push(px, py, pz, kind, strength, (px - x) ** 2 + (pz - z) ** 2); };
     const ic = w.items.t.cols;
