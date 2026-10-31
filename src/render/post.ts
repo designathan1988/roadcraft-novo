@@ -7,6 +7,7 @@ import * as THREE from 'three/webgpu';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import GTAONode from 'three/addons/tsl/display/GTAONode.js';
 import { aoDenoise } from './aoDenoise.ts';
+import { PrepassPassNode } from './depthPrepass.ts';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
@@ -17,7 +18,7 @@ import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
 const {
-  pass, mrt, output, vec2, vec4, vec3, mix, float, dot, renderOutput,
+  mrt, output, vec2, vec4, vec3, mix, float, dot, renderOutput,
   smoothstep, max, min, clamp, screenUV, select, pow, sqrt, screenSize, cameraProjectionMatrix, getViewPosition,
 } = T;
 
@@ -181,7 +182,8 @@ export class Post {
 
     this.pipeline = new THREE.RenderPipeline(renderer);
     // no MSAA: anti-aliasing is temporal (TRAA), which also cleans the occlusion's noise
-    const scenePass = pass(scene, camera, { samples: 0 });
+    // the opaque depth laid first, each material then runs once per covered pixel (render/depthPrepass.ts)
+    const scenePass = T.nodeObject(new PrepassPassNode(scene, camera, { samples: 0 })) as Node;
     this.scenePass = scenePass;
     this.owned.push(scenePass);
     // velocity blends by material: opaque overwrites, colorOnly's transparent leaves it

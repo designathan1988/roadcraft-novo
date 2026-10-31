@@ -14,6 +14,7 @@ import { T, lodFadeMask, useCompactVertex, withPrevious, type Node } from './tsl
 import { nightU } from './scene.ts';
 import { ARCHES, ARCH_COUNT, facadeWindowTable } from '../world/arch.ts';
 import { cutMask } from './inside.ts';
+import { layDepthFirst } from './depthPrepass.ts';
 import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
 import { FINISH_BY_MAT, FINISH_COUNT, FINISH_LOOKS, FINISH_SIZE } from '../jobs/buildingFinishes.ts';
 import { WIN_REVEAL_SHADE } from '../jobs/buildingGen.ts';
@@ -180,7 +181,8 @@ const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a
 export interface BuildingPlacement { place: (rest: Node) => Node; turn: (n: Node) => Node; surface: Node; prev: Node }
 
 export function createBuildingMaterial(moved?: BuildingPlacement): THREE.MeshStandardNodeMaterial {
-  const m = new THREE.MeshStandardNodeMaterial();
+  // its depth laid before the colour: its pixels are the frame's dearest (render/depthPrepass.ts)
+  const m = layDepthFirst(new THREE.MeshStandardNodeMaterial());
   const n = useCompactVertex(m, 'vBldNormal', moved?.place);
   // the level swap dither and the inside view cut
   bakeFinishesOnce();
