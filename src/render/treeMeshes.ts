@@ -51,15 +51,27 @@ const crownShade = (bottom: number, top: number, radius: number): Occlusion => (
   return (0.62 + 0.38 * h) * (0.85 + 0.15 * out);
 };
 
-interface LeafPoint { p: THREE.Vector3; n: THREE.Vector3; tone: Tone; height: number; size?: number }
-
-/** Flat triangles (each face its own normal and shade) and billboard cards, all in model units (scaled at the end). */
+/**
+ * Flat triangles (each face its own normal and shade) and billboard cards, all in model units (scaled at the end).
+ * The vertices go straight into flat arrays and the leaf points (where the cards hang) into typed columns: nothing is
+ * allocated per triangle or per point while a model is built.
+ */
 class Builder {
   private pos: number[] = []; private nrm: number[] = []; private col: number[] = []; private ext: number[] = [];
-  readonly leaves: LeafPoint[] = [];
+  /** The leaf points: position, normal (3 each), the tone, the height up the crown (0..1) and the card size factor. */
+  private leafP: number[] = []; private leafN: number[] = []; private leafTone: Tone[] = []; private leafH: number[] = []; private leafS: number[] = [];
   readonly rng: () => number;
-  private n = new THREE.Vector3(); private e = new THREE.Vector3(); private c = new THREE.Vector3();
+  private readonly a = new THREE.Vector3(); private readonly b = new THREE.Vector3(); private readonly c3 = new THREE.Vector3();
+  private readonly n = new THREE.Vector3(); private readonly e = new THREE.Vector3(); private readonly c = new THREE.Vector3();
   constructor(seed: number) { this.rng = stream(seed); }
+
+  /** How many leaf points there are (a model with none gets no cards). */
+  get leafCount(): number { return this.leafTone.length; }
+  /** A leaf point laid by hand: where a card may hang, its normal (unit), tone, height up the crown and card size factor. */
+  leaf(x: number, y: number, z: number, nx: number, ny: number, nz: number, tone: Tone, height: number, size = 1): void {
+    const l = Math.hypot(nx, ny, nz) || 1;
+    this.leafP.push(x, y, z); this.leafN.push(nx / l, ny / l, nz / l); this.leafTone.push(tone); this.leafH.push(height); this.leafS.push(size);
+  }
 
   private vert(x: number, y: number, z: number, nx: number, ny: number, nz: number, r: number, g: number, b: number, mat: number, u = 0, v = 0, cx = 0, cy = 0): void {
     this.pos.push(x, y, z); this.nrm.push(nx, ny, nz); this.col.push(r, g, b, mat / 255); this.ext.push(u, v, cx, cy);
@@ -72,24 +84,28 @@ class Builder {
     const k = Math.min(1, Math.max(0, 0.42 + 0.45 * this.n.y + (this.rng() - 0.5) * jitter));
     const l = occ(this.c);
     const r = (t.dark.r + (t.lit.r - t.dark.r) * k) * l, g = (t.dark.g + (t.lit.g - t.dark.g) * k) * l, bl = (t.dark.b + (t.lit.b - t.dark.b) * k) * l;
-    for (const p of [a, b, c]) this.vert(p.x, p.y, p.z, this.n.x, this.n.y, this.n.z, r, g, bl, mat);
+    this.vert(a.x, a.y, a.z, this.n.x, this.n.y, this.n.z, r, g, bl, mat);
+    this.vert(b.x, b.y, b.z, this.n.x, this.n.y, this.n.z, r, g, bl, mat);
+    this.vert(c.x, c.y, c.z, this.n.x, this.n.y, this.n.z, r, g, bl, mat);
   }
 
+  /** `geo`'s triangles placed by `m`, each shaded on its own; `geo` is used up. */
   add(geo: THREE.BufferGeometry, m: THREE.Matrix4, t: Tone | ToneAt, mat: number, occ: Occlusion = OPEN, jitter = 0.15): void {
-    const g = geo.index ? geo.toNonIndexed() : geo.clone();
+    const g = geo.index ? geo.toNonIndexed() : geo;
     g.applyMatrix4(m);
     const p = g.getAttribute('position');
     for (let i = 0; i + 2 < p.count; i += 3) {
-      this.tri(new THREE.Vector3().fromBufferAttribute(p, i), new THREE.Vector3().fromBufferAttribute(p, i + 1), new THREE.Vector3().fromBufferAttribute(p, i + 2), t, mat, occ, jitter);
+      this.tri(this.a.fromBufferAttribute(p, i), this.b.fromBufferAttribute(p, i + 1), this.c3.fromBufferAttribute(p, i + 2), t, mat, occ, jitter);
     }
-    g.dispose(); geo.dispose();
+    if (g !== geo) g.dispose();
+    geo.dispose();
   }
 
   /** A lumpy crown mass; its heart drawn shrunk and in shade, every third vertex a place for a card. */
   mass(at: THREE.Vector3, radius: number, squash: THREE.Vector3, t: Tone | ToneAt, seed: number, rough: number, occ: Occlusion, detail = 1, floor = -Infinity): void {
     const solid = new THREE.IcosahedronGeometry(1, detail);
     const position = solid.getAttribute('position');
-    const p = new THREE.Vector3();
+    const p = this.a, n = this.b;
     const top = radius * squash.y;
     for (let i = 0; i < position.count; i++) {
       p.fromBufferAttribute(position, i);
@@ -100,8 +116,11 @@ class Builder {
       if (p.y < floor) p.y = floor + (p.y - floor) * 0.2;
       position.setXYZ(i, p.x, p.y, p.z);
       if (i % 3 === 0) {
-        const n = p.clone().sub(at).normalize();
-        this.leaves.push({ p: p.clone(), n, tone: typeof t === 'function' ? t(p) : t, height: Math.min(1, Math.max(0, (p.y - (at.y - top)) / Math.max(1e-6, 2 * top))) });
+        n.subVectors(p, at).normalize();
+        this.leafP.push(p.x, p.y, p.z); this.leafN.push(n.x, n.y, n.z);
+        this.leafTone.push(typeof t === 'function' ? t(p) : t);
+        this.leafH.push(Math.min(1, Math.max(0, (p.y - (at.y - top)) / Math.max(1e-6, 2 * top))));
+        this.leafS.push(1);
       }
     }
     const shrink = new THREE.Matrix4().makeTranslation(at.x, at.y, at.z).multiply(new THREE.Matrix4().makeScale(HEART_SHRINK, HEART_SHRINK, HEART_SHRINK))
@@ -141,25 +160,32 @@ class Builder {
   finish(count: number, size: number, height: number): THREE.BufferGeometry {
     let top = 0, bottom = Infinity;
     for (let i = 1; i < this.pos.length; i += 3) { top = Math.max(top, this.pos[i]); bottom = Math.min(bottom, this.pos[i]); }
-    const placed: Array<{ leaf: LeafPoint; s: number; c: THREE.Vector3 }> = [];
-    for (let k = 0; k < (this.leaves.length ? count : 0); k++) {
-      const leaf = this.leaves[Math.floor(this.rng() * this.leaves.length)];
-      const s = size * (leaf.size ?? 1) * (0.75 + this.rng() * 0.5);
-      const c = leaf.p.clone().addScaledVector(leaf.n, s * (0.1 + this.rng() * 0.2));
-      top = Math.max(top, c.y + s * 0.45);
-      placed.push({ leaf, s, c });
+    // the cards: which leaf point, its size and its centre (pushed out along the point's normal), drawn once the
+    // model's scale is known (the top rises with the highest card)
+    const leaves = this.leafCount, cards = leaves ? count : 0;
+    const at = new Int32Array(cards), sz = new Float64Array(cards), cx = new Float64Array(cards * 3);
+    for (let k = 0; k < cards; k++) {
+      const i = Math.floor(this.rng() * leaves);
+      const s = size * this.leafS[i] * (0.75 + this.rng() * 0.5), out = s * (0.1 + this.rng() * 0.2);
+      at[k] = i; sz[k] = s;
+      cx[k * 3] = this.leafP[i * 3] + this.leafN[i * 3] * out;
+      cx[k * 3 + 1] = this.leafP[i * 3 + 1] + this.leafN[i * 3 + 1] * out;
+      cx[k * 3 + 2] = this.leafP[i * 3 + 2] + this.leafN[i * 3 + 2] * out;
+      top = Math.max(top, cx[k * 3 + 1] + s * 0.45);
     }
     const k = height / Math.max(1e-6, top - Math.min(0, bottom));
-    for (const { leaf, s, c } of placed) {
+    for (let q = 0; q < cards; q++) {
+      const i = at[q], s = sz[q];
       const roll = this.rng() * Math.PI * 2, cr = Math.cos(roll), sr = Math.sin(roll);
-      const k0 = Math.min(1, 0.45 + 0.55 * leaf.height) * (0.88 + this.rng() * 0.24);
-      const t = leaf.tone;
+      const k0 = Math.min(1, 0.45 + 0.55 * this.leafH[i]) * (0.88 + this.rng() * 0.24);
+      const t = this.leafTone[i];
       const r = t.dark.r + (t.lit.r - t.dark.r) * k0, g = t.dark.g + (t.lit.g - t.dark.g) * k0, b = t.dark.b + (t.lit.b - t.dark.b) * k0;
-      const nx = leaf.n.x, ny = leaf.n.y * 0.8 + 0.2, nz = leaf.n.z, nl = Math.hypot(nx, ny, nz) || 1;
-      const corner = (u: number, w: number) => {
+      const nx = this.leafN[i * 3], ny = this.leafN[i * 3 + 1] * 0.8 + 0.2, nz = this.leafN[i * 3 + 2], nl = Math.hypot(nx, ny, nz) || 1;
+      const x = cx[q * 3], y = cx[q * 3 + 1], z = cx[q * 3 + 2];
+      // the corners' offsets are in metres already (scaled by k); the centre is scaled below with everything else
+      const corner = (u: number, w: number): void => {
         const ou = (u - 0.5) * s * k, ow = (w - 0.5) * s * k;
-        // positions are scaled below with everything else: the card centre goes in model units
-        this.vert(c.x, c.y, c.z, nx / nl, ny / nl, nz / nl, r, g, b, TREE_MAT.LeafCard, u * 0.5, w, ou * cr - ow * sr, ou * sr + ow * cr);
+        this.vert(x, y, z, nx / nl, ny / nl, nz / nl, r, g, b, TREE_MAT.LeafCard, u * 0.5, w, ou * cr - ow * sr, ou * sr + ow * cr);
       };
       corner(0, 0); corner(1, 0); corner(1, 1);
       corner(0, 0); corner(1, 1); corner(0, 1);
@@ -230,7 +256,7 @@ export function cypressTree(lod: TreeLod, seed = 37): THREE.BufferGeometry {
     const y = base + 0.03 + t * height * 0.9;
     const r = (crown * (1 - t) + 0.02) * (0.55 + 0.45 * b.rng());
     const a = b.rng() * Math.PI * 2;
-    b.leaves.push({ p: new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r), n: new THREE.Vector3(Math.cos(a), 0.35, Math.sin(a)).normalize(), tone: NEEDLE, height: t, size: 1 - 0.6 * t });
+    b.leaf(Math.cos(a) * r, y, Math.sin(a) * r, Math.cos(a), 0.35, Math.sin(a), NEEDLE, t, 1 - 0.6 * t);
   }
   return b.finish(...cards(lod, 70, 0.3), 10);
 }
