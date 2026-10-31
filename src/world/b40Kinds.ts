@@ -52,6 +52,14 @@ export type B40Side = (typeof B40_SIDE)[keyof typeof B40_SIDE];
 export const B40_ROOF_DETAIL = { Solar: 0, Skylight: 1, Vent: 2, Chimney: 3, WaterTank: 4, Spire: 5, Lantern: 6 } as const;
 export type B40RoofDetail = (typeof B40_ROOF_DETAIL)[keyof typeof B40_ROOF_DETAIL];
 
+/** The floor line a volume draws, in the 4.0 DRESS_LINES order. */
+export const B40_LINES = { Every: 0, Base: 1, Slab: 2, None: 3 } as const;
+export type B40Lines = (typeof B40_LINES)[keyof typeof B40_LINES];
+
+/** The crown a volume draws, in the 4.0 DRESS_CROWNS order. */
+export const B40_CROWN = { Cornice: 0, Deco: 1, Slab: 2, Attic: 3, None: 4 } as const;
+export type B40Crown = (typeof B40_CROWN)[keyof typeof B40_CROWN];
+
 /** `FURNITURE_KINDS`, in the 4.0 order: the ids written into the interior table. */
 export const B40_FURNITURE = {
   Bed: 0, SingleBed: 1, Sofa: 2, Armchair: 3, Table: 4, Chair: 5, Desk: 6, OfficeChair: 7, Shelf: 8, Bookshelf: 9,
