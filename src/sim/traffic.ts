@@ -16,6 +16,7 @@ import { Router } from './routing.ts';
 import { FlowAdvisor } from './advisor.ts';
 import { MANOEUVRE_RADIUS, MKind, Manoeuvres } from './manoeuvres.ts';
 import { Signals } from './signals.ts';
+import { LightBoard } from './traffic/lightBoard.ts';
 import { stripAt } from './probe.ts';
 import { archOf, drawDriver } from './drivers.ts';
 import { BODY_HALF_W, CAR_STYLE_LEN, CROSSWALK, End, INSPECT_BAY, INSPECT_CHANGING, INSPECT_GATE, INSPECT_LEAVING, INSPECT_PASS, INSPECT_RED, INSPECT_STOP, KIND_LEN, LIGHT_BRAKE, LIGHT_LEFT, LIGHT_RIGHT, MAX_VEHICLES, ROUTE_CAP, WAGON_LEN, WAGONS, vehSchema, VehPhase } from './traffic/state.ts';
@@ -130,6 +131,8 @@ export class Traffic {
   private activeConns = new Set<number>();
   /** Traffic lights (plans, timed cycle, actuated near the camera). */
   readonly sig: Signals;
+  /** What the page draws of each light: traffic/lightBoard.ts. */
+  readonly lights: LightBoard;
   private readonly laneChanges: LaneChanges;
   /** Drop-offs at the kerb (sim/traffic/kerbStops.ts). */
   private readonly kerb: KerbStops;
@@ -285,7 +288,7 @@ export class Traffic {
     this.sig = new Signals(sim);
     this.sig.queue = (n, mask) => this.armsQueue(n, mask);
     this.sig.busNear = (n, mask) => this.busNearArms(n, mask);
-    sim.onNodeReset = (n) => { this.advisor.reset(n); };
+    sim.onNodeReset = (n) => { this.advisor.reset(n); this.lights.touch(n); };
     sim.onArmsRemapped = (n, old) => this.advisor.remap(n, old);
     this.veh.onGrow((cap) => {
       const r = new Int32Array(cap * ROUTE_CAP); r.set(this.routes); this.routes = r;
@@ -319,6 +322,12 @@ export class Traffic {
     };
     sim.net.nodes.onGrow(onNodes);
     const g = this;
+    this.lights = new LightBoard({
+      sim, sig: this.sig,
+      get signals() { return g.signals; },
+      get windowSignals() { return g.windowSignals; },
+      dropLight: (n) => { g.signalNodes.delete(n); g.windowSignals.delete(n); g.sig.setActive(n, false); },
+    });
     // the transitions between lanes and connections, for every module
     const moves = {
       moveToLane: (v: number, from: number, to: number) => g.moveToLane(v, from, to), enterConn: (v: number, conn: number) => g.enterConn(v, conn),
@@ -1131,21 +1140,8 @@ export class Traffic {
 
   evacuateConn(conn: number): void { this.junctions.evacuateConn(conn); }
 
-  private updateSignals(dt: number): void {
-    const sim = this.sim;
-    this.sig.step(dt);
-    for (const n of this.signalNodes) {
-      if (!sim.net.nodes.alive[n] || sim.nodePhases[n] === 0) { this.signalNodes.delete(n); this.windowSignals.delete(n); this.sig.setActive(n, false); if (this.signals && n < this.signals.length) this.signals[n] = 0; continue; }
-      if (this.signals && n < this.signals.length) this.signals[n] = this.lightState(n);
-    }
-  }
-
-  /** A light's state as written for the drawing: 128 | amber << 6 | arms with green or amber (0: no light). */
-  lightState(n: number): number {
-    if (this.sim.nodePhases[n] === 0) return 0;
-    const st = this.sig.state(n), mask = (st & 3) < 2 ? this.sig.arms[n * 8 + (st >> 2)] : 0;
-    return 128 | ((st & 3) === 1 ? 64 : 0) | (mask & 63);
-  }
+  /** A light's state as written for the drawing (traffic/lightBoard.ts). */
+  lightState(n: number): number { return this.lights.state(n); }
 
   /** Vehicles waiting near the line on the arms of node `n` in `mask`. */
   private armsQueue(n: number, mask: number): number {
@@ -1193,6 +1189,7 @@ export class Traffic {
     this.junctions.resettleBox();
     for (const n of nodes) {
       this.sig.rebuild(n);
+      this.lights.touch(n);
       if (!this.sim.net.nodes.alive[n] || this.sim.nodePhases[n] === 0) {
         this.signalNodes.delete(n);
         if (this.windowSignals.delete(n) && this.signals && n < this.signals.length) this.signals[n] = 0;
@@ -1309,8 +1306,8 @@ export class Traffic {
     sim.net.nodeIndex.query(this.camX - r, this.camZ - r, this.camX + r, this.camZ + r, (n) => {
       if (sim.nodePhases[n] > 0 && this.signalNodes.has(n)) this.windowSignals.add(n);
     });
-    // those that left the window go back to their timed cycle; the drawing keeps the real state (updateSignals writes every signalled node)
-    for (const n of old) if (!this.windowSignals.has(n)) this.sig.setActive(n, false);
+    // those that left the window go back to their timed cycle; the light board writes them from it again
+    for (const n of old) if (!this.windowSignals.has(n)) { this.sig.setActive(n, false); this.lights.touch(n); }
     for (const n of this.windowSignals) this.sig.setActive(n, true);
     for (let i = this.microN - 1; i >= 0; i--) {
       const v = this.micro[i];
@@ -1393,7 +1390,7 @@ export class Traffic {
     }
     this.fleetFloor = Math.min(this.veh.size, target);
     this.buses.tick(dt);
-    this.updateSignals(dt);
+    this.sig.step(dt); this.lights.step();
     this.junctions.updateCrossings();
     this.meso.process();
     this.mvs.beginStep();

@@ -169,6 +169,16 @@ export class Signals {
   }
 
   /**
+   * When the timed cycle of node n next changes sub-phase after `t` (what the drawing shows changes only then); Infinity
+   * for no cycle, or a light run actuated near the camera (its state follows the queues, read every step).
+   */
+  nextChange(n: number, t: number): number {
+    if (this.on[n] || !(this.cycle[n] > 0)) return Infinity;
+    const st = this.timed(n, t), o = n * 8 + (st >> 2), sub = st & 3;
+    return t - this.timedIn + (sub === Sub.Green ? this.green[o] : sub === Sub.Amber ? this.amber[o] : SIGNAL.allRed);
+  }
+
+  /**
    * Earliest time from `t` on when vehicles on arm `arm` have green: exact for a timed light; an actuated one is asked
    * again a second later. `t` itself when green now (or no light).
    */
