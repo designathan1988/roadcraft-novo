@@ -29,6 +29,8 @@ export interface RoofSite {
   readonly x0: number; readonly z0: number; readonly x1: number; readonly z1: number;
   /** How old it looks, 0 new to 1 old. */
   readonly age: number;
+  /** A lift core drawn by the building itself: no machine room to add. */
+  readonly hasCore?: boolean;
   /** Rectangles taken already (a block standing on the roof). */
   readonly blocked?: readonly { readonly x0: number; readonly z0: number; readonly x1: number; readonly z1: number }[];
 }
@@ -46,7 +48,7 @@ const USE = (s: RoofSite, r: number, c: number, i: number): number => (s.use ===
 
 /** 4.0 CATALOGUE (roofPlant.ts:58-74). */
 const CATALOGUE: readonly Kind[] = [
-  { kind: 'liftRoom', w: 2.6, d: 2.6, h: 2.5, most: 1, chance: (s) => (s.storeys >= 4 ? 1 : 0) },
+  { kind: 'liftRoom', w: 2.6, d: 2.6, h: 2.5, most: 1, chance: (s) => (s.storeys >= 4 && !s.hasCore ? 1 : 0) },
   { kind: 'tankBox', w: 3.2, d: 2.4, h: 2.2, most: 1, chance: (s) => (s.storeys >= 6 ? USE(s, 0.7, 0.5, 0.2) : 0) },
   { kind: 'tank', w: 1.9, d: 1.9, h: 1.5, most: 2, chance: (s) => (s.storeys < 6 ? USE(s, 0.75, 0.55, 0.35) : USE(s, 0.25, 0.2, 0.2)) },
   { kind: 'hatch', w: 0.9, d: 0.9, h: 0.45, most: 1, chance: () => 0.9 },
