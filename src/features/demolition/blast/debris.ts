@@ -98,6 +98,7 @@ export class Debris {
       if (m === material) mesh.setColorAt(0, this.c.set(1, 1, 1));
       this.meshes.push(mesh);
       this.counts.push(0);
+      this.cap.push(cap); this.live.push(0);
       this.group.add(mesh);
     }
   }
@@ -109,10 +110,18 @@ export class Debris {
     return false;
   }
 
+  /** Each shape's batch capacity and how many pieces of it are simulated: never more than are drawn (D42). */
+  private cap: number[] = [];
+  private live: number[] = [];
+
   add(s: PieceSpec): void {
-    let i = this.n;
-    if (i >= MAX_PIECES) i = this.victim();
+    let i = this.n, reused = false;
+    // a full batch of this shape gives up its oldest resting piece; else the pool's oldest when the pool is full
+    if (this.live[s.shape] >= this.cap[s.shape]) { i = this.victim(s.shape); reused = true; }
+    else if (i >= MAX_PIECES) { i = this.victim(-1); reused = true; }
     else this.n++;
+    if (reused) this.live[this.shape[i]]--;
+    this.live[s.shape]++;
     this.shape[i] = s.shape;
     this.px[i] = s.x; this.py[i] = s.y; this.pz[i] = s.z;
     this.vx[i] = s.vx; this.vy[i] = s.vy; this.vz[i] = s.vz;
@@ -137,10 +146,11 @@ export class Debris {
     this.dirty = true;
   }
 
-  /** The slot to reuse when full: the oldest piece at rest that is not burning nor laid still, else the oldest. */
-  private victim(): number {
+  /** The slot to reuse when full: the oldest piece at rest that is not burning nor laid still, else the oldest; of one `shape`, or of any (-1). */
+  private victim(shape: number): number {
     let best = -1, bestOrder = Infinity, any = 0, anyOrder = Infinity;
     for (let i = 0; i < this.n; i++) {
+      if (shape >= 0 && this.shape[i] !== shape) continue;
       const o = this.order[i];
       if (o < anyOrder) { anyOrder = o; any = i; }
       if (o < bestOrder && (this.flags[i] & (ASLEEP | STILL)) === ASLEEP && this.burn[i] <= 0) { bestOrder = o; best = i; }
@@ -157,6 +167,7 @@ export class Debris {
 
   clear(): void {
     this.n = 0;
+    this.live.fill(0);
     this.dirty = true;
   }
 
