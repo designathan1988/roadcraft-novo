@@ -2,19 +2,10 @@
 // rough}.ktx2: 13 layers of 512², rgba8, zstd), decoded in a worker and packed into the two arrays the building
 // material samples: colour (rgb, sRGB) + roughness, and normal (rgb) + metalness. No three here: workers only.
 
-/** Finish ids as the vertex carries them (high nibble of the material byte). 0 = by material (see FINISH_BY_MAT). */
-export const FIN = {
-  Auto: 0, Plaster: 1, Ceramic: 2, Brick: 3, Stone: 4, Concrete: 5, Wood: 6, Metal: 7, Glass: 8, Tile: 9, Roofing: 10,
-  Stucco: 11, Panel: 12, Slate: 13,
-} as const;
-export const FINISH_COUNT = 13;
+import { COOKED_FINISHES, FIN, FINISH_COUNT, FINISH_KEYS } from '../shared/finishes.ts';
+export { COOKED_FINISHES, FIN, FINISH_COUNT, FINISH_KEYS };
 /** Texels per layer side (the cooked files' size). */
 export const FINISH_SIZE = 512;
-
-/** Finish names for the creator (index = id − 1). */
-export const FINISH_KEYS = ['plaster', 'ceramic', 'brick', 'stone', 'concrete', 'wood', 'metal', 'glass', 'tile', 'roofing', 'stucco', 'panel', 'slate'] as const;
-/** The layers of the cooked files: Roadcraft 4.0 `FINISHES` order. */
-export const COOKED_FINISHES = ['plaster', 'stucco', 'ceramic', 'brick', 'stone', 'concrete', 'wood', 'metal', 'glass', 'tile', 'slate', 'panel', 'roofing'] as const;
 
 export interface FinishLook {
   /** Metres one repeat of the finish covers. */
