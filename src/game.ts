@@ -38,7 +38,7 @@ import type { Design } from './world/design.ts';
 import { nightU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
 import { PROFILES, customProfiles, onProfileAdded } from './roads/profiles.ts';
-import { arrowCode } from './roads/laneLinks.ts';
+import { LaneArrows } from './features/roads/laneArrows.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
 import { BOMB_START } from './shared/contracts/bomb.ts';
@@ -87,7 +87,7 @@ import { clickTool, type ClickHost } from './app/clicks.ts';
 import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
 import { LotEditing } from './app/lotEditing.ts';
 import { Gesture, bindInput, type InputControl } from './app/input.ts';
-import type { NodeId, SegId } from './core/ids.ts';
+import type { SegId } from './core/ids.ts';
 import { signTextCommand } from './features/streetscape/signText.ts';
 import { SimLink } from './app/simLink.ts';
 
@@ -162,7 +162,8 @@ export class Game {
   /** The page's link to the simulation worker (app/simLink.ts). */
   private simLink!: SimLink;
   /** Nodes whose hand-adjusted arrows need to be recomputed. */
-  private arrowNodes = new Set<NodeId>();
+  /** The arrows of hand-adjusted lane connections (features/roads/laneArrows.ts). */
+  private laneArrows!: LaneArrows;
   /** Doors sent to the simulation: when, and from where (the camera moving or the city growing sends them again). */
   private canvas: HTMLCanvasElement;
 
@@ -340,15 +341,9 @@ export class Game {
       demandChoice: () => this.prefs?.now, hasLines: () => this.transit.lines.length > 0,
     }, this.sim);
     this.world.roads.listeners.push((op) => this.simLink.queue(op));
-    // hand-adjusted arrows: nodes to redo when the control or the segments change
-    this.world.roads.listeners.push((op) => {
-      const arr = this.trafficLook.arrows.image.data as Float32Array;
-      if (op.t === 'junction') this.arrowNodes.add(op.id);
-      else if (op.t === 'addNode' && op.rec.j) this.arrowNodes.add(op.rec.id);
-      else if (op.t === 'addSeg') { this.arrowNodes.add(op.rec.a); this.arrowNodes.add(op.rec.b); }
-      else if (op.t === 'remSeg') { if (op.id * 2 + 1 < arr.length && (arr[op.id * 2] || arr[op.id * 2 + 1])) { arr[op.id * 2] = arr[op.id * 2 + 1] = 0; this.trafficLook.arrows.needsUpdate = true; } }
-      else if (op.t === 'clear') { arr.fill(0); this.trafficLook.arrows.needsUpdate = true; }
-    });
+    // hand-adjusted arrows: nodes to redo when the control or the segments change (features/roads/laneArrows.ts)
+    this.laneArrows = new LaneArrows(this.world.roads, this.trafficLook.arrows);
+    this.world.roads.listeners.push((op) => this.laneArrows.note(op));
 
     const ge = this;
     this.editing = new LotEditing({
@@ -829,7 +824,7 @@ export class Game {
     pr?.lap(PART.layersDirty, performance.now());
     // (the terrain's dirty cells are read by the seam layer, render/terrainSeams.ts)
     this.processRoadPaint();
-    if (this.arrowNodes.size) this.updateArrows();
+    this.laneArrows.update();
     const T1 = pf ? performance.now() : 0;
     pr?.lap(PART.roadPaint, T1);
     if (!this.cities.terrainUnderway) this.growth.processDirty();
@@ -948,24 +943,6 @@ export class Game {
     this.simLink.sync(now);
     this.trafficLook.center.value.set(this.rig.target.x, this.rig.target.z);
     if (now - this.occSent > 500) { this.occSent = now; this.trafficLook.occupancy.needsUpdate = true; }
-  }
-
-  /** Arrows at segment ends on nodes with adjusted lane connections (only the nodes that changed). */
-  private updateArrows(): void {
-    const net = this.world.roads, sc = net.segs.cols, arr = this.trafficLook.arrows.image.data as Float32Array;
-    let changed = false;
-    for (const n of this.arrowNodes) {
-      if (!net.nodes.alive[n]) continue;
-      const spec = net.junctions.get(n);
-      for (const s of net.segsOf(n, [])) {
-        const k = s * 2 + (sc.a[s] === n ? 0 : 1);
-        if (k >= arr.length) continue;
-        const code = spec?.lanes?.length ? arrowCode(net, n, s) : 0;
-        if (arr[k] !== code) { arr[k] = code; changed = true; }
-      }
-    }
-    this.arrowNodes.clear();
-    if (changed) this.trafficLook.arrows.needsUpdate = true;
   }
 
   /** Repaints, in the worker, the tiles whose roads changed. */
