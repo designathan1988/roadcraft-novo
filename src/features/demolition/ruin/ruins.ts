@@ -163,6 +163,8 @@ export class Ruins {
     const w = this.host.world, col = w.buildings.cols;
     if (!data || !w.buildings.alive[r.id] || data.fragmentCount > SLOT) {
       if (msg.error) console.error(`[ruin] building ${r.id}: ${msg.error}`);
+      // never silent: a ruin over the slot was dropped with no record (D28; the worker now cuts coarser to fit)
+      if (data && data.fragmentCount > SLOT) console.error(`[ruin] building ${r.id}: ${data.fragmentCount} fragments > ${SLOT}, the ruin is dropped`);
       this.ruins[k] = emptyRuin();
       return;
     }

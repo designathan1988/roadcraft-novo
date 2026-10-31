@@ -53,6 +53,8 @@ const FRAGMENT = 2.8;
 const WALL = 0.28;
 /** Fragments a building is cut into at most: a larger building gets larger fragments (4.0 cut every building at 2.8 m). */
 const MOST_FRAGMENTS = 480;
+/** Fragments a ruin may hold (its slot in the ruins' tables: ruinMesh.ts MAX_FRAGMENTS / MAX_RUINS). */
+export const FRAGMENT_LIMIT = 512;
 /** The grey of broken masonry on the cut faces (4.0 BROKEN 0.46, 0.44, 0.41 linear) as sRGB bytes, in the concrete finish. */
 const BROKEN_RGB = (179 << 16) | (176 << 8) | 171;
 const BROKEN_MAT = 4 | (FIN.Concrete << 4);
@@ -122,65 +124,76 @@ function trianglesOf(mb: MeshBuilder): { tris: Tri[]; area: number } {
 export function fractureBuilding(mb: MeshBuilder, seed: number, tag: number, attached: Attached): RuinData | null {
   const { tris: whole, area } = trianglesOf(mb);
   if (!whole.length) return null;
+  /** The Voronoi cut at one cell `size`: the triangles split to the cells and grouped by cell; `cellOf` for later. */
+  const cut = (size: number) => {
+    const maxEdge = size / 2;
+    // ---- Voronoi cells: a jittered grid of seeds (4.0's), keyed by integer
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    for (const t of whole) for (let q = 0; q < 3; q++) {
+      minX = Math.min(minX, t.v[q * STRIDE]); minY = Math.min(minY, t.v[q * STRIDE + 1]); minZ = Math.min(minZ, t.v[q * STRIDE + 2]);
+    }
+    minX -= size; minY -= size; minZ -= size;
+    let s = seed >>> 0 || 1;
+    const rand = () => { s = (Math.imul(s ^ (s >>> 15), 0x2c1b3c6d) + 0x9e3779b9) >>> 0; return s / 4_294_967_296; };
+    const key = (i: number, j: number, k: number) => ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512);
+    const seeds = new Map<number, Float64Array>();
+    const seedOf = (i: number, j: number, k: number): Float64Array => {
+      const kk = key(i, j, k);
+      let p = seeds.get(kk);
+      if (!p) {
+        p = Float64Array.of(minX + (i + 0.15 + rand() * 0.7) * size, minY + (j + 0.15 + rand() * 0.7) * size, minZ + (k + 0.15 + rand() * 0.7) * size);
+        seeds.set(kk, p);
+      }
+      return p;
+    };
+    const cellOf = (x: number, y: number, z: number): number => {
+      const i0 = Math.floor((x - minX) / size), j0 = Math.floor((y - minY) / size), k0 = Math.floor((z - minZ) / size);
+      let best = 0, bd = Infinity;
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (let dk = -1; dk <= 1; dk++) {
+        const p = seedOf(i0 + di, j0 + dj, k0 + dk);
+        const d = (p[0] - x) ** 2 + (p[1] - y) ** 2 + (p[2] - z) ** 2;
+        if (d < bd) { bd = d; best = key(i0 + di, j0 + dj, k0 + dk); }
+      }
+      return best;
+    };
+    const oneCell = (t: Float64Array): boolean => {
+      const c = cellOf((t[0] + t[STRIDE] + t[2 * STRIDE]) / 3, (t[1] + t[STRIDE + 1] + t[2 * STRIDE + 1]) / 3, (t[2] + t[STRIDE + 2] + t[2 * STRIDE + 2]) / 3);
+      for (let q = 0; q < 3; q++) if (cellOf(t[q * STRIDE], t[q * STRIDE + 1], t[q * STRIDE + 2]) !== c) return false;
+      return true;
+    };
+    const tris: Tri[] = [];
+    const split: Float64Array[] = [];
+    for (const t of whole) {
+      if (!t.solid) { tris.push(t); continue; }
+      split.length = 0;
+      subdivide(t.v, maxEdge, split, oneCell);
+      for (const v of split) tris.push({ ...t, v });
+    }
+    // a part goes whole to the cell of its first triangle's centre
+    const groupCell = new Map<number, number>();
+    const cells = new Map<number, Tri[]>();
+    for (const t of tris) {
+      const cx = (t.v[0] + t.v[STRIDE] + t.v[2 * STRIDE]) / 3, cy = (t.v[1] + t.v[STRIDE + 1] + t.v[2 * STRIDE + 1]) / 3, cz = (t.v[2] + t.v[STRIDE + 2] + t.v[2 * STRIDE + 2]) / 3;
+      let cell: number;
+      if (t.group >= 0) {
+        cell = groupCell.get(t.group) ?? cellOf(cx, cy, cz);
+        groupCell.set(t.group, cell);
+      } else cell = cellOf(cx, cy, cz);
+      const list = cells.get(cell);
+      if (list) list.push(t); else cells.set(cell, [t]);
+    }
+    return { cells, cellOf };
+  };
   // the cut's size: 4.0's 2.8 m fragments, larger for a building that would make more than MOST_FRAGMENTS of them
-  // (fragments cover the surface: about area / size² of them), and triangles split to half a fragment
-  const size = Math.max(FRAGMENT, Math.sqrt(area / MOST_FRAGMENTS));
-  const maxEdge = size / 2;
-  // ---- Voronoi cells: a jittered grid of seeds (4.0's), keyed by integer
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  for (const t of whole) for (let q = 0; q < 3; q++) {
-    minX = Math.min(minX, t.v[q * STRIDE]); minY = Math.min(minY, t.v[q * STRIDE + 1]); minZ = Math.min(minZ, t.v[q * STRIDE + 2]);
+  // (fragments cover the surface: about area / size² of them). That is an estimate: the real count is the occupied
+  // cells, and a ruin past FRAGMENT_LIMIT was dropped unseen (D28); the cut is redone coarser until it fits
+  let size = Math.max(FRAGMENT, Math.sqrt(area / MOST_FRAGMENTS));
+  let made = cut(size);
+  for (let tries = 0; made.cells.size > FRAGMENT_LIMIT && tries < 8; tries++) {
+    size *= Math.sqrt(made.cells.size / FRAGMENT_LIMIT) * 1.05;
+    made = cut(size);
   }
-  minX -= size; minY -= size; minZ -= size;
-  let s = seed >>> 0 || 1;
-  const rand = () => { s = (Math.imul(s ^ (s >>> 15), 0x2c1b3c6d) + 0x9e3779b9) >>> 0; return s / 4_294_967_296; };
-  const key = (i: number, j: number, k: number) => ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512);
-  const seeds = new Map<number, Float64Array>();
-  const seedOf = (i: number, j: number, k: number): Float64Array => {
-    const kk = key(i, j, k);
-    let p = seeds.get(kk);
-    if (!p) {
-      p = Float64Array.of(minX + (i + 0.15 + rand() * 0.7) * size, minY + (j + 0.15 + rand() * 0.7) * size, minZ + (k + 0.15 + rand() * 0.7) * size);
-      seeds.set(kk, p);
-    }
-    return p;
-  };
-  const cellOf = (x: number, y: number, z: number): number => {
-    const i0 = Math.floor((x - minX) / size), j0 = Math.floor((y - minY) / size), k0 = Math.floor((z - minZ) / size);
-    let best = 0, bd = Infinity;
-    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (let dk = -1; dk <= 1; dk++) {
-      const p = seedOf(i0 + di, j0 + dj, k0 + dk);
-      const d = (p[0] - x) ** 2 + (p[1] - y) ** 2 + (p[2] - z) ** 2;
-      if (d < bd) { bd = d; best = key(i0 + di, j0 + dj, k0 + dk); }
-    }
-    return best;
-  };
-  const oneCell = (t: Float64Array): boolean => {
-    const c = cellOf((t[0] + t[STRIDE] + t[2 * STRIDE]) / 3, (t[1] + t[STRIDE + 1] + t[2 * STRIDE + 1]) / 3, (t[2] + t[STRIDE + 2] + t[2 * STRIDE + 2]) / 3);
-    for (let q = 0; q < 3; q++) if (cellOf(t[q * STRIDE], t[q * STRIDE + 1], t[q * STRIDE + 2]) !== c) return false;
-    return true;
-  };
-  const tris: Tri[] = [];
-  const split: Float64Array[] = [];
-  for (const t of whole) {
-    if (!t.solid) { tris.push(t); continue; }
-    split.length = 0;
-    subdivide(t.v, maxEdge, split, oneCell);
-    for (const v of split) tris.push({ ...t, v });
-  }
-  // a part goes whole to the cell of its first triangle's centre
-  const groupCell = new Map<number, number>();
-  const cells = new Map<number, Tri[]>();
-  for (const t of tris) {
-    const cx = (t.v[0] + t.v[STRIDE] + t.v[2 * STRIDE]) / 3, cy = (t.v[1] + t.v[STRIDE + 1] + t.v[2 * STRIDE + 1]) / 3, cz = (t.v[2] + t.v[STRIDE + 2] + t.v[2 * STRIDE + 2]) / 3;
-    let cell: number;
-    if (t.group >= 0) {
-      cell = groupCell.get(t.group) ?? cellOf(cx, cy, cz);
-      groupCell.set(t.group, cell);
-    } else cell = cellOf(cx, cy, cz);
-    const list = cells.get(cell);
-    if (list) list.push(t); else cells.set(cell, [t]);
-  }
+  const { cells, cellOf } = made;
   // ---- each cell to a solid fragment: its faces, their back in broken concrete, a side along every cut edge
   const out = new Writer(tag / 32767);
   const fragOfCell = new Map<number, number>();
