@@ -6,7 +6,7 @@ import { HEIGHT_TILE_RES, MAP_HALF } from '../src/config.ts';
 import { NO_WATER, WATER_SPACING, waterCoord, waterIndex } from '../src/world/ground.ts';
 import { waterLevelAt, courseZ } from '../src/jobs/terrainGen.ts';
 import { World } from '../src/world/world.ts';
-import { BrushStroke } from '../src/world/brush.ts';
+import { BrushStroke, FlattenMap } from '../src/world/brush.ts';
 import { CommandStack } from '../src/core/commands.ts';
 import { heightAt, heightIndex } from '../src/world/heights.ts';
 import { generateTerrainTile } from '../src/jobs/terrainGen.ts';
@@ -160,4 +160,16 @@ test('rio: água desce sempre, leito abaixo da água, desfazer volta tudo', asyn
   assert.notDeepEqual(w.ground32, g0);
   s.invert();
   assert.deepEqual(w.ground32, g0);
+});
+
+test('D25: flattening the map above a lake dries it, and undo brings the water back', () => {
+  const w = new World();
+  w.heights.fill(0); w.tileMin.fill(0); w.tileMax.fill(0);
+  const wet: number[] = [];
+  for (let gz = 100; gz < 110; gz++) for (let gx = 100; gx < 110; gx++) { const i = waterIndex(gx, gz); w.water[i] = 2; wet.push(i); }
+  const cmd = new FlattenMap(w, 20);
+  cmd.apply();
+  for (const i of wet) assert.equal(w.water[i], NO_WATER, 'water left over the raised land');
+  cmd.invert();
+  for (const i of wet) assert.equal(w.water[i], 2);
 });

@@ -50,7 +50,10 @@ export class FlattenMap implements Command {
   readonly label = 'aplainar mapa';
   private world: World;
   private old: Uint16Array;
-  get bytes(): number { return this.old.byteLength; }
+  /** The water samples the new level dries (as BrushStroke's syncWater: ground above level - 0.5) and their levels. */
+  private dried: Int32Array;
+  private driedLevel: Float32Array;
+  get bytes(): number { return this.old.byteLength + this.dried.byteLength + this.driedLevel.byteLength; }
   private y: number;
   constructor(world: World, y: number) {
     this.world = world;
@@ -58,6 +61,21 @@ export class FlattenMap implements Command {
     const h = world.heights, span = TERRAIN_MAX_Y - TERRAIN_MIN_Y;
     this.old = new Uint16Array(h.length);
     for (let i = 0; i < h.length; i++) this.old[i] = Math.round((h[i] - TERRAIN_MIN_Y) / span * 65535);
+    // the lakes and rivers the flat land would rise through (D25: the water plane stayed over the new ground)
+    const water = world.water, idx: number[] = [], lvl: number[] = [];
+    for (let i = 0; i < water.length; i++) if (water[i] !== NO_WATER && y > water[i] - 0.5) { idx.push(i); lvl.push(water[i]); }
+    this.dried = Int32Array.from(idx);
+    this.driedLevel = Float32Array.from(lvl);
+  }
+  /** Each dried sample's water: none (`dry`) or its level back. */
+  private setDried(dry: boolean): void {
+    const w = this.world, shift = 2 * Math.log2(WATER_TILE_RES);
+    for (let k = 0; k < this.dried.length; k++) {
+      const i = this.dried[k], tile = i >> shift;
+      w.water[i] = dry ? NO_WATER : this.driedLevel[k];
+      w.waterDirty.add(tile);
+      if (!dry) w.tileWater[tile] = 1;
+    }
   }
   private touchAll(): void {
     const w = this.world;
@@ -67,12 +85,14 @@ export class FlattenMap implements Command {
   apply(): void {
     this.world.heights.fill(this.y);
     this.world.tileMin.fill(this.y); this.world.tileMax.fill(this.y);
+    this.setDried(true);
     this.touchAll();
   }
   invert(): void {
     const h = this.world.heights, span = TERRAIN_MAX_Y - TERRAIN_MIN_Y, w = this.world;
     w.tileMin.fill(Infinity); w.tileMax.fill(-Infinity);
     for (let i = 0; i < h.length; i++) { h[i] = TERRAIN_MIN_Y + this.old[i] / 65535 * span; extendBounds(w, i, h[i]); }
+    this.setDried(false);
     this.touchAll();
   }
 }
