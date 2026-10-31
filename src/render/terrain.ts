@@ -300,7 +300,7 @@ export class TerrainRenderer {
    * rock = smoothstep(30°, 56°) or the altitude (168-232 m); dirt = smoothstep(27°, 42°) under the rock; talus where the
    * rock weight is between 0.06 and 0.92.
    */
-  private groundBlend(vNormal: N): { rockW: N; dirtW: N; talus: N; wanderA: N; wanderC: N } {
+  private groundBlend(vNormal: N): { rockW: N; dirtW: N; talus: N; wanderA: N; wanderC: N; deg: N } {
     const p = positionWorld;
     const n = normalize(vNormal);
     // 4.0 terrainSlope (terrain.ts:720-723): the vertex normal's slope, taken over by the corners' (landSlope.ts) where
@@ -320,7 +320,7 @@ export class TerrainRenderer {
     const sw = deg.add(wander);
     const dirtW = smoothstep(27, 42, sw).mul(float(1).sub(rockW)).mul(float(1).sub(smoothstep(36, 48, sw).mul(0.6)));
     const talus = smoothstep(0.06, 0.4, rockW).mul(float(1).sub(smoothstep(0.5, 0.92, rockW)));
-    return { rockW, dirtW, talus, wanderA, wanderC };
+    return { rockW, dirtW, talus, wanderA, wanderC, deg };
   }
 
   /** The painted geology's weights at `p` (granite, sandstone, basalt), bilinear over the 8 m samples (4.0 terrainGeo). */
@@ -617,8 +617,9 @@ export class TerrainRenderer {
         const cover = max(riverCover, bySea);
         const above = p.y.sub(lvl);
         const wander = texture(TERRAIN_NOISE, p.xz.div(37 * 8)).g;
-        const slopeDeg = T.acos(clamp(n.y, 0, 1)).mul(57.29578);
-        const gentle = float(1).sub(smoothstep(24, 40, slopeDeg));
+        // the same slope as the ground's blend (the corners' where steep): the vertex normal alone, coarser with the
+        // level, turned a far bank from beach to cut earth: a red ring round a distant pond that the near view had not
+        const gentle = float(1).sub(smoothstep(24, 40, blend.deg));
         const shoreFade = smoothstep(0.15, 0.85, cover.add(wander.sub(0.5).mul(0.3)));
         const sandLuma = dot(dirtC, vec3(0.3, 0.6, 0.1));
         const sand = vec3(0.42, 0.36, 0.23).mul(sandLuma.mul(1.4).add(0.82));
