@@ -590,7 +590,7 @@ function elementRows(h: DrawerHost, p: DrawerParts): void {
 }
 
 // ------------------------------------------------------------------ transit
-const RAIL = { trainTrack: 'Ferrovia dupla', metroTrack: 'Metrô (duplo)' } as const; // not for the player: profile names are ids
+const RAIL = { trainTrack: 'profile.doubleRailway', metroTrack: 'profile.metroDouble' } as const; // not for the player: profile names are ids
 
 /** A line's mode, stops and passengers an hour, as its row shows them. */
 export function lineInfo(l: LineRow): string {

@@ -108,8 +108,8 @@ export function registerVariant(id: number, o: RoadOptions): number {
 /** Roadcraft 4.0's road classes (world/roadTypes.ts:99-209: local, urban, avenue, boulevard, highway, ramp) as this
  *  engine's roads, with their names' keys: the cards of the Upgrade tool (ui/v2/shell.ts:1308-1314). */
 export const ROAD_CLASSES: ReadonlyArray<readonly [string, string]> = [
-  ['Rua local', 'road.local'], ['Rua urbana', 'road.urban'], ['Avenida', 'road.avenue'], ['Bulevar', 'road.boulevard'],
-  ['Rodovia 6 faixas', 'road.highway'], ['Alça de acesso', 'road.ramp'],
+  ['profile.localStreet', 'road.local'], ['profile.urbanStreet', 'road.urban'], ['profile.avenue', 'road.avenue'], ['profile.boulevard', 'road.boulevard'],
+  ['profile.highway6Lanes', 'road.highway'], ['profile.ramp', 'road.ramp'],
 ];
 
 /** The class cards' profiles: [id, name key] for those this engine has. */

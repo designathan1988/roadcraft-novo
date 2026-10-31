@@ -304,9 +304,9 @@ function buildGraph(polys: Poly[], centers: Center[], H: (x: number, z: number) 
   // catalogue variety by district (broad noise: a whole street stays the same)
   const P = (name: string) => { const i = PROFILES.findIndex((p) => p.name === name); return i < 0 ? 0 : i; };
   const V = {
-    wide: P('Calçadas largas'), park: 1, urban: P('Rua urbana'), cobble: P('Rua de paralelepípedo'), green: P('Rua com canteiro central'),
-    concrete: P('Estrada de concreto'), bike: P('Rua com ciclofaixa'), busSide: P('Faixa de ônibus lateral'), boulevard: P('Bulevar'),
-    av4: P('Avenida 4 faixas'),
+    wide: P('profile.wideSidewalks'), park: 1, urban: P('profile.urbanStreet'), cobble: P('profile.cobblestoneStreet'), green: P('profile.streetWithMedian'),
+    concrete: P('profile.concreteRoad'), bike: P('profile.streetWithBikeLane'), busSide: P('profile.curbsideBusLane'), boulevard: P('profile.boulevard'),
+    av4: P('profile.avenue4Lanes'),
   };
   const variant = (profile: number, zone: number, d: number, x: number, z: number): number => {
     const n = fbm(x / 650, z / 650, seed + 313, 2), m = fbm(x / 1400, z / 1400, seed + 919, 2);

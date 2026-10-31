@@ -217,7 +217,7 @@ export function bendRoad(world: World, s: SegId, t: number, h: number): RoadJour
 }
 
 /** Roadcraft 4.0's upgrade ladder (world/roadTypes.ts:232-233: local, urban, avenue, boulevard), by our profiles' names. */
-const UPGRADE_LADDER = ['Rua local', 'Rua urbana', 'Avenida', 'Bulevar'];
+const UPGRADE_LADDER = ['profile.localStreet', 'profile.urbanStreet', 'profile.avenue', 'profile.boulevard'];
 
 /**
  * The class one step up the ladder from `profile` (by its priority: a street with parking is on the urban rung),

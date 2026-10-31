@@ -61,7 +61,7 @@ test('cor e circular da linha são comandos com desfazer; salvamento leva o circ
 });
 
 test('passagem de nível: a cancela desce com o trem chegando e nenhum carro entra no cruzamento', () => {
-  const railId = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const railId = PROFILES.findIndex((p) => p.name === 'profile.doubleRailway');
   const sim = net((b) => { b(-700, 0, 700, 0, railId); b(0, -400, 0, 400, 0); b(-350, -400, -350, 400, 0); b(350, -400, 350, 400, 0); });
   const tr = new Traffic(sim);
   sim.onConnRemoved = (c) => tr.evacuateConn(c);

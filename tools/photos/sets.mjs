@@ -85,27 +85,27 @@ export const SETS = {
   // ---- scenes on an empty map, each printing RESULT <name> {measured}
   // growth: a zoned street growing slowly (2 buildings/s); the next lot is the free one nearest the last, so the street
   // fills in order from the first; at most 3 floors over the neighbour
-  growth: { query: EMPTY, shots: [['growth', scene(`a.road(X - 300, Z, X + 300, Z, 'Rua local'); R.cities.growthRate(2);
+  growth: { query: EMPTY, shots: [['growth', scene(`a.road(X - 300, Z, X + 300, Z, 'profile.localStreet'); R.cities.growthRate(2);
     a.zone(X - 150, Z, 170, 6); a.zone(X + 150, Z, 170, 6); await wait(7000); R.cities.growthRate(0);
     const col = w.buildings.cols, ids = [...Array(w.buildings.end).keys()].filter((i) => w.buildings.alive[i]);
     console.log('RESULT growth ' + JSON.stringify({ buildings: ids.length, order: ids.map((i) => [Math.round(col.x[i] - X), Math.round(col.z[i] - Z), col.floors[i]]) }));
     await R.camera.view(X, Z, 15, 40, 330, 11);`)]] },
   // wear: a grown street, the city clock runs 25 days; half the buildings are renovated (Shift+click)
-  wear: { query: EMPTY, shots: [['wear', scene(`a.road(X - 200, Z, X + 200, Z, 'Rua local'); a.zone(X - 100, Z, 120, 1); a.zone(X + 100, Z, 120, 1);
+  wear: { query: EMPTY, shots: [['wear', scene(`a.road(X - 200, Z, X + 200, Z, 'profile.localStreet'); a.zone(X - 100, Z, 120, 1); a.zone(X + 100, Z, 120, 1);
     await a.grow(); a.passTime(25 * 1440);
     const col = w.buildings.cols, ids = [...Array(w.buildings.end).keys()].filter((i) => w.buildings.alive[i]);
     for (const id of ids) if (col.x[id] < X) a.renovate(col.x[id], col.z[id]);
     console.log('RESULT wear ' + JSON.stringify({ buildings: ids.length, decayLeft: ids.filter((i) => col.x[i] < X).map((i) => col.decay[i]), decayRight: ids.filter((i) => col.x[i] >= X).map((i) => col.decay[i]) }));
     R.tools.set('building'); R.tools.select(ids.find((i) => col.x[i] >= X && col.floors[i] > 0) ?? -1); await R.camera.view(X, Z, 20, 35, 260, 11);`)]] },
   // road economy: an avenue on the ground, the same raised as a bridge (2.5×), demolishing gives 25 % back, no cash refuses
-  economy: { query: EMPTY, shots: [['economy', scene(`const m0 = w.money; a.road(X - 250, Z - 80, X + 250, Z - 80, 'Avenida'); const m1 = w.money;
-    a.road(X - 250, Z + 80, X + 250, Z + 80, 'Avenida', 9); const m2 = w.money;
+  economy: { query: EMPTY, shots: [['economy', scene(`const m0 = w.money; a.road(X - 250, Z - 80, X + 250, Z - 80, 'profile.avenue'); const m1 = w.money;
+    a.road(X - 250, Z + 80, X + 250, Z + 80, 'profile.avenue', 9); const m2 = w.money;
     const n = a.demolish(X - 60, Z - 95, X + 60, Z - 65); const m3 = w.money;
-    w.money = 1000; const r = a.road(X - 250, Z + 220, X + 250, Z + 220, 'Avenida'); const intact = w.money === 1000; w.money = m3;
+    w.money = 1000; const r = a.road(X - 250, Z + 220, X + 250, Z + 220, 'profile.avenue'); const intact = w.money === 1000; w.money = m3;
     console.log('RESULT economy ' + JSON.stringify({ start: m0, ground: m0 - m1, bridge: m1 - m2, refunded: m3 - m2, demolished: n, noCash: r, cashIntact: intact }));
     await R.camera.view(X, Z, 30, 45, 560, 11);`)]] },
   // polygon lots: 5 clicks (pentagon), a lot split by a line and a lot with a curved side; each outline marked with a wall
-  'polygon-lots': { query: EMPTY, shots: [['polygon-lots', scene(`a.road(X - 200, Z - 40, X + 200, Z - 40, 'Rua local');
+  'polygon-lots': { query: EMPTY, shots: [['polygon-lots', scene(`a.road(X - 200, Z - 40, X + 200, Z - 40, 'profile.localStreet');
     const outline = () => { const col = w.buildings.cols; for (let id = 0; id < w.buildings.end; id++) { if (!w.buildings.alive[id]) continue;
       const o = w.lotOutline(id), c = Math.cos(col.rot[id]), s = Math.sin(col.rot[id]); const P = (k) => [col.x[id] + o[k] * c + o[k + 1] * s, col.z[id] - o[k] * s + o[k + 1] * c];
       for (let k = 0; k < o.length; k += 2) { const p = P(k), q = P((k + 2) % o.length); w.items.add([p[0], p[1], q[0], q[1], 21, 0]); } } };
@@ -117,7 +117,7 @@ export const SETS = {
   // manoeuvres (Reeds-Shepp, near the camera): streets with parking and sheds; waits for a manoeuvre of kind MANOEUVRE
   // (3 truck backing to a dock, 1 car into a space, 2 out of a space, 4 stopped at the kerb dropping a passenger)
   manoeuvres: { query: EMPTY, shots: [['manoeuvres', scene(`if (R.sim.paused()) R.sim.togglePause();
-    if (!w.roads.segs.size) { for (let i = 0; i < 4; i++) { a.road(X - 240, Z - 240 + i * 160, X + 240, Z - 240 + i * 160, 'Rua com estacionamento'); a.road(X - 240 + i * 160, Z - 240, X - 240 + i * 160, Z + 240, 'Rua com estacionamento'); }
+    if (!w.roads.segs.size) { for (let i = 0; i < 4; i++) { a.road(X - 240, Z - 240 + i * 160, X + 240, Z - 240 + i * 160, 'profile.streetWithParking'); a.road(X - 240 + i * 160, Z - 240, X - 240 + i * 160, Z + 240, 'profile.streetWithParking'); }
       a.zone(X - 80, Z, 260, 1); a.zone(X + 80, Z + 80, 140, 2); await a.grow();
       // sheds facing the street (the dock is at the gate)
       for (const [x0, z0] of [[X - 200, Z - 232], [X - 40, Z - 232], [X + 120, Z - 232]]) a.lot(x0, z0, x0 + 60, z0, x0 + 60, z0 + 60, 3, 2);
@@ -132,7 +132,7 @@ export const SETS = {
     if(list.length)await R.camera.view(list[1],list[2],30,55,120,11);})()`]] },
   // old map repair (a loose end inside another road becomes a junction on opening), then quarantine (a damaged tile
   // comes back from the original relief; the whole save is copied to saves/quarantine-<date>-… and never deleted)
-  'repair-quarantine': { query: EMPTY, shots: [['01-repair', scene(`const net = w.roads; a.road(X - 200, Z, X + 200, Z, 'Rua local');
+  'repair-quarantine': { query: EMPTY, shots: [['01-repair', scene(`const net = w.roads; a.road(X - 200, Z, X + 200, Z, 'profile.localStreet');
     const c = net.addNode({ x: X + 20, z: Z + 90, y: a.ground(X + 20, Z + 90) }), d = net.addNode({ x: X + 20, z: Z + 1, y: a.ground(X + 20, Z) });
     net.addSeg({ a: c, b: d, cx: X + 20, cz: Z + 45, profile: 0, flags: 0 }); const before = net.nodes.cols.deg[d];
     await R.saves.save(); await wait(500); await R.saves.load(); await wait(1500);
@@ -149,8 +149,8 @@ export const SETS = {
   // transit: a railway crossing streets (level crossing) with a train line; waits for the barrier to come down as the
   // train arrives; also an out-and-back bus line whose return stops are on the other side of the street
   transit: { query: EMPTY, shots: [['transit', scene(`const net = w.roads; w.unlimited = true;
-    a.road(X - 700, Z, X + 700, Z, 'Ferrovia dupla'); for (const dx of [-350, 0, 350]) a.road(X + dx, Z - 300, X + dx, Z + 300, 'Rua local');
-    a.road(X - 350, Z + 200, X + 350, Z + 200, 'Rua local'); a.zone(X, Z + 250, 300, 1); a.zone(X, Z - 200, 300, 2); await a.grow();
+    a.road(X - 700, Z, X + 700, Z, 'profile.doubleRailway'); for (const dx of [-350, 0, 350]) a.road(X + dx, Z - 300, X + dx, Z + 300, 'profile.localStreet');
+    a.road(X - 350, Z + 200, X + 350, Z + 200, 'profile.localStreet'); a.zone(X, Z + 250, 300, 1); a.zone(X, Z - 200, 300, 2); await a.grow();
     a.line(1, [X - 650, Z, X + 650, Z], 2); a.line(0, [X - 300, Z + 209, X - 100, Z + 209, X + 100, Z + 209, X + 300, Z + 209], 3);
     const sig = R.sim.signals(); const node = net.nearestNode(X, Z, 5); let down = false, probe = null;
     for (let k = 0; k < 240 && !down; k++) { await wait(500); probe = await a.manoeuvres(); down = (sig[node] & 128) !== 0 || probe.crossings.length > 0; }

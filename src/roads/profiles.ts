@@ -4,6 +4,7 @@
 // sends the list to the workers; a segment stores only the id (Uint8).
 
 import { ROAD_TUNING } from './tuning.ts';
+import { t } from '../shared/i18n/index.ts';
 
 export type StripKind = 'sidewalk' | 'curb' | 'parking' | 'bike' | 'lane' | 'median' | 'shoulder' | 'barrier';
 
@@ -121,71 +122,71 @@ const one = (walk: number, n: number, w: number, o: { right?: Strip; left?: Stri
 
 /** Built-in profiles. The first 7 keep the ids of old saves. */
 const BUILTIN: Array<Omit<Profile, 'id'>> = [
-  { name: 'Rua local', speed: 40, oneWay: false, priority: 0, category: 'ruas', centre: 'dashed',
+  { name: 'profile.localStreet', speed: 40, oneWay: false, priority: 0, category: 'ruas', centre: 'dashed',
     strips: [sw(2.6), curb, lane(1, 3.1), lane(-1, 3.1), curb, sw(2.6)] },
-  { name: 'Rua com estacionamento', speed: 40, oneWay: false, priority: 1, category: 'ruas',
+  { name: 'profile.streetWithParking', speed: 40, oneWay: false, priority: 1, category: 'ruas',
     strips: [sw(2.4), curb, park, lane(1, 3.0), lane(-1, 3.0), park, curb, sw(2.4)] },
-  { name: 'Mão única com estacionamento', speed: 50, oneWay: true, priority: 1, category: 'ruas',
+  { name: 'profile.oneWayWithParking', speed: 50, oneWay: true, priority: 1, category: 'ruas',
     strips: [sw(3), curb, park, lane(1), lane(1), curb, sw(3)] },
-  { name: 'Avenida', speed: 60, oneWay: false, priority: 2, category: 'avenidas',
+  { name: 'profile.avenue', speed: 60, oneWay: false, priority: 2, category: 'avenidas',
     strips: [sw(3.5), curb, lane(1), lane(1), curb, median(3), curb, lane(-1), lane(-1), curb, sw(3.5)] },
-  { name: 'Avenida com ciclovia', speed: 60, oneWay: false, priority: 3, category: 'avenidas',
+  { name: 'profile.avenueWithCycleTrack', speed: 60, oneWay: false, priority: 3, category: 'avenidas',
     strips: [sw(4), curb, bike(1.6), lane(1, 3.3), lane(1, 3.3), lane(1, 3.3), curb, median(4),
       curb, lane(-1, 3.3), lane(-1, 3.3), lane(-1, 3.3), bike(1.6), curb, sw(4)] },
-  { name: 'Via expressa', speed: 90, oneWay: false, priority: 4, category: 'rodovias',
+  { name: 'profile.expressway', speed: 90, oneWay: false, priority: 4, category: 'rodovias',
     strips: [barrier(0.5), shoulder(2.5), lane(1, 3.6), lane(1, 3.6), shoulder(1), barrier(0.8), shoulder(1),
       lane(-1, 3.6), lane(-1, 3.6), shoulder(2.5), barrier(0.5)] },
-  { name: 'Rotatória', speed: 30, oneWay: true, ring: true, priority: 3, category: 'especiais',
+  { name: 'profile.roundabout', speed: 30, oneWay: true, ring: true, priority: 3, category: 'especiais',
     strips: [sw(3), curb, lane(1, 4), lane(1, 4), curb, median(1.5)] },
   // streets
-  { name: 'Rua urbana', speed: 50, oneWay: false, priority: 1, category: 'ruas', strips: two(2.5, 1, 3.3) },
-  { name: 'Mão única, 1 faixa', speed: 30, oneWay: true, priority: 0, category: 'ruas', strips: one(2, 1, 3.2) },
-  { name: 'Mão única, 2 faixas', speed: 40, oneWay: true, priority: 1, category: 'ruas', strips: one(2, 2, 3) },
-  { name: 'Estacionamento de um lado', speed: 40, oneWay: false, priority: 1, category: 'ruas',
+  { name: 'profile.urbanStreet', speed: 50, oneWay: false, priority: 1, category: 'ruas', strips: two(2.5, 1, 3.3) },
+  { name: 'profile.oneWay1Lane', speed: 30, oneWay: true, priority: 0, category: 'ruas', strips: one(2, 1, 3.2) },
+  { name: 'profile.oneWay2Lanes', speed: 40, oneWay: true, priority: 1, category: 'ruas', strips: one(2, 2, 3) },
+  { name: 'profile.parkingOneSide', speed: 40, oneWay: false, priority: 1, category: 'ruas',
     strips: [sw(2.2), curb, park, lane(1, 3), lane(-1, 3), curb, sw(2.2)] },
-  { name: 'Rua com ciclofaixa', speed: 40, oneWay: false, priority: 1, category: 'ruas', strips: two(2.2, 1, 3, { edge: bike(1.8) }) },
-  { name: 'Rua com canteiro central', speed: 40, oneWay: false, priority: 1, category: 'ruas', strips: two(3, 1, 3.2, { med: median(2) }) },
-  { name: 'Calçadas largas', speed: 30, oneWay: false, priority: 0, category: 'ruas', centre: 'dashed', strips: two(4.5, 1, 3, { pave: Paving.Pavers }) },
-  { name: 'Rua estreita', speed: 30, oneWay: false, priority: 0, category: 'ruas', centre: 'dashed', strips: two(1.4, 1, 2.8) },
-  { name: 'Rua compartilhada', speed: 20, oneWay: false, priority: 0, category: 'ruas', surface: Surface.Cobble, centre: 'dashed',
+  { name: 'profile.streetWithBikeLane', speed: 40, oneWay: false, priority: 1, category: 'ruas', strips: two(2.2, 1, 3, { edge: bike(1.8) }) },
+  { name: 'profile.streetWithMedian', speed: 40, oneWay: false, priority: 1, category: 'ruas', strips: two(3, 1, 3.2, { med: median(2) }) },
+  { name: 'profile.wideSidewalks', speed: 30, oneWay: false, priority: 0, category: 'ruas', centre: 'dashed', strips: two(4.5, 1, 3, { pave: Paving.Pavers }) },
+  { name: 'profile.narrowStreet', speed: 30, oneWay: false, priority: 0, category: 'ruas', centre: 'dashed', strips: two(1.4, 1, 2.8) },
+  { name: 'profile.sharedStreet', speed: 20, oneWay: false, priority: 0, category: 'ruas', surface: Surface.Cobble, centre: 'dashed',
     strips: two(3, 1, 3, { flush: true, pave: Paving.Stone }) },
-  { name: 'Rua de paralelepípedo', speed: 30, oneWay: false, priority: 0, category: 'ruas', surface: Surface.Cobble, centre: 'dashed',
+  { name: 'profile.cobblestoneStreet', speed: 30, oneWay: false, priority: 0, category: 'ruas', surface: Surface.Cobble, centre: 'dashed',
     strips: two(2, 1, 3) },
   // avenues
-  { name: 'Avenida 4 faixas', speed: 60, oneWay: false, priority: 2, category: 'avenidas', strips: two(3, 2, 3.2) },
-  { name: 'Avenida 6 faixas com canteiro', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(3.5, 3, 3.3, { med: median(3) }) },
-  { name: 'Avenida com estacionamento', speed: 50, oneWay: false, priority: 2, category: 'avenidas', strips: two(3, 2, 3.2, { edge: park }) },
-  { name: 'Faixa de ônibus lateral', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(3.5, 2, 3.4, { med: median(2), bus: 'outer' }) },
-  { name: 'Corredor de ônibus central', speed: 60, oneWay: false, priority: 3, category: 'avenidas',
+  { name: 'profile.avenue4Lanes', speed: 60, oneWay: false, priority: 2, category: 'avenidas', strips: two(3, 2, 3.2) },
+  { name: 'profile.avenue6LanesMedian', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(3.5, 3, 3.3, { med: median(3) }) },
+  { name: 'profile.avenueWithParking', speed: 50, oneWay: false, priority: 2, category: 'avenidas', strips: two(3, 2, 3.2, { edge: park }) },
+  { name: 'profile.curbsideBusLane', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(3.5, 2, 3.4, { med: median(2), bus: 'outer' }) },
+  { name: 'profile.centralBusway', speed: 60, oneWay: false, priority: 3, category: 'avenidas',
     strips: two(3.5, 3, 3.4, { med: median(2, Paving.Concrete), bus: 'inner' }) },
-  { name: 'Avenida mão única, 3 faixas', speed: 60, oneWay: true, priority: 2, category: 'avenidas', strips: one(3, 3, 3.3) },
-  { name: 'Avenida mão única, 4 faixas', speed: 60, oneWay: true, priority: 3, category: 'avenidas', strips: one(3.5, 4, 3.3) },
-  { name: 'Bulevar', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(4, 2, 3.3, { med: median(6), pave: Paving.Pavers }) },
+  { name: 'profile.oneWayAvenue3Lanes', speed: 60, oneWay: true, priority: 2, category: 'avenidas', strips: one(3, 3, 3.3) },
+  { name: 'profile.oneWayAvenue4Lanes', speed: 60, oneWay: true, priority: 3, category: 'avenidas', strips: one(3.5, 4, 3.3) },
+  { name: 'profile.boulevard', speed: 60, oneWay: false, priority: 3, category: 'avenidas', strips: two(4, 2, 3.3, { med: median(6), pave: Paving.Pavers }) },
   // highways
-  { name: 'Rodovia 6 faixas', speed: 110, oneWay: false, priority: 5, category: 'rodovias',
+  { name: 'profile.highway6Lanes', speed: 110, oneWay: false, priority: 5, category: 'rodovias',
     strips: [barrier(0.5), shoulder(3), ...lanes(1, 3, 3.7), shoulder(1), barrier(0.8), shoulder(1), ...lanes(-1, 3, 3.7), shoulder(3), barrier(0.5)] },
-  { name: 'Rodovia mão única, 2 faixas', speed: 100, oneWay: true, priority: 5, category: 'rodovias',
+  { name: 'profile.oneWayHighway2Lanes', speed: 100, oneWay: true, priority: 5, category: 'rodovias',
     strips: [barrier(0.5), shoulder(2.5), ...lanes(1, 2, 3.6), shoulder(1), barrier(0.5)] },
-  { name: 'Rodovia mão única, 3 faixas', speed: 110, oneWay: true, priority: 5, category: 'rodovias',
+  { name: 'profile.oneWayHighway3Lanes', speed: 110, oneWay: true, priority: 5, category: 'rodovias',
     strips: [barrier(0.5), shoulder(2.5), ...lanes(1, 3, 3.6), shoulder(1), barrier(0.5)] },
-  { name: 'Pista dupla, 2 faixas', speed: 80, oneWay: false, priority: 4, category: 'rodovias',
+  { name: 'profile.dualCarriageway2Lanes', speed: 80, oneWay: false, priority: 4, category: 'rodovias',
     strips: [shoulder(2), lane(1, 3.6), shoulder(0.6), barrier(0.8), shoulder(0.6), lane(-1, 3.6), shoulder(2)] },
-  { name: 'Estrada simples', speed: 80, oneWay: false, priority: 3, category: 'rodovias', centre: 'dashed',
+  { name: 'profile.countryRoad', speed: 80, oneWay: false, priority: 3, category: 'rodovias', centre: 'dashed',
     strips: [shoulder(1.5), lane(1, 3.5), lane(-1, 3.5), shoulder(1.5)] },
   // special
-  { name: 'Alça de acesso', speed: 60, oneWay: true, priority: 4, category: 'especiais',
+  { name: 'profile.ramp', speed: 60, oneWay: true, priority: 4, category: 'especiais',
     strips: [barrier(0.5), shoulder(1.5), lane(1, 4), shoulder(1), barrier(0.5)] },
-  { name: 'Alça de acesso, 2 faixas', speed: 60, oneWay: true, priority: 4, category: 'especiais',
+  { name: 'profile.ramp2Lanes', speed: 60, oneWay: true, priority: 4, category: 'especiais',
     strips: [barrier(0.5), shoulder(1.5), ...lanes(1, 2, 3.6), shoulder(1), barrier(0.5)] },
-  { name: 'Estrada rural de paralelepípedo', speed: 40, oneWay: false, priority: 0, category: 'especiais', surface: Surface.Cobble, centre: 'dashed',
+  { name: 'profile.ruralCobblestoneRoad', speed: 40, oneWay: false, priority: 0, category: 'especiais', surface: Surface.Cobble, centre: 'dashed',
     strips: [shoulder(0.8), lane(1, 3), lane(-1, 3), shoulder(0.8)] },
-  { name: 'Estrada de concreto', speed: 60, oneWay: false, priority: 1, category: 'especiais', surface: Surface.Concrete, strips: two(2, 1, 3.8) },
+  { name: 'profile.concreteRoad', speed: 60, oneWay: false, priority: 1, category: 'especiais', surface: Surface.Concrete, strips: two(2, 1, 3.8) },
   // rails (trains and metro; for metro, build below ground with Page Down)
-  { name: 'Ferrovia dupla', speed: 90, oneWay: false, priority: 6, category: 'trilhos', surface: Surface.Ballast,
+  { name: 'profile.doubleRailway', speed: 90, oneWay: false, priority: 6, category: 'trilhos', surface: Surface.Ballast,
     strips: [shoulder(1.6), lane(1, 4.3, { rail: true }), lane(-1, 4.3, { rail: true }), shoulder(1.6)] },
-  { name: 'Ferrovia simples', speed: 80, oneWay: true, priority: 6, category: 'trilhos', surface: Surface.Ballast,
+  { name: 'profile.singleRailway', speed: 80, oneWay: true, priority: 6, category: 'trilhos', surface: Surface.Ballast,
     strips: [shoulder(1.6), lane(1, 4.3, { rail: true }), shoulder(1.6)] },
-  { name: 'Metrô (duplo)', speed: 80, oneWay: false, priority: 6, category: 'trilhos', surface: Surface.Ballast,
+  { name: 'profile.metroDouble', speed: 80, oneWay: false, priority: 6, category: 'trilhos', surface: Surface.Ballast,
     strips: [shoulder(0.8), lane(1, 4.0, { rail: true }), lane(-1, 4.0, { rail: true }), shoulder(0.8)] },
 ];
 
@@ -216,6 +217,9 @@ const listeners: Array<(id: number) => void> = [];
 export function onProfileAdded(fn: (id: number) => void): void { listeners.push(fn); }
 
 /** What defines the profile (the name is not part of it). */
+/** What the player reads as a profile's name: a built-in one's language key, translated; a custom one's own name. */
+export const profileName = (p: { name: string; custom?: boolean }): string => (p.custom ? p.name : t(p.name));
+
 export function profileKey(p: Omit<Profile, 'id' | 'name' | 'category' | 'custom'> & { name?: string }): string {
   return JSON.stringify([p.strips.map((s) => [s.kind, Math.round(s.width * 100), s.dir ?? 0, s.bus ? 1 : 0, s.turns ?? 0, s.solid ? 1 : 0, s.pave ?? 0, s.flush ? 1 : 0, s.rail ? 1 : 0]),
     p.oneWay, p.ring ?? false, p.speed, p.priority ?? 0, p.surface ?? 0, p.centre ?? 'double']);

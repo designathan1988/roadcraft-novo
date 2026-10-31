@@ -4,13 +4,13 @@
 // with it or saves it as a template. Cards are drawn once per category shown; picking a road only moves the ring.
 
 import {
-  PROFILES, PROFILE_INFO, Paving, Surface, TurnBit, normalize, profileIssueSpots, profileKey, registerProfile,
+  PROFILES, PROFILE_INFO, Paving, Surface, TurnBit, normalize, profileIssueSpots, profileKey, profileName, registerProfile,
   type Category, type ProfileIssue, type Centre, type Profile, type Strip, type StripKind,
 } from '../roads/profiles.ts';
 import { STEP_LIMITS, fromWork, insertionIndex, movedStrip, newStrip, toWork, withStripWidth, type PaletteKind } from '../roads/profileWork.ts';
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
-import { fmtDec, lang, loose, money, plural, t } from '../shared/i18n/index.ts';
+import { fmtDec, lang, money, plural, t } from '../shared/i18n/index.ts';
 import { readTemplates, writeTemplates } from '../roads/roadTemplates.ts';
 
 const CATS: Array<[Category, string]> = [['ruas', 'catalog.cat.streets'], ['avenidas', 'catalog.cat.avenues'], ['rodovias', 'catalog.cat.highways'],
@@ -33,7 +33,7 @@ export interface CatalogActions {
 }
 
 /** A road's name in the player's language (the engine names its profiles in Portuguese). */
-export const profileName = (p: { name: string; custom?: boolean }): string => (p.custom ? p.name : loose(p.name));
+export { profileName };
 
 /** The strips from the image's left edge to its right (seen from A to B, the right edge on the right). */
 const leftToRight = (p: Omit<Profile, 'id'>): Strip[] => p.strips.slice().reverse();

@@ -585,7 +585,7 @@ test('C32: level crossing barriers close for trains far from the camera too, and
   const { SimNet, laneId } = await import('../src/sim/lanes.ts');
   const { Ctl } = await import('../src/roads/control.ts');
   const { recordOps, mirror } = await import('./simCity.ts');
-  const railId = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const railId = PROFILES.findIndex((p) => p.name === 'profile.doubleRailway');
   const w = new World();
   w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.unlimited = true;
   const ops = recordOps(w);
@@ -727,7 +727,7 @@ test('C40: car trips never start or end at a node that only rails reach', async 
   const { PROFILES, PROFILE_INFO } = await import('../src/roads/profiles.ts');
   const { SimNet } = await import('../src/sim/lanes.ts');
   const { recordOps, mirror } = await import('./simCity.ts');
-  const railId = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const railId = PROFILES.findIndex((p) => p.name === 'profile.doubleRailway');
   const w = new World();
   w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10); w.unlimited = true;
   const ops = recordOps(w);
@@ -749,7 +749,7 @@ test('C40: car trips never start or end at a node that only rails reach', async 
 test('C45: with two segments between the same nodes, a car takes the one it may drive that way', async () => {
   const { SimNet } = await import('../src/sim/lanes.ts');
   const { PROFILES } = await import('../src/roads/profiles.ts');
-  const one = PROFILES.findIndex((p) => p.oneWay && !p.name.toLowerCase().includes('ferro'));
+  const one = PROFILES.findIndex((p) => p.oneWay && !p.name.toLowerCase().includes('railway'));
   assert.ok(one >= 0, 'a one-way profile');
   const sim = new SimNet();
   sim.apply({ t: 'addNode', rec: { id: asNode(0), x: 0, z: 0, y: 10 } });
@@ -807,7 +807,7 @@ test('C24: the rear wagons of a train stay on the track through a bend', async (
   const { SimNet, laneId } = await import('../src/sim/lanes.ts');
   const { PROFILES } = await import('../src/roads/profiles.ts');
   const T = await import('../src/sim/traffic.ts') as unknown as { backAlong?: (sim: SimNet, lane: number, conn: number, s: number, d: number, out: Float64Array) => void };
-  const rail = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const rail = PROFILES.findIndex((p) => p.name === 'profile.doubleRailway');
   const sim = new SimNet();
   sim.apply({ t: 'addNode', rec: { id: asNode(0), x: 0, z: 0, y: 10 } });
   sim.apply({ t: 'addNode', rec: { id: asNode(1), x: 200, z: 0, y: 10 } });

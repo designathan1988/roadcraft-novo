@@ -33,7 +33,7 @@ test('a right-angle crossing of local streets: kerb returns of about 3 m, legs s
 });
 
 test('wider roads get wider kerb returns, up to 7.2 m', () => {
-  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue6LanesMedian');
   const f = cornerFillet(arm(0, avenue), arm(90, avenue));
   assert.ok(f.r > 5 && f.r <= 7.2, `radius ${f.r}`);
 });

@@ -26,7 +26,7 @@ test('perfis: larguras e linhas', () => {
   assert.equal(local.lanesBack, 1);
   // linha amarela no meio da rua de mão dupla (tracejada na rua local, dupla na avenida sem canteiro)
   assert.ok(local.lines.some((l) => l.color === 1 && Math.abs(l.u) < 1e-9));
-  const av4 = PROFILE_INFO.find((p) => p.name === 'Avenida 4 faixas')!;
+  const av4 = PROFILE_INFO.find((p) => p.name === 'profile.avenue4Lanes')!;
   assert.ok(av4.lines.some((l) => l.kind === 3 && l.color === 1 && Math.abs(l.u) < 1e-9));
   const one = PROFILE_INFO[2];
   assert.equal(one.lanesBack, 0);

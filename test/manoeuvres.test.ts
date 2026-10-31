@@ -21,7 +21,7 @@ function parkingGrid(n = 4, step = 160): SimNet {
   w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10);
   const ops: NetOp[] = [];
   w.roads.listeners.push((op) => ops.push(op));
-  const prof = PROFILES.findIndex((p) => p.name === 'Rua com estacionamento');
+  const prof = PROFILES.findIndex((p) => p.name === 'profile.streetWithParking');
   assert.ok(prof >= 0);
   const half = (n - 1) * step / 2;
   for (let i = 0; i < n; i++) for (const horiz of [true, false]) {

@@ -44,7 +44,7 @@ const near = (a: number, b: number, what: string) => assert.ok(Math.abs(a - b) <
 
 test('an avenue: footway 15 cm, its kerb 16 cm; the median kerb 15 cm and its planting 17 cm', () => {
   const { w, net } = flatWorld();
-  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida');
+  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue');
   const a = net.addNode({ x: -40, z: 0, y: GROUND }), b = net.addNode({ x: 40, z: 0, y: GROUND });
   net.addSeg({ a, b, cx: 0, cz: 0, profile: avenue, flags: 0 });
   const vs = mesh(w, net).filter((v) => !v.junction && Math.abs(v.x) < 30);
@@ -75,7 +75,7 @@ test('the kerb stone runs round a junction corner at 16 cm, the corner footway a
 
 test('a skewed avenue junction: every corner footway keeps its width all the way round', () => {
   const { w, net } = flatWorld();
-  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida'), bike = PROFILE_INFO.findIndex((p) => p.name === 'Avenida com ciclovia');
+  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue'), bike = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenueWithCycleTrack');
   const c = net.addNode({ x: 0, z: 0, y: GROUND });
   // the four legs of node 399 in the seed-1 city (directions and profiles), long enough for their corners
   const legs: Array<[number, number, number, number]> = [[0.41, -0.91, 90, bike], [-0.38, 0.93, 90, bike], [1, -0.03, 90, avenue], [-1, 0.03, 90, avenue]];

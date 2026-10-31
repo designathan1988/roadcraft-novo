@@ -12,6 +12,7 @@ import { ENGINE_PT } from '../src/shared/i18n/lang/engine.pt-BR.ts';
 import { ENGINE_EN } from '../src/shared/i18n/lang/engine.en.ts';
 import { setLang, t } from '../src/shared/i18n/index.ts';
 import { polygonLot } from '../src/world/lotEdit.ts';
+import { PROFILES, profileName } from '../src/roads/profiles.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ts = createRequire(path.join(root, 'package.json'))('typescript');
@@ -101,4 +102,18 @@ test('each command label keeps the sound it had (the old rule on its Portuguese 
   const keys = Object.keys(ENGINE_PT).filter((k) => k.startsWith('cmd.'));
   assert.ok(keys.length >= 80);
   assert.deepEqual(keys.filter((k) => old(ENGINE_PT[k]) !== k.split('.')[1]), []);
+});
+
+test('built-in road profiles are named by language keys and read in the player\'s language', () => {
+  const builtIn = PROFILES.filter((p) => !p.custom);
+  assert.ok(builtIn.length >= 37);
+  assert.deepEqual(builtIn.filter((p) => !(p.name.startsWith('profile.') && p.name in ENGINE_PT && p.name in ENGINE_EN)).map((p) => p.name), []);
+  const avenue = builtIn.find((p) => p.name === 'profile.avenue')!;
+  try {
+    setLang('en');
+    assert.equal(profileName(avenue), 'Avenue');
+  } finally {
+    setLang('pt-BR');
+  }
+  assert.equal(profileName(avenue), 'Avenida');
 });

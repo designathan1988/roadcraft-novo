@@ -53,7 +53,7 @@ test('nome dado pelo jogador vale para a rua inteira; avenida se chama Avenida',
   const s = w.roads.nearestSeg(100, 0, 5)![0];
   w.streetNames.set(s, 'Rua do Jogador');
   assert.equal(addressAt(w, -150, 10)!.name, 'Rua do Jogador');
-  const av = PROFILES.findIndex((p) => p.name === 'Avenida');
+  const av = PROFILES.findIndex((p) => p.name === 'profile.avenue');
   road(w, -200, 400, 200, 400, av);
   assert.match(addressAt(w, 0, 410)!.name, /^Avenida /);
 });

@@ -9,7 +9,7 @@ import { RoadJournal, buildRoad, planRoad, snap } from '../src/roads/build.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { RoadGround, roadGroundAt } from '../src/roads/ground.ts';
 
-const AVENUE = PROFILE_INFO.findIndex((p) => p.name === 'Avenida');
+const AVENUE = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue');
 
 function world(): World {
   const w = new World();

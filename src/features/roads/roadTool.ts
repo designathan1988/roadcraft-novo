@@ -5,7 +5,7 @@ import type * as THREE from 'three/webgpu';
 import type { CommandStack } from '../../core/commands.ts';
 import { RoadJournal, buildRoad, buildRoundabout, planPrice, roundaboutRefusal, changeProfile, changeProfiles, moveNode, splitAt, streetChain, planRoad, segPreview, snap, type Anchor, type RoadPlan } from '../../roads/build.ts';
 import { bez, type Quad } from '../../roads/geometry.ts';
-import { PROFILE_INFO } from '../../roads/profiles.ts';
+import { PROFILE_INFO, profileName } from '../../roads/profiles.ts';
 import { registerVariant, type RoadOptions } from '../../roads/roadVariant.ts';
 import { SegFlag } from '../../roads/flags.ts';
 import type { RoadPreview } from '../../render/preview.ts';
@@ -82,7 +82,7 @@ export class RoadTool {
       case 'road': h.setHint(this.start ? t('tools.hint.roadEnd') : t('tools.hint.roadStart')); break;
       case 'curve': h.setHint(!this.start ? t('tools.hint.curveStart') : !this.control ? t('tools.hint.curveControl') : t('tools.hint.curveEnd')); break;
       case 'roundabout': h.setHint(t('tools.hint.roundabout', { radius: this.ringRadius })); break;
-      case 'upgrade': h.setHint(t('tools.hint.upgrade', { profile: PROFILE_INFO[this.profile].name })); break;
+      case 'upgrade': h.setHint(t('tools.hint.upgrade', { profile: profileName(PROFILE_INFO[this.profile]) })); break;
       case 'bulldoze': h.setHint(t('tools.hint.bulldoze')); break;
       case 'move': h.setHint(this.moving >= 0 ? t('tools.hint.moveDrop') : t('tools.hint.move')); break;
       case 'free': h.setHint(t('tools.hint.free')); break;

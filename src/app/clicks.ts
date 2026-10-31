@@ -1,8 +1,8 @@
 // The click a tool gets on release: one dispatch, in the tool's order. The Game owns the tools and the world; this
 // module only calls the ports of the host.
 import { ROAD_TOOLS } from '../ui/hudActions.ts';
-import { PROFILE_INFO } from '../roads/profiles.ts';
-import { loose, t } from '../shared/i18n/index.ts';
+import { PROFILE_INFO, profileName } from '../roads/profiles.ts';
+import { t } from '../shared/i18n/index.ts';
 import type { Vector3 } from 'three/webgpu';
 import type { Tool } from '../ui/hudActions.ts';
 import type { Hud } from '../ui/hud.ts';
@@ -52,6 +52,6 @@ export function clickTool(host: ClickHost, hit: Vector3 | null, shift: boolean, 
     if (hit) { const r = host.zoneTool.fillBlock(hit.x, hit.z); if (r !== 'ok') host.hud.toast(r); }
   } else if (alt && ROAD_TOOLS.includes(host.tool)) {
     const p = host.roadTool.pick(hit);
-    if (p >= 0) { host.hud.setProfile(p); host.hud.toast(t('game.toast.profileCopied', { name: loose(PROFILE_INFO[p].name) })); }
+    if (p >= 0) { host.hud.setProfile(p); host.hud.toast(t('game.toast.profileCopied', { name: profileName(PROFILE_INFO[p]) })); }
   } else host.roadTool.click(hit, shift);
 }

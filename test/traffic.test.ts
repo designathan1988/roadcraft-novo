@@ -277,7 +277,7 @@ test('vias custam dinheiro; desfazer devolve; sem dinheiro não constrói', () =
 
 test('trem: anda só no trilho, para nas estações; carro nunca entra no trilho', async () => {
   const { PROFILES } = await import('../src/roads/profiles.ts');
-  const railId = PROFILES.findIndex((p) => p.name === 'Ferrovia dupla');
+  const railId = PROFILES.findIndex((p) => p.name === 'profile.doubleRailway');
   assert.ok(railId > 0);
   const w = new World();
   w.heights.fill(10); w.tileMin.fill(10); w.tileMax.fill(10);

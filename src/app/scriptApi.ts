@@ -20,7 +20,7 @@ import type { SaveFlow } from './saveFlow.ts';
 import type { LotEditing } from './lotEditing.ts';
 import type { PersonOptions } from '../shared/contracts/people.ts';
 import type { FromSim } from '../sim/worker.ts';
-import { PROFILES } from '../roads/profiles.ts';
+import { PROFILES, profileName } from '../roads/profiles.ts';
 import { addCrossing, addUTurn, buildRoad, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, snap, splitAt } from '../roads/build.ts';
 import { heightAt } from '../world/heights.ts';
 import { GroundStroke, waterAt } from '../world/ground.ts';
@@ -98,7 +98,7 @@ export function createScriptApi(h: ScriptApiHost) {
     biome: (b: number) => h.setBiome(b),
     /** Straight road from (ax, az) to (bx, bz) with the profile by name (or id). */
     road: (ax: number, az: number, bx: number, bz: number, profile: string | number = 0, elevation = 0) => {
-      const id = typeof profile === 'number' ? profile : PROFILES.findIndex((p) => p.name === profile);
+      const id = typeof profile === 'number' ? profile : PROFILES.findIndex((p) => p.name === profile || profileName(p) === profile);
       const a = snap(w.roads, ax, az, 10), b = snap(w.roads, bx, bz, 10);
       const plan = planRoad(w, a, null, b, Math.max(0, id), elevation);
       if (!plan.ok) return plan.reason;

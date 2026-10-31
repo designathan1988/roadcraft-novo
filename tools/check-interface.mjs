@@ -92,7 +92,7 @@ export const SCENARIOS = {
   'B4-station-tabs': `
     road(0, 100, 400, 100);
     a.line(0, [200, 108], 1);
-    road(0, -100, 400, -100, 'Ferrovia dupla');
+    road(0, -100, 400, -100, 'profile.doubleRailway');
     const bus = R.transit.lines()[0];
     click('[data-cat=transit]');
     await frames(2);

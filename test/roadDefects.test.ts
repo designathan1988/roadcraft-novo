@@ -101,7 +101,7 @@ test('D2: making a free road dearer costs the difference; making it cheaper give
   const { changeProfile } = await import('../src/roads/build.ts');
   const w = flatWorld(1e9);
   const s = generatedRoad(w, -50, 0, 50, 0, 0);
-  const wide = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+  const wide = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue6LanesMedian');
   const up = changeProfile(w, asSeg(s), wide);
   const diff = 100 * (PROFILE_INFO[wide].cost - PROFILE_INFO[0].cost);
   assert.ok(Math.abs(up.price - diff) < diff * 0.02, `upgrading costs ${up.price}, the difference is ${diff}`);
@@ -225,7 +225,7 @@ test('D5: a bridge or a tunnel leaves the buildings below or above it standing; 
   w.roads.addNode({ x: -120, z: 0, y: 26 }); w.roads.addNode({ x: 120, z: 0, y: 26 });
   road(w, -120, 0, 120, 0, 0, 16);
   assert.equal(w.buildings.alive[house], 1, 'the house under the viaduct was demolished');
-  const metro = PROFILE_INFO.findIndex((p) => p.name.startsWith('Metrô'));
+  const metro = PROFILE_INFO.findIndex((p) => p.name === 'profile.metroDouble');
   w.roads.addNode({ x: 300, z: 0, y: -2 }); w.roads.addNode({ x: 560, z: 0, y: -2 });
   road(w, 300, 0, 560, 0, metro, -12);
   for (const id of row) assert.equal(w.buildings.alive[id], 1, `the house ${id} over the metro was demolished`);
@@ -615,7 +615,7 @@ test('D18: widening a road clears the buildings the wider road covers and settle
   const { changeProfile, changeProfiles } = await import('../src/roads/build.ts');
   const w = flatWorld(1e9);
   road(w, -100, 0, 100, 0);
-  const wide = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+  const wide = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue6LanesMedian');
   const half = PROFILE_INFO[wide].right;
   // a house just off the local street, inside the avenue's width, and a bump in the ground there
   const house = w.addBuilding({ x: 30, z: half - 4, w: 8, d: 8, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Residential, floors: 2, style: 1 });
@@ -649,7 +649,7 @@ test('D19: a street-wide profile and parking on one side land on the same side o
   net.addSeg({ a: n[0], b: n[1], cx: -100, cz: 0, profile: 0, flags: 16 });
   net.addSeg({ a: n[2], b: n[1], cx: 0, cz: 0, profile: 0, flags: 16 }); // drawn the other way
   net.addSeg({ a: n[2], b: n[3], cx: 100, cz: 0, profile: 0, flags: 16 });
-  const one = PROFILE_INFO.findIndex((p) => p.name === 'Estacionamento de um lado');
+  const one = PROFILE_INFO.findIndex((p) => p.name === 'profile.parkingOneSide');
   const first = net.nearestSeg(-100, 0, 2)![0];
   const j = changeProfiles(w, streetChain(w, first), one);
   assert.ok(j.settle());
@@ -671,7 +671,7 @@ test('D20: a mid-block crossing or U-turn node that gets a third road becomes an
   const { effectiveControl } = await import('../src/roads/control.ts');
   for (const kind of ['zebra', 'uturn'] as const) {
     const w = flatWorld(1e9);
-    const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 6 faixas com canteiro');
+    const avenue = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue6LanesMedian');
     road(w, -100, 0, 100, 0, kind === 'uturn' ? avenue : 0);
     const s = w.roads.nearestSeg(0, 0, 2)![0];
     const r = kind === 'zebra' ? addCrossing(w, s, 0.5, Ctl.Zebra) : addUTurn(w, s, 0.5);
@@ -727,7 +727,7 @@ test('D22: repainting a street\'s zone leaves the corner buildings that front th
 
 test('D23: the zone brush never zones rails, highways or ramps', async () => {
   const { ZoneTool } = await import('../src/features/zones/zoneTool.ts');
-  const names = ['Ferrovia dupla', 'Metrô (duplo)', 'Rodovia 6 faixas', 'Alça de acesso', 'Pista dupla, 2 faixas'];
+  const names = ['profile.doubleRailway', 'profile.metroDouble', 'profile.highway6Lanes', 'profile.ramp', 'profile.dualCarriageway2Lanes'];
   for (const name of names) {
     const w = flatWorld(1e9);
     road(w, -100, 0, 100, 0, PROFILE_INFO.findIndex((p) => p.name === name));
@@ -900,7 +900,7 @@ test('D38: applying a segment\'s profile to the whole street reaches the blocks 
   const w = flatWorld(1e9);
   const net = w.roads;
   const n = [-150, -50, 50, 150].map((x) => net.addNode({ x, z: 0, y: 10 }));
-  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas');
+  const avenue = PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue4Lanes');
   net.addSeg({ a: n[0], b: n[1], cx: -100, cz: 0, profile: 0, flags: 16 });
   net.addSeg({ a: n[1], b: n[2], cx: 0, cz: 0, profile: avenue, flags: 16 });
   net.addSeg({ a: n[2], b: n[3], cx: 100, cz: 0, profile: 0, flags: 16 });
@@ -916,7 +916,7 @@ test('D39: the preview\'s price of a planned road matches what building it costs
   const w = flatWorld(1e9);
   // sea in the middle: part of the road is a bridge
   for (let gz = 0; gz < HEIGHT_MAP_RES; gz++) for (let gx = Math.round(sampleCoord(-30)); gx < Math.round(sampleCoord(30)); gx++) w.heights[heightIndex(gx, gz)] = -4;
-  for (const [ax, bx, prof] of [[-300, -100, 0], [-150, 150, 0], [-200, 200, PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]]) {
+  for (const [ax, bx, prof] of [[-300, -100, 0], [-150, 150, 0], [-200, 200, PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue4Lanes')]]) {
     const a = snap(w.roads, ax, 0, 1), b = snap(w.roads, bx, 0, 1);
     const p = planRoad(w, a, null, b, prof, 0);
     assert.ok(p.ok, p.reason);
@@ -937,7 +937,7 @@ test('D33: a landmark that grows over time keeps to 3 floors above its tallest n
     const x = (i % 20) * 120 - 1200, z = Math.floor(i / 20) * 120 - 1200;
     w.addBuilding({ x: x + 30, z, w: 20, d: 20, h: 0, rot: 0, color: 0, seed: 1, zone: Zone.Commercial, floors: 6, style: 1 });
     const l: LotColumns = { count: 1, x: new Float32Array([x]), z: new Float32Array([z]), w: new Float32Array([30]), d: new Float32Array([30]), rot: new Float32Array([0]),
-      zone: new Uint8Array([Zone.ComHigh]), seed: new Uint32Array([i * 7919 + 3]), profile: new Uint16Array([PROFILE_INFO.findIndex((p) => p.name === 'Avenida 4 faixas')]) };
+      zone: new Uint8Array([Zone.ComHigh]), seed: new Uint32Array([i * 7919 + 3]), profile: new Uint16Array([PROFILE_INFO.findIndex((p) => p.name === 'profile.avenue4Lanes')]) };
     const rec = g.recordFor(l, 0, true);
     if (rec.color) landmarks++;
     worst = Math.max(worst, rec.floors);
