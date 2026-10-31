@@ -1163,8 +1163,9 @@ export class Peds {
     const rate = this.t.size < target / 2 ? SPAWN_FILL : SPAWN_STEADY;
     for (let k = 0; k < rate && this.t.size < target; k++) this.spawn();
     const c = this.t.cols;
-    let budget = 20000;
-    while (this.heapN > 0 && this.heapT[0] <= this.time && budget-- > 0) {
+    // every event due now, however many: a cap here left the rest late (people standing past their stretch's end)
+    // and hid the population's real cost (D55: it was 20,000 a step)
+    while (this.heapN > 0 && this.heapT[0] <= this.time) {
       const p = this.heapP[0], at = this.heapT[0];
       this.popEvent();
       if (!this.t.alive[p] || c.at[p] !== at) continue; // stale event
