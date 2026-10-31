@@ -46,10 +46,6 @@ export function partW(yaw: number, rgb: number): number {
   const c = (((rgb >> 20) & 15) << 8) | (((rgb >> 12) & 15) << 4) | ((rgb >> 4) & 15);
   return yq + c * 4096;
 }
-/** A decoded scale (for the tests): the inverse of `q`. */
-export function partScale(code: number, bits: number): number {
-  return SCALE_MIN * Math.pow(2, code / ((1 << bits) - 1) * SCALE_OCTAVES);
-}
 
 /**
  * Each pooled kind's base colour (sRGB) and whether it is metal: the 4.0 kit's material (kit.ts createBuildingKit,

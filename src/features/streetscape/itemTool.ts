@@ -28,23 +28,7 @@ const POLE_CHECK = 4;
 function both(a: Command, b: Command): Command {
   return { label: a.label, apply: () => { a.apply(); b.apply(); }, invert: () => { b.invert(); a.invert(); } };
 }
-
-export const STREET_ITEMS: Array<[number, string]> = [
-  [Item.Tree, 'Árvore'], [Item.Conifer, 'Pinheiro'], [Item.Palm, 'Palmeira'], [Item.Bush, 'Arbusto'], [Item.Bench, 'Banco'], [Item.Bin, 'Lixeira'],
-  [Item.Lamp, 'Iluminação'], [Item.Hydrant, 'Hidrante'], [Item.Postbox, 'Caixa de correio'], [Item.Phone, 'Orelhão'],
-  [Item.Drain, 'Boca de lobo'], [Item.Bollard, 'Frade'], [Item.Planter, 'Floreira'], [Item.Sign, 'Placa'],
-  [Item.Smoke, 'Fumaça'], [Item.Steam, 'Vapor'], [Item.Fire, 'Fogo'], [Item.Fountain, 'Chafariz'],
-  [Item.Dust, 'Poeira'], [Item.Soot, 'Fuligem'], [Item.Sparks, 'Faíscas'], [Item.Spray, 'Espuma e borrifo'],
-];
 const isElement = isEffect;
-export const SIGN_TYPES: Array<[number, string]> = [
-  [4, 'Pare'], [1, 'Dê a preferência'], [0, 'Velocidade máxima'], [5, 'Proibido estacionar'], [6, 'Sentido proibido'],
-  [7, 'Pedestres'], [8, 'Escola'], [9, 'Direção'], [2, 'Placa de rua'], [10, 'Informação'], [3, 'Mão única'],
-];
-export const BARRIER_KINDS: Array<[number, string]> = [
-  [Item.Fence, 'Cerca'], [Item.Wall, 'Muro'], [Item.Hedge, 'Sebe'], [Item.Guardrail, 'Defensa (guard-rail)'], [Item.Railing, 'Gradil urbano'],
-  [Item.PoleLine, 'Postes com fios'],
-];
 
 interface Spot { x: number; z: number; y: number; yaw: number; onWalk: boolean }
 

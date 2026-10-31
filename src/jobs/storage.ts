@@ -1,7 +1,7 @@
 // A tile's save file: binary, compressed, with its SHA-256. Encoded and decoded in the workers; the page writes and
 // reads the files (saveFiles.ts).
 
-import { HEIGHT_TILE_RES, MAP_TILES, SAVE_VERSION, TERRAIN_MAX_Y, TERRAIN_MIN_Y } from '../config.ts';
+import { HEIGHT_TILE_RES, MAP_TILES, SAVE_VERSION, TERRAIN_MIN_Y } from '../config.ts';
 import { heightIndex } from '../world/heights.ts';
 import { SEG_REC, SEG_REC_V2, boxColumnList, columnStride, emptyBoxes, type BoxColumns, type RoadSave } from '../shared/contracts/worker.ts';
 import { generatedBuilt } from '../world/decay.ts';
@@ -14,7 +14,6 @@ export function quantizeHeight(h: number): number {
   return v < 0 ? 0 : v > 65535 ? 65535 : v;
 }
 export function dequantizeHeight(q: number): number { return q / HEIGHT_Q + TERRAIN_MIN_Y; }
-export const HEIGHT_MAX_Q = quantizeHeight(TERRAIN_MAX_Y);
 
 export function encodeTile(tile: number, heights: Uint16Array, boxes: BoxColumns, roads: RoadSave, ground: Uint32Array = new Uint32Array(0), water: Float32Array = new Float32Array(0)): Uint8Array {
   const n = boxes.count;

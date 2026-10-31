@@ -95,11 +95,3 @@ export function intern<T>(value: T): T {
   Object.freeze(node);
   return value;
 }
-
-/** A record's object members made canonical, in place (the record itself stays its own: its id, place and wear). */
-export function internMembers(record: Record<string, unknown>): void {
-  for (const key of Object.keys(record)) {
-    const value = record[key];
-    if (typeof value === 'object' && value !== null) record[key] = intern(value);
-  }
-}

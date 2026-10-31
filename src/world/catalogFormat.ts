@@ -25,8 +25,6 @@ export const CAT_FUNCTIONS = ['house', 'townhouse', 'apartments', 'residentialTo
   'fireStation', 'hospital', 'clinic', 'school', 'university', 'library', 'museum', 'prison', 'church', 'cemetery', 'busStation', 'shop',
   'supermarket', 'mall', 'bank', 'pharmacy', 'bakery', 'restaurant', 'snackBar', 'bar', 'nightclub', 'cinema', 'hotel', 'gym', 'club',
   'gasStation', 'office', 'factory', 'warehouse', 'park', 'square', 'playground', 'sportsCourt'] as const;
-/** Index of each name in its list. */
-export const catIndex = <T extends readonly string[]>(list: T, name: string): number => list.indexOf(name as T[number]);
 
 /** A finish (index into CAT_FINISHES) and a colour (0xRRGGBB). */
 export interface CatMaterial { finish: number; colour: number }
@@ -65,8 +63,6 @@ export interface CatProject {
 
 /** Bits of a volume's flags byte. */
 export const VOL_MATERIAL = 1, VOL_OUTLINE = 2, VOL_PATTERN = 4;
-/** Bits of a face geometry's fields byte, in the order the values follow. */
-export const GEOM_FIELDS = ['bays', 'windowWidth', 'windowHeight', 'sill', 'pierWidth', 'pierDepth', 'pierEvery'] as const;
 
 /** Reads the packed catalog (the layout written by data/lots-roadcraft/pack.mjs). */
 export function decodeCatalog(bytes: Uint8Array, names: readonly string[]): CatProject[] {

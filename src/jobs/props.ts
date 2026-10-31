@@ -39,8 +39,6 @@ export const SIGN = { Speed: 0, Yield: 1, Name: 2, OneWay: 3, Stop: 4, NoParking
 export const WIRE_Y = 9.25;
 /** Tipo do espaço livre no pool (5 bits de tipo). */
 export const PROP_FREE = 31;
-/** Bits do tipo na palavra extra (o resto é a chave). */
-export const TYPE_BITS = 5;
 
 /** Postes ao longo da via: primeiro a 8 m do recuo, depois a cada 32 m (o shader da via usa o mesmo passo). */
 export const LAMP_FIRST = 8;
@@ -145,9 +143,6 @@ function placeItems(heights: Float32Array, a: Float32Array, out: Out): void {
     out.add(m[0], x0, y, z0, x1, m[1] || variant, 1, 0);
   }
 }
-
-/** Escala guardada em 6 bits: 0,5 a 2,0. */
-export function propScale(q: number): number { return 0.5 + q / 42; }
 
 /**
  * The crown's reach of each wild tree kind at scale 1 (m), measured on its model (render/treeMeshes.ts: the mixed

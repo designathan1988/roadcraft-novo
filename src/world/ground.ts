@@ -28,20 +28,11 @@ export const Ground = {
   Auto: 0, Sand: 1, Soil: 2, Meadow: 3, Snow: 4, Gravel: 5, Asphalt: 6, Concrete: 7,
   Granite: 8, Sandstone: 9, Basalt: 10, Cerrado: 11, Flowers: 12, Rocks: 13, Mud: 14,
 } as const;
-export const GROUND_NAMES: Array<[number, string]> = [
-  [Ground.Auto, 'Grama (apaga)'], [Ground.Sand, 'Areia'], [Ground.Soil, 'Terra'], [Ground.Meadow, 'Mato'], [Ground.Snow, 'Neve'],
-  [Ground.Gravel, 'Cascalho'], [Ground.Asphalt, 'Asfalto'], [Ground.Concrete, 'Concreto'], [Ground.Granite, 'Rocha: granito'],
-  [Ground.Sandstone, 'Rocha: arenito'], [Ground.Basalt, 'Rocha: basalto'], [Ground.Cerrado, 'Cerrado'], [Ground.Flowers, 'Flores'],
-  [Ground.Rocks, 'Pedras'], [Ground.Mud, 'Lama'],
-];
 /** sRGB colour of each type (the shader reads this table). */
 export const GROUND_COLORS = [
   0x6b8545, 0xb8a882, 0x85715a, 0x7a8a4a, 0xeef0f2, 0x9a958c, 0x45484c, 0xa9a59d,
   0x8f8a85, 0xc08458, 0x4a4846, 0x9c8f52, 0x8a9a52, 0x7d7a74, 0x5a4a3a,
 ];
-
-/** Map biomes: grass colours and tree mix. */
-export const BIOMES = ['Sem ecossistema', 'Cerrado', 'Mata Atlântica', 'Amazônia', 'Caatinga', 'Pampa', 'Pantanal'];
 
 export const WATER_SPACING = 8;
 export const WATER_TILE_RES = 1024 / WATER_SPACING; // 128
@@ -74,8 +65,6 @@ export function waterAt(w: Float32Array, x: number, z: number): number {
 }
 
 export type GroundMode = 'paint' | 'forest' | 'cut';
-/** Species of a planted wood (kept in channel A while there is no clearing): 0 mixed, 1 oak, 2 cypress, 3 palm. */
-export const TREE_SPECIES: Array<[number, string]> = [[0, 'Mistas'], [1, 'Carvalho'], [2, 'Cipreste'], [3, 'Palmeira']];
 
 /** Stroke of the ground brush: paint, forest (plants) or cut (clearing). */
 export class GroundStroke implements Command {

@@ -16,8 +16,6 @@ import { parkMiller } from '../core/rng.ts';
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
 /** Faces per variant: Sign0 … Sign0 + 15. */
 export const FACE_LAST = PMAT.Sign0 + 15;
-/** Sign parts: finish Sign0 + variant (the shader hides those of the other variants). */
-export const SIGN_PARTS = 4;
 
 export interface PropDef {
   /** Mesh per level (null = not drawn). */

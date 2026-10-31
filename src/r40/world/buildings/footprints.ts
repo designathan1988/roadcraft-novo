@@ -99,21 +99,6 @@ function convexOverlap(a: readonly Vec2[], b: readonly Vec2[]): number {
   return poly.length < 3 ? 0 : Math.abs(signedArea(poly));
 }
 
-/** The area of `ring` that lies over `supports`, the supports' own overlaps counted once: summed one by one where `ring` and every support are convex and no two supports overlap, else swept. */
-function coveredArea(ring: readonly Vec2[], supports: readonly Vec2[][], area: number): number {
-  if (isConvex(ring) && supports.every(isConvex)) {
-    const near = supports.filter((s) => !boxesApart(ring, s));
-    let apart = true;
-    for (let i = 0; i < near.length && apart; i++) for (let j = i + 1; j < near.length && apart; j++) apart = overlapArea(near[i]!, near[j]!) === 0;
-    if (apart) {
-      let covered = 0;
-      for (const s of near) covered += convexOverlap(ring, s);
-      return Math.min(area, covered);
-    }
-  }
-  return area - polygonArea(clipping.difference(asPolygon(ring), ...supports.map(asPolygon)));
-}
-
 /** Whether two rings' boxes are strictly apart (touching boxes are clipped: their rings may share an edge). */
 function boxesApart(a: readonly Vec2[], b: readonly Vec2[]): boolean {
   let ax0 = Infinity, ay0 = Infinity, ax1 = -Infinity, ay1 = -Infinity;
@@ -122,13 +107,6 @@ function boxesApart(a: readonly Vec2[], b: readonly Vec2[]): boolean {
   let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
   for (const p of b) { if (p.x < bx0) bx0 = p.x; if (p.x > bx1) bx1 = p.x; if (p.y < by0) by0 = p.y; if (p.y > by1) by1 = p.y; }
   return ax1 < bx0 || bx1 < ax0 || ay1 < by0 || by1 < ay0;
-}
-
-/** The share (0..1) of `ring`'s area that lies over `supports`. */
-export function supportShare(ring: readonly Vec2[], supports: readonly Vec2[][]): number {
-  const area = Math.abs(signedArea(ring));
-  if (supports.length === 0 || area < 1e-9) return 0;
-  return Math.max(0, 1 - (area - coveredArea(ring, supports, area)) / area);
 }
 
 export function containsPoint(v: Volume, p: Vec2): boolean {

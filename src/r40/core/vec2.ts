@@ -13,8 +13,6 @@ export const scale = (a: Vec2, k: number): Vec2 => ({ x: a.x * k, y: a.y * k });
 export const dot = (a: Vec2, b: Vec2): number => a.x * b.x + a.y * b.y;
 /** Scalar cross product (z component of the 3D cross). */
 export const cross = (a: Vec2, b: Vec2): number => a.x * b.y - a.y * b.x;
-
-export const lenSq = (a: Vec2): number => a.x * a.x + a.y * a.y;
 export const len = (a: Vec2): number => Math.hypot(a.x, a.y);
 export const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
 

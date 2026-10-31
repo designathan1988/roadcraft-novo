@@ -13,10 +13,8 @@ export const Ctl = { Auto: 0, Signal: 1, Priority: 2, AllStop: 3, YieldAll: 4, M
 export const isMidCrossing = (ctl: number) => ctl === Ctl.Zebra || ctl === Ctl.PedSignal;
 /** Special control of a two-road node (pedestrian crossing or U-turn through the median). */
 export const isMidNode = (ctl: number) => isMidCrossing(ctl) || ctl === Ctl.UTurn;
-export const CTL_NAMES = ['Automático', 'Semáforo', 'Placas (via principal)', 'Pare em todas', 'Preferência em todas', 'Minirrotatória', 'Sem sinalização', 'Rotatória', 'Passagem de nível', 'Faixa zebra', 'Faixa com semáforo', 'Retorno'];
 /** Rule of an arm: Free = no sign (priority to the right). */
 export const Rule = { Free: 0, Main: 1, Yield: 2, Stop: 3, Signal: 4 } as const;
-export const RULE_NAMES = ['Sem placa', 'Preferencial', 'Dê a preferência', 'Pare', 'Semáforo'];
 
 export interface JunctionSpec {
   ctl: number;

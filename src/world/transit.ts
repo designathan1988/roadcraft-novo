@@ -6,7 +6,6 @@ import type { Command } from '../core/commands.ts';
 
 /** Line mode: bus, train or metro (train and metro run on rails). */
 export const Mode = { Bus: 0, Train: 1, Metro: 2 } as const;
-export const MODE_NAMES = ['Ônibus', 'Trem', 'Metrô'];
 
 /** A line. Bus lines run out and back (Roadcraft) unless `loop` (a ring: last stop → first). */
 export interface Line { id: number; color: number; buses: number; stops: number[]; mode?: number; loop?: boolean }

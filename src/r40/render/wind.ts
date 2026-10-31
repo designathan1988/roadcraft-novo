@@ -21,13 +21,6 @@ export function setWindWeather(dirX: number, dirZ: number, metresPerSecond: numb
   windUniforms.uWindStrength.value = Math.min(4.2, 0.3 + metresPerSecond / 6.5);
 }
 
-export interface WindResponse {
-  /** Top displacement as a fraction of height, at a full gust. */
-  readonly sway: number;
-  /** Leaf or blade flutter, as a fraction of height. */
-  readonly flutter: number;
-}
-
 /** The mark of a material whose vertices the wind moves: what it draws sways every frame, and the sun's cascades draw it over their store of what stands still (`sunCascades.ts` movers, `renderer.ts`). */
 const SWAYS = Symbol('sways');
 type Swaying = Material & { [SWAYS]?: true };

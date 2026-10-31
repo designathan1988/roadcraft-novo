@@ -36,8 +36,6 @@ export { finishTable } from './buildingGen/finishes.ts';
 export { catalogLevels, wallsHeight, wallsHeightOf } from './buildingGen/heights.ts';
 export type { HeightRec } from './buildingGen/heights.ts';
 export type { PartEmit, Volume } from './buildingGen/outputs.ts';
-
-export const GEN_VERSION = 15;
 /**
  * The main mesh of a pass that does not want it (detail layer, parts): keeps the facade state the detail reads
  * (curFac, curBase, curU) and stores no vertex.

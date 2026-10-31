@@ -2,7 +2,7 @@ import type { Vec2 } from '../../core/vec2.ts';
 import { convexHull, pointInPolygon } from '../../core/polygon.ts';
 import { m } from '../units.ts';
 import { localFootprint, overlapArea } from './footprints.ts';
-import { STEP_RISE, STEP_RUN } from './foundation.ts';
+import { STEP_RISE } from './foundation.ts';
 import { isRetainingStone } from './cityBuildings.ts';
 import {
   EPS,
@@ -14,44 +14,9 @@ import {
   type Building,
   type BuildingElement,
   type ElementKind,
-  type FaceId,
   type Volume,
   volumeTop,
 } from './types.ts';
-
-/** Free parts of a building. */
-
-/** A ramp's slope: one in twelve, the usual limit for a wheelchair ramp. */
-const RAMP_RUN_PER_RISE = 12;
-
-/** Sizes an element starts with, world units: [w, d, h]. */
-export const ELEMENT_DEFAULTS: Readonly<Record<ElementKind, readonly [number, number, number]>> = {
-  stair: [m(1.2), m(3), m(1)],
-  ramp: [m(1.5), m(6), m(0.5)],
-  pillar: [m(0.4), m(0.4), m(3)],
-  canopy: [m(2.4), m(1.2), m(0.15)],
-  wall: [m(4), m(0.25), m(1.8)],
-  slab: [m(4), m(4), m(0.25)],
-  pavement: [m(4), m(3), m(0.12)],
-  fence: [m(2), m(0.12), m(1.1)],
-  tree: [m(3), m(3), m(5)],
-  bench: [m(1.6), m(0.5), m(0.45)],
-  ac: [m(0.8), m(0.35), m(0.6)],
-  planter: [m(1), m(1), m(0.5)],
-  railing: [m(2), m(0.12), m(1.05)],
-  awning: [m(3), m(1.2), m(0.12)],
-  flowers: [m(1.4), m(1.4), m(0.4)],
-  rocks: [m(1.6), m(1.6), m(0.7)],
-  parking: [m(6), m(5), m(0.12)],
-  clock: [m(3), m(0.25), m(3)],
-  hedge: [m(3), m(0.7), m(1.2)],
-  shrub: [m(1.4), m(1.4), m(1.2)],
-  gate: [m(3), m(0.12), m(1.8)],
-  bin: [m(1.4), m(0.7), m(1.1)],
-  lamp: [m(0.3), m(0.3), m(4.5)],
-  bollard: [m(0.2), m(0.2), m(0.9)],
-  drain: [m(0.5), m(0.5), m(0.1)],
-};
 
 /** Parts hung on a facade rather than standing on the ground. */
 export const ON_FACADE: ReadonlySet<ElementKind> = new Set<ElementKind>(['canopy', 'ac', 'awning', 'clock']);
@@ -92,12 +57,6 @@ export { elementRect };
 
 /** Steps of a stair: every riser at most `STEP_RISE`. */
 export const stairSteps = (e: BuildingElement): number => Math.max(1, Math.ceil(e.h / STEP_RISE - 1e-9));
-
-/** The run a stair or a ramp needs for its rise. */
-export function runFor(kind: ElementKind, rise: number): number {
-  if (kind === 'ramp') return Math.max(m(1), rise * RAMP_RUN_PER_RISE);
-  return Math.max(STEP_RUN, Math.ceil(rise / STEP_RISE - 1e-9) * STEP_RUN);
-}
 
 /** The first volume an element would stand inside of, or null. Touching is allowed. */
 export function elementClash(b: Building, e: BuildingElement): Volume | null {
@@ -198,16 +157,6 @@ export function partGroups(b: Building): Map<number, number> {
   const out = new Map<number, number>();
   els.forEach((e, i) => out.set(e.id, find(i)));
   return out;
-}
-
-// ------------------------------------------------------------------ snapping
-
-/** A bay of a face, as the pointer picked it. */
-export interface BayRef {
-  readonly volume: number;
-  readonly side: FaceId;
-  readonly index: number;
-  readonly storey: number;
 }
 
 // ------------------------------------------------------------------ parts through parts

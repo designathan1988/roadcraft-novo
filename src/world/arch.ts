@@ -14,11 +14,6 @@ import { ARCH_COUNT, ARCHES, PATTERN_COUNT, Win } from './archData.ts';
 export { ARCH_COUNT, ARCHES, PATTERN_COUNT, Win, Balcony, Crown } from './archData.ts';
 export type { Arch } from './archData.ts';
 
-/** Window parameters per style, for the shader: (side margin, sill, head, bits: 1 shutters, 2 moulding). */
-export function archWindowTable(): Array<[number, number, number, number]> {
-  return ARCHES.map((a) => [a.winSide, a.winLow, a.winHigh, (a.shutters ? 1 : 0) + (a.frame ? 2 : 0)]);
-}
-
 /** Building function (0 = ordinary; growth picks by zone). */
 export const Fn = {
   None: 0, School: 1, Church: 2, Hospital: 3, Clinic: 4, Square: 5, Park: 6, GasStation: 7, Supermarket: 8,

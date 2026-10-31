@@ -1,12 +1,7 @@
-/** Single source of truth for every numeric tolerance in the engine. */
 
-import { m } from './units.ts';
 
 /** Generic floating-point slop for "are these the same point/number". */
 export const EPS = 1e-9;
-
-/** Geometric slop — below this (0.04 mm), two positions are one position. */
-export const GEO_EPS = m(0.00004);
 
 /** Guard against dividing by a quantity that is numerically zero. */
 export const DIV_EPS = 1e-12;

@@ -255,14 +255,6 @@ export const MASS_GRID = 4;
 /** Numbers a box of a box level is drawn from (`massBoxes.ts`): centre x, y, half sides, turn; wall's foot, top, floor; wall rgb, bay; roof rgb, storey; glass share, seed. */
 export const BOX_INSTANCE = 18;
 
-/** A BOX LEVEL'S BUILDINGS AS INSTANCES OF ONE BOX (`farTiles.ts` levels 2 and up): `BOX_INSTANCE` numbers a box in place of its 20 vertices and 30 indices. */
-export interface BoxMass {
-  readonly boxes: Float32Array;
-  readonly bounds: Bounds;
-  readonly top: number;
-  readonly error: number;
-}
-
 /** The most vertices a shell piece holds: every index of it fits 16 bits (meshoptimizer's advice: half the index memory and fetch), 65535 left out (WebGL 2.0 spec, "PRIMITIVE_RESTART_FIXED_INDEX is always enabled"). */
 export const SHELL_PIECE = 0xffff;
 

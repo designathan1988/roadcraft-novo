@@ -47,8 +47,6 @@ function texture(data: Uint8Array, size: number): THREE.DataTexture {
 
 /** Side of the asphalt tile (m). */
 export const ASPHALT_TILE = 10.4;
-/** Side of the sidewalk tile (m): 32 courses of 11 cm pavers. */
-export const FOOTWAY_TILE = 3.52;
 
 /**
  * Asphalt: R = relative tone (0.5 = the road colour), G = wear sheen (polished track). 512² over 10.4 m.

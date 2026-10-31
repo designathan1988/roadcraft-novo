@@ -32,13 +32,6 @@ export function impostorFrames(geos: THREE.BufferGeometry[]): void {
   });
 }
 
-/** Direction (upper hemisphere) → uv on the octahedron. */
-export function hemiOctEncode(x: number, y: number, z: number): [number, number] {
-  const s = Math.abs(x) + Math.abs(y) + Math.abs(z);
-  const px = x / s, pz = z / s;
-  return [(px + pz) * 0.5 + 0.5, (px - pz) * 0.5 + 0.5];
-}
-
 export function hemiOctDecode(u: number, v: number): [number, number, number] {
   const ux = u * 2 - 1, uy = v * 2 - 1;
   const px = (ux + uy) / 2, pz = (ux - uy) / 2;

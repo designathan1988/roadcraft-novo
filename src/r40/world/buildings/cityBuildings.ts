@@ -19,16 +19,6 @@ import {
   bayKey,
 } from './types.ts';
 
-/** The city's buildings - homes, public services, shops, places to eat and go out, places of work and of leisure */
-
-type CityCategory = 'homes' | 'public' | 'commerce' | 'leisure' | 'work';
-
-export interface CityBuilding {
-  readonly fn: BuildingFunction;
-  readonly category: CityCategory;
-  readonly body: BlueprintBody;
-}
-
 interface BlockSpec {
   readonly x: number;
   readonly y: number;

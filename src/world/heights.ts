@@ -40,21 +40,6 @@ export function heightAt(h: Float32Array, x: number, z: number): number {
   return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz;
 }
 
-/** Lowest and highest height in a world rectangle (for culling boxes and building bases). */
-export function heightRange(h: Float32Array, minX: number, minZ: number, maxX: number, maxZ: number, out: Float32Array): void {
-  const gx0 = clampG(Math.floor(sampleCoord(minX))), gx1 = clampG(Math.ceil(sampleCoord(maxX)));
-  const gz0 = clampG(Math.floor(sampleCoord(minZ))), gz1 = clampG(Math.ceil(sampleCoord(maxZ)));
-  let lo = Infinity, hi = -Infinity;
-  for (let gz = gz0; gz <= gz1; gz++) {
-    for (let gx = gx0; gx <= gx1; gx++) {
-      const v = h[heightIndex(gx, gz)];
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
-  }
-  out[0] = lo; out[1] = hi;
-}
-
 /** Global sample (gx, gz) of an index into the heights (inverse of heightIndex). */
 export function sampleOfIndex(i: number): [number, number] {
   const tile = i >> (SHIFT * 2), local = i & (LAYER_TEXELS - 1);

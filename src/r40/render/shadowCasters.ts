@@ -8,11 +8,3 @@ export interface SizedCaster {
   readonly casts: boolean;
   radius(): number;
 }
-
-const casters = new Set<SizedCaster>();
-
-/** `caster` chosen at each cascade from now on; the function returned takes it off (its mesh disposed). */
-export function castBySize(caster: SizedCaster): () => void {
-  casters.add(caster);
-  return () => { casters.delete(caster); };
-}

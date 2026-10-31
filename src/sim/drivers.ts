@@ -50,7 +50,6 @@ export const driverSchema = {
   acc: Float32Array,
 } as const;
 type Cols = { [K in keyof typeof driverSchema]: InstanceType<(typeof driverSchema)[K]> };
-export type VehicleColumns = Cols;
 /** The driver's figures, read only (the driving rules read them; only `drawDriver` writes them). */
 export type DriverRead = { readonly [K in keyof Cols]: { readonly [i: number]: number } };
 

@@ -18,8 +18,6 @@ export function closeRoadKeys(): void {
   open = null;
 }
 
-export const roadKeysOpen = (): boolean => open !== null;
-
 /** `keys` reads the keys as they are now; `set` keeps a change (and the pill shows it). */
 export function openRoadKeys(anchor: HTMLElement, keys: () => RoadKeys, set: (patch: Partial<RoadKeys>) => void): void {
   closeRoadKeys();

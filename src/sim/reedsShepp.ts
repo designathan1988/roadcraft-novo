@@ -83,19 +83,6 @@ function candidates(x: number, y: number, phi: number): RSPath[] {
   return out;
 }
 
-/** End pose of a path from (0, 0, 0), radius 1 (x forward, y left, phi counter-clockwise). */
-export function integrate(p: RSPath, upTo = Infinity): [number, number, number] {
-  let x = 0, y = 0, phi = 0, left = upTo;
-  for (let i = 0; i < p.kinds.length && left > 0; i++) {
-    const full = p.lens[i], l = Math.sign(full) * Math.min(Math.abs(full), left);
-    left -= Math.abs(l);
-    const k = p.kinds[i];
-    if (k === 0) { x += Math.cos(phi) * l; y += Math.sin(phi) * l; }
-    else { const p1 = phi + k * l; x += (Math.sin(p1) - Math.sin(phi)) / k; y += (Math.cos(phi) - Math.cos(p1)) / k; phi = p1; }
-  }
-  return [x, y, phi];
-}
-
 /**
  * Shortest path among the families above from pose a to pose b (world: forward = (sin yaw, cos yaw), as the
  * vehicle poses), with turning radius r (m). `maxReverse`: longest stretch in reverse allowed (m). Null when none.

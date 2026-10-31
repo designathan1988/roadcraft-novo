@@ -167,24 +167,6 @@ export function solidFootprints(b: Building, grow = 0): Vec2[][] {
   return groundVolumes(b).filter((v) => !v.open).map((v) => volumeCorners(b, v, grow));
 }
 
-/** Local bounding box of the footprint, world units. */
-export function footprintBox(b: Building): { x0: number; y0: number; x1: number; y1: number } {
-  const ground = groundVolumes(b);
-  const list = ground.length > 0 ? ground : b.volumes;
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (const v of list) {
-    x0 = Math.min(x0, v.x);
-    y0 = Math.min(y0, v.y);
-    x1 = Math.max(x1, v.x + v.w);
-    y1 = Math.max(y1, v.y + v.d);
-  }
-  if (!Number.isFinite(x0)) return { x0: 0, y0: 0, x1: b.module, y1: b.module };
-  return { x0, y0, x1, y1 };
-}
-
 /** An element's plan, local frame: [x0, y0, x1, y1]. `w` runs across its facing, `d` along it. */
 export function elementRect(e: BuildingElement): [number, number, number, number] {
   const alongY = e.facing === 0 || e.facing === 2;

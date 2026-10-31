@@ -36,8 +36,6 @@ export function markingStyle(id: MarkingStyleId | undefined): MarkingStyle {
   }
 }
 
-export const isMarkingStyle = (v: unknown): v is MarkingStyleId => v === 'classic' || v === 'br' || v === 'us' || v === 'eu';
-
 type Line = ReadonlyArray<readonly [number, number]>;
 
 function ring(cx: number, cy: number, rx: number, ry: number): Array<[number, number]> {

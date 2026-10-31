@@ -35,8 +35,6 @@ export const isGroundElement = (t: number) => t >= 30 && t <= 40;
  */
 export const isSidewalkFurniture = (t: number) =>
   (t >= Item.Bench && t <= Item.Sign) || t === Item.Guardrail || t === Item.Railing || t === Item.PoleLine || t === Item.Person;
-/** Planted by the player: trees, palms and shrubs (a sidewalk takes them; a road built over them clears them). */
-export const isPlant = (t: number) => t === Item.Tree || t === Item.Bush || t === Item.Conifer || t === Item.Palm;
 
 const schema = { x0: Float32Array, z0: Float32Array, x1: Float32Array, z1: Float32Array, type: Uint8Array, variant: Uint8Array };
 /** Flat record: [id, x0, z0, x1, z1, type, variant]. */
