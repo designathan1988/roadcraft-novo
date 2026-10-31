@@ -4,11 +4,12 @@
 // into this engine's mesh: the shell's faces with their paint and finish (the finishes texture array), and the parts
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
-import { furnishLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, hypot3, type PartKind, type Building, type RoofKind, type MadeBuilding } from '../r40/api.ts';
+import { emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, hypot3, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
 import type { BufferGeometry } from 'three/webgpu';
 import { FIN } from './buildingFinishes.ts';
 import { Xoshiro128 } from '../core/rng.ts';
 import { madeToMeasure as massingB40 } from './b40/massing.ts';
+import { furnishLot as furnishB40 } from './b40/lot/furnish.ts';
 import { lotKind as lotKindB40, planLot as planB40 } from './b40/lot/plan.ts';
 import { toBuilding40 } from './b40/adapter.ts';
 import { B40Table } from './b40/volumes.ts';
@@ -112,7 +113,7 @@ export type PartSink = (kind: string, x: number, y: number, z: number, yaw: numb
  * and furnished again for every one of them (the whole lot plan, the yard's elements with their O(n²) clash tests).
  * A body depends on the lot's seed, use, density and size alone, so it is made once and kept for the next jobs.
  */
-type Body40 = Parameters<typeof furnishLot>[0];
+type Body40 = Building;
 /** `placed`: the record as last placed in the world (one object: the party walls tell a building from its neighbours by identity). */
 interface KeptBody { use: string; density: string; W: number; D: number; body: Body40; placed?: { x: number; y: number; rot: number; b: Building } }
 const MASSING = new B40Table();
@@ -129,18 +130,13 @@ function building40(lot: Lot40): Building {
     const plan = planB40(lotKindB40(lot.use, lot.density), lot.W, lot.D, rng);
     const env = plan.building;
     const madeB40 = massingB40(MASSING, lot.use, lot.density, { W: env.x1 - env.x0, D: env.y1 - env.y0, backDoor: plan.back.use !== 'none' && plan.back.use !== 'loading', character: lot.seed & 0xffff, era: (lot.seed >>> 16) % 3 as 0 | 1 | 2 }, rng);
-    const body = toBuilding40(MASSING, (lot.seed & 0x7fffffff) || 1, 0, 0, 0);
     // the plan's frame (x from the lot's left, y from the front) -> the lot's (x from its middle)
     const dx = env.x0 - lot.W / 2, dy = env.y0;
-    for (const v of body.volumes) { v.x += dx; v.y += dy; }
-    for (const e of body.elements ?? []) { e.x += dx; e.y += dy; }
-    for (const c of body.cores ?? []) { c.x += dx; c.y += dy; }
-    const made: MadeBuilding = {
-      signature: { form: '', colour: 0, roof: '', storeys: 0 },
-      fn: (body.function ?? 'house') as MadeBuilding['fn'],
-      body, entrance: madeB40.entrance, backDoor: madeB40.backDoor, free: madeB40.free,
-    };
-    furnishLot(body, plan, made, rng);
+    for (let v = 0; v < MASSING.n; v++) { MASSING.x[v] = MASSING.x[v]! + dx; MASSING.y[v] = MASSING.y[v]! + dy; }
+    for (let i = 0; i < MASSING.elN; i++) { MASSING.elX[i] = MASSING.elX[i]! + dx; MASSING.elY[i] = MASSING.elY[i]! + dy; }
+    for (let i = 0; i < MASSING.coreN; i++) { MASSING.coreX[i] = MASSING.coreX[i]! + dx; MASSING.coreY[i] = MASSING.coreY[i]! + dy; }
+    furnishB40(MASSING, plan, madeB40, rng);
+    const body = toBuilding40(MASSING, (lot.seed & 0x7fffffff) || 1, 0, 0, 0);
     const fresh: KeptBody = { use: lot.use, density: lot.density, W: lot.W, D: lot.D, body };
     BODIES.delete(seed);
     BODIES.set(seed, fresh);
