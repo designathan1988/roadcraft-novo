@@ -9,6 +9,7 @@ import { impostorQuad } from './impostor.ts';
 import { MOVER_LAYER, MOVER_SMALL_LAYER, SMALL_CASTER, SMALL_CASTER_LAYER } from './sun.ts';
 import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
 import { BRISE_BLADE, FRAME_BAR, SHELL_PARTS, partGeometries, partTopGeometries } from '../r40/api.ts';
+import { markThin, partCardGeometries, THIN_PARTS } from './partCards.ts';
 import { PART_BASE, PART_DIST, PART_PROP, PART_TYPES, POOL_PARTS, SHARED_MODEL_TYPES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 import { parkMiller } from '../core/rng.ts';
@@ -42,6 +43,8 @@ export interface PartMeta {
   reach: readonly [number, number, number];
   pieces: ReadonlyArray<readonly [number, number, number]>;
   topLevel: boolean;
+  /** A thin kind's far level is its card (render/partCards.ts): what the card leaves out, in its unit model's axes. */
+  card?: readonly [number, number, number];
 }
 
 /** A part's bars, in its unit model's axes (Roadcraft 4.0 kit.ts `pieces`; the values of R5's own models, r40 kit.ts). */
@@ -58,7 +61,7 @@ export const PART_ERROR_PX = 1.5;
 export const BAR_PIXELS = 0.5;
 
 /** A part kind's rules from the model it draws (its level 0) and its 4.0 name. */
-function partMeta(name: string, g: THREE.BufferGeometry, topLevel: boolean): PartMeta {
+function partMeta(name: string, g: THREE.BufferGeometry, topLevel: boolean, card: boolean): PartMeta {
   if (!g.boundingBox) g.computeBoundingBox();
   const b = g.boundingBox!;
   return {
@@ -66,6 +69,7 @@ function partMeta(name: string, g: THREE.BufferGeometry, topLevel: boolean): Par
     reach: [Math.max(-b.min.x, b.max.x), Math.max(-b.min.y, b.max.y), Math.max(-b.min.z, b.max.z)],
     pieces: PART_PIECES[name] ?? [],
     topLevel,
+    ...(card && THIN_PARTS[name] ? { card: THIN_PARTS[name].cardError } : {}),
   };
 }
 
@@ -81,7 +85,7 @@ function part(g: THREE.BufferGeometry, rgb: number, mat: number, tx = 0, ty = 0,
   const c = new THREE.Color(rgb).convertSRGBToLinear();
   for (let i = 0; i < n; i++) { col[i * 4] = c.r; col[i * 4 + 1] = c.g; col[i * 4 + 2] = c.b; col[i * 4 + 3] = mat / 255; }
   ng.setAttribute('pcol', new THREE.BufferAttribute(col, 4));
-  // atlas uv and billboard corner (only the tree cards use it; zero elsewhere)
+  // atlas uv and billboard corner (the tree cards), a thin part's bar, tone and card (render/partCards.ts); zero elsewhere
   ng.setAttribute('pext', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
   return ng;
 }
@@ -554,6 +558,8 @@ function buildingPartDefs(models: Readonly<Record<string, THREE.BufferGeometry>>
   const byType = new Map<number, { near: THREE.BufferGeometry[]; far: THREE.BufferGeometry[]; names: string[] }>();
   // the shell parts' far level: their tops (Roadcraft 4.0: a lot's box, rail or slab from afar)
   const tops = partTopGeometries() as Readonly<Record<string, THREE.BufferGeometry | null>>;
+  // the thin kinds' far level: their cards (Roadcraft 4.0: a frame's or a railing's bars drawn by the pixel shader)
+  const cards = partCardGeometries();
   /** A model posed as a part of the pool, in the kit's colour and with the model's own tones (the facade props). */
   const posed = (g: THREE.BufferGeometry, rgb: number, mat: number): THREE.BufferGeometry => {
     const one = part(g, rgb, mat);
@@ -579,9 +585,10 @@ function buildingPartDefs(models: Readonly<Record<string, THREE.BufferGeometry>>
     }
     const [rgb, metal] = PART_BASE[kind] ?? [0xffffff, false];
     const mat = VARIANT_TYPES.has(type) ? PMAT.Sign0 + variant : metal ? PMAT.Metal : PMAT.Plain;
-    entry.near.push(posed(g, rgb, mat));
-    const top = tops[kind];
+    entry.near.push(markThin(posed(g, rgb, mat), kind, false));
+    const top = tops[kind], card = cards[kind];
     if (top) entry.far.push(posed(top, rgb, mat));
+    else if (card) entry.far.push(markThin(posed(card, rgb, mat), kind, true));
     entry.names[VARIANT_TYPES.has(type) ? variant : 0] = kind;
   }
   const defs = new Map<number, PropDef>();
@@ -737,7 +744,8 @@ export function propCullRadius(k: PropKind, poseW: number): number {
 function kindPart(d: PropDef, sub: number, lods: Array<THREE.BufferGeometry | null>): PartMeta | undefined {
   const name = d.partNames?.[sub] ?? d.partNames?.[0];
   const g = lods[0];
-  return name && g ? partMeta(name, g, lods[1] !== null && lods[1] !== undefined && (SHELL_PARTS as ReadonlySet<string>).has(name)) : undefined;
+  const far = lods[1] !== null && lods[1] !== undefined;
+  return name && g ? partMeta(name, g, far && (SHELL_PARTS as ReadonlySet<string>).has(name), far && THIN_PARTS[name] !== undefined) : undefined;
 }
 
 /** The kinds the renderer draws, in kind order (`propKindTable`). */

@@ -1174,3 +1174,31 @@ test('TRAA: the history read through Catmull-Rom keeps its detail when read agai
   // bilinear wipes the bars out (1e-4 of their detail left); Catmull-Rom keeps two orders of magnitude more (0.13)
   assert.ok(cr > 100 * bl, `detail kept after 100 half-pixel reads: Catmull-Rom ${cr.toExponential(2)}, bilinear ${bl.toExponential(2)}`);
 });
+
+test('props: the thin parts from afar are cards (a frame one quad, a railing a face a side) with their pattern and tone', async () => {
+  const { partCardGeometries, markThin, CARD, THIN_PARTS } = await import('../src/render/partCards.ts');
+  const { partGeometries } = await import('../src/r40/api.ts');
+  const cards = partCardGeometries();
+  const tris = (g: THREE.BufferGeometry) => (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+  const models = partGeometries() as unknown as Record<string, THREE.BufferGeometry>;
+  // 4.0 kit.ts: a frame card is one face (2 triangles) for the model's bars; a railing a face a side, seen from both
+  assert.equal(tris(cards.frame), 2);
+  assert.ok(tris(models.frame) >= 40, `the frame model draws its bars as faces (${tris(models.frame)} triangles)`);
+  assert.equal(tris(cards.railing), 12);
+  assert.equal(tris(cards.roofRailing), 4);
+  // the card lies on the frame's street face (z = 0.5) across the unit square
+  cards.frame.computeBoundingBox();
+  const b = cards.frame.boundingBox!;
+  assert.deepEqual([b.min.x, b.max.x, b.min.y, b.max.y, b.min.z, b.max.z], [-0.5, 0.5, -0.5, 0.5, 0.5, 0.5]);
+  // pattern by face on a posed railing card: its sides (normal along x) the side pattern, its front the front one
+  const g = cards.railing.toNonIndexed();
+  g.setAttribute('pext', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 4), 4));
+  markThin(g, 'railing', true);
+  const ext = g.getAttribute('pext'), n = g.getAttribute('normal');
+  for (let i = 0; i < ext.count; i++) {
+    assert.equal(ext.getZ(i), Math.abs(n.getX(i)) > 0.5 ? CARD.railingSide : CARD.railingFront);
+    assert.equal(ext.getX(i), Math.fround(THIN_PARTS.railing.bar));
+  }
+  // what the frame's card leaves out is its depth (4.0 kit.ts error [0, 0, 1])
+  assert.deepEqual([...THIN_PARTS.frame.cardError], [0, 0, 1]);
+});

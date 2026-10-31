@@ -15,6 +15,8 @@ import { PROP, PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
 import { PartSize } from './partSize.ts';
+import { signalLampLit } from './propSignals.ts';
+import { partCardOn, partThinTone } from './partCards.ts';
 import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propLayer, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
@@ -27,9 +29,9 @@ import { SHADOW_LENGTH, sunDirection } from './sun.ts';
 import type { SegId } from '../core/ids.ts';
 
 const {
-  Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4, ivec2,
+  Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4,
   attribute, positionLocal, normalLocal, varyingProperty, transformNormalToView, normalize, cos, sin, min, select, length, dot,
-  textureLoad, time, interleavedGradientNoise, screenCoordinate, mix, step, abs, fract, hash, sRGBTransferEOTF,
+  time, interleavedGradientNoise, screenCoordinate, mix, step, abs, hash, sRGBTransferEOTF,
   texture, vec2, cross, clamp, floor, uniformArray: uArr, cameraPosition, positionWorld: positionWorldP, cameraViewMatrix, max,
 } = T;
 
@@ -398,29 +400,9 @@ export class PropRenderer {
       const wz = p.x.negate().mul(s).add(p.z.mul(c)).add(sway.mul(windDirU.y));
       const n = normalize(mix(normalLocal, normalLocal.div(scale3), isPart));
       vN.assign(vec3(n.x.mul(c).add(n.z.mul(s)), n.y, n.x.negate().mul(s).add(n.z.mul(c))));
-      // traffic light: which lamp is lit
-      const key = keyRaw.shiftRight(uint(5));
-      const node = int(key.shiftRight(uint(3)));
-      const arm = float(key.bitAnd(uint(7)));
-      const st = textureLoad(sigTex, ivec2(node.mod(int(512)), node.div(int(512)))).r.mul(255).add(0.5).floor();
-      // outside the simulation's window: a decorative cycle by the clock
-      const fakeT = time.add(hash(node.toUint()).mul(60));
-      const fakePhase = float(fakeT.div(16).floor().mod(2));
-      const fakeState = select(fract(fakeT.div(16)).greaterThan(0.85), float(1), float(0));
-      // from the simulation: 128 | amber << 6 | arms with green
-      const known = step(float(127.5), st);
-      const mask = st.mod(64);
-      const armOn = floor(mask.div(T.pow(float(2), arm))).mod(2);
-      const state = mix(fakeState, step(float(0.5), floor(st.div(64)).mod(2)), known);
-      const armMatch = mix(step(abs(fract(arm.div(2)).mul(2).sub(fakePhase)), float(0.1)), armOn, known);
       const mat = pcol.w.mul(255);
-      const isRed = step(abs(mat.sub(PMAT.Red)), float(0.5));
-      const isYel = step(abs(mat.sub(PMAT.Yellow)), float(0.5));
-      const isGrn = step(abs(mat.sub(PMAT.Green)), float(0.5));
-      const greenOn = armMatch.mul(step(state, float(0.5)));
-      const yellowOn = armMatch.mul(step(abs(state.sub(1)), float(0.5)));
-      const redOn = float(1).sub(greenOn).sub(yellowOn);
-      vA.assign(vec4(fadeN, compN, variant, isRed.mul(redOn).add(isYel.mul(yellowOn)).add(isGrn.mul(greenOn))));
+      // traffic light: which lamp is lit (render/propSignals.ts)
+      vA.assign(vec4(fadeN, compN, variant, signalLampLit(keyRaw, sigTex, mat)));
       // impostor: a square facing the camera with the photo of the nearest direction
       const isImp = step(abs(mat.sub(PMAT.Impostor)), float(0.5));
       const col = pcol.x.mul(255).add(0.5).floor();
@@ -490,7 +472,8 @@ export class PropRenderer {
     const leafBase = base.mul(mix(vec3(1, 1, 1), leafK, isLeaf.max(isImpF)));
     const up = clamp(normalize(mix(vN, impNW, isImpF)).y, 0, 1);
     const through = leafBase.mul(float(0.1).add(up.mul(0.1))).mul(float(1).sub(nightU.mul(0.9))).mul(isLeaf.max(isImpF));
-    m.colorNode = vec4(mix(leafBase, bulbOff, isBulb).mul(mix(vec3(1, 1, 1), vD.xyz, vD.w)), 1);
+    // a thin part's bars against the tone behind them (render/partCards.ts)
+    m.colorNode = vec4(partThinTone(mix(leafBase, bulbOff, isBulb).mul(mix(vec3(1, 1, 1), vD.xyz, vD.w))), 1);
     m.emissiveNode = through.add(pcol.xyz.mul(isBulb).mul(vLit).mul(mix(float(2.2), float(4), nightU)))
       .add(sRGBTransferEOTF(vec3(1, 0.86, 0.6)).mul(isGlass).mul(nightU).mul(6));
     m.roughnessNode = mix(mix(float(0.85), float(0.45), isMetal), float(0.95), isLeaf.max(isImpF));
@@ -498,7 +481,7 @@ export class PropRenderer {
     // fading between levels
     const noise = interleavedGradientNoise(screenCoordinate.xy);
     const fadeOk = select(vComp.greaterThan(0.5), noise.greaterThanEqual(float(1).sub(vFade)), noise.lessThan(vFade.add(0.002)));
-    m.maskNode = fadeOk.and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5))).and(isCardF.lessThan(0.5).or(leafC.a.greaterThan(0.5)));
+    m.maskNode = partCardOn().and(fadeOk).and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5))).and(isCardF.lessThan(0.5).or(leafC.a.greaterThan(0.5)));
     return m;
   }
 

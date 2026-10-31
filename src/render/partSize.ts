@@ -10,14 +10,15 @@ import { SCALE_MIN, SCALE_OCTAVES } from '../jobs/parts40.ts';
 
 const { uniform, uniformArray, float, uint, vec3, mix, select, min, max, length } = T;
 
-/** vec4s per kind in `rulesU`: flags, the model's box, its reach, three bars. */
-const RULE = { flags: 0, extent: 1, reach: 2, piece: 3, stride: 6 } as const;
+/** vec4s per kind in `rulesU`: flags, the model's box, its reach, three bars, its card's error (w = 1 where it has one). */
+const RULE = { flags: 0, extent: 1, reach: 2, piece: 3, card: 6, stride: 7 } as const;
 
 export class PartSize {
   /**
    * Every kind's rules in one array (one uniform buffer: the cull pass sits near WebGPU's 12 a stage), RULE.stride vec4s a
    * kind: flags (x = 0 not a 4.0 building part, 1 a solid part, 2 a part of bars; y = 1 where its far level is a shell
-   * part's top), its model's box, its reach from its origin, its bars (up to three; zero when unused).
+   * part's top), its model's box, its reach from its origin, its bars (up to three; zero when unused), what its card leaves
+   * out (a thin kind's far level, render/partCards.ts; w = 1 where it has one).
    */
   private readonly rulesU: Node;
   /** Pixels a metre spans at a metre's distance in the perspective view, and everywhere in the isometric one (0 in the other). */
@@ -30,6 +31,7 @@ export class PartSize {
     this.rulesU = uniformArray(kinds.flatMap((d) => [
       new THREE.Vector4(d.part ? (d.part.pieces.length ? 2 : 1) : 0, d.part?.topLevel ? 1 : 0, 0, 0),
       v4(d.part?.extent), v4(d.part?.reach), v4(d.part?.pieces[0]), v4(d.part?.pieces[1]), v4(d.part?.pieces[2]),
+      d.part?.card ? new THREE.Vector4(d.part.card[0], d.part.card[1], d.part.card[2], 1) : new THREE.Vector4(),
     ]), 'vec4');
   }
 
@@ -82,7 +84,7 @@ export class PartSize {
    * Where a part's levels end, metres from the eye ([level 0, level 1, level 2]), never past `reach` (its type's distance:
    * the cells hold its parts no farther): its far level (a shell part's top) once the half side its sides stand for is
    * under PART_ERROR_PX, and nothing once its diagonal is under a pixel, or its widest bar (the middle side of each)
-   * under BAR_PIXELS. By its type's distance alone a window frame's 6 cm bars were drawn to 400 m (at 1080p), a fifth
+   * under BAR_PIXELS; a thin kind's card (its far level) once what the card leaves out spans under PART_ERROR_PX. By its type's distance alone a window frame's 6 cm bars were drawn to 400 m (at 1080p), a fifth
    * of a pixel wide.
    */
   ends(kind: Node, s3: Node, reach: Node): Node[] {
@@ -97,8 +99,12 @@ export class PartSize {
     const draw = min(at(drawM, drawPx), reach).toVar();
     const hasTop = pk.y.greaterThan(0.5);
     const top = at(min(s3.y, max(s3.x, s3.z)).mul(0.5), float(PART_ERROR_PX));
-    const end0 = select(hasTop, min(top, draw), draw).toVar();
-    const end1 = select(hasTop.and(draw.greaterThan(end0)), draw, float(0)).toVar();
+    // a thin kind's card (4.0 partCells.ts levelAt): once the largest thing it leaves out spans under PART_ERROR_PX
+    const cardRule = this.rule(kind, RULE.card), hasCard = cardRule.w.greaterThan(0.5);
+    const left = cardRule.xyz.mul(s3);
+    const card = at(max(max(left.x, left.y), left.z), float(PART_ERROR_PX));
+    const end0 = select(hasTop, min(top, draw), select(hasCard, min(card, draw), draw)).toVar();
+    const end1 = select(hasTop.or(hasCard).and(draw.greaterThan(end0)), draw, float(0)).toVar();
     return [end0, end1, float(0)];
   }
 }
