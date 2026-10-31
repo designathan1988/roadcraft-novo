@@ -150,6 +150,8 @@ export class SimNet {
         this.dirtyNodes.add(sc.a[op.id]); this.dirtyNodes.add(sc.b[op.id]);
         for (let k = 0; k < 16; k++) this.laneConn[op.id * 16 + k] = -1;
         this.removedSegEnds.push(sc.a[op.id], sc.b[op.id]);
+        // a dead end near it may now have room for its turning bulb (D41: only an added segment rechecked them)
+        this.dirtyDeadEndsNear(op.id);
         net.removeSeg(op.id);
         this.removedSegs.push(op.id);
         this.epoch++;
@@ -159,6 +161,8 @@ export class SimNet {
         const sc = net.segs.cols;
         this.laneMeters -= sc.len[op.id] * (laneCount(sc.profile[op.id], 1) + laneCount(sc.profile[op.id], -1));
         net.setProfile(op.id, op.profile);
+        // the road's width changed: the dead ends round it are measured again
+        this.dirtyDeadEndsNear(op.id);
         this.laneMeters += sc.len[op.id] * (laneCount(op.profile, 1) + laneCount(op.profile, -1));
         this.dirtyNodes.add(sc.a[op.id]); this.dirtyNodes.add(sc.b[op.id]);
         this.reprofiledSegs.push(op.id); // the number of lanes may have changed
