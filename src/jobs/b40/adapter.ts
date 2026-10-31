@@ -132,7 +132,7 @@ export function toBuilding40(t: B40Table, id: number, x: number, y: number, rota
   const elements: BuildingElement[] = [];
   for (let e = 0; e < t.elN; e++) {
     elements.push({
-      id: e + 1, kind: B40_ELEMENT_NAME[t.elKind[e]!] as BuildingElement['kind'],
+      id: t.elId[e]!, kind: B40_ELEMENT_NAME[t.elKind[e]!] as BuildingElement['kind'],
       x: t.elX[e]!, y: t.elY[e]!, facing: t.elFacing[e] as 0 | 1 | 2 | 3,
       w: t.elW[e]!, d: t.elD[e]!, z: t.elZ[e]!, h: t.elH[e]!,
       ...(Number.isFinite(t.elAngle[e]) ? { angle: t.elAngle[e]! } : {}),
@@ -156,7 +156,7 @@ export function toBuilding40(t: B40Table, id: number, x: number, y: number, rota
     palette: t.palette,
     ...(Object.keys(bm).length ? { materials: bm } : {}),
     volumes,
-    ...(elements.length ? { elements, nextElementId: elements.length + 1 } : {}),
+    ...((elements.length || t.furnished) ? { elements, nextElementId: t.nextElementId } : {}),
     cores,
     ...(t.functionName ? { function: t.functionName as BuildingFunction } : {}),
     nextVolumeId: volumes.length + 1,
@@ -226,6 +226,8 @@ export function fromBuilding40(t: B40Table, b: Building): void {
   }
   for (const e of b.elements ?? []) {
     const ei = t.elN++;
+    t.elId[ei] = e.id;
+    if (e.id >= t.nextElementId) t.nextElementId = e.id + 1;
     t.elKind[ei] = Math.max(0, B40_ELEMENT_NAME.indexOf(e.kind as (typeof B40_ELEMENT_NAME)[number]));
     t.elX[ei] = e.x; t.elY[ei] = e.y; t.elW[ei] = e.w; t.elD[ei] = e.d; t.elZ[ei] = e.z; t.elH[ei] = e.h;
     t.elFacing[ei] = e.facing;

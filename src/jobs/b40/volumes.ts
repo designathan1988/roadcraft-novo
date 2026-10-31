@@ -121,6 +121,10 @@ export class B40Table {
 
   /** Free parts. */
   elN = 0;
+  nextElementId = 1;
+  /** The lot has been furnished: its record always carries the (possibly empty) element list. */
+  furnished = false;
+  readonly elId = new Int32Array(MAX_ELEMENTS);
   readonly elKind = new Uint8Array(MAX_ELEMENTS);
   readonly elX = new Float64Array(MAX_ELEMENTS);
   readonly elY = new Float64Array(MAX_ELEMENTS);
@@ -158,7 +162,7 @@ export class B40Table {
   plinthRef: number = NONE;
 
   clear(): void {
-    this.n = 0; this.elN = 0; this.coreN = 0; this.matN = 0; this.reliefN = 0; this.outlineUsed = 0;
+    this.n = 0; this.elN = 0; this.nextElementId = 1; this.furnished = false; this.coreN = 0; this.matN = 0; this.reliefN = 0; this.outlineUsed = 0;
     this.outlineN.fill(0); this.outlineAt.fill(0);
     this.fill.fill(UNSET);
     this.bays.fill(UNSET);
@@ -242,13 +246,25 @@ export class B40Table {
   el(kind: number, x: number, y: number, facing = 0, size?: { w?: number; d?: number; h?: number; z?: number; material?: B40Paint | MatSpec }): number {
     if (this.elN >= MAX_ELEMENTS) return NONE;
     const e = this.elN++;
+    this.elId[e] = this.nextElementId++;
     const dflt = ELEMENT_DEFAULT[kind] ?? [1, 1, 1];
     this.elKind[e] = kind; this.elFacing[e] = facing;
     this.elX[e] = x; this.elY[e] = y;
     this.elW[e] = size?.w ?? dflt[0]; this.elD[e] = size?.d ?? dflt[1]; this.elH[e] = size?.h ?? dflt[2];
     this.elZ[e] = size?.z ?? 0;
-    if (size?.material) this.elMat[e] = this.material(size.material);
+    this.elAngle[e] = NaN;
+    this.elMat[e] = size?.material ? this.material(size.material) : NONE;
     return e;
+  }
+
+  /** Removes element `i`, keeping the order of the others (its id disappears with it). */
+  removeElement(i: number): void {
+    if (i < 0 || i >= this.elN) return;
+    const n = this.elN - i - 1;
+    if (n > 0) {
+      for (const a of [this.elId, this.elKind, this.elX, this.elY, this.elW, this.elD, this.elZ, this.elH, this.elFacing, this.elAngle, this.elMat]) a.copyWithin(i, i + 1, this.elN);
+    }
+    this.elN--;
   }
 
   row(kind: number, x0: number, y0: number, x1: number, y1: number, n: number, facing = 0): void {
