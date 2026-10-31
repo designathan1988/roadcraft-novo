@@ -53,3 +53,11 @@ test('B62: every action the interface declares is used by a button, a key, a pan
   const dead = methods.filter((m) => !new RegExp(`(hud|this)\\.${m}\\(`).test(game));
   assert.deepEqual(dead, [], `interface methods nobody calls: ${dead.join(', ')}`);
 });
+
+test('D5: no text left says demolishing refunds half (the refund is what the tuning says, 25% as Roadcraft 4.0)', async () => {
+  const { LEGACY_EN } = await import('../src/shared/i18n/lang/legacy.ts');
+  const { ROAD_TUNING } = await import('../src/roads/tuning.ts');
+  if ((ROAD_TUNING.economy.demolitionRefund as number) === 0.5) return;
+  const wrong = Object.entries(LEGACY_EN).filter(([pt, en]) => /devolv|refund/i.test(pt + en) && /metade|\bhalf\b/i.test(pt + en));
+  assert.deepEqual(wrong, []);
+});

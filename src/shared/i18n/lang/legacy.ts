@@ -19,8 +19,6 @@ export const LEGACY_EN: Record<string, string> = {
   'Encher o mapa de ruas em grade e prédios em todos os lotes (teste de desempenho)': 'Fill the map with a street grid and buildings on every lot (performance test)',
   'Carregar o pior caso': 'Load the worst case', 'Qualidade, resolução e tempo (O)': 'Quality, resolution and weather (O)',
   'Velocidade do relógio (P)': 'Clock speed (P)', 'Mais cedo': 'Earlier', 'Mais tarde': 'Later',
-  'Dinheiro em caixa. Vias custam pela largura e pelo comprimento; pontes e túneis custam mais. Demolir devolve metade.':
-    'Cash. Roads cost by width and length; bridges and tunnels cost more. Demolishing refunds half.',
   'Dinheiro ilimitado (liga/desliga)': 'Unlimited money (on/off)', 'Modo livre: dinheiro ilimitado.': 'Sandbox: unlimited money.',
   'Modo livre: nada é cobrado neste mapa': 'Sandbox: nothing is charged on this map', 'Dinheiro de volta ao caixa.': 'Money back in the bank.',
   'Botão direito': 'Right button', 'gira ·': 'rotates ·', 'meio': 'middle', 'ou': 'or', 'arrastar': 'drag', 'move ·': 'pans ·',
@@ -223,7 +221,6 @@ export const LEGACY_EN: Record<string, string> = {
   'Três cliques: começo, ponto de controle e fim.': 'Three clicks: start, control point and end.',
   'Clique num cruzamento ou no chão; [ e ] mudam o raio.': 'Click a junction or the ground; [ and ] change the radius.',
   'Troca o perfil de uma via existente; Shift troca a rua inteira.': 'Changes the profile of an existing road; Shift changes the whole street.',
-  'Clique numa via para tirá-la (devolve metade do custo).': 'Click a road to remove it (refunds half the cost).',
   'Arraste dos lados das vias: residencial, comercial, industrial, misto, baixa ou alta densidade. Os prédios nascem sozinhos.':
     'Drag along the roads: residential, commercial, industrial, mixed, low or high density. Buildings grow by themselves.',
   'Clique num prédio para mudar andares, estilo e função; num lote vazio para construir; ou desenhe um lote em qualquer lugar.':
