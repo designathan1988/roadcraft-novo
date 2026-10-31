@@ -113,7 +113,12 @@ export function bindInput(h: InputHost, gs: Gesture = new Gesture()): InputContr
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // two fingers zoom (src/ui/touch.ts runs before the listeners below)
     attachPinch(c, h.rig);
+    // the pointer of the gesture under way: a second pointer (a pen with the mouse, a touch with a pen) does not start
+    // another gesture over it nor end it (D71: a second pointerdown replaced the stroke without finishing it)
+    let pointerId = -1;
     c.addEventListener('pointerdown', (e) => {
+      if (gs.drag !== 'none' && e.pointerId !== pointerId) return;
+      pointerId = e.pointerId;
       h.ambient.start();
       c.setPointerCapture(e.pointerId);
       h.pointer.x = e.offsetX; h.pointer.y = e.offsetY;
@@ -240,6 +245,7 @@ export function bindInput(h: InputHost, gs: Gesture = new Gesture()): InputContr
     };
     // whatever the tool does on release, the drag always ends (an error must not leave the next move panning the camera)
     const end = (e: PointerEvent) => {
+      if (gs.drag !== 'none' && e.pointerId !== pointerId) return;
       try { finishDrag(e); } catch (err) {
         console.error(err);
         h.hud.toast(t('tool.failed', { message: (err as Error)?.message ?? String(err) }));

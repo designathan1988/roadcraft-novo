@@ -20,8 +20,8 @@ class FakeCanvas extends EventTarget {
   hasPointerCapture(): boolean { return false; }
 }
 
-const pointer = (type: string, x: number, y: number, button = 0): Event =>
-  Object.assign(new Event(type), { button, offsetX: x, offsetY: y, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', shiftKey: false, altKey: false });
+const pointer = (type: string, x: number, y: number, button = 0, pointerId = 1): Event =>
+  Object.assign(new Event(type), { button, offsetX: x, offsetY: y, clientX: x, clientY: y, pointerId, pointerType: pointerId === 1 ? 'mouse' : 'pen', shiftKey: false, altKey: false });
 
 /** A host whose tools only record what the input asks of them. */
 function rig(tool: InputHost['tool']) {
@@ -167,4 +167,18 @@ test('the landform picked reaches the brush only while the Landform tool is in h
   assert.equal(brush.mode, 'canyon');
   tools.setLandform(brush, 'gully');
   assert.equal(brush.mode, 'gully');
+});
+
+test('D71: a second pointer during a gesture neither starts another one over it nor ends it', () => {
+  const { calls, canvas, control } = rig('zone');
+  canvas.dispatchEvent(pointer('pointerdown', 100, 100));
+  assert.equal(control.gesture.drag, 'zone');
+  // a pen comes down and up while the mouse still drags
+  canvas.dispatchEvent(pointer('pointerdown', 120, 100, 0, 2));
+  canvas.dispatchEvent(pointer('pointerup', 120, 100, 0, 2));
+  assert.equal(control.gesture.drag, 'zone', 'the mouse gesture goes on');
+  assert.equal(calls.filter((c) => c === 'zoneBegin').length, 1, calls.join(', '));
+  canvas.dispatchEvent(pointer('pointerup', 130, 100));
+  assert.equal(control.gesture.drag, 'none');
+  assert.equal(calls.filter((c) => c === 'zoneEnd').length, 1, calls.join(', '));
 });
