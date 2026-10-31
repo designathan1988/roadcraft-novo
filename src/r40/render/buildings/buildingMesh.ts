@@ -103,8 +103,8 @@ export function emitBuilding(
     }
   }
 
-  // The spaces of each floor, for which room a window lights.
-  const spacesOf = deriveSpaces(b);
+  // The spaces of each floor, for which room a window lights: only for a reader of them (Roadcraft 5 reads neither).
+  const spacesOf = rooms ? deriveSpaces(b) : null;
   // ---- facades, bay by bay: only outside walls are in `bays`
   const componentAt = new Map<number, BayComponent>();
   for (const bay of bays) componentAt.set(bayKey(bay.volume, bay.level, bay.side, bay.index), bay.component);
@@ -166,7 +166,7 @@ export function emitBuilding(
       e.flat = false;
       shell.ground = floor;
     } else {
-      e.slot = rooms ? slotOfBay(b, v, bay, spacesOf, slots) : -1;
+      e.slot = rooms ? slotOfBay(b, v, bay, spacesOf!, slots) : -1;
       if (rooms && b.id >= 0 && b.cutaway === undefined) {
         // The levels of one type share their pieces (`interiorAt`), and so their rooms, a pane alike looked at once.
         const inside = interiorAt(b, bay.level);

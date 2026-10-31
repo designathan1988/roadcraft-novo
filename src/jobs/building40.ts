@@ -4,7 +4,7 @@
 // into this engine's mesh: the shell's faces with their paint and finish (the finishes texture array), and the parts
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
-import { madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
+import { madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, hypot3, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
 import type { BufferGeometry } from 'three/webgpu';
 import { FIN } from './buildingFinishes.ts';
 import { Xoshiro128 } from '../core/rng.ts';
@@ -72,7 +72,7 @@ function unfold(u: number, v: number, out: number[]): void {
   let x = Math.max(-1, u / NORMAL_UNIT), y = Math.max(-1, v / NORMAL_UNIT);
   const z = 1 - Math.abs(x) - Math.abs(y);
   if (z < 0) { const nx = (1 - Math.abs(y)) * (x >= 0 ? 1 : -1), ny = (1 - Math.abs(x)) * (y >= 0 ? 1 : -1); x = nx; y = ny; }
-  const l = Math.hypot(x, y, z) || 1;
+  const l = hypot3(x, y, z) || 1;
   out[0] = x / l; out[1] = y / l; out[2] = z / l;
 }
 
@@ -310,7 +310,7 @@ export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink |
           // T * Ry * S (partPose.ts poseMatrixInto)
           const X = px + pc * lx + ps * lz, Y = py + ly, Z = pz - ps * lx + pc * lz;
           let nx2 = nor ? nor.getX(v) / sx : 0, ny2 = nor ? nor.getY(v) / sy : 1, nz2 = nor ? nor.getZ(v) / sz : 0;
-          const nl = Math.hypot(nx2, ny2, nz2) || 1; nx2 /= nl; ny2 /= nl; nz2 /= nl;
+          const nl = hypot3(nx2, ny2, nz2) || 1; nx2 /= nl; ny2 /= nl; nz2 /= nl;
           const NX = pc * nx2 + ps * nz2, NZ = -ps * nx2 + pc * nz2;
           let cr = r, cg = gg, cb = bl;
           if (vc) { cr *= vc.getX(v); cg *= vc.getY(v); cb *= vc.getZ(v); }

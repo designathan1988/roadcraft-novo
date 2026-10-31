@@ -1,5 +1,6 @@
 // The Roadcraft 4.0 subsystem's public surface. Code outside `src/r40` imports from here, never from its internals.
 export { madeToMeasure } from './world/buildings/procedural.ts';
+export { hypot3 } from './core/hypot.ts';
 export { furnishLot, lotKind, planLot } from './world/growth/lotPlan.ts';
 export { emitChunk, letGoEmitted } from './render/buildings/buildingMesh.ts';
 export { PartyWalls } from './render/buildings/partyWalls.ts';
