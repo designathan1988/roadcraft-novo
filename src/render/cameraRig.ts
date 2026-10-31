@@ -414,7 +414,13 @@ export class CameraRig {
     return new Float64Array([this.target.x, this.target.z, this.yaw, this.pitch, this.dist, this.mode === 'iso' ? 1 : 0]);
   }
 
-  restore(s: Float64Array): void {
+  /**
+   * Puts the camera at a state from `state()` (x, z, yaw, pitch, dist, iso). A short state or one with a value that is
+   * not a number (a damaged save) is refused and the camera stays as it is (D54: it became NaN). True when restored.
+   */
+  restore(s: ArrayLike<number>): boolean {
+    if (s.length < 6) return false;
+    for (let i = 0; i < 5; i++) if (!Number.isFinite(s[i])) return false;
     this.target.set(s[0], heightAt(this.heights, s[0], s[1]), s[1]);
     this.yaw = s[2]; this.pitch = s[3]; this.dist = s[4];
     this.mode = s[5] === 1 ? 'iso' : 'persp';
@@ -423,5 +429,6 @@ export class CameraRig {
     this.pendingZoom = 0; this.pendingTurn = 0; this.coast.set(0, 0); this.pull = Infinity;
     for (const a of AXES) this.vel[a] = 0;
     this.syncCamera();
+    return true;
   }
 }

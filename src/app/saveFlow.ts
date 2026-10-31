@@ -222,6 +222,7 @@ export class SaveFlow {
     // old maps: dead ends lying inside another road become junctions (marked to save)
     const repaired = repairDanglingEnds(w);
     if (repaired) this.h.life.changed();
+    // a damaged camera in the file is refused: the view stays where the opening left it
     this.h.rig.restore(meta.camera);
     this.h.hud.viewChanged();
     this.slotGame = meta.gameId;
