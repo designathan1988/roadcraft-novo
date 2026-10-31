@@ -1,4 +1,4 @@
-// Final image: the sun's shadows in 3 cascades (near only), ambient occlusion (GTAO at full resolution), the glow
+// Final image: the sun's shadows in 3 cascades (near only), ambient occlusion (GTAO at half resolution), the glow
 // of lights at night (bloom), temporal anti-aliasing (TRAA), ACES tone mapping and Roadcraft's grade (CAS sharpening,
 // S curve, vibrance, split toning, vignette). Each part switches with the options; in compatibility mode (WebGL 2)
 // everything is off.
@@ -93,18 +93,19 @@ export class Post {
     let color: Node = scenePass.getTextureNode('output');
     const depthTex = scenePass.getTextureNode('depth');
     if (opts.ao) {
-      // Roadcraft 4.0's occlusion (postprocess.ts:185-228, quality.ts:234 ultra): from the depth alone, its normals
-      // rebuilt from it, at the scene's full resolution. DO NOT feed it the shading normal (the grass's and the rock's
-      // relief): it leans the hemisphere into a flat ground. DO NOT halve it: r186 GTAONode takes the centre's depth as
-      // the nearest of four texels at a scale under 1 (sampleCenterDepth), above the ground's own plane, and the ground
-      // round it reads as a horizon wherever its samples pass the thickness test; both darkened the ground up to a
-      // line straight across the view (21 levels of grey at 11 h, the empty map, 2026-10-31).
+      // Roadcraft 4.0's occlusion (postprocess.ts:185-228): from the depth alone, its normals rebuilt from it. DO NOT
+      // feed it the shading normal (the grass's and the rock's relief): it leans the hemisphere into a flat ground and
+      // darkened the ground up to a line straight across the view (21 levels of grey at 11 h on the empty map,
+      // 2026-10-31; 10 with the depth's normals). Half the frame's size, as 4.0's high tier (quality.ts:196): at the
+      // frame's own size the AO and its denoise ran the GPU to 100 % in the standard views (the owner, 2026-10-31).
+      // Open: the 10 levels left at half size (r186 GTAONode sampleCenterDepth takes the centre's depth as the
+      // nearest of four texels under a scale of 1).
       const depth = depthTex;
       // no normal node: rebuilt from the depth (r186 GTAONode.js:61 and DenoiseNode.js:29 take null; the types do not)
       const fromDepth = null as unknown as Node;
       const aoPass = ao(depth, fromDepth, camera);
       this.owned.push(aoPass);
-      aoPass.resolutionScale = 1;
+      aoPass.resolutionScale = 0.5;
       aoPass.radius.value = 1.3;
       aoPass.distanceExponent.value = 1.6;
       aoPass.thickness.value = 0.8;

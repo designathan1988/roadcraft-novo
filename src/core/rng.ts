@@ -30,6 +30,43 @@ export class Rng {
   int(a: number, bExclusive: number): number { return a + Math.floor(this.next() * (bExclusive - a)); }
 }
 
+/**
+ * xoshiro128** (Blackman & Vigna 2018), its four words seeded through splitmix32: the stream the 4.0 buildings are
+ * drawn from (jobs/building40.ts), so a lot's building is the one 4.0 made of its seed. Four words of state, no
+ * allocation per draw. `int` is inclusive of both ends, unlike `Rng.int`.
+ */
+export class Xoshiro128 {
+  private a: number; private b: number; private c: number; private d: number;
+  constructor(seed: number) {
+    let x = seed >>> 0;
+    const word = (): number => {
+      x = (x + 0x9e3779b9) >>> 0;
+      let z = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+      z = Math.imul(z ^ (z >>> 15), 0x735a2d97) >>> 0;
+      return (z ^ (z >>> 15)) >>> 0;
+    };
+    this.a = word(); this.b = word(); this.c = word(); this.d = word();
+    if ((this.a | this.b | this.c | this.d) === 0) this.a = 1;
+  }
+  nextU32(): number {
+    const s1x5 = Math.imul(this.b, 5) >>> 0;
+    const out = Math.imul(((s1x5 << 7) | (s1x5 >>> 25)) >>> 0, 9) >>> 0;
+    const t = (this.b << 9) >>> 0;
+    this.c = (this.c ^ this.a) >>> 0;
+    this.d = (this.d ^ this.b) >>> 0;
+    this.b = (this.b ^ this.c) >>> 0;
+    this.a = (this.a ^ this.d) >>> 0;
+    this.c = (this.c ^ t) >>> 0;
+    this.d = ((this.d << 11) | (this.d >>> 21)) >>> 0;
+    return out;
+  }
+  /** [0, 1) */
+  float(): number { return this.nextU32() / 4294967296; }
+  range(lo: number, hi: number): number { return lo + this.float() * (hi - lo); }
+  /** An integer in [lo, hi], both ends in. */
+  int(lo: number, hi: number): number { return lo + Math.floor(this.float() * (hi - lo + 1)); }
+}
+
 /** A seeded stream of numbers in [0, 1): the Rng as a function (the same mulberry32 sequence). One copy for all. */
 export function stream(seed: number): () => number {
   const r = new Rng(seed);

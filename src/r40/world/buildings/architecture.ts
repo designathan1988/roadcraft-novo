@@ -1,4 +1,4 @@
-import type { Rng } from '../../core/rng.ts';
+import type { Xoshiro128 as Rng } from '../../../core/rng.ts';
 import { m, stepsIn } from '../units.ts';
 import { mat } from './cityBuildings.ts';
 import { volumeSides } from './footprints.ts';

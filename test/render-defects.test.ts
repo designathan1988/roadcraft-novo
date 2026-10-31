@@ -271,9 +271,9 @@ test('E18: the ambient occlusion reads the depth with the matrices of the camera
   assert.ok(denoiseNode._cameraProjectionMatrixInverse!.value === iso.projectionMatrixInverse, 'the denoise unprojects with the isometric camera');
 });
 
-test('the ambient occlusion reads the depth alone, at full resolution (no false occlusion on flat ground)', async () => {
-  // Roadcraft 4.0 postprocess.ts:214 (normals rebuilt from the depth), quality.ts:234 (ultra: full resolution). The
-  // shading normal and r186's half-resolution centre (nearest of four texels) both shaded a flat ground up to a line.
+test('the ambient occlusion reads the depth alone, at half resolution (no shading normal, no 100 % GPU)', async () => {
+  // Roadcraft 4.0 postprocess.ts:214 (normals rebuilt from the depth). The shading normal shaded a flat ground up to a
+  // line; at the frame's full size the pass ran the GPU to 100 % in the standard views (the owner, 2026-10-31).
   const { Post } = await import('../src/render/post.ts');
   const persp = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), sun = new THREE.DirectionalLight();
   const post = new Post(fakeRenderer(), new THREE.Scene(), persp, sun, { shadows: false, ao: true, bloom: false });
@@ -283,7 +283,7 @@ test('the ambient occlusion reads the depth alone, at full resolution (no false 
   const denoiseNode = owned.find((n) => n._cameraProjectionMatrixInverse && !n._cameraProjectionMatrix)!;
   assert.equal(aoNode.normalNode, null, 'GTAO rebuilds its normals from the depth');
   assert.equal(denoiseNode.normalNode, null, 'the denoise rebuilds its normals from the depth');
-  assert.equal(aoNode.resolutionScale, 1, 'GTAO at the scene\'s full resolution');
+  assert.equal(aoNode.resolutionScale, 0.5, 'GTAO at half the frame\'s size');
 });
 
 test('E5, E25: each prop draw carries one variant only (a hydrant does not process the vertices of 13 other pieces)', async () => {

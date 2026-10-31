@@ -4,9 +4,10 @@
 // into this engine's mesh: the shell's faces with their paint and finish (the finishes texture array), and the parts
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
-import { Rng, madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
+import { madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
 import type { BufferGeometry } from 'three/webgpu';
 import { FIN } from './buildingFinishes.ts';
+import { Xoshiro128 } from '../core/rng.ts';
 import { MeshBuilder } from './meshBuilder.ts';
 
 /** Building materials as the generator writes them (jobs/buildingGen.ts BMAT). */
@@ -119,7 +120,7 @@ function building40(lot: Lot40): Building {
   const had = BODIES.get(seed);
   let kept: KeptBody | undefined = had && had.use === lot.use && had.density === lot.density && had.W === lot.W && had.D === lot.D ? had : undefined;
   if (!kept) {
-    const rng = new Rng(seed);
+    const rng = new Xoshiro128(seed);
     const plan = planLot(lotKind(lot.use, lot.density), lot.W, lot.D, rng);
     const env = plan.building;
     const made = madeToMeasure(lot.use, lot.density, { W: env.x1 - env.x0, D: env.y1 - env.y0, backDoor: plan.back.use !== 'none' && plan.back.use !== 'loading', character: lot.seed & 0xffff, era: (lot.seed >>> 16) % 3 as 0 | 1 | 2 }, rng);

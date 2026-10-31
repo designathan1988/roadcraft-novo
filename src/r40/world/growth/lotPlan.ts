@@ -1,4 +1,4 @@
-import type { Rng } from '../../core/rng.ts';
+import type { Xoshiro128 as Rng } from '../../../core/rng.ts';
 import type { BlueprintBody } from '../buildings/blueprints.ts';
 import { RETAINING_STONE, mat } from '../buildings/cityBuildings.ts';
 import { FOLLOWS_GROUND, elementClash, elementsMeet, isStructure, planReach, unsupportedElements } from '../buildings/elements.ts';
@@ -183,10 +183,6 @@ export function garageRamp(plan: LotPlan): { readonly start: number; readonly en
   if (end - start < 2) return null;
   return { start, end, grade: GARAGE_GRADE };
 }
-
-/** The side of the lot its drive runs down, if it has one. */
-export const driveSide = (plan: LotPlan): 'left' | 'right' | null =>
-  plan.left.use === 'drive' || plan.left.use === 'drivePath' ? 'left' : plan.right.use === 'drive' || plan.right.use === 'drivePath' ? 'right' : null;
 
 /** Depth of the paved apron behind a house where a car turns into its garage under the back. */
 const GARAGE_APRON = 6;
