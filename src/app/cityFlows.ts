@@ -84,12 +84,13 @@ export class CityFlows {
       for (let i = 0; i < city.nodes.length; i += 3) ids.push(w.roads.addNode({ x: city.nodes[i], z: city.nodes[i + 1], y: city.nodes[i + 2] }));
       const nc = w.roads.nodes.cols;
       const perTile: number[][] = Array.from({ length: TILE_COUNT }, () => []);
+      let refusedSegs = 0;
       for (let k = 0; k < city.segs.length; k += 5) {
         const a = ids[city.segs[k]], b = ids[city.segs[k + 1]], profile = city.segs[k + 2];
         const mx = (nc.x[a] + nc.x[b]) / 2, mz = (nc.z[a] + nc.z[b]) / 2;
         try {
           w.roads.addSeg({ a, b, cx: mx, cz: mz, profile, flags: 0, zl: city.segs[k + 3], zr: city.segs[k + 4] });
-        } catch { continue; }
+        } catch { refusedSegs++; continue; }
         // the straight segment the terrain is conformed to, in every tile it touches
         const half = PROFILE_INFO[profile].right;
         const rec = [nc.x[a], nc.z[a], nc.y[a], nc.x[b], nc.z[b], nc.y[b], half, edgeRise(profile, true), edgeRise(profile, false)];
@@ -98,6 +99,8 @@ export class CityFlows {
         const tz0 = tileX(Math.min(nc.z[a], nc.z[b]) - r), tz1 = tileX(Math.max(nc.z[a], nc.z[b]) + r);
         for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) perTile[tileId(tx, tz)].push(...rec);
       }
+      // never silent: a street the network refused is said (the generator should not make one; D64)
+      if (refusedSegs) h.hud.toast(t('game.toast.testCityRefused', { n: fmtInt(refusedSegs) }));
       // dead ends with a turning bulb: a disc when conforming the terrain (its footway ring ends at BULB_R + BULB_WALK)
       for (const n of ids) {
         if (!bulbAt(w.roads, n)) continue;
@@ -150,6 +153,7 @@ export class CityFlows {
       const key = new Map<number, NodeId>();
       for (const a of nodes) for (let k = 0; k < a.length; k += 5) key.set(a[k] * 1000 + a[k + 1], w.roads.addNode({ x: a[k + 2], z: a[k + 3], y: a[k + 4] }));
       const nc = w.roads.nodes.cols;
+      let refused = 0;
       for (const a of segs) for (let k = 0; k < a.length; k += 4) {
         const na = key.get(a[k] * 1000 + a[k + 1]), nb = key.get(a[k + 2] * 1000 + a[k + 3]);
         if (na === undefined || nb === undefined) continue;
@@ -158,8 +162,10 @@ export class CityFlows {
         const zone = r < 1300 ? Zone.Commercial : r < 2600 ? Zone.Mixed : mx > 2800 ? Zone.Industrial : Zone.Residential;
         // a horizontal segment (same j) follows line j; a vertical one, line i
         const profile = a[k + 1] === a[k + 3] ? lineProfile(a[k + 1]) : lineProfile(a[k]);
-        w.roads.addSeg({ a: na, b: nb, cx: mx, cz: mz, profile, flags: 0, zl: zone, zr: zone });
+        // a segment the network refuses (a node with too many roads) is counted and said, not the whole flow lost (D64)
+        try { w.roads.addSeg({ a: na, b: nb, cx: mx, cz: mz, profile, flags: 0, zl: zone, zr: zone }); } catch { refused++; }
       }
+      if (refused) h.hud.toast(t('game.toast.testCityRefused', { n: fmtInt(refused) }));
       const n = await h.grow();
       h.endRebuild(null, '');
       h.hud.toast(t('game.toast.testCityDone', { buildings: fmtInt(n), roads: fmtInt(w.roads.segs.size) }));
