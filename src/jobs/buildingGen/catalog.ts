@@ -173,7 +173,8 @@ export function catalogBuilding(g: GenContext, p: CatProject, wallOverride: numb
     const terrace = CAT_ROOFS[v.roof] === 'terrace', capY = yb + (vi % 4) * 0.02;
     const cap = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]].map(([x, z]) => mb.vert(wx(f, x, z), capY, wz(f, x, z), 0, 1, 0, terrace ? 0xc9c3b8 : p.roof.colour, terrace ? BMAT.Paving : BMAT.RoofFlat | (CAT_FIN[p.roof.finish] << 4)));
     mb.quad(cap[0], cap[1], cap[2], cap[3], 0, 1, 0);
-    if (lod < 2) catalogParapets(g, boxes, vi, x0, x1, z0, z1, v.base + n, capY, terrace ? 1.1 : 0.9, wallCol, terrace && lod === 0);
+    // volIndex, not vi: the boxes are the closed volumes only (D66: with an open volume first the wrong box was skipped)
+    if (lod < 2) catalogParapets(g, boxes, volIndex, x0, x1, z0, z1, v.base + n, capY, terrace ? 1.1 : 0.9, wallCol, terrace && lod === 0);
   });
   // the highest roof gets the machine room and the units
   if (lod < 2) {
