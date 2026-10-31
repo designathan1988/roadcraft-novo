@@ -464,7 +464,7 @@ test('controle automático pelo fluxo: semáforo onde passa muita gente, placas 
     for (let t = t0; t < t0 + seconds; t++) {
       for (let a = 0; a < 4; a++) {
         acc[a] += ((sim.armMain[busy] & (1 << a)) ? mainRate : minorRate) * x / 3600;
-        const whole = Math.floor(acc[a]); acc[a] -= whole; tr.advisor.pass[busy * 8 + a] += whole;
+        const whole = Math.floor(acc[a]); acc[a] -= whole; for (let i = 0; i < whole; i++) tr.advisor.count(busy, a, t);
       }
       tr.advisor.step(t);
     }

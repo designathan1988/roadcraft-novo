@@ -1,52 +1,74 @@
-// Controle automático pelo fluxo (roadcraft controlAdvisor): cada cruzamento no automático conta quem
-// chega por braço (micro e meso), a taxa vira média móvel de alguns minutos e, com histerese, o nó ganha
-// ou perde o semáforo. Uma fatia fixa de nós por passo (nunca o mapa inteiro), tudo em arrays por nó.
+// Automatic control by flow (Roadcraft 4.0 ControlAdvisor, src/sim/roads/controlAdvisor.ts and world.ts
+// stepControlAdvisor): each junction on automatic counts who comes in by arm (micro and meso), the rate becomes a moving
+// average of a few minutes and, with hysteresis, the node gains or loses its signal. As in 4.0, only the junctions being
+// watched are judged, each every EVERY seconds: a junction is watched from the first vehicle counted at it (or from its
+// creation / the choice of its control) until it rests at signs too quiet for anything else. A quiet junction costs
+// nothing until a vehicle comes again; nothing walks the map's nodes (D55: a cursor sliced every node, 64 a step).
 
-import { Flow, warrantedControl } from '../roads/control.ts';
+import { FLOW, Flow, warrantedControl } from '../roads/control.ts';
 import type { SimNet } from './lanes.ts';
 import { asNode, type NodeId } from '../core/ids.ts';
 
-/** Média móvel do fluxo (s): o controle só muda por uma tendência, não por um pelotão. */
+/** Moving average of the flow (s): the control changes on a trend, not on a platoon. */
 export const TREND = 300;
-/** Tempo mínimo entre duas trocas no mesmo nó, e de medida antes da primeira (s). */
+/** Minimum time between two changes at a node, and of measuring before the first (s). */
 export const SETTLE = 600;
-/** Nós avaliados por passo, e trocas por passo (cada troca refaz o nó; o resto troca na volta seguinte). */
-const PER_STEP = 64, CHANGES_PER_STEP = 2;
+/** Seconds between two judgements of a watched junction (4.0 ControlAdvisor.EVERY). */
+export const EVERY = 10;
+/**
+ * Vehicles an hour into a junction below which no control above signs is warranted, whatever it has now: the least
+ * major flow of a step up, with the hysteresis (4.0 controlAdvisor.ts QUIET_FLOW).
+ */
+export const QUIET_FLOW = Math.min(FLOW.stopMajor, FLOW.signalMajor, FLOW.signalMajorB) * Math.min(1, FLOW.stepDown);
+/** Changes per step (each change rebuilds the node; the rest stay due and change at the next step). */
+const CHANGES_PER_STEP = 2;
 
 export class FlowAdvisor {
   private readonly sim: SimNet;
-  /** Chegadas por braço (nó * 8 + braço), desde sempre; e o valor na última avaliação. */
+  /** Arrivals per arm (node * 8 + arm), ever; and the value at the last judgement. */
   pass = new Uint32Array((1 << 14) * 8);
   private seen = new Uint32Array((1 << 14) * 8);
-  /** Fluxo por braço (veíc./h, média móvel). */
+  /** Flow per arm (vehicles/h, moving average). */
   rate = new Float32Array((1 << 14) * 8);
-  /** Última avaliação e começo da medida (ou última troca) de cada nó. */
+  /** Last judgement and start of the measurement (or last change) of each node. */
   private lastT = new Float64Array(1 << 14);
   private since = new Float64Array(1 << 14).fill(-1);
-  private cursor = 0;
-  /**
-   * Limiares do roadcraft vezes isto. Com 1 o automático punha ~700 semáforos na cidade gerada de 16 km e o
-   * centro caía 1-2 km/h (aqui o cruzamento com placas escoa mais que um semáforo); com 2 troca ~200 nós
-   * (põe onde o fluxo é muito alto, tira onde a importância das vias pedia e quase ninguém passa).
-   */
+  /** Watched nodes in the order they are due (every push is due EVERY s after now, so the queue stays in order). */
+  private queue = new Int32Array(1 << 14);
+  private dueAt = new Float64Array(1 << 14);
+  private head = 0;
+  private size = 0;
+  private queued = new Uint8Array(1 << 14);
+  /** Nodes new or with their control chosen since the last step: watched from then (they may never see a vehicle). */
+  private pending: number[] = [];
+  private pendingAt = new Uint8Array(1 << 14);
+  /** 4.0's thresholds times this. With 1 the automatic put ~700 signals in the generated 16 km city and the centre fell
+   *  1-2 km/h (a junction with signs clears more than a signal here); with 2 it changes ~200 nodes. */
   scale = 2;
-  /** Trocas feitas (para o diagnóstico). */
+  /** Changes made (for the diagnosis). */
   changes = 0;
-  /** Nó trocou (para avisar a página). */
+  /** A node changed (to tell the page). */
   onChange: (node: NodeId, flow: number) => void = () => {};
 
   constructor(sim: SimNet) {
     this.sim = sim;
-    sim.net.nodes.onGrow((cap) => {
-      this.pass = grow(this.pass, cap * 8); this.seen = grow(this.seen, cap * 8); this.rate = grow(this.rate, cap * 8);
-      this.lastT = grow(this.lastT, cap); this.since = grow(this.since, cap, -1);
-    });
+    sim.net.nodes.onGrow((cap) => this.growNodes(cap));
+    this.growNodes(sim.net.nodes.capacity);
+    // a network built before this advisor was made
+    for (let n = 0; n < sim.net.nodes.end; n++) if (sim.net.nodes.alive[n]) this.reset(n);
   }
 
-  /** Nó novo ou com controle escolhido: mede de novo. */
+  /** New node or control chosen: measured again, and watched from the next step. */
   reset(n: number): void {
     for (let a = 0; a < 8; a++) { this.pass[n * 8 + a] = 0; this.seen[n * 8 + a] = 0; this.rate[n * 8 + a] = 0; }
     this.since[n] = -1;
+    if (!this.pendingAt[n]) { this.pendingAt[n] = 1; this.pending.push(n); }
+  }
+
+  /** A vehicle went through node n from arm `arm` at `time` (micro or meso): counted, and the node watched. */
+  count(n: number, arm: number, time: number): void {
+    this.pass[n * 8 + arm]++;
+    if (!this.queued[n] && this.sim.nodeAuto[n]) this.watch(n, time);
   }
 
   /**
@@ -64,20 +86,25 @@ export class FlowAdvisor {
     }
   }
 
-  /** Avalia a próxima fatia de nós. */
+  /** Judges the watched nodes that are due (each every EVERY s), and starts watching the new ones. */
   step(time: number): void {
-    const sim = this.sim, nodes = sim.net.nodes, end = nodes.end;
-    if (end === 0) return;
+    const sim = this.sim, nodes = sim.net.nodes;
+    for (const n of this.pending) {
+      this.pendingAt[n] = 0;
+      if (nodes.alive[n] && sim.nodeAuto[n] && !this.queued[n]) this.watch(n, time);
+    }
+    this.pending.length = 0;
     let changes = 0;
-    for (let i = 0; i < PER_STEP && changes < CHANGES_PER_STEP; i++) {
-      if (this.cursor >= end) this.cursor = 0;
-      const n = this.cursor++;
+    while (this.size > 0 && changes < CHANGES_PER_STEP && this.dueAt[this.head] <= time) {
+      const n = this.queue[this.head];
+      this.head = (this.head + 1) % this.queue.length; this.size--;
+      this.queued[n] = 0;
       if (!nodes.alive[n] || !sim.nodeAuto[n]) continue;
-      if (this.since[n] < 0) { this.since[n] = time; this.lastT[n] = time; for (let a = 0; a < 8; a++) this.seen[n * 8 + a] = this.pass[n * 8 + a]; continue; }
+      if (this.since[n] < 0) { this.watch(n, time); continue; }
       const dt = time - this.lastT[n];
-      if (dt <= 0) continue;
+      if (dt <= 0) { this.push(n, time); continue; }
       this.lastT[n] = time;
-      // média móvel exponencial da taxa de cada braço
+      // exponential moving average of each arm's rate
       const w = Math.min(1, dt / TREND), main = sim.armMain[n], deg = nodes.cols.deg[n];
       let major = 0, minorMax = 0, minorTotal = 0;
       for (let a = 0; a < deg; a++) {
@@ -88,22 +115,55 @@ export class FlowAdvisor {
         if (main & (1 << a)) major += this.rate[k];
         else { minorMax = Math.max(minorMax, this.rate[k]); minorTotal += this.rate[k]; }
       }
+      const k = this.scale, signal = sim.nodePhases[n] > 0;
+      // at signs and too quiet for anything else: the rates only fall until a vehicle is counted here again (4.0)
+      if (!signal && (major + minorTotal) / k < QUIET_FLOW) continue;
+      this.push(n, time);
       if (time - this.since[n] < SETTLE) continue;
-      const current = sim.nodePhases[n] > 0 ? 'signal' : 'priority';
-      const k = this.scale;
-      const want = warrantedControl(major / k, minorMax / k, minorTotal / k, current);
-      const flow = want === 'signal' ? Flow.Signal : Flow.Signs;
-      if ((want === 'signal') === (current === 'signal')) continue;
+      const want = warrantedControl(major / k, minorMax / k, minorTotal / k, signal ? 'signal' : 'priority');
+      if ((want === 'signal') === signal) continue;
       const node = asNode(n);
-      sim.setFlow(node, flow);
+      sim.setFlow(node, want === 'signal' ? Flow.Signal : Flow.Signs);
       this.since[n] = time;
       this.changes++; changes++;
-      this.onChange(node, flow);
+      this.onChange(node, want === 'signal' ? Flow.Signal : Flow.Signs);
     }
+  }
+
+  /** Watches node n from `time`: its measurement starts now if it had none, and it is judged EVERY s from now. */
+  private watch(n: number, time: number): void {
+    if (this.since[n] < 0) {
+      this.since[n] = time; this.lastT[n] = time;
+      for (let a = 0; a < 8; a++) this.seen[n * 8 + a] = this.pass[n * 8 + a];
+    }
+    this.push(n, time);
+  }
+
+  private push(n: number, time: number): void {
+    const q = this.queue;
+    const i = (this.head + this.size) % q.length;
+    q[i] = n; this.dueAt[i] = time + EVERY;
+    this.size++;
+    this.queued[n] = 1;
+  }
+
+  /** The per-node arrays take the network's size (also one that grew before this advisor was made). */
+  private growNodes(cap: number): void {
+    this.pass = grow(this.pass, cap * 8); this.seen = grow(this.seen, cap * 8); this.rate = grow(this.rate, cap * 8);
+    this.lastT = grow(this.lastT, cap); this.since = grow(this.since, cap, -1);
+    this.queued = grow(this.queued, cap); this.pendingAt = grow(this.pendingAt, cap);
+    // the queue holds each node at most once: it grows with the nodes, keeping its order
+    if (cap <= this.queue.length) return;
+    const q = new Int32Array(cap), d = new Float64Array(cap);
+    for (let k = 0; k < this.size; k++) {
+      const i = (this.head + k) % this.queue.length;
+      q[k] = this.queue[i]; d[k] = this.dueAt[i];
+    }
+    this.queue = q; this.dueAt = d; this.head = 0;
   }
 }
 
-function grow<T extends Uint32Array | Float32Array | Float64Array>(a: T, cap: number, fill = 0): T {
+function grow<T extends Uint32Array | Float32Array | Float64Array | Uint8Array>(a: T, cap: number, fill = 0): T {
   if (cap <= a.length) return a;
   const b = new (a.constructor as new (n: number) => T)(cap);
   b.fill(fill);

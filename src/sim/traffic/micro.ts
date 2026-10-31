@@ -320,7 +320,7 @@ export class Micro {
       // an invariant kept as a count (roadcraft invariants.ts): nobody enters a junction on red (amber is a go for
       // whoever cannot stop); one that crossed the stop line with the way open was counted there
       if (!c.pass[v] && sim.nodePhases[k.node[conn]] > 0 && !this.h.junctions.stageGreen(conn, true)) this.h.ranRed++;
-      if (release) { this.h.released++; this.h.releaseAt[k.node[conn]] = this.h.time + RELEASE_EVERY; this.h.nodePass[k.node[conn]]++; this.h.advisor.pass[k.node[conn] * 8 + k.arm[conn]]++; }
+      if (release) { this.h.released++; this.h.releaseAt[k.node[conn]] = this.h.time + RELEASE_EVERY; this.h.nodePass[k.node[conn]]++; this.h.advisor.count(k.node[conn], k.arm[conn], this.h.time); }
       else this.admit(k.node[conn], k.arm[conn]);
       this.h.insert(v, true, conn);
       return;
@@ -331,7 +331,7 @@ export class Micro {
   /** Someone went through node `n` from arm `arm` (micro or meso): arm flow and "the node is moving". */
   admit(n: number, arm: number): void {
     this.h.nodePass[n]++;
-    this.h.advisor.pass[n * 8 + arm]++;
+    this.h.advisor.count(n, arm, this.h.time);
     this.h.lastAdmit[n] = this.h.time;
   }
 
