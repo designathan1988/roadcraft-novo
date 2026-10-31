@@ -60,7 +60,8 @@ export const vehSchema = {
   lcFrom: Int32Array, lcT: Float32Array, lcCool: Float32Array,
   microIdx: Int32Array,
   // bus: line (-1 = ordinary car), next stop, dwell time, load, stop already served
-  line: Int16Array, stopI: Uint8Array, dwell: Float32Array, load: Uint8Array, served: Uint8Array,
+  // stopI: an out-and-back line with 129 or more stops passes 258 (D44: Uint8 wrapped at 256)
+  line: Int16Array, stopI: Uint16Array, dwell: Float32Array, load: Uint8Array, served: Uint8Array,
   // time stopped at the stop line (stop sign, queue of those yielding)
   wait: Float32Array,
   // stopped (anywhere on the lane) since the last time it reconsidered the route

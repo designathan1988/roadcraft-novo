@@ -9,6 +9,7 @@ import { Ctl } from '../src/roads/control.ts';
 import { PROFILES, PROFILE_INFO } from '../src/roads/profiles.ts';
 import { Transit } from '../src/world/transit.ts';
 import type { NetOp } from '../src/roads/network.ts';
+import { gridCity, traffic as trafficOf } from './simCity.ts';
 
 function net(build: (b: (ax: number, az: number, bx: number, bz: number, prof: number) => void) => void): SimNet {
   const w = new World();
@@ -94,4 +95,20 @@ test('passagem de nível: a cancela desce com o trem chegando e nenhum carro ent
   assert.ok(downSteps > 50, `cancela desceu ${downSteps} passos`);
   assert.equal(signalSeen, downSteps, 'a página vê a cancela no buffer de sinais');
   assert.equal(entered, 0, 'carro entrou com a cancela descida');
+});
+
+test('D44: a line with more than 256 stops (out and back) addresses every one of them', () => {
+  const { sim } = gridCity(4, 120);
+  const tr = trafficOf(sim);
+  // a stop every 10 m on the sidewalk of each horizontal street: 140 stops, 280 out and back
+  const stops: number[] = [];
+  for (const z of [-189, -69, 51, 171]) for (let x = -170; x <= 170; x += 10) stops.push(x, z);
+  tr.setLines([{ id: 1, color: 0, buses: 1, stops }]);
+  const n = tr.lines[0].stopLane.length;
+  assert.ok(n > 256, `the line resolved to ${n} stops`);
+  // the vehicle table's stop index holds the last stop of such a line
+  const c = tr.veh.cols, v = tr.veh.alloc();
+  c.stopI[v] = n - 1;
+  assert.equal(c.stopI[v], n - 1);
+  tr.veh.release(v);
 });
