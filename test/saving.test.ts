@@ -261,3 +261,14 @@ test('desktop saves: the saves kept in the browser storage are copied to files o
   assert.deepEqual(await migrateOnce(opfs, files), []);
   assert.deepEqual(await files.read('cidade-1', 'meta.bin'), bytes(9, 9));
 });
+
+test('D62: exporting while another operation holds the game says so instead of doing nothing', async () => {
+  const { SaveFlow } = await import('../src/app/saveFlow.ts');
+  const { t } = await import('../src/shared/i18n/index.ts');
+  const toasts: string[] = [];
+  const flow = Object.create(SaveFlow.prototype) as { h: unknown; save(): Promise<boolean>; exportMap(): Promise<void> };
+  flow.h = { life: { begin: () => false }, hud: { toast: (m: string) => toasts.push(m) } };
+  flow.save = async () => true;
+  await flow.exportMap();
+  assert.deepEqual(toasts, [t('save.exportBusy')]);
+});

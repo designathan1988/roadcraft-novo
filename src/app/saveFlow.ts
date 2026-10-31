@@ -233,7 +233,8 @@ export class SaveFlow {
   /** Saves and downloads the whole map as a .cidade file (only a save that completed is exported, nothing else). */
   async exportMap(): Promise<void> {
     if (!await this.save()) { this.h.hud.toast(t('save.exportNotSaved')); return; }
-    if (!this.h.life.begin('exporting')) return;
+    // an autosave or an opening that began meanwhile: said, never silent (D62)
+    if (!this.h.life.begin('exporting')) { this.h.hud.toast(t('save.exportBusy')); return; }
     let blob: Blob | null;
     try { blob = await packSlot(await this.slot()); } catch (err) {
       this.h.hud.toast(t('save.failed', { message: errorText(err) }));
