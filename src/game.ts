@@ -572,6 +572,8 @@ export class Game {
     scene.add(this.clouds.view.mesh);
     scene.add(this.inside.group);
     scene.add(this.demolition.group);
+    // the city's masked material only for the meshes that need it; the inside cut and a ruin's hidden building do
+    this.city.maskAll = () => this.viewState.insideId >= 0 || this.demolition.active();
     this.textSigns = new TextSigns(this.world, this.world.signTexts);
     scene.add(this.textSigns.group);
     this.itemTool.onText = (text, x, z, seg, street) => {
