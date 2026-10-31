@@ -36,8 +36,8 @@ const GROUND_EASE_S = 0.12;
 const COAST_DECAY_S = 0.45;
 /** Window of drag samples used for the release velocity (ms). */
 const FLING_MS = 100;
-/** Key speeds: turn (rad/s), tilt (rad/s), zoom (log per s). */
-const TURN_PER_S = 1.6, TILT_PER_S = 1.2, ZOOM_PER_S = 2;
+/** Key speeds: turn (rad/s), tilt (rad/s), zoom (log per s): Roadcraft 4.0's (src/view/cameraMotion.ts). */
+const TURN_PER_S = 1.6, TILT_PER_S = 0.9, ZOOM_PER_S = 1.8;
 
 type Axis = 'fwd' | 'right' | 'turn' | 'tilt' | 'zoom';
 const KEYS: Record<string, [Axis, 1 | -1]> = {
