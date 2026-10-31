@@ -114,12 +114,15 @@ interface Plan {
   z: Float32Array; level: Float32Array; depth: Float32Array;
   lakes: Map<number, Lake | null>;
 }
-const plans = new Map<number, Plan>();
+/**
+ * The plan of the map being made: one map, one seed, so one plan is kept (D76: a Map kept a river plan and its
+ * lakes' flood cache for every seed the worker ever made, for as long as the worker lived).
+ */
+let planned: { seed: number; plan: Plan } | null = null;
 
 /** The river's level along its course (computed once per seed: 8 m steps across the map). */
 function plan(seed: number): Plan {
-  let p = plans.get(seed);
-  if (p) return p;
+  if (planned && planned.seed === seed) return planned.plan;
   const n = Math.ceil(MAP_HALF * 2 / WATER_SPACING) + 1;
   const z = new Float32Array(n), level = new Float32Array(n), depth = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -145,8 +148,8 @@ function plan(seed: number): Plan {
   const fall = (i: number, prev: number) => { level[i] = Math.max(SEA_LEVEL + 1, Math.min(level[i], prev - step)); };
   if (head >= tail) for (let i = 1; i < n; i++) fall(i, level[i - 1]);
   else for (let i = n - 2; i >= 0; i--) fall(i, level[i + 1]);
-  p = { z, level, depth, lakes: new Map() };
-  plans.set(seed, p);
+  const p: Plan = { z, level, depth, lakes: new Map() };
+  planned = { seed, plan: p };
   return p;
 }
 
