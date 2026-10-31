@@ -8,6 +8,9 @@ import { SIGN_STOP, SIGN_YIELD, signRuleCommand } from '../src/roads/signRule.ts
 import { Ctl, Rule, effectiveControl } from '../src/roads/control.ts';
 import { PROFILES } from '../src/roads/profiles.ts';
 import { asSeg } from '../src/core/ids.ts';
+import { CommandStack } from '../src/core/commands.ts';
+import { streetChain } from '../src/roads/build.ts';
+import { signTextCommand } from '../src/features/streetscape/signText.ts';
 
 function flatWorld(): World {
   const w = new World();
@@ -87,4 +90,21 @@ test('placa = regra: Pare posto na perna muda a regra dela; tirar a placa devolv
   // semáforo: a placa não muda a regra
   w.roads.setJunction(n, { ctl: Ctl.Signal });
   assert.equal(typeof signRuleCommand(w, 6, -25, SIGN_STOP, true), 'string');
+});
+
+test('D47: undoing a sign text puts the previous text back (and the street names), not nothing', () => {
+  const w = flatWorld();
+  road(w, -50, 0, 50, 0);
+  const s = w.roads.nearestSeg(0, 0, 3)![0], chain = streetChain(w, s), key = '0,50';
+  const stack = new CommandStack();
+  stack.run(signTextCommand(w, key, 'A', chain, () => {}));
+  stack.run(signTextCommand(w, key, 'B', chain, () => {}));
+  stack.undo();
+  assert.equal(w.signTexts.get(key), 'A');
+  assert.equal(w.streetNames.get(s), 'A');
+  stack.undo();
+  assert.equal(w.signTexts.has(key), false);
+  assert.equal(w.streetNames.has(s), false);
+  stack.redo();
+  assert.equal(w.signTexts.get(key), 'A');
 });

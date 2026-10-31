@@ -92,6 +92,10 @@ export class World {
   /** Player sign texts, by position (signKey), and street names by segment. */
   readonly signTexts = new Map<string, string>();
   readonly streetNames = new Map<SegId, string>();
+  /** The text on the sign at `key`; undefined takes it away. */
+  setSignText(key: string, text: string | undefined): void { if (text === undefined) this.signTexts.delete(key); else this.signTexts.set(key, text); }
+  /** The name typed for segment `seg`; undefined takes it away (the generated name shows again). */
+  setStreetName(seg: SegId, name: string | undefined): void { if (name === undefined) this.streetNames.delete(seg); else this.streetNames.set(seg, name); }
   /** The map's look (water, hand-set weather, clouds, fog, road paint), saved with the map. */
   readonly look = new MapLook();
   readonly buildingIndex = new SpatialIndex(1 << 16);

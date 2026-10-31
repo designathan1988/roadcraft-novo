@@ -92,6 +92,7 @@ import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } 
 import { LotEditing } from './app/lotEditing.ts';
 import { Gesture, bindInput, type InputControl } from './app/input.ts';
 import { asNode, asSeg, type NodeId, type SegId } from './core/ids.ts';
+import { signTextCommand } from './features/streetscape/signText.ts';
 
 /** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
 const STILL_FRAMES = 40;
@@ -581,10 +582,7 @@ export class Game {
     this.itemTool.onText = (text, x, z, seg, street) => {
       const w = this.world, key = signKey(x, z);
       const chain = street && seg >= 0 ? streetChain(w, seg) : [];
-      const before = chain.map((s) => w.streetNames.get(s));
-      const apply = () => { w.signTexts.set(key, text); for (const s of chain) w.streetNames.set(s, text); this.textSigns.version++; this.unsaved = true; };
-      const invert = () => { w.signTexts.delete(key); chain.forEach((s, i) => { const b = before[i]; if (b === undefined) w.streetNames.delete(s); else w.streetNames.set(s, b); }); this.textSigns.version++; };
-      this.commands.run({ label: 'texto da placa', apply, invert });
+      this.commands.run(signTextCommand(w, key, text, chain, () => { this.textSigns.version++; this.unsaved = true; }));
       if (street && chain.length) this.hud.toast(t('game.toast.streetNamed', { name: text }));
     };
 

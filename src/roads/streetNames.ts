@@ -115,8 +115,8 @@ export function nameStreetCommand(world: World, seg: SegId, name: string, change
   const text = name.trim();
   return {
     label: 'nome da rua',
-    apply: () => { for (const x of segs) { if (text) world.streetNames.set(x, text); else world.streetNames.delete(x); } changed(); },
-    invert: () => { segs.forEach((x, i) => { const b = before[i]; if (b === undefined) world.streetNames.delete(x); else world.streetNames.set(x, b); }); changed(); },
+    apply: () => { for (const x of segs) world.setStreetName(x, text || undefined); changed(); },
+    invert: () => { segs.forEach((x, i) => world.setStreetName(x, before[i])); changed(); },
   };
 }
 
