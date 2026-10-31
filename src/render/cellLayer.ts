@@ -50,10 +50,6 @@ export interface LayerOptions {
   /** Video memory ceiling (bytes): past it, cells leave closer in. */
   budget?: number;
   shadows?: boolean;
-  /** A material without the fade/cut mask, for meshes that need none (a shader with discard loses early-Z). */
-  opaqueMaterial?: THREE.Material;
-  /** Whether a cell's level mesh needs the masked material even when not fading (a cut window, a cut building). */
-  needsMask?: (cell: number, level: number) => boolean;
   /** Sparse layer (detail near the camera): draws the cells it has, without waiting for the whole tile. */
   sparse?: boolean;
   /** Set to 1 for each cell whose level-0 mesh is on screen at full fade (0 otherwise): what another layer reads. */
@@ -132,8 +128,6 @@ export class CellLayer {
   changed = true;
   /** Distance scale by resolution (1 = 1080p, 45°). */
   pixelScale = 1;
-  /** The whole layer needs the mask now (inside view, a demolition): set by the game. */
-  maskAll: (() => boolean) | null = null;
   gpuBytes = 0;
   /** Shrinks the eviction radius when memory passes the ceiling. */
   private evictScale = 1;
@@ -500,14 +494,6 @@ export class CellLayer {
     }
   }
 
-  /** The material a mesh is drawn with: the masked one while it fades or needs a mask, else the opaque one. */
-  private materialOf(mesh: THREE.Mesh): THREE.Material {
-    const u = mesh.userData as FadeData;
-    const opaque = this.opt.opaqueMaterial;
-    if (!opaque || (u.fade ?? 1) < 1 || this.maskAll?.() || (u.cell !== undefined && this.opt.needsMask?.(u.cell, u.level ?? -1))) return this.material;
-    return opaque;
-  }
-
   /** Fading: what came in rises, what left goes down, with complementary masks. */
   private applyFades(): void {
     const now = performance.now() / 1000;
@@ -542,7 +528,6 @@ export class CellLayer {
       if (lostOutgoing) u.since = -1e9;
       u.fade = Math.min(1, (now - (u.since ?? -1e9)) / FADE);
       if (u.fade < 1) this.fadingIn++;
-      mesh.material = this.materialOf(mesh);
       out.push(mesh);
     }
     for (const mesh of this.shown) {
@@ -554,7 +539,6 @@ export class CellLayer {
       const u = f.mesh.userData as FadeData;
       if (a >= 1 || u.dead) { this.fading[i] = this.fading[this.fading.length - 1]; this.fading.pop(); continue; }
       u.fade = -Math.max(a, 1e-3);
-      f.mesh.material = this.materialOf(f.mesh);
       out.push(f.mesh);
     }
     const t = this.shown; this.shown = this.next; this.next = t;

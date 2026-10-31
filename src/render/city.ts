@@ -120,12 +120,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
   };
   // L0 full detail near, L1 facade level in the middle, L2 masses far: `detail` has to stay below `near`, or the cell
   // jumps from L0 straight to the tile's massing and the town turns into boxes at the near boundary (4.0's L1 band).
-  // The stable meshes take a material WITHOUT the dither/cut mask: a fragment shader with discard loses early-Z, and
-  // the whole city was drawn with it (the mask only matters to a mesh that fades in/out, is cut open, or has its
-  // windows cut for the detail layer).
-  const masked = createBuildingMaterial();
-  const opaque = createBuildingMaterial(undefined, false);
-  return new CellLayer(src, world.dirty, Dirty.Buildings, masked, { near: 1800, evict: 3000, margin: 40, detail: 700, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z), opaqueMaterial: opaque, needsMask: (cell, level) => level === 0 && DETAIL_SHOWN[cell] === 1 }, false, true);
+  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1800, evict: 3000, margin: 40, detail: 700, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
 }
 
 
@@ -184,7 +179,7 @@ const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a
  */
 export interface BuildingPlacement { place: (rest: Node) => Node; turn: (n: Node) => Node; surface: Node; prev: Node }
 
-export function createBuildingMaterial(moved?: BuildingPlacement, mask = true): THREE.MeshStandardNodeMaterial {
+export function createBuildingMaterial(moved?: BuildingPlacement): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
   const n = useCompactVertex(m, 'vBldNormal', moved?.place);
   // the level swap dither and the inside view cut
@@ -277,9 +272,9 @@ export function createBuildingMaterial(moved?: BuildingPlacement, mask = true): 
   const eu = float(0.01).div(colW), ey = float(0.01).div(fh);
   const hardWin = step(ww.add(eu), fx).mul(step(fx, float(1).sub(ww).sub(eu))).mul(step(wLow.add(ey), fy)).mul(step(fy, wHigh.sub(ey)));
   const hole = opened.mul(openBit).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(hardWin);
-  if (mask) m.maskNode = lodFadeMask().and(cutMask()).and(hole.lessThan(0.5));
+  m.maskNode = lodFadeMask().and(cutMask()).and(hole.lessThan(0.5));
   // the shadow keeps the wall whole: the sun through an opening lights the room, not the street behind the building
-  if (mask) m.maskShadowNode = lodFadeMask().and(cutMask());
+  m.maskShadowNode = lodFadeMask().and(cutMask());
   const signMask = sign.mul(inShop).mul(hasWin).mul(step(float(0.35), rnd2));
 
   // fake interior: the camera ray inside a room the size of the window
