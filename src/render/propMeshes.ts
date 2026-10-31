@@ -558,7 +558,7 @@ export function buildPropDefs(): PropDef[] {
   // 18..23: the roads/vegetation work's, empty for now; 24..29 the 4.0 building parts
   const parts = buildingPartDefs();
   for (let t = PROP.Palm + 1; t < PROP_TYPES; t++) defs[t] = parts.get(t) ?? { lods: [null, null, null], dist: [0, 0, 0], radius: 0 };
-  if (defs.length !== PROP_TYPES) throw new Error('tipos de peça');
+  if (defs.length !== PROP_TYPES) throw new Error(`prop types: ${defs.length} definitions for ${PROP_TYPES} types`);
   return defs;
 }
 

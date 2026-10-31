@@ -1,6 +1,6 @@
 /// <reference types="node" />
 // What the player reads comes from the language files (src/shared/i18n/lang), never from a Portuguese literal in the
-// code: the files listed here are migrated, and none may hold one again. Command labels are language keys
+// code: no file in src holds one (CONTENT lists the world's own Portuguese). Command labels are language keys
 // (cmd.<sound>.<name>) everywhere in src, in both languages, and their middle part keeps each command's old sound.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,12 +21,17 @@ import { PRESETS } from '../src/ui/creator.ts';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ts = createRequire(path.join(root, 'package.json'))('typescript');
 
-const MIGRATED = [
-  'src/features/roads/roadTool.ts', 'src/features/streetscape/itemTool.ts', 'src/features/zones/zoneTool.ts',
-  'src/roads/construction/plan.ts', 'src/roads/construction/segmentEdits.ts', 'src/roads/signRule.ts',
-  'src/world/lotEdit.ts', 'src/world/design.ts', 'src/world/arch.ts', 'src/world/archData.ts', 'src/ui/creator.ts',
-  'src/ui/drawers.ts',
-];
+/** Portuguese that is world content, not interface text: street names, building lettering, the bus lane's paint, and
+ *  the language's own name in the language list. Everything else in src reads its text from the language files. */
+const CONTENT = ['src/roads/streetNames.ts', 'src/r40/render/buildings/signature.ts', 'src/roads/markings.ts', 'src/shared/i18n/index.ts'];
+const MIGRATED: string[] = [];
+(function collect(d: string): void {
+  for (const e of fs.readdirSync(path.join(root, d), { withFileTypes: true })) {
+    const rel = `${d}/${e.name}`;
+    if (e.isDirectory()) { if (!/i18n\/lang$|vendor$/.test(rel)) collect(rel); }
+    else if (e.name.endsWith('.ts') && !e.name.endsWith('.d.ts') && !CONTENT.includes(rel)) MIGRATED.push(rel);
+  }
+})('src');
 // a table value counts when it is a phrase (a short one like 'terminal' is also a tool id)
 const PT_VALUES = new Set(Object.values(ENGINE_PT));
 const ACCENT = /[ãõçáéíóúâêôàÃÕÇÁÉÍÓÚÂÊÔ]/;
@@ -49,7 +54,8 @@ function portuguese(file: string): string[] {
   return out;
 }
 
-test('the migrated files hold no Portuguese text for the player', () => {
+test('no file in src (but world content) holds Portuguese text for the player', () => {
+  assert.ok(MIGRATED.length > 300, `files: ${MIGRATED.length}`);
   assert.deepEqual(MIGRATED.flatMap(portuguese), []);
 });
 
@@ -65,10 +71,10 @@ test('their refusals follow the player\'s language', () => {
 });
 
 /** Every literal in a command-label position in src: label: / readonly label = / label = default, the label argument of
- *  new RoadJournal / new ItemsCommand / removeItems / replaceBy / buildRoad and the inspector's this.apply. */
+ *  new RoadJournal / new ItemsCommand / removeItems / replaceBy / buildRoad / both and the inspector's this.apply. */
 function labels(): string[] {
   const out: string[] = [];
-  const ARG = new Map<string, number>([['RoadJournal', 1], ['ItemsCommand', 1], ['removeItems', 1], ['replaceBy', 3], ['buildRoad', 6]]);
+  const ARG = new Map<string, number>([['RoadJournal', 1], ['ItemsCommand', 1], ['removeItems', 1], ['replaceBy', 3], ['buildRoad', 6], ['both', 0]]);
   const walk = (d: string): void => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);

@@ -331,7 +331,7 @@ export class Game {
       else if (e.data.type === 'manoeuvres') { const r = this.manoeuvreWait; this.manoeuvreWait = null; r?.(e.data); }
       else if (e.data.type === 'resync') this.resyncSim(e.data.reason);
       else if (e.data.type === 'inspect') { /* read by the motion probe's own listener (tools/check-sim.mjs) */ }
-      else { console.error('simulação:', e.data.message); this.health?.add('erro', `simulação: ${e.data.message.split(String.fromCharCode(10))[0]}`); }
+      else { console.error('simulation:', e.data.message); this.health?.add('error', t('health.msg.simulation', { message: e.data.message.split(String.fromCharCode(10))[0] })); }
     };
     this.sim.postMessage({ type: 'init', poses: posesSab, heights: this.world.heightsSab, occupancy: this.occupancySab, signals: this.signalsSab, tickHz: 20 } satisfies ToSim);
     this.vehicles = new VehicleRenderer(this.poses);
@@ -962,7 +962,7 @@ export class Game {
     const enc = encodeOps(ops, extra);
     this.sim.postMessage({ type: 'ops', ops: enc, extra } satisfies ToSim, [enc.buffer]);
     this.roadsVersion++;
-    console.error('simulação: rede reenviada inteira', reason);
+    console.error('simulation: the whole network sent again', reason);
   }
 
   /** Sends the network changes and the camera position to the simulation. */

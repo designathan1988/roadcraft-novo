@@ -85,9 +85,8 @@ export class HealthPanel {
   private kindName(k: Entry['kind']): string { return t(k === 'error' ? 'ui.health.error' : 'ui.health.slow'); }
 
   /** Records an entry (a worker error, for example). */
-  add(kind: Entry['kind'] | 'erro' | 'lento', text: string): void {
-    const k: Entry['kind'] = kind === 'erro' || kind === 'error' ? 'error' : 'slow';
-    this.entries.push({ t: Date.now(), kind: k, text: this.context ? `${text} (${t('health.context')}: ${this.context})` : text });
+  add(kind: Entry['kind'], text: string): void {
+    this.entries.push({ t: Date.now(), kind, text: this.context ? `${text} (${t('health.context')}: ${this.context})` : text });
     if (this.entries.length > KEEP) this.entries.shift();
     if (this.open && this.tab === 'health') this.render();
   }

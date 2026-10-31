@@ -84,5 +84,5 @@ export function demolishBox(world: World, x0: number, z0: number, x1: number, z1
   for (const s of segs) if (net.segs.alive[s]) removeSegAndOrphans(world, j, s);
   j.settle();
   const items = its.length ? removeItems(world, 'cmd.demolish.area', its) : null;
-  return { cmd: both('demolir área', j, items), count: segs.length + blds.length + its.length, charge: j.charge };
+  return { cmd: both('cmd.demolish.area', j, items), count: segs.length + blds.length + its.length, charge: j.charge };
 }

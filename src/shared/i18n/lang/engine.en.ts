@@ -220,6 +220,7 @@ export const ENGINE_EN: Record<string, string> = {
   'ui.toolName.bomb': 'Bomb',
   'ui.health.error': 'error',
   'ui.health.slow': 'slow',
+  'health.msg.simulation': 'simulation: {message}',
   'ui.health.frame': '{ms} ms frame',
   'ui.insp.actions': "Actions",
   'ui.insp.autoChoice': "Chosen by the roads' importance and flow: {choice}.",
