@@ -9,7 +9,8 @@ type Fill = [number, number, number, number];
 
 function tex(size: number, fill: Fill, layers = 1): THREE.DataTexture | THREE.DataArrayTexture {
   const n = size * size * layers, data = new Uint8Array(n * 4);
-  for (let i = 0; i < n; i++) data.set(fill, i * 4);
+  // the same bytes as one set() per texel, in one fill (little-endian RGBA packed; 12 M calls at load before)
+  new Uint32Array(data.buffer).fill(((fill[3] << 24) | (fill[2] << 16) | (fill[1] << 8) | fill[0]) >>> 0);
   const t = layers > 1 ? new THREE.DataArrayTexture(data, size, size, layers) : new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
@@ -65,7 +66,8 @@ export function loadCookedSurfaces(): void {
     if (m.error || !m.data || !t) { cookedLoaded.failed.push(`${m.file}: ${m.error ?? 'unknown'}`); console.error('cooked surface', m.file, m.error); return; }
     const dst = t.image.data as Uint8Array;
     if (m.data.length !== dst.length) { cookedLoaded.failed.push(`${m.file}: ${m.data.length} bytes, expected ${dst.length}`); return; }
-    dst.set(m.data);
+    // the worker's array becomes the texture's data (checked above: the same size): no copy on the main thread
+    t.image.data = m.data;
     t.needsUpdate = true;
     cookedLoaded.count++;
   };

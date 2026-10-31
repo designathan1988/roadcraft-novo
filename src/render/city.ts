@@ -29,7 +29,8 @@ const {
  */
 function finishArray(fill: [number, number, number, number], srgb: boolean): THREE.DataArrayTexture {
   const n = FINISH_SIZE * FINISH_SIZE * FINISH_COUNT, data = new Uint8Array(n * 4);
-  for (let i = 0; i < n; i++) data.set(fill, i * 4);
+  // the same bytes as one set() per texel, in one fill (little-endian RGBA packed; 6.8 M calls at load before)
+  new Uint32Array(data.buffer).fill(((fill[3] << 24) | (fill[2] << 16) | (fill[1] << 8) | fill[0]) >>> 0);
   const t = new THREE.DataArrayTexture(data, FINISH_SIZE, FINISH_SIZE, FINISH_COUNT);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
@@ -49,8 +50,9 @@ function bakeFinishesOnce(): void {
   w.onmessage = (e: MessageEvent<{ albedo: Uint8Array; normal: Uint8Array } | { error: string }>) => {
     w.terminate();
     if ('error' in e.data) { console.warn('building finishes not loaded:', e.data.error); return; }
-    (FINISH_ALBEDO.image.data as Uint8Array).set(e.data.albedo); FINISH_ALBEDO.needsUpdate = true;
-    (FINISH_NORMAL.image.data as Uint8Array).set(e.data.normal); FINISH_NORMAL.needsUpdate = true;
+    // the worker's arrays become the textures' data (the same size and format): no 13.6 MB copy on the main thread
+    FINISH_ALBEDO.image.data = e.data.albedo; FINISH_ALBEDO.needsUpdate = true;
+    FINISH_NORMAL.image.data = e.data.normal; FINISH_NORMAL.needsUpdate = true;
   };
   w.postMessage({ base: new URL('cooked/surfaces/', document.baseURI).href });
 }
