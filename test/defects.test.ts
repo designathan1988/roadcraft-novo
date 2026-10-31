@@ -192,3 +192,20 @@ test('A4: a callback that throws does not stop the pool', async () => {
     assert.equal(await second, 'second ran');
   } finally { console.error = errors; }
 });
+
+test('D51: the pool forgets the key of a job that is over (no entry per key ever used)', async () => {
+  const { JobPool } = await import('../src/jobs/pool.ts');
+  const shared = { heights: new SharedArrayBuffer(4), ground: new SharedArrayBuffer(4), water: new SharedArrayBuffer(4) };
+  const pool = new JobPool(shared, 1, () => new FakeWorker() as unknown as Worker);
+  const errors = console.error; console.error = () => {};
+  try {
+    for (let i = 0; i < 2000; i++) pool.submit('terrainGen', { slot: 's', meta: new Uint8Array(1), fail: i % 3 === 0 } as never, () => {}, { key: `k${i}`, fail: () => {} } as never);
+    // a key cancelled while queued, and one superseded by a newer job of the same key
+    pool.submit('terrainGen', { slot: 's', meta: new Uint8Array(1) } as never, () => {}, { key: 'gone:1', fail: () => {} } as never);
+    pool.cancel('gone:');
+    pool.submit('terrainGen', { slot: 's', meta: new Uint8Array(1) } as never, () => {}, { key: 'same', fail: () => {} } as never);
+    pool.submit('terrainGen', { slot: 's', meta: new Uint8Array(1) } as never, () => {}, { key: 'same', fail: () => {} } as never);
+    await pool.whenIdle();
+  } finally { console.error = errors; }
+  assert.equal((pool as unknown as { latest: Map<string, number> }).latest.size, 0);
+});

@@ -140,7 +140,7 @@ export class JobPool {
    * not delivered (it fails as cancelled). For the results of a city that is being replaced (its lots, for one).
    */
   cancel(prefix: string): void {
-    for (const p of this.queue.items) if (!p.cancelled && p.key?.startsWith(prefix)) { p.cancelled = true; this.queuedByKey.delete(p.key); this.tell(p, 'cancelled'); }
+    for (const p of this.queue.items) if (!p.cancelled && p.key?.startsWith(prefix)) { p.cancelled = true; this.queuedByKey.delete(p.key); this.forget(p); this.tell(p, 'cancelled'); }
     for (const p of this.busy) if (p?.key?.startsWith(prefix) && this.latest.get(p.key) === p.seq) this.latest.set(p.key, -p.seq);
   }
 
@@ -164,7 +164,7 @@ export class JobPool {
       if (!p) break;
       if (p.key && this.queuedByKey.get(p.key) === p) this.queuedByKey.delete(p.key);
       // every worker died: nothing will ever run the job
-      if (!w) { this.tell(p, 'no worker left to run the job'); continue; }
+      if (!w) { this.forget(p); this.tell(p, 'no worker left to run the job'); continue; }
       this.busy[i] = p;
       try {
         w.postMessage({ type: 'job', id: p.seq, kind: p.kind, payload: p.payload } satisfies ToWorker, p.transfer);
@@ -172,6 +172,7 @@ export class JobPool {
         // a payload that cannot be cloned (or a buffer already transferred): the job fails, the worker stays free
         this.busy[i] = null;
         console.error(`job ${p.kind} could not be sent:`, err);
+        this.forget(p);
         this.tell(p, `the job could not be sent to a worker (${(err as Error)?.message ?? String(err)})`);
         i--;
       }
@@ -192,7 +193,7 @@ export class JobPool {
     this.busy[i] = null;
     this.workers[i]?.terminate();
     this.workers[i] = this.restarts[i]++ < RESTARTS ? this.spawn(i) : null;
-    if (p) this.tell(p, `the worker died (${message})`);
+    if (p) { this.forget(p); this.tell(p, `the worker died (${message})`); }
     this.pump();
   }
 
@@ -200,7 +201,7 @@ export class JobPool {
   private onUnreadable(i: number): void {
     const p = this.busy[i];
     this.busy[i] = null;
-    if (p) { console.error(`job ${p.kind}: the worker's answer could not be read`); this.tell(p, "the worker's answer could not be read"); }
+    if (p) { console.error(`job ${p.kind}: the worker's answer could not be read`); this.forget(p); this.tell(p, "the worker's answer could not be read"); }
     this.pump();
   }
 
@@ -217,8 +218,19 @@ export class JobPool {
         // a callback that throws is logged; the pool goes on with the next job
         try { p.done(msg.result); } catch (err) { console.error(`job ${p.kind}: the result's callback threw`, err); }
       } else this.tell(p, 'superseded');
+      this.forget(p);
     }
     this.pump();
+  }
+
+  /**
+   * A keyed job is over (delivered, failed, cancelled): its key leaves `latest` unless a newer job of that key is on
+   * its way (D51: the map kept one entry per key ever used).
+   */
+  private forget(p: Pending): void {
+    if (!p.key) return;
+    const l = this.latest.get(p.key);
+    if (l === p.seq || l === -p.seq) this.latest.delete(p.key);
   }
 
   /** Tells a job's sender that it did not complete (never throws into the pool). */
