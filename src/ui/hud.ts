@@ -9,7 +9,7 @@ import './engine.css';
 import { RoadCatalog } from './roadCatalog.ts';
 import { button, rename, closeDropdown, el, orow, range, choices } from './dom.ts';
 import { svg } from './icons.ts';
-import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, loose, money, onLanguageChange, plural, setLang, t } from '../shared/i18n/index.ts';
+import { LANGUAGES, fmtCount, fmtDec, fmtInt, forTouch, isTouch, lang, money, onLanguageChange, plural, setLang, t } from '../shared/i18n/index.ts';
 import { MAP_SIZE } from '../config.ts';
 import { mountCompass, type Compass } from './compass.ts';
 import { keyHelp, keyName } from './keys.ts';
@@ -758,7 +758,7 @@ export class Hud {
   setCompass(yaw: number): void { this.compass.point(yaw); }
 
   setHint(text: string): void {
-    const shown = forTouch(loose(text));
+    const shown = forTouch(text);
     if (this.hint.textContent !== shown) this.hint.textContent = shown;
     this.hint.hidden = !shown;
   }
@@ -776,7 +776,7 @@ export class Hud {
    * most four, each for as long as it takes to read; the same text again only restarts its time.
    */
   toast(text: string): void {
-    const shown = forTouch(loose(text));
+    const shown = forTouch(text);
     let box = [...this.toasts.children].find((e) => e.textContent === shown) as HTMLElement | undefined;
     if (!box) {
       box = el('div', 'v2-toast', shown);
@@ -789,7 +789,7 @@ export class Hud {
   }
 
   showLoading(text: string): void {
-    this.loadingText.textContent = loose(text);
+    this.loadingText.textContent = text;
     this.loading.classList.remove('hidden');
   }
 

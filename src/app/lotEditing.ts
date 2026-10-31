@@ -18,7 +18,7 @@ import type { LotFeatureActions } from './featureActions.ts';
 import type { World } from '../world/world.ts';
 import type { Transit } from '../world/transit.ts';
 import { encodeDesign, type Design } from '../world/design.ts';
-import { loose, t } from '../shared/i18n/index.ts';
+import { t } from '../shared/i18n/index.ts';
 
 export interface LotEditHost {
   readonly world: World;
@@ -241,7 +241,7 @@ export class LotEditing {
     if (!c || !hit || !this.h.world.buildings.alive[c.id]) return;
     const [cx, cz] = lotOutlineWorld(this.h.world, c.id)[c.k];
     const r = moveSharedCorner(this.h.world, cx, cz, hit.x, hit.z);
-    if (typeof r === 'string') { this.h.hud.toast(t('game.toast.notChanged', { why: loose(r) })); return; }
+    if (typeof r === 'string') { this.h.hud.toast(t('game.toast.notChanged', { why: r })); return; }
     this.h.commands.push(r);
   }
 

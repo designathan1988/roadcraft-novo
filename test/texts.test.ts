@@ -55,9 +55,12 @@ test('B62: every action the interface declares is used by a button, a key, a pan
 });
 
 test('D5: no text left says demolishing refunds half (the refund is what the tuning says, 25% as Roadcraft 4.0)', async () => {
-  const { LEGACY_EN } = await import('../src/shared/i18n/lang/legacy.ts');
   const { ROAD_TUNING } = await import('../src/roads/tuning.ts');
   if ((ROAD_TUNING.economy.demolitionRefund as number) === 0.5) return;
-  const wrong = Object.entries(LEGACY_EN).filter(([pt, en]) => /devolv|refund/i.test(pt + en) && /metade|\bhalf\b/i.test(pt + en));
+  // every language table the player reads (the legacy phrase table is gone: nothing in src writes Portuguese now)
+  const tables = await Promise.all(['../src/shared/i18n/lang/engine.pt-BR.ts', '../src/shared/i18n/lang/engine.en.ts', '../data/textos-roadcraft/pt-BR.ts', '../data/textos-roadcraft/en.ts'].map((f) => import(f)));
+  const all = tables.flatMap((m) => Object.values(m).flatMap((t) => Object.entries(t as Record<string, string>)));
+  assert.ok(all.length > 1000, `texts read: ${all.length}`);
+  const wrong = all.filter(([k, v]) => /devolv|refund/i.test(k + v) && /metade|\bhalf\b/i.test(v));
   assert.deepEqual(wrong, []);
 });

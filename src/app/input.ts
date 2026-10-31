@@ -14,7 +14,7 @@ import { deleteLotsAlong } from '../world/lotEdit.ts';
 import { demolishBox } from '../features/demolition/demolish.ts';
 import { clickTool, type ClickHost } from './clicks.ts';
 import { duplicateRoad } from '../roads/build.ts';
-import { loose, money, plural, t } from '../shared/i18n/index.ts';
+import { money, plural, t } from '../shared/i18n/index.ts';
 import type { Ambient } from '../platform/audio.ts';
 import type { CameraRig } from '../render/cameraRig.ts';
 import type { CommandStack } from '../core/commands.ts';
@@ -306,7 +306,7 @@ export function bindInput(h: InputHost, gs: Gesture = new Gesture()): InputContr
         const s = h.inspector.isOpen ? h.inspector.seg : NO_SEG;
         const j = s >= 0 ? duplicateRoad(h.world, s) : null;
         if (!j) return;
-        if (typeof j === 'string') { h.hud.toast(loose(j)); return; }
+        if (typeof j === 'string') { h.hud.toast(j); return; }
         if (!j.empty && j.settle()) h.commands.push(j);
       },
       home: () => { if (h.homeView) h.rig.restore(h.homeView); },

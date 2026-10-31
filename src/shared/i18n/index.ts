@@ -2,13 +2,11 @@
 // keys of what the engine has and Roadcraft did not (lang/engine.ts). Every string the interface shows comes from
 // here through `t(key)`. Changing the language rewrites what is on screen at once, without reloading (Roadcraft 4.0,
 // i18n/index.ts:95-111): each panel that keeps text listens with `onLanguageChange`.
-// Text that other engine areas still write in Portuguese (toasts, tool hints) goes through `loose()`.
 
 import { PT_BR as RC_PT } from '../../../data/textos-roadcraft/pt-BR.ts';
 import { EN as RC_EN } from '../../../data/textos-roadcraft/en.ts';
 import { ENGINE_PT } from './lang/engine.pt-BR.ts';
 import { ENGINE_EN } from './lang/engine.en.ts';
-import { translate as legacyTranslate } from './lang/legacy.ts';
 import { readStored, writeStored } from '../storage.ts';
 
 export type Lang = 'pt-BR' | 'en';
@@ -89,11 +87,7 @@ export function fmtCount(n: number): string {
 /** Money as the game shows it ("R$ 20.000.000"). */
 export function money(n: number): string { return t('economy.money', { value: fmtInt(n) }); }
 
-/** Text written in Portuguese elsewhere in the engine, shown in the player's language. */
-export function loose(s: string): string { return current === 'en' ? legacyTranslate(s) : s; }
 
-/** Kept for the engine's test of the phrase table. */
-export const translate = legacyTranslate;
 
 /** A touch screen (a finger, not a mouse): the hints say "tap" where they say "click". */
 export const isTouch = (): boolean => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;

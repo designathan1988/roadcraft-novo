@@ -1,7 +1,7 @@
 // The game's options dialog (quality, resolution, weather, simulation, sound, language) with presets, in Roadcraft's
 // dialog look. The preferences are platform/settings.ts's: the dialog edits a copy and hands it back on Apply.
 
-import { LANGUAGES, lang, loose, onLanguageChange, setLang, t, type Lang } from '../shared/i18n/index.ts';
+import { LANGUAGES, lang, onLanguageChange, setLang, t, type Lang } from '../shared/i18n/index.ts';
 import { PRESETS, type Preset, type Settings } from '../platform/settings.ts';
 import { keyName, reservedKeys } from './keys.ts';
 
@@ -144,7 +144,7 @@ export class OptionsPanel {
       box.append(p);
     }
     for (const [label, title, fn] of this.extra) {
-      const b = document.createElement('button'); b.className = 'v2-btn'; b.textContent = loose(label); b.title = loose(title);
+      const b = document.createElement('button'); b.className = 'v2-btn'; b.textContent = label; b.title = title;
       b.addEventListener('click', () => { this.close(); fn(); });
       row(t('ui.options.game'), b);
     }
