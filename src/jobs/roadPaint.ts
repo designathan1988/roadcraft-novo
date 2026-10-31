@@ -1,6 +1,5 @@
-// Vias pintadas na textura do terreno, para a vista de longe: por texel de
-// 4 m, quanto dele é asfalto (R) e quanto é calçada/canteiro (G). Pontes e
-// túneis não são pintados no chão.
+// Roads painted in the terrain's texture, for the far view: per 4 m texel, how much of it is asphalt (R) and how
+// much is sidewalk/median (G). Bridges and tunnels are not painted on the ground.
 
 import { HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_TILES } from '../config.ts';
 import { tileOriginX } from '../core/grid.ts';
@@ -12,10 +11,10 @@ import type { RoadGraph } from '../shared/contracts/worker.ts';
 
 const p2 = new Float64Array(2);
 
-/** Lado da versão grossa (média de blocos) usada bem de longe. */
+/** Side of the coarse version (block average) used from far away. */
 export const PAINT_COARSE = 32;
 
-/** Reduz por média de blocos (sem mipmaps de hardware: a camada muda sozinha). */
+/** Reduces by block average (no hardware mipmaps: the layer changes on its own). */
 export function coarsen(fine: Uint8Array): Uint8Array {
   const R = HEIGHT_TILE_RES, C = PAINT_COARSE, f = R / C;
   const out = new Uint8Array(C * C * 4);
@@ -59,7 +58,7 @@ export function paintRoadTile(heights: Float32Array, g: RoadGraph, tile: number)
       const z = oz + (j + 0.5) * S;
       for (let i = i0; i <= i1; i++) {
         const x = ox + (i + 0.5) * S;
-        // distância à linha central (polilinha) e altura da via ali
+        // distance to the centre line (polyline) and the road's height there
         let bd = Infinity, by = 0;
         for (let k = 0; k + 1 < n; k++) {
           const ex = px[k + 1] - px[k], ez = pz[k + 1] - pz[k];

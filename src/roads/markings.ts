@@ -1,6 +1,6 @@
 // Road paint rules of Roadcraft 4.0 (world/roads/markingStyle.ts and the layout rules of world/roads/markings.ts and
 // parkingLayout.ts), as pure data and functions: the regional styles (centre colour, dashes by speed, legends), the
-// stroked letters of PARE/STOP and ÔNIBUS/BUS, where a legend, a bus word, a mini-roundabout island and parking bays
+// stroked letters of "PARE"/STOP and "ÔNIBUS"/BUS, where a legend, a bus word, a mini-roundabout island and parking bays
 // go along a road. Nothing here draws: the road shader (render/roads.ts) reads these numbers (lines are painted in the
 // shader, never as quads with a material per colour). Lengths in metres, along the road (v) and across it (u).
 

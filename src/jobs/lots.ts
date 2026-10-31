@@ -1,7 +1,6 @@
-// Lotes ao longo das vias zoneadas (worker). Função pura da rede em volta da
-// célula: o mesmo resultado em qualquer worker e em células vizinhas.
-// Vias (e as esquinas dos nós) entram numa grade de ocupação de 2 m; cada lado
-// zoneado de trecho é fatiado em lotes que só entram onde a grade está livre.
+// Lots along the zoned roads (worker). A pure function of the network around the cell: the same result in any
+// worker and in neighbouring cells. Roads (and the nodes' corners) go into a 2 m occupancy grid; each zoned side
+// of a segment is sliced into lots that go in only where the grid is free.
 
 import { CELL_SIZE, MAP_CELLS, SEA_LEVEL } from '../config.ts';
 import { cellOriginX } from '../core/grid.ts';
@@ -18,7 +17,7 @@ import { blockLots } from './blockLots.ts';
 const RES = 2;
 const MARGIN = 120;
 
-/** Faixas de frente e fundo por zona (m). */
+/** Front and depth strips by zone (m). */
 export const LOT_SIZE: Record<number, { w: [number, number]; d: [number, number] }> = {
   [Zone.Residential]: { w: [12, 19], d: [26, 34] },
   [Zone.Commercial]: { w: [16, 28], d: [30, 40] },
@@ -26,8 +25,8 @@ export const LOT_SIZE: Record<number, { w: [number, number]; d: [number, number]
   [Zone.Mixed]: { w: [14, 22], d: [28, 36] },
 };
 
-/** Centro (comércio, misto, alta densidade): fundo maior, que alcança o miolo da quadra (o centro fica cheio). */
-// casas: quintal fundo até o quintal do vizinho de trás (sem miolo de quadra vazio, como no roadcraft)
+/** Downtown (commerce, mixed, high density): a deeper lot that reaches the middle of the block (downtown is full). */
+// houses: a deep yard up to the back neighbour's yard (no empty middle of the block, as in roadcraft)
 const DEEP: Record<number, [number, number]> = { [Zone.Residential]: [38, 48], [Zone.Commercial]: [55, 70], [Zone.Mixed]: [45, 58], [Zone.ResHigh]: [45, 58], [Zone.ComHigh]: [58, 72] };
 
 const p2 = new Float64Array(2), d2 = new Float64Array(2);
@@ -65,7 +64,7 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
       mark(p2[0], p2[1], half, 1);
     }
   }
-  // esquinas: recuo de cada braço
+  // corners: each arm's setback
   const retreat = new Float64Array(g.segCount * 2);
   const arms: Array<Array<{ s: number; end: 0 | 1 }>> = Array.from({ length: g.nodeCount }, () => []);
   for (let s = 0; s < g.segCount; s++) { arms[g.sa[s]].push({ s, end: 0 }); arms[g.sb[s]].push({ s, end: 1 }); }
@@ -120,7 +119,7 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
     return shift;
   };
 
-  // lados zoneados, numa ordem que não depende de ids
+  // zoned sides, in an order that does not depend on ids
   const sides: Array<{ s: number; side: number; zone: number; key: number }> = [];
   for (let s = 0; s < g.segCount; s++) {
     bez(quads[s], 0.5, p2);
@@ -205,13 +204,13 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
       bez(quads[s], t, p2); bezD(quads[s], t, d2);
       const l = Math.hypot(d2[0], d2[1]) || 1;
       const tx = d2[0] / l, tz = d2[1] / l;
-      const lx = tz * sign, lz = -tx * sign; // para longe da via
+      const lx = tz * sign, lz = -tx * sign; // away from the road
       let placed = false;
       const deep = DEEP[zone] ?? DEEP[baseZone(zone)];
       const deepD = deep ? rng.range(deep[0], deep[1]) : 0;
       const baseD = rng.range(size.d[0], size.d[1]);
-      // fundos a tentar: o fundo do centro (até o miolo da quadra), o de sempre e daí encolhendo de 3 em 3 m até
-      // encaixar no lote de trás (sem faixa de gramado sobrando entre os dois)
+      // depths to try: the downtown depth (to the middle of the block), the usual one and then shrinking by 3 m until
+      // it fits the lot behind (no strip of lawn left between the two)
       const depths: number[] = deep ? [deepD] : [];
       for (let D = baseD; D >= 12; D -= 3) depths.push(D);
       for (const D of depths) {
@@ -221,7 +220,7 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
         const back = exactShift(cx, cz, tx, tz, lx, lz, w, D);
         if (back > 0 && back < 3) { cx += lx * (back + 0.05); cz += lz * (back + 0.05); }
         if (back >= 3 || (back > 0 && (exactShift(cx, cz, tx, tz, lx, lz, w, D) > 0 || !lotFree(grid, W, ax, az, cx, cz, tx, tz, lx, lz, w, D)))) continue;
-        // água ou encosta forte neste fundo: tenta o próximo (mais raso), o raso pode caber onde o fundo não coube
+        // water or a steep slope at this depth: try the next (shallower) one, which may fit where the deep one did not
         const hc = heightAt(heights, cx, cz);
         if (hc < SEA_LEVEL + 0.5) continue;
         let lo = hc, hi = hc, wet = water ? waterAt(water, cx, cz) > hc - 0.5 : false;
@@ -248,7 +247,7 @@ export function buildLots(heights: Float32Array, g: RoadGraph, cell: number, wat
         taken.push(...corners(cx, cz, tx, tz, lx, lz, w - 0.6, D, 0.15));
         if (Math.floor((cx - cx0) / CELL_SIZE) === 0 && Math.floor((cz - cz0) / CELL_SIZE) === 0) {
           out.x.push(cx); out.z.push(cz); out.w.push(w - 0.6); out.d.push(D); out.zone.push(zone);
-          // frente (+z local) olha para a via: rumo = -longe
+          // the front (+z local) faces the road: heading = -away
           out.rot.push(Math.atan2(-lx, -lz));
           out.seed.push(hash2(Math.round(cx * 2), Math.round(cz * 2), zone));
           out.profile.push(g.sprofile[s]);

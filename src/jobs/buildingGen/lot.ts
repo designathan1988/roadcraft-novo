@@ -32,7 +32,7 @@ export function beginLot(poly: Array<[number, number]> | null): void {
 
 export function endLot(): void { lotPoly = null; }
 
-/** Muro reto entre dois pontos locais, acompanhando o chão. */
+/** A straight wall between two local points, following the ground. */
 /** wall, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
 export function wall(...a: Parameters<typeof wallTagged>): void { untagged(a[0], a[2], () => wallTagged(...a)); }
 function wallTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number, az: number, bx: number, bz: number, h: number, t: number, col: number, mat: number = BMAT.Fence): void {
@@ -44,7 +44,7 @@ function wallTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, ax: number
     const mx = ax + dx * (s0 + s1) / 2, mz = az + dz * (s0 + s1) / 2;
     const gy = heightAt(heights, wx(f, mx, mz), wz(f, mx, mz));
     const g: Frame = f;
-    // caixa fina ao longo do muro, em coordenadas locais
+    // a thin box along the wall, in local coordinates
     const half = (s1 - s0) / 2;
     const px = -dz * t / 2, pz = dx * t / 2;
     const c0x = mx - dx * half, c0z = mz - dz * half, c1x = mx + dx * half, c1z = mz + dz * half;
@@ -80,11 +80,11 @@ export function yardGrid(heights: Float32Array, f: Frame, w: number, d: number):
   const lift = 0.18 + (hash2(Math.round(wx(f, 0, 0) * 4), Math.round(wz(f, 0, 0) * 4), 7) % 3) * 0.03;
   const lxOf = (i: number) => gx0 + (gw * i) / NX, lzOf = (j: number) => gz0 + (gd * j) / NZ;
   const hAt = (i: number, j: number) => { const X = wx(f, lxOf(i), lzOf(j)), Z = wz(f, lxOf(i), lzOf(j)); return heightAt(heights, X, Z) + lift; };
-  /** Altura do chão do lote no ponto local (pela grade, não pelo relevo: o que fica por cima não cruza o chão). */
+  /** Height of the lot's ground at the local point (by the grid, not the relief: what lies on top does not cross the ground). */
   const at = (lx: number, lz: number) => {
     const fi = Math.max(0, Math.min(NX - 1e-6, (lx - gx0) / gw * NX)), fj = Math.max(0, Math.min(NZ - 1e-6, (lz - gz0) / gd * NZ));
     const i = Math.floor(fi), j = Math.floor(fj), ti = fi - i, tj = fj - j;
-    // o mesmo triângulo da malha (a diagonal vai de (i, j) a (i + 1, j + 1))
+    // the mesh's own triangle (the diagonal runs from (i, j) to (i + 1, j + 1))
     const h00 = hAt(i, j), h11 = hAt(i + 1, j + 1);
     return ti >= tj ? h00 + (hAt(i + 1, j) - h00) * ti + (h11 - hAt(i + 1, j)) * tj : h00 + (hAt(i, j + 1) - h00) * tj + (h11 - hAt(i, j + 1)) * ti;
   };
@@ -93,7 +93,7 @@ export function yardGrid(heights: Float32Array, f: Frame, w: number, d: number):
   return grid;
 }
 
-/** Chão do lote (grama ou piso) acompanhando o relevo. */
+/** The lot's ground (grass or paving) following the relief. */
 /** yard, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
 export function yard(...a: Parameters<typeof yardTagged>): void { untagged(a[0], a[2], () => yardTagged(...a)); }
 function yardTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, w: number, d: number, col: number, mat: number): void {
@@ -111,8 +111,8 @@ function yardTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, w: number,
 }
 
 /**
- * Caminho de entrada (roadcraft `lotDoors`): piso do portão na frente do lote até a porta, 6 cm acima do chão do lote
- * (pela grade do chão: em declive o caminho não cruza a grama).
+ * Entrance path (roadcraft `lotDoors`): paving from the gate at the lot's front to the door, 6 cm above the lot's ground
+ * (by the ground's grid: on a slope the path does not cut through the grass).
  */
 /** walkway, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
 export function walkway(...a: Parameters<typeof walkwayTagged>): void { untagged(a[0], a[2], () => walkwayTagged(...a)); }
@@ -249,7 +249,7 @@ export function groundRange(heights: Float32Array, f: Frame, w: number, d: numbe
   return [lo, hi];
 }
 
-/** Piso do estacionamento e as faixas das vagas, acompanhando o relevo. */
+/** The car park's paving and the bays' markings, following the relief. */
 /** parkingLots, without the building's tag (it is the lot's, not the building's: the inside view's cut leaves it). */
 export function parkingLots(...a: Parameters<typeof parkingLotsTagged>): void { untagged(a[0], a[2], () => parkingLotsTagged(...a)); }
 function parkingLotsTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, rows: number[]): void {
@@ -258,7 +258,7 @@ function parkingLotsTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, row
     const ax = rows[k], az = rows[k + 1], bx = rows[k + 2], bz = rows[k + 3];
     const L = Math.hypot(bx - ax, bz - az), tx = (bx - ax) / L, tz = (bz - az) / L, px = -tz, pz = tx;
     const n = Math.floor(L / 2.5);
-    // piso: tiras de 2,5 m (uma por vaga), 2,5 m para cada lado da linha
+    // paving: 2.5 m strips (one per bay), 2.5 m to each side of the line
     const at = (s: number, o: number, lift: number, col: number, mat: number, nrmUp = true) => {
       const lx = ax + tx * s + px * o, lz = az + tz * s + pz * o;
       const X = wx(f, lx, lz), Z = wz(f, lx, lz);
@@ -270,7 +270,7 @@ function parkingLotsTagged(mb: MeshBuilder, heights: Float32Array, f: Frame, row
     }
     for (let j = 0; j <= n; j++) {
       const s = j * 2.5 + (L - n * 2.5) / 2;
-      // faixa 8 cm acima do piso: em declive o piso é reto entre os cantos e o relevo sob a faixa, curvo
+      // the marking 8 cm above the paving: on a slope the paving is straight between the corners and the relief under the marking curved
       mb.quad(at(s - 0.06, -2.4, 0.3, 0xe8e6df, BMAT.Plain), at(s + 0.06, -2.4, 0.3, 0xe8e6df, BMAT.Plain), at(s + 0.06, 2.4, 0.3, 0xe8e6df, BMAT.Plain), at(s - 0.06, 2.4, 0.3, 0xe8e6df, BMAT.Plain), 0, 1, 0);
     }
   }
@@ -285,7 +285,7 @@ export function legacyBox(mb: MeshBuilder, heights: Float32Array, b: BoxColumns,
   prism(mb, f, -b.w[i] / 2, b.w[i] / 2, -b.d[i] / 2, b.d[i] / 2, f.base, hi + b.h[i], b.color[i], BMAT.Wall, 3.1, shadeHex(b.color[i], 0.82), BMAT.RoofFlat);
 }
 
-/** Lote vazio: só a divisa, um meio-fio baixo de concreto em volta (sem prédio). */
+/** An empty lot: only its boundary, a low concrete kerb around it (no building). */
 export function emptyLot(mb: MeshBuilder, heights: Float32Array, W: number, D: number, f: Frame): void {
   const [lo, hi] = groundRange(heights, f, W, D);
   f.base = lo - 0.3;

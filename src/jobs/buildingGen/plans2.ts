@@ -20,7 +20,7 @@ export function tower(g: GenContext): void {
   const podiumCol = a.base >= 0 ? a.base : PLASTER[r.int(0, PLASTER.length)];
   const fh = a.floorH;
   const podium = 2;
-  // lote fundo do centro: o embasamento vai até o fundo (sem gramado atrás da torre)
+  // a deep lot downtown: the podium reaches the back (no lawn behind the tower)
   const pw = Math.min(W - 0.6, 40), pd = Math.min(D - 3, D > 42 ? 60 : 36);
   const z1 = D / 2 - 0.5, z0 = z1 - pd;
   const yP = hi + 0.2 + 4.4 + fh * (podium - 1);
@@ -88,7 +88,7 @@ export function warehouse(mb: MeshBuilder, heights: Float32Array, f: Frame, W: n
   mb.curBase = hi;
   setFac(mb, style, r.nextU32(), Facade.Industrial, 4, 5.6);
   prism(mb, f, -bw / 2, bw / 2, z0, z1, f.base, hi + h, metal, BMAT.Metal, 4, 0x9da3a6, BMAT.RoofFlat);
-  // telhado em dente de serra
+  // sawtooth roof
   if (r.next() < 0.5 && lod < 3) {
     const n = Math.max(2, Math.floor(bd / 8));
     const step = bd / n;
@@ -99,7 +99,7 @@ export function warehouse(mb: MeshBuilder, heights: Float32Array, f: Frame, W: n
   }
   if (lod > 0) return;
   docks(mb, f, bw, z1, hi, f.base);
-  // escritório na frente
+  // the office at the front
   setFac(mb, style, r.nextU32(), Facade.Punched, 3, 3.2);
   prism(mb, f, -bw / 2, -bw / 2 + Math.min(14, bw * 0.4), z1, z1 + 4, f.base, hi + 6.5, 0xe6e2da, BMAT.Wall, 3, 0x8f8b84, BMAT.RoofFlat);
   yard(mb, heights, f, W, D, 0xa7a299, BMAT.Paving);
@@ -111,12 +111,12 @@ export function warehouse(mb: MeshBuilder, heights: Float32Array, f: Frame, W: n
   lotWall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 2.0, 0.1, fence);
 }
 
-/** Chaminé de tijolo com anel branco e vermelho no topo (a fumaça sai dela). */
+/** A brick chimney with a white and red ring at the top (the smoke comes out of it). */
 export function chimney(mb: MeshBuilder, f: Frame, x: number, z: number, y0: number, y1: number, lod: number): void {
   blank(mb);
   const r0 = 1.3, r1 = 0.9;
   if (lod >= 2) { prism(mb, f, x - r0, x + r0, z - r0, z + r0, y0, y1, 0x8c4430, BMAT.Plain, 4, 0x2a2624, BMAT.RoofFlat); return; }
-  // tronco que afina: três trechos
+  // a tapering shaft: three sections
   const H = y1 - y0;
   for (let k = 0; k < 3; k++) {
     const r = r0 + (r1 - r0) * (k / 2);
@@ -126,9 +126,9 @@ export function chimney(mb: MeshBuilder, f: Frame, x: number, z: number, y0: num
   prism(mb, f, x - r1 - 0.1, x + r1 + 0.1, z - r1 - 0.1, z + r1 + 0.1, y1 - 1.1, y1, 0xb8322c, BMAT.Plain, 4, 0x1e1a18, BMAT.RoofFlat);
 }
 
-// ------------------------------------------------------------ projeto do jogador (criador)
+// ------------------------------------------------------------ the player's design (creator)
 
-/** Prisma de planta poligonal (convexa), paredes com coordenada de fachada; topo em leque opcional. */
+/** A prism on a polygonal (convex) plan, walls with facade coordinates; an optional fan-shaped top. */
 export function polyPrism(mb: MeshBuilder, f: Frame, pts: Array<[number, number]>, y0: number, y1: number, wallCol: number, colW: number, top: number, topMat: number, wallMat: number = BMAT.Wall): void {
   const sink = f.out;
   if (sink?.foot) captureFoot(sink, f, Math.min(...pts.map((q) => q[0])), Math.max(...pts.map((q) => q[0])), Math.min(...pts.map((q) => q[1])), Math.max(...pts.map((q) => q[1])), y0);
@@ -159,7 +159,7 @@ export function polyPrism(mb: MeshBuilder, f: Frame, pts: Array<[number, number]
   for (let k = 0; k < ring.length; k++) mb.tri(ctr, ring[k], ring[(k + 1) % ring.length], 0, 1, 0);
 }
 
-/** Pirâmide sobre a planta poligonal (telhado de polígono). */
+/** A pyramid over the polygonal plan (a polygon roof). */
 export function pyramid(mb: MeshBuilder, f: Frame, pts: Array<[number, number]>, y: number, h: number, col: number): void {
   let cx = 0, cz = 0;
   for (const [x, z] of pts) { cx += x; cz += z; }
@@ -178,7 +178,7 @@ export function pyramid(mb: MeshBuilder, f: Frame, pts: Array<[number, number]>,
   }
 }
 
-/** Telhado de uma água: cai da frente (alta, z0) para o fundo (z1)? não: alto no fundo, caindo para a frente. */
+/** A shed roof: high at the back, falling towards the front. */
 export function shed(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, h: number, roofCol: number, wallCol: number): void {
   const o = 0.4;
   const P = (lx: number, ly: number, lz: number, n: [number, number, number], col: number, mat: number) =>
@@ -188,7 +188,7 @@ export function shed(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
   const a = P(x0 - o, y, z1 + o, n, roofCol, BMAT.RoofTile), b = P(x1 + o, y, z1 + o, n, roofCol, BMAT.RoofTile);
   const c = P(x1 + o, y + h, z0 - o, n, roofCol, BMAT.RoofTile), d = P(x0 - o, y + h, z0 - o, n, roofCol, BMAT.RoofTile);
   mb.quad(a, b, c, d, nx(f, 0, n[2]), n[1], nz(f, 0, n[2]));
-  // parede alta do fundo e os dois triângulos dos lados
+  // the high back wall and the two side triangles
   const nb: [number, number, number] = [0, 0, -1];
   const e = P(x0, y, z0, nb, wallCol, BMAT.Plain), g = P(x1, y, z0, nb, wallCol, BMAT.Plain), hh = P(x1, y + h, z0, nb, wallCol, BMAT.Plain), i = P(x0, y + h, z0, nb, wallCol, BMAT.Plain);
   mb.quad(g, e, i, hh, nx(f, 0, -1), 0, nz(f, 0, -1));
@@ -198,14 +198,14 @@ export function shed(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
   }
 }
 
-/** Dente de serra (galpão com luz do fundo): sheds seguidos ao longo da frente. */
+/** Sawtooth (a shed lit from the back): sheds in a row along the front. */
 export function sawtooth(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y: number, roofCol: number, wallCol: number): void {
   const n = Math.max(2, Math.round((z1 - z0) / 7));
   const step = (z1 - z0) / n;
   for (let k = 0; k < n; k++) shed(mb, f, x0, x1, z0 + k * step, z0 + (k + 1) * step, y, Math.min(3.2, step * 0.45), roofCol, k % 2 ? 0xbfd3dc : wallCol);
 }
 
-/** Cemitério (muro, caminhos, túmulos em fileiras, capela) e parquinho (piso, brinquedos). */
+/** Cemetery (wall, paths, rows of graves, chapel) and playground (ground, play equipment). */
 export function design(g: GenContext, ds: Design): void {
   const { mb, f, W, D, floors, hi, lod, zone, seed } = g;
   const shop = zone === Zone.Commercial || zone === Zone.Mixed;
@@ -219,7 +219,7 @@ export function design(g: GenContext, ds: Design): void {
   const colW = (win === 1 ? 1.6 : ds.finish === 2 ? 1.6 : ds.finish === 4 ? 4 : 3.1) * (win === 2 ? 1.7 : win === 3 ? 0.7 : 1);
   const bw = Math.max(5, W - 1.2), bd = Math.max(5, D - 2.4);
   const lf: Frame = { ...f, cx: wx(f, 0, 0.6), cz: wz(f, 0, 0.6) }; // encostado na frente
-  // ala: o corpo principal estreita e a ala (um terço dos andares) ocupa o lado
+  // wing: the main body narrows and the wing (a third of the floors) takes the side
   const wing = ds.wing ?? 0, wn = wing === 3 ? 2 : wing ? 1 : 0;
   const ww = wn && bw >= 14 ? bw * (wn === 2 ? 0.25 : 0.36) : 0;
   const offX = !ww ? 0 : wing === 1 ? ww / 2 : wing === 2 ? -ww / 2 : 0;
@@ -245,7 +245,7 @@ export function design(g: GenContext, ds: Design): void {
     }
     facade();
   }
-  // volumes de baixo (até o recuo) e, se houver, o andar recuado (2,5 m para dentro)
+  // the lower volumes (up to the setback) and, if any, the set-back floor (2.5 m in)
   const inset = 2.5;
   const topRects: Array<[number, number, number, number]> = [];
   let topPoly: Array<[number, number]> | null = null;
@@ -289,7 +289,7 @@ export function design(g: GenContext, ds: Design): void {
       wallSeg(mb, mf, ax, az, bx, bz, roofY, ds.roof === 1 ? 1.1 : 0.9, wallCol);
     }
   }
-  // peças no telhado (só nos telhados planos e no terraço; agulha e antena em qualquer um)
+  // rooftop gear (only on flat roofs and the terrace; spire and antenna on any)
   if (lod >= 2) return;
   const [rx0, rx1, rz0, rz1] = poly ? [-bw * 0.3, bw * 0.3, -bd * 0.3, bd * 0.3] : (set ? topRects : rects)[0];
   const cx = (rx0 + rx1) / 2, cz = (rz0 + rz1) / 2, rw = rx1 - rx0, rd = rz1 - rz0;
@@ -309,7 +309,7 @@ export function design(g: GenContext, ds: Design): void {
   if (flatTop && ds.gear & GEAR.AC) for (let q = 0; q < 4; q++) prism(mb, mf, rx1 - 2.2 - q * 1.6, rx1 - 1.2 - q * 1.6, rz1 - 2, rz1 - 1.2, roofY, roofY + 0.8, 0xc9ccce, BMAT.Metal, 50, 0xa9adb0, BMAT.Metal);
   const peak = roofY + (pitched ? Math.min(rw, rd) * 0.32 : 0);
   if (ds.gear & GEAR.Spire) {
-    // agulha: base, haste em três trechos que afinam
+    // spire: base, a shaft in three tapering sections
     prism(mb, mf, cx - 1.6, cx + 1.6, cz - 1.6, cz + 1.6, peak, peak + 2.5, wallCol, BMAT.Plain, 50, -1, BMAT.RoofFlat);
     for (let q = 0; q < 3; q++) { const r = 1 - q * 0.3; prism(mb, mf, cx - r, cx + r, cz - r, cz + r, peak + 2.5 + q * 4, peak + 6.5 + q * 4, 0xc8c3b4, BMAT.Metal, 50, -1, BMAT.Metal); }
     prism(mb, mf, cx - 0.12, cx + 0.12, cz - 0.12, cz + 0.12, peak + 14.5, peak + 22, 0xd9d4c4, BMAT.Metal, 50, 0xd9d4c4, BMAT.Metal);
@@ -317,7 +317,7 @@ export function design(g: GenContext, ds: Design): void {
   if (ds.gear & GEAR.Antenna) prism(mb, mf, rx0 + 2, rx0 + 2.2, rz1 - 2.2, rz1 - 2, peak, peak + 14, 0x9aa4ab, BMAT.Metal, 50, 0x9aa4ab, BMAT.Metal);
 }
 
-/** Mureta reta entre dois pontos do telhado (platibanda de planta poligonal). */
+/** A straight low wall between two roof points (the parapet of a polygonal plan). */
 export function wallSeg(mb: MeshBuilder, f: Frame, ax: number, az: number, bx: number, bz: number, y: number, h: number, col: number): void {
   const len = Math.hypot(bx - ax, bz - az);
   if (len < 0.1) return;

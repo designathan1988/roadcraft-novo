@@ -9,7 +9,7 @@ import type { Frame } from './geometry.ts';
 export interface GenContext {
   mb: MeshBuilder; heights: Float32Array; f: Frame; W: number; D: number; floors: number;
   arch: number; a: Arch; r: Rng; hi: number; lod: number; seed: number; zone: number;
-  /** Vagas do estacionamento (`lotParking`). */
+  /** Car park bays (`lotParking`). */
   rows: number[];
   /** Facade pattern picked by the cell plan (Pattern). */
   pattern: number;

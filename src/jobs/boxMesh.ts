@@ -1,10 +1,10 @@
-// Monta a malha compacta de um conjunto de caixas (prédios genéricos).
-// Roda no worker. Vértice: posição snorm16×4, normal octaédrica snorm8×4, cor+material unorm8×4.
+// Builds the compact mesh of a set of boxes (generic buildings).
+// Runs in the worker. Vertex: position snorm16×4, octahedral normal snorm8×4, colour+material unorm8×4.
 
 import { heightAt } from '../world/heights.ts';
 import type { BoxColumns, PackedMesh } from '../shared/contracts/worker.ts';
 
-/** Normal unitária → octaédrico em [-1, 1]². */
+/** Unit normal → octahedral in [-1, 1]². */
 export function octEncode(x: number, y: number, z: number, out: Float32Array): void {
   const l1 = Math.abs(x) + Math.abs(y) + Math.abs(z);
   let ex = x / l1, ey = y / l1;
@@ -30,7 +30,7 @@ export function buildBoxMesh(heights: Float32Array, b: BoxColumns, originX: numb
   const color = new Uint8Array(vCount * 4);
   const index = vCount <= 65536 ? new Uint16Array(n * 30) : new Uint32Array(n * 30);
 
-  // bases primeiro, para escolher a origem Y
+  // bases first, to choose the Y origin
   const base = new Float32Array(n), top = new Float32Array(n);
   let minY = Infinity, maxY = -Infinity;
   for (let i = 0; i < n; i++) {
@@ -43,7 +43,7 @@ export function buildBoxMesh(heights: Float32Array, b: BoxColumns, originX: numb
       if (g < lo) lo = g;
       if (g > hi) hi = g;
     }
-    base[i] = lo - 1.5; // fundação enterrada
+    base[i] = lo - 1.5; // buried foundation
     top[i] = hi + b.h[i];
     if (base[i] < minY) minY = base[i];
     if (top[i] > maxY) maxY = top[i];
@@ -72,7 +72,7 @@ export function buildBoxMesh(heights: Float32Array, b: BoxColumns, originX: numb
     const hw = b.w[i] / 2, hd = b.d[i] / 2;
     const cx = b.x[i], cz = b.z[i];
     const y0 = base[i], y1 = top[i];
-    // cantos no plano (ordem anti-horária vista de cima: -x-z, +x-z, +x+z, -x+z)
+    // corners on the plane (anticlockwise seen from above: -x-z, +x-z, +x+z, -x+z)
     const px = [-hw, hw, hw, -hw], pz = [-hd, -hd, hd, hd];
     const wx = new Array<number>(4), wz = new Array<number>(4);
     for (let k = 0; k < 4; k++) { wx[k] = cx + px[k] * c - pz[k] * s; wz[k] = cz + px[k] * s + pz[k] * c; }
@@ -83,7 +83,7 @@ export function buildBoxMesh(heights: Float32Array, b: BoxColumns, originX: numb
       const k2 = (k + 1) & 3;
       const ex = wx[k2] - wx[k], ez = wz[k2] - wz[k];
       const len = Math.hypot(ex, ez);
-      const nx = ez / len, nz = -ex / len; // normal para fora
+      const nx = ez / len, nz = -ex / len; // outward normal
       put(wx[k2], y0, wz[k2], nx, 0, nz, col, MAT_WALL);
       put(wx[k], y0, wz[k], nx, 0, nz, col, MAT_WALL);
       put(wx[k], y1, wz[k], nx, 0, nz, col, MAT_WALL);

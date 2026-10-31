@@ -47,7 +47,7 @@ export function civic(g: GenContext, fn: number): void {
       break;
     }
     case Fn.Church: {
-      // nave com telhado de duas águas, torre com pináculo e cruz, adro
+      // nave with a gable roof, a tower with a pinnacle and cross, churchyard
       const nw = Math.min(W - 6, 14), nd = Math.min(D - 10, 30);
       const z1 = zf - 6, z0 = z1 - nd;
       setFac(mb, ArchId.Civic, g.seed, Facade.Punched, 3.6, 7);
@@ -76,7 +76,7 @@ export function civic(g: GenContext, fn: number): void {
         solid(-1.4, 1.4, z1, z1 + 0.15, y0 + fl * 3.6 - 2.3, y0 + fl * 3.6 - 1.3, 0xc8241c);
       }
       if (lod > 0) break;
-      // marquise da emergência
+      // the emergency entrance's canopy
       solid(-6, 6, z1, z1 + 5, y0 + 3.4, y0 + 3.7, 0xd8d6d0);
       for (const x of [-5.5, 5.5]) solid(x - 0.15, x + 0.15, z1 + 4.6, z1 + 4.9, y0, y0 + 3.4, 0xd8d6d0);
       // helipad on the roof, inside the 0.8 m band
@@ -85,7 +85,7 @@ export function civic(g: GenContext, fn: number): void {
       break;
     }
     case Fn.Square: case Fn.Park: {
-      // praça: piso, canteiros, bancos, chafariz; parque: gramado, caminhos e árvores
+      // square: paving, flower beds, benches, fountain; park: lawn, paths and trees
       const park = fn === Fn.Park;
       ground(park ? 0x6f9a4c : 0xc4beb2, park ? BMAT.Grass : BMAT.Paving);
       if (lod > 1) break;
@@ -130,7 +130,7 @@ export function civic(g: GenContext, fn: number): void {
       // cobertura sobre as bombas, lojinha, totem
       const cz = zf - 9, ch = Math.min(9, W / 2 - 0.6);
       solid(-ch, ch, cz - 6, cz + 6, y0 + 5, y0 + 5.9, 0xf2f2ee);
-      // faixa colorida 5 cm acima do teto da cobertura (no mesmo plano, as duas cores piscavam)
+      // a coloured band 5 cm above the canopy's top (on the same plane the two colours flickered)
       if (lod < 2) solid(-ch - 0.05, ch + 0.05, cz - 6.05, cz + 6.05, y0 + 5.4, y0 + 5.95, r.next() < 0.5 ? 0xc8241c : 0x1f8a4a);
       for (const [x, z] of [[-5, -3], [5, -3], [-5, 3], [5, 3]]) solid(x - 0.25, x + 0.25, cz + z - 0.25, cz + z + 0.25, y0, y0 + 5, 0xd8d6d0);
       if (lod > 0) break;
@@ -148,7 +148,7 @@ export function civic(g: GenContext, fn: number): void {
       box(-bw / 2, bw / 2, z0, z1, mall ? 14 : 7, mall ? 0xe8e2d4 : 0xf2f2ee, Facade.Industrial, 4, mall ? 7 : 7, 0x9aa0a4);
       if (lod < 2) solid(-bw / 2 - 0.3, bw / 2 + 0.3, z1 - 0.2, z1 + 0.3, y0 + (mall ? 14 : 7) - 1.6, y0 + (mall ? 14 : 7) + 0.05, r.next() < 0.5 ? 0xd8432a : 0x1f6fb0);
       if (lod > 0) break;
-      // entrada envidraçada e estacionamento pintado
+      // glazed entrance and a painted car park
       setFac(mb, ArchId.Glass, g.seed, Facade.Curtain, 1.6, 3.6);
       prism(mb, f, -8, 8, z1, z1 + 2, g.f.base, y0 + 6, 0x4a6274, BMAT.Curtain, 1.6, 0x8f8b84, BMAT.RoofFlat);
       ground(0x55585b, BMAT.Paving);
@@ -157,7 +157,7 @@ export function civic(g: GenContext, fn: number): void {
       break;
     }
     case Fn.CityHall: {
-      // três andares, pórtico de colunas, frontão e mastro com bandeira
+      // three floors, a portico of columns, a pediment and a flagpole with its flag
       const bw = Math.min(W - 6, 36), bd = Math.min(D - 12, 22);
       const z1 = zf - 8;
       box(-bw / 2, bw / 2, z1 - bd, z1, 13, 0xefe9de, Facade.Punched, 3.4, 4.2);
@@ -182,11 +182,11 @@ export function civic(g: GenContext, fn: number): void {
       box(-bw / 2, bw / 2, z1 - bd, z1, 8, fire ? 0xc8402c : 0xe8e8e4, Facade.Punched, 3.2, 4);
       if (lod < 2) solid(-bw / 2, bw / 2, z1, z1 + 0.15, y0 + 6.3, y0 + 7.3, fire ? 0xf2f2ee : 0x1f3f8a);
       if (fire) {
-        // portões da garagem e torre de treino
+        // garage doors and the training tower
         // garage doors along the front, as many as fit (up to three)
         if (lod < 2) for (let k = 0; k < 3 && -bw / 2 + 6.5 + k * 6 <= bw / 2 - 0.5; k++) solid(-bw / 2 + 2 + k * 6, -bw / 2 + 6.5 + k * 6, z1, z1 + 0.1, y0, y0 + 4.5, 0xa02a1c);
         setFac(mb, ArchId.Civic, g.seed, Facade.Punched, 2.4, 3.2);
-        // torre 10 cm para fora das paredes do quartel (no mesmo plano, as janelas das duas piscavam)
+        // the tower 10 cm out of the station's walls (on the same plane the windows of both flickered)
         prism(mb, f, bw / 2 - 4.9, bw / 2 + 0.1, z1 - bd - 0.1, z1 - bd + 4.9, g.f.base, y0 + 18, 0xc8402c, BMAT.Wall, 2.4, 0x8f8b84, BMAT.RoofFlat);
       }
       if (lod > 0) break;
@@ -197,7 +197,7 @@ export function civic(g: GenContext, fn: number): void {
   }
 }
 
-/** Torre de escritórios: pódio de lojas, torre recuada (vidro, contemporânea ou art déco) e coroa. */
+/** Office tower: a podium of shops, a set-back tower (glass, contemporary or art deco) and a crown. */
 export function openLot(g: GenContext, fn: number): void {
   const { mb, heights, f, W, D, hi, lod } = g;
   const y0 = hi + 0.2;
@@ -214,13 +214,13 @@ export function openLot(g: GenContext, fn: number): void {
     blank(mb);
     if (lod > 0) return;
     for (let z = -D / 2 + 13; z < D / 2 - 3; z += 3.2) for (let x = -W / 2 + 2.5; x < W / 2 - 2; x += 2.6) {
-      if (Math.abs(x) < 1.6) continue; // caminho do meio
+      if (Math.abs(x) < 1.6) continue; // the middle path
       sol(x - 0.5, x + 0.5, z - 1, z + 1, y0, y0 + 0.4, 0xb4b0a8);
       sol(x - 0.45, x + 0.45, z - 1.05, z - 0.85, y0 + 0.4, y0 + 1.3, 0xc9c5bd);
     }
     return;
   }
-  // parquinho: escorregador, balanço, gangorra, gira-gira e areia
+  // playground: slide, swing, seesaw, merry-go-round and sand
   if (lod > 0) return;
   sol(-W / 4 - 3, -W / 4 + 3, -3, 3, y0, y0 + 0.15, 0xd8c69a);
   sol(-W / 4 - 2.2, -W / 4 - 1.8, -0.2, 0.2, y0, y0 + 2.2, 0xd63c3c); sol(-W / 4 + 1.8, -W / 4 + 2.2, -0.2, 0.2, y0, y0 + 2.2, 0xd63c3c);

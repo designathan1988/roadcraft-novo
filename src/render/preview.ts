@@ -1,6 +1,5 @@
-// Pré-visualização de vias: uma fita de vértices fixos, posicionada inteira no
-// vertex shader a partir da curva (uniforms). Nenhuma malha montada na CPU.
-// Mais um anel para o ponto de encaixe e para a rotatória.
+// Road preview: a ribbon of fixed vertices, placed whole in the vertex shader from the curve (uniforms). No mesh is
+// built on the CPU. One more ring for the snap point and for the roundabout.
 
 import * as THREE from 'three/webgpu';
 import type { Quad } from '../roads/geometry.ts';
@@ -54,9 +53,9 @@ export class RoadPreview {
       return vec3(xz.x, y, xz.y);
     });
     m.positionNode = pos();
-    // transparente: não mexe na velocidade (o TRAA lê a do chão atrás)
+    // transparent: it does not touch the velocity (the TRAA reads the ground's behind it)
     colorOnly(m);
-    // faixas diagonais para ler como "planejado"
+    // diagonal stripes so it reads as "planned"
     const stripe = smoothstep(0.35, 0.5, abs(fract(pv.x.mul(N / 2).add(pv.y.mul(0.5))).sub(0.5)));
     const edge = smoothstep(0.82, 0.95, abs(pv.y));
     m.colorNode = vec4(mix(this.color, vec3(1), edge.mul(0.6)), mix(float(0.32), float(0.55), stripe).add(edge.mul(0.35)));
@@ -77,7 +76,7 @@ export class RoadPreview {
     this.circle.frustumCulled = false;
   }
 
-  /** Mostra a curva com alturas (at, y) reamostradas. */
+  /** Shows the curve with resampled heights (at, y). */
   show(q: Quad, half: number, at: ArrayLike<number>, y: ArrayLike<number>, ok: boolean, tint?: number): void {
     this.p0.value.set(q.x0, q.z0);
     this.pc.value.set(q.cx, q.cz);
@@ -86,7 +85,7 @@ export class RoadPreview {
     this.color.value.setHex(tint ?? (ok ? 0x4cd28a : 0xe2564b));
     const n = at.length, len = at[n - 1] || 1;
     for (let i = 0; i <= N; i++) {
-      // amostra pelo parâmetro aproximado por comprimento
+      // sample by the parameter approximated by length
       const s = len * i / N;
       let k = Math.min(n - 2, Math.max(0, Math.floor(s / len * (n - 1))));
       while (k < n - 2 && at[k + 1] < s) k++;

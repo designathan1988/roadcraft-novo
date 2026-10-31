@@ -177,7 +177,7 @@ function tableGeometry(): BufferGeometry {
   return merged([tone(top, grey(1)), tone(post, grey(0.85)), tone(foot, grey(0.85))]);
 }
 
-/** A floor-standing clothes airer (the varal de chao), 1.2 m along X */
+/** A floor-standing clothes airer, 1.2 m along X */
 function airerGeometry(): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const half = 0.6, top = 0.92, foot = 0.3;

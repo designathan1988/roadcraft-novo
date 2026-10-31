@@ -1,7 +1,6 @@
-// Peças da rua e dos lotes (worker): postes, árvores de calçada e de canteiro,
-// semáforos, bancos, lixeiras, árvores e arbustos de quintal. Função pura da
-// rede em volta da célula e dos prédios dela; cada peça fica na célula onde
-// cai, então células vizinhas nunca duplicam.
+// Street and lot props (worker): street lights, sidewalk and median trees, traffic lights, benches, bins, yard trees
+// and bushes. A pure function of the network around the cell and of its buildings; each prop stays in the cell it
+// falls in, so neighbouring cells never duplicate one.
 
 import { MAP_CELLS, SEA_LEVEL } from '../config.ts';
 import { cellId, cellOriginX, cellX } from '../core/grid.ts';
@@ -22,25 +21,25 @@ import { inPolygon, lotFit, lotPolygon } from './buildingGen/polygon.ts';
 /** A prop's type from its `extra` word (5 bits; the rest is its key): the one decoder of that format. */
 export const propType = (extra: number): number => extra & 31;
 
-/** Tipos de peça (4 bits; 15 = vaga livre). */
+/** Prop types (4 bits; 15 = free slot). */
 export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17, ...PART_PROP } as const;
 /** Types 16..23 belong to the roads/vegetation work, 24..30 to the buildings work (see the shared notes); 18..23 are
  * empty for now (no mesh, no draw). */
 export const PROP_TYPES = 31;
-/** Mobiliário (variante da peça Furniture). */
+/** Furniture (a variant of the Furniture prop). */
 export const FURN = { Hydrant: 0, Postbox: 1, Phone: 2, Drain: 3, Bollard: 4, Planter: 5,
-  // peças de fachada dos prédios (sessão prédios; jobs/buildingGen.ts PART): 8..15
+  // the buildings' facade parts (buildings session; jobs/buildingGen.ts PART): 8..15
   WallAc: 8, RoofAc: 9, Vase: 10, Clothesline: 11, Dish: 12, Vent: 13, Chair: 14, Tank: 15 } as const;
-/** Muros e cercas (variante da peça Barrier); a peça vai de z = 0 a 1 e o shader estica. */
+/** Walls and fences (a variant of the Barrier prop); the prop runs from z = 0 to 1 and the shader stretches it. */
 export const BARRIER = { Fence: 0, Wall: 1, Hedge: 2, Guardrail: 3, Railing: 4 } as const;
-/** Placas (variante da peça Sign). */
+/** Signs (a variant of the Sign prop). */
 export const SIGN = { Speed: 0, Yield: 1, Name: 2, OneWay: 3, Stop: 4, NoParking: 5, NoEntry: 6, Pedestrian: 7, School: 8, Direction: 9, Info: 10 } as const;
-/** Altura da cruzeta dos postes (onde passam os fios). */
+/** Height of the poles' crossarm (where the wires run). */
 export const WIRE_Y = 9.25;
-/** Tipo do espaço livre no pool (5 bits de tipo). */
+/** The type of a free slot in the pool (5 type bits). */
 export const PROP_FREE = 31;
 
-/** Postes ao longo da via: primeiro a 8 m do recuo, depois a cada 32 m (o shader da via usa o mesmo passo). */
+/** Street lights along the road: the first 8 m from the setback, then every 32 m (the road shader uses the same step). */
 export const LAMP_FIRST = 8;
 export const LAMP_STEP = 32;
 
@@ -52,7 +51,7 @@ class Out {
   extra: number[] = [];
   private cell: number;
   constructor(cell: number) { this.cell = cell; }
-  /** Mesma conta da grade, sobre o valor gravado (float32): a borda nunca vai para as duas células. */
+  /** The grid's own count, on the stored value (float32): the edge never goes to both cells. */
   inCell(x: number, z: number): boolean {
     return cellId(cellX(Math.fround(x)), cellX(Math.fround(z))) === this.cell;
   }
@@ -75,13 +74,13 @@ class Out {
     this.data.push(x, y, z, w);
     this.extra.push(((type & 31) | ((key & 0x07ffffff) << 5)) >>> 0);
   }
-  /** Escala crua (6 bits), para peças que usam o campo como comprimento (fios). */
+  /** Raw scale (6 bits), for props that use the field as a length (wires). */
   addRaw(type: number, x: number, y: number, z: number, yaw: number, variant: number, scale6: number, key: number): void {
     this.add(type, x, y, z, yaw, variant, 0.5 + Math.max(0, Math.min(63, scale6)) / 42, key);
   }
 }
 
-/** Itens postos pelo jogador: objetos (z1 = altura) e trechos de muro em peças de até 3 m. */
+/** Items placed by the player: objects (z1 = height) and wall runs in pieces of up to 3 m. */
 function placeItems(heights: Float32Array, a: Float32Array, out: Out): void {
   const OBJ: Record<number, [number, number]> = {
     0: [PROP.Tree, 0], 1: [PROP.Bush, 0], 2: [PROP.Bench, 0], 3: [PROP.Bin, 0], 4: [PROP.Lamp, 0],
@@ -91,14 +90,14 @@ function placeItems(heights: Float32Array, a: Float32Array, out: Out): void {
   for (let k = 0; k + 5 < a.length; k += 6) {
     const x0 = a[k], z0 = a[k + 1], x1 = a[k + 2], z1 = a[k + 3], type = a[k + 4], variant = a[k + 5];
     if (type === 25) {
-      // linha de postes com fios: poste a cada ≤ 35 m e vão de fios entre eles
+      // a line of poles with wires: a pole every ≤ 35 m and a span of wires between them
       const L = Math.hypot(x1 - x0, z1 - z0);
       const n = Math.max(1, Math.ceil(L / 35));
-      const yaw = Math.atan2(x1 - x0, z1 - z0) + Math.PI / 2; // cruzeta atravessada à linha
+      const yaw = Math.atan2(x1 - x0, z1 - z0) + Math.PI / 2; // the crossarm across the line
       let prev: [number, number, number] | null = null;
       for (let i = 0; i <= n; i++) {
         const x = x0 + (x1 - x0) * i / n, z = z0 + (z1 - z0) * i / n, y = heightAt(heights, x, z);
-        // luz: variante 1 = em postes alternados, 2 = em todos (poste aceso = o poste com luminária das vias)
+        // light: variant 1 = on every other pole, 2 = on all (a lit pole = the roads' pole with a lamp)
         const lit = variant === 2 || (variant === 1 && i % 2 === 0);
         if (lit) out.add(PROP.Lamp, x, y, z, yaw - Math.PI / 2, 0, 1, 0);
         else out.add(PROP.Pole, x, y, z, yaw, 0, 1, 0);
@@ -112,13 +111,13 @@ function placeItems(heights: Float32Array, a: Float32Array, out: Out): void {
       continue;
     }
     if (type === 43) {
-      // pessoa do criador: cor da roupa (4 bits baixos) e altura (4 bits altos)
+      // a creator person: the clothes' colour (low 4 bits) and the height (high 4 bits)
       out.add(PROP.Person, x0, z1 !== 0 ? z1 : heightAt(heights, x0, z0), z0, x1, variant & 15, 0.86 + (variant >> 4) * 0.02, 0);
       continue;
     }
     if (type === 41) { out.add(PROP.Ground, x0, z1 !== 0 ? z1 : heightAt(heights, x0, z0), z0, x1, 11, 1, 0); continue; }
     if (type >= 30 && type <= 40) {
-      // elemento do chão: variante = tipo, escala na variante do item (0..15 → 0,6..1,6)
+      // a ground element: variant = type, the scale in the item's variant (0..15 → 0.6..1.6)
       out.add(PROP.Ground, x0, heightAt(heights, x0, z0), z0, x1, type - 30, 0.6 + variant / 15, 0);
       continue;
     }
@@ -130,7 +129,7 @@ function placeItems(heights: Float32Array, a: Float32Array, out: Out): void {
         const xa = x0 + (x1 - x0) * i / n, za = z0 + (z1 - z0) * i / n;
         const xb = x0 + (x1 - x0) * (i + 1) / n, zb = z0 + (z1 - z0) * (i + 1) / n;
         const ya = heightAt(heights, xa, za), yb = heightAt(heights, xb, zb);
-        // escala crua = comprimento em decímetros; chave = desnível (5 cm) + 512
+        // raw scale = length in decimetres; key = height difference (5 cm) + 512
         const span = Math.min(63, Math.round(L / n * 10));
         out.addRaw(PROP.Barrier, xa, ya, za, yaw, type - 20, span, Math.max(0, Math.min(1023, Math.round((yb - ya) * 20) + 512)));
       }
@@ -164,7 +163,7 @@ const BIOME_TREES: Array<[number, number, number, number, number]> = [
   [0.12, 0.3, 0.02, 1.0, 0.1], // pantanal
 ];
 
-/** O que o chão diz às peças: pintura/floresta, água e bioma. */
+/** What the ground tells the props: paint/forest, water and biome. */
 export interface PropEnv { ground?: Uint32Array; water?: Float32Array; biome?: number; /** the cell is near: its 4.0 buildings' parts too */ parts40?: boolean }
 
 export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, cell: number, items?: Float32Array, env?: PropEnv): PropColumns {
@@ -192,9 +191,9 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     if (list.length < 2) continue;
     junctionRetreats(list.map((r) => armOf(quads[r.s], g.sprofile[r.s], r.end)), list.map((r) => lens[r.s]), tmp, order);
     list.forEach((r, i) => { retreat[r.s * 2 + r.end] = tmp[i]; });
-    // semáforos: um por braço, na esquina à direita de quem chega (mesma ordem dos braços da simulação)
+    // traffic lights: one per arm, at the corner on the right of whoever arrives (the same arm order as the simulation)
     const ring = list.some((r) => (g.sflags[r.s] & SegFlag.Ring) !== 0);
-    // placas de pare e dê a preferência nos braços que não têm a preferência
+    // stop and give-way signs on the arms that do not have right of way
     if (list.length >= 3 && !ring && g.nctl[n] !== Ctl.Signal) {
       list.forEach((r, i) => {
         const rule = r.end === 0 ? g.srule[r.s] & 7 : (g.srule[r.s] >> 3) & 7;
@@ -220,7 +219,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         const l = Math.hypot(d2[0], d2[1]) || 1;
         const tx = d2[0] / l, tz = d2[1] / l;
         const lx = tz, lz = -tx;
-        // quem chega pelo braço anda para o nó: à direita dele fica u+ (ponta a) ou u− (ponta b)
+        // whoever arrives by the arm walks towards the node: on their right is u+ (end a) or u− (end b)
         const u = end === 0 ? info.left - 0.7 : -(info.right - 0.7);
         const x = p2[0] + lx * u, z = p2[1] + lz * u;
         const yaw = end === 0 ? Math.atan2(tx, tz) : Math.atan2(-tx, -tz);
@@ -228,7 +227,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         out.add(PROP.Signal, x, y, z, yaw, 0, 1, g.nid[n] * 8 + armIdx);
       });
     }
-    // placa com o nome da rua numa esquina de cada cruzamento
+    // a sign with the street's name on one corner of each junction
     if (list.length >= 3) {
       const { s, end } = list[order[0]];
       const info = PROFILE_INFO[g.sprofile[s]];
@@ -240,7 +239,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
       const u = end === 0 ? -(info.right - 0.5) : info.left - 0.5;
       if (Number.isFinite(u)) out.add(PROP.Sign, p2[0] + tz * u, yAt(g, s, lens[s], at) + CURB_H, p2[1] - tx * u, Math.atan2(tx, tz), SIGN.Name, 1, 0);
     }
-    // rotatória: "dê a preferência" em cada entrada
+    // roundabout: give way at each entry
     if (ring) {
       list.forEach((r, i) => {
         if ((g.sflags[r.s] & SegFlag.Ring) !== 0) return;
@@ -263,7 +262,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     if (s1 - s0 < 4) continue;
     const ring = (g.sflags[s] & SegFlag.Ring) !== 0;
     const furn = furnOf(g.sflags[s]);
-    if (furn === 2) continue; // via sem mobiliário: nada na calçada
+    if (furn === 2) continue; // a road without furniture: nothing on the sidewalk
     bez(quads[s], 0.5, p2);
     const rng = new Rng(hash2(Math.round(p2[0] * 4), Math.round(p2[1] * 4), 911));
     const median = info.edges.find((e) => e.strip.kind === 'median' || e.strip.kind === 'barrier' && Math.abs((e.u0 + e.u1) / 2) < 1);
@@ -304,7 +303,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         const uo = swL.u1 - 0.5;
         out.add(PROP.Lamp, f.px + lx * uo, y, f.pz + lz * uo, Math.atan2(-lx, -lz), 0, 1, k);
       }
-      // vão de fios do poste anterior até este (fica na célula do poste anterior)
+      // the span of wires from the previous pole to this one (it stays in the previous pole's cell)
       if (prevPole && !ring) {
         const [px, py, pz] = prevPole;
         const L = Math.hypot(x - px, z - pz);
@@ -316,8 +315,8 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
       prevPole = [x, y, z];
     }
     const nearLamp = (v: number) => lampVs.some((lv) => Math.abs(lv - v) < 3.5);
-    // velocidade em todo trecho de mais de 60 m (como as placas derivadas do roadcraft: 14 m depois da boca do
-    // cruzamento, para quem sai dele) e mão única
+    // speed on every segment longer than 60 m (as roadcraft's derived signs: 14 m after the junction's mouth, for
+    // those leaving it) and one-way
     if (!ring && s1 - s0 > 40) {
       const kind = info.oneWay ? SIGN.OneWay : s1 - s0 > 60 && info.speed > 0 ? SIGN.Speed : -1;
       if (kind >= 0) {
@@ -333,7 +332,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         if (!info.oneWay) put(s1 - 14, false);
       }
     }
-    // carros estacionados nas faixas de estacionamento (longe das esquinas)
+    // cars parked in the parking lanes (away from the corners)
     if (!ring) {
       for (const e of info.edges) {
         if (e.strip.kind !== 'parking') continue;
@@ -344,7 +343,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
           const f = frame(v);
           const lx = f.tz, lz = -f.tx;
           const x = f.px + lx * u, z = f.pz + lz * u;
-          // estaciona no sentido do tráfego daquele lado
+          // parks in the traffic's direction on that side
           const yaw = leftSide ? Math.atan2(-f.tx, -f.tz) : Math.atan2(f.tx, f.tz);
           out.add(PROP.ParkedCar, x, f.y, z, yaw + rng.range(-0.03, 0.03), rng.int(0, 16), 1, rng.nextU32());
         }
@@ -401,10 +400,10 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
           if (nearLamp(v)) continue;
           const f = frame(v);
           const lx = f.tz, lz = -f.tx;
-          const u = side === 1 ? e.u0 + 0.6 : e.u1 - 0.6; // junto aos prédios
+          const u = side === 1 ? e.u0 + 0.6 : e.u1 - 0.6; // next to the buildings
           const x = f.px + lx * u, z = f.pz + lz * u;
           if (!onGround(x, z, f.y)) continue;
-          const face = side === 1 ? Math.atan2(lx, lz) : Math.atan2(-lx, -lz); // banco olha para a rua
+          const face = side === 1 ? Math.atan2(lx, lz) : Math.atan2(-lx, -lz); // the bench faces the street
           out.add(PROP.Bench, x, f.y + CURB_H, z, face, rng.int(0, 2), 1, rng.nextU32());
           const f2 = frame(Math.min(s1 - 1, v + 2.4));
           const x2 = f2.px + lx * u, z2 = f2.pz + lz * u;
@@ -414,13 +413,13 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     }
   }
 
-  // carros nas vagas dos estacionamentos dos lotes (mesma conta do gerador de prédios)
+  // cars in the bays of the lots' car parks (the same count as the building generator)
   for (let i = 0; i < b.count; i++) {
     const rows = lotParking(b, i);
     if (!rows.length) continue;
     const r = new Rng((b.seed[i] * 2654435761 + 77) >>> 0);
     const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
-    // lotação do estacionamento: cada lote tem a sua (de quase vazio a cheio)
+    // the car park's occupancy: each lot has its own (from almost empty to full)
     const fill = r.range(0.35, 0.9);
     for (let k = 0; k + 3 < rows.length; k += 4) {
       const ax = rows[k], az = rows[k + 1], bx = rows[k + 2], bz = rows[k + 3];
@@ -432,7 +431,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
         const o = r.range(-0.2, 0.2);
         const lx = ax + tx * s0 - tz * o, lz = az + tz * s0 + tx * o;
         const x = b.x[i] + lx * c + lz * sn, z = b.z[i] - lx * sn + lz * c;
-        // o carro fica de frente ou de ré na vaga (perpendicular à fileira)
+        // the car stands nose or tail first in the bay (across the row)
         const dx = -tz * c + tx * sn, dz = tz * sn + tx * c;
         const yaw = Math.atan2(dx, dz) + (r.next() < 0.5 ? Math.PI : 0) + r.range(-0.05, 0.05);
         out.addOwn(PROP.ParkedCar, x, heightAt(heights, x, z) + 0.22, z, yaw, r.int(0, 16), 1, r.nextU32());
@@ -526,13 +525,13 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     for (let z = z0 + 3; z < z0 + 256; z += 6) {
       for (let x = x0 + 3; x < x0 + 256; x += 6) {
         const px = x + rng.range(-2.5, 2.5), pz = z + rng.range(-2.5, 2.5);
-        // floresta plantada (canal B do chão) adensa; clareira (canal A) tira; água não tem árvore
+        // planted forest (the ground's B channel) thickens; a clearing (A channel) removes; water has no tree
         let forest = 0, clear = 0, species = 0;
         if (env?.ground) {
           const v = env.ground[waterIndex(Math.max(0, Math.min(WATER_MAP_RES - 1, Math.floor(waterCoord(px)))), Math.max(0, Math.min(WATER_MAP_RES - 1, Math.floor(waterCoord(pz)))))];
           forest = ((v >> 16) & 255) / 255;
           const a = (v >>> 24) & 255;
-          // A até 3 com floresta = espécie plantada; acima = clareira
+          // A up to 3 with forest = the planted species; above = clearing
           if (forest > 0 && a <= 3) species = a; else clear = a / 255;
         }
         const keep = ((B[0] + 0.4 * Math.max(0, fbm(px / 260, pz / 260, 4242, 2) + 0.35)) * 0.45 * (1 - clear) + forest * 0.9) * (1 - clear);

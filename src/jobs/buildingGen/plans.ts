@@ -94,7 +94,7 @@ export function hip(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numbe
   pitchedRoof(mb, f, x0, x1, z0, z1, y, h, roofCol, trim, trim, true);
 }
 
-/** Facha da (estilo, semente, tipo) para o volume principal. */
+/** Facade (style, seed, kind) for the main volume. */
 export function facade(g: GenContext, kind: number, colW: number, fh: number): void { setFac(g.mb, g.arch + ARCH_COUNT * g.pattern, g.seed, kind, colW, fh); }
 
 export function house(g: GenContext): void {
@@ -103,7 +103,7 @@ export function house(g: GenContext): void {
   const roofCol = TILE[r.int(0, TILE.length)];
   const sobrado = g.arch === ArchId.Sobrado;
   const modern = g.arch === ArchId.ModernHouse;
-  // sobrado encosta nas divisas (geminado); os outros têm recuo e quintal
+  // a townhouse stands against the boundaries (terraced); the others have a setback and a yard
   const bw = sobrado ? Math.max(6, W - 0.4) : Math.min(W - 3, r.range(8, 12.5));
   const bd = Math.min(D - (sobrado ? 6 : 9), r.range(8, 13));
   const front = D / 2 - (sobrado ? r.range(1, 3) : r.range(4, 6.5));
@@ -115,15 +115,15 @@ export function house(g: GenContext): void {
   mb.curBase = hi + 0.4;
   facade(g, Facade.House, a.module, fh);
   prism(mb, f, x0, x1, z0, z1, f.base, top, wallCol, BMAT.Wall, a.module, modern ? 0x8f8b84 : -1, BMAT.RoofFlat);
-  // embasamento (rodapé de pedra) e soleira
+  // plinth (a stone base) and threshold
   if (a.base >= 0 && lod < 2) { blank(mb); prism(mb, f, x0 - 0.05, x1 + 0.05, z0 - 0.05, z1 + 0.05, f.base, hi + 0.7, a.base, BMAT.Plain, 50, -1, 0); }
   if (modern) {
-    // laje plana com beiral saliente e platibanda fina
+    // a flat slab with a projecting eave and a thin parapet
     if (lod < 3) ring(mb, f, x0, x1, z0, z1, top, top + 0.35, 0.8, a.trim === 0x3a3f43 ? 0xe8e8e4 : a.trim);
     // segundo volume deslocado (casa em L)
     if (lod < 2 && r.next() < 0.6 && bd > 9) {
       facade(g, Facade.House, a.module, fh);
-      // 5 cm para dentro da parede da casa: no mesmo plano as duas paredes piscavam
+      // 5 cm inside the house's wall: on the same plane the two walls flickered
       const sx = r.next() < 0.5 ? x0 + 0.05 : x1 - 0.05 - bw * 0.45;
       prism(mb, f, sx, sx + bw * 0.45, z0 - 3, z0 + 2, f.base, hi + 0.4 + fh, shadeHex(wallCol, 0.85), BMAT.Wall, a.module, 0x8f8b84, BMAT.RoofFlat);
     }
@@ -131,7 +131,7 @@ export function house(g: GenContext): void {
   else gable(mb, f, x0, x1, z0, z1, top, r.range(1.8, 3.0), roofCol, wallCol, bw >= bd, a.trim);
   if (lod > 0) return;
   door(mb, f, Math.max(x0 + 1.2, Math.min(x1 - 1.2, off + (hash2(g.seed, 0xd0) & 1 ? -1 : 1) * bw * 0.22)), z1, hi + 0.4, a.trim, false);
-  // varanda na frente (bangalô e casa colonial): laje, pilares e telhadinho
+  // front porch (bungalow and colonial house): slab, posts and a small roof
   if ((g.arch === ArchId.Bungalow || g.arch === ArchId.ColonialHouse) && D / 2 - z1 > 3.2) {
     const pw = Math.min(bw - 1, r.range(4, 7)), px0 = off - pw / 2 + r.range(-1, 1) * (bw - pw) / 2;
     blank(mb);
@@ -139,14 +139,14 @@ export function house(g: GenContext): void {
     for (const cx of [px0 + 0.25, px0 + pw - 0.25]) prism(mb, f, cx - 0.12, cx + 0.12, z1 + 2.0, z1 + 2.24, hi + 0.55, hi + 0.4 + fh - 0.1, a.trim, BMAT.Plain, 50, a.trim, BMAT.Plain);
     prism(mb, f, px0 - 0.3, px0 + pw + 0.3, z1, z1 + 2.7, hi + 0.4 + fh - 0.1, hi + 0.4 + fh + 0.12, roofCol, BMAT.RoofTile, 50, roofCol, BMAT.RoofTile, true);
   }
-  // sobrado: sacadinha no andar de cima
+  // townhouse: a small balcony on the upper floor
   if (sobrado && fl >= 2) {
     blank(mb);
     const y = hi + 0.4 + fh;
     prism(mb, f, x0 + bw * 0.25, x1 - bw * 0.25, z1, z1 + 0.9, y - 0.12, y, 0xd8d6d0, BMAT.Plain, 50, 0xcfcdc6, BMAT.Plain, true);
     prism(mb, f, x0 + bw * 0.25, x1 - bw * 0.25, z1 + 0.82, z1 + 0.9, y, y + 0.95, 0x2c3034, BMAT.Metal, 50, 0x2c3034, BMAT.Metal);
   }
-  // garagem ao lado, quando cabe
+  // a garage alongside, when it fits
   if (!sobrado && W - bw > 6.5 && r.next() < 0.7) {
     const gx0 = x1 + 0.2 > W / 2 - 3.2 ? x0 - 3.4 : x1 + 0.2, gx1 = gx0 + 3.2;
     if (gx0 > -W / 2 + 0.5 && gx1 < W / 2 - 0.5) {
@@ -154,10 +154,10 @@ export function house(g: GenContext): void {
       prism(mb, f, gx0, gx1, z1 - 6, z1 - 0.5, f.base, hi + 2.8, wallCol, BMAT.Plain, 3.2, 0x8c8c88, BMAT.RoofFlat);
     }
   }
-  // caixa d'água no telhado
+  // water tank on the roof
   if (!modern && r.next() < 0.5) part(f, PART.Tank, x0 + 1.6, top + 0.3, z0 + 1.6, 0, 1);
   else if (modern) part(f, PART.Tank, x0 + 1.6, top + 0.35, z0 + 1.6, 0, 1);
-  // piscina no quintal dos fundos (como nas casas do roadcraft): borda clara e água
+  // a pool in the back yard (as in roadcraft's houses): a light coping and water
   const backD = z0 - 1.2 - (-D / 2 + 1.2);
   if (!sobrado && backD >= 4.2 && W >= 9 && r.next() < 0.45) {
     const pl = Math.min(W - 4, r.range(5, 8)), pd = Math.min(backD, r.range(3, 4.2));
@@ -165,7 +165,7 @@ export function house(g: GenContext): void {
     const gy = heightAt(heights, wx(f, pcx, pcz), wz(f, pcx, pcz)) + 0.18;
     blank(mb);
     prism(mb, f, pcx - pl / 2 - 0.45, pcx + pl / 2 + 0.45, pcz - pd / 2 - 0.45, pcz + pd / 2 + 0.45, gy - 0.3, gy + 0.12, 0xe6e1d6, BMAT.Plain, 50, 0xe6e1d6, BMAT.Paving);
-    // água 4 cm acima da borda (5 mm somem na quantização de 7,8 mm da malha e as duas superfícies piscavam)
+    // water 4 cm above the coping (5 mm vanish in the mesh's 7.8 mm quantization and the two surfaces flickered)
     const P = (lx: number, lz: number) => mb.vert(wx(f, lx, lz), gy + 0.16, wz(f, lx, lz), 0, 1, 0, 0x52c0e0, BMAT.Plain);
     mb.quad(P(pcx - pl / 2, pcz + pd / 2), P(pcx + pl / 2, pcz + pd / 2), P(pcx + pl / 2, pcz - pd / 2), P(pcx - pl / 2, pcz - pd / 2), 0, 1, 0);
   }
@@ -173,7 +173,7 @@ export function house(g: GenContext): void {
   yard(mb, heights, f, W, D, 0x587a3c, BMAT.Grass);
   const fence = PLASTER[r.int(0, PLASTER.length)];
   const gateX = r.range(-W / 2 + 2, W / 2 - 5);
-  // caminho do portão até a porta
+  // the path from the gate to the door
   if (lod < 2) walkway(mb, heights, f, W, D, gateX + 1.6, D / 2 - 0.25, Math.max(x0 + 0.9, Math.min(x1 - 0.9, gateX + 1.6)), z1 + 0.1, 1.2);
   const fh2 = modern ? 1.8 : 1.0;
   lotWall(mb, heights, f, -W / 2, D / 2, gateX, D / 2, fh2, 0.2, fence);
@@ -187,7 +187,7 @@ export function house(g: GenContext): void {
   lotWall(mb, heights, f, -W / 2, -D / 2, W / 2, -D / 2, 1.8, 0.18, fence);
 }
 
-/** Prédio de apartamentos ou de uso misto, na gramática do estilo. */
+/** An apartment or mixed-use building, in the style's grammar. */
 export function block(g: GenContext): void {
   const { mb, heights, f, W, D, floors, a, r, hi, lod, zone } = g;
   const shop = zone === Zone.Commercial || zone === Zone.Mixed;
@@ -195,7 +195,7 @@ export function block(g: GenContext): void {
   const trim = a.trim;
   const fh = a.floorH;
   const groundH = shop ? 4.4 : fh;
-  // lote fundo do centro: o prédio ocupa quase todo (até 50 m), sem gramado no miolo da quadra
+  // a deep lot downtown: the building takes almost all of it (up to 50 m), no lawn in the middle of the block
   let bw = Math.max(8, Math.min(W - (shop ? 0.6 : 3), 40));
   const bd = Math.max(8, Math.min(D - (shop ? 4 : 7), D > 42 ? 50 : 26));
   const z1 = D / 2 - (shop ? 0.4 : r.range(2.5, 4.5)), z0 = z1 - bd;
@@ -207,7 +207,7 @@ export function block(g: GenContext): void {
   const y0 = hi + 0.2;
   const colW = a.module * r.range(0.92, 1.08);
   const kind = (a.win === Win.Ribbon ? Facade.Industrial : a.win === Win.Curtain ? Facade.Curtain : Facade.Punched) | (shop ? Facade.ShopBit : 0);
-  // escalonamento no topo (art déco, contemporâneo, vidro) em prédios altos
+  // a stepped top (art deco, contemporary, glass) on tall buildings
   const steps = floors >= 8 ? a.setbacks : 0;
   const lower = steps ? floors - Math.min(floors - 3, steps * 2) : floors;
   const top = y0 + groundH + (lower - 1) * fh;
@@ -241,7 +241,7 @@ export function block(g: GenContext): void {
     if (lod < 2) { blank(mb); parapet(mb, f, tx0 - k, tx1 + k, tz0 - k * 0.7, tz1 + k, roofY, PARAPET_H, PARAPET_T, wallCol, shadeHex(roofC, 0.9), copingOf(trim)); }
     roofY += n * fh;
   }
-  // base em pedra (térreo) quando o estilo tem
+  // a stone base (ground floor) when the style has one
   if (a.base >= 0 && lod < 2) {
     facade(g, kind, colW, fh);
     prism(mb, f, x0 - 0.06, x1 + 0.06, z0 - 0.06, z1 + 0.06, f.base, y0 + Math.min(groundH, 1.1), a.base, BMAT.Plain, 50, -1, 0);
@@ -257,7 +257,7 @@ export function block(g: GenContext): void {
     else { blank(mb); parapet(mb, f, tx0, tx1, tz0, tz1, roofY, PARAPET_H, PARAPET_T, wallCol, shadeHex(roofC, 0.9), copingOf(trim)); }
   }
   if (lod > 1) return;
-  // pilares e faixas de andar (relevo da fachada)
+  // piers and floor bands (the facade's relief)
   if (a.piers) piers(mb, f, x0, x1, z0, z1, y0 + groundH, top, colW, a.piers, shadeHex(wallCol, 1.06));
   else if (g.pattern === Pattern.Gallery) piers(mb, f, x0, x1, z0, z1, y0 + groundH, top, colW, 1, shadeHex(wallCol, 1.08));
   if (a.bands) for (let fl = 1; fl < lower; fl += a.bands) {
@@ -265,7 +265,7 @@ export function block(g: GenContext): void {
     ring(mb, f, x0, x1, z0, z1, y - 0.12, y + 0.08, 0.14, trim, false);
   }
   if (lod === 0) facadeRelief(g, x0, x1, z0, z1, y0, groundH, fh, lower, colW, wallCol, shop);
-  // lojas: toldo de lona por vão (ruas antigas, como no roadcraft) ou marquise de concreto (prédios modernos)
+  // shops: a canvas awning per bay (old streets, as in roadcraft) or a concrete canopy (modern buildings)
   if (shop) {
     blank(mb);
     const classic = g.arch === ArchId.Colonial || g.arch === ArchId.Brick || g.arch === ArchId.ArtDeco || g.arch === ArchId.Tropical || g.arch === ArchId.Modernist;
@@ -273,7 +273,7 @@ export function block(g: GenContext): void {
       const col = AWNINGS[r.int(0, AWNINGS.length)];
       const bays = Math.max(1, Math.round(bw / colW)), bwid = bw / bays;
       const yA = y0 + groundH - 0.25, depth = r.range(1.1, 1.5);
-      // um toldo inteiro na largura da loja ou um por vão
+      // one awning across the shop's width or one per bay
       if (r.next() < 0.35) awning(mb, f, x0 + 0.2, x1 - 0.2, z1, yA, depth, depth * 0.62, col);
       else for (let k = 0; k < bays; k++) awning(mb, f, x0 + k * bwid + 0.18, x0 + (k + 1) * bwid - 0.18, z1, yA, depth, depth * 0.62, col);
     } else {
@@ -327,7 +327,7 @@ export function block(g: GenContext): void {
       }
     }
   }
-  // ar-condicionado pendurado sob algumas janelas da frente (prédios de janelas soltas, perto da câmera)
+  // air conditioners hung under some front windows (buildings with separate windows, near the camera)
   if (a.win !== Win.Curtain && lower >= 2) {
     blank(mb);
     const cols = Math.max(1, Math.round(bw / colW));
@@ -338,7 +338,7 @@ export function block(g: GenContext): void {
       const y = y0 + groundH + (fl - 1) * fh + fh * 0.12;
       part(f, PART.WallAc, cx, y, z1, 0, 1);
     }
-    // e nos fundos (sorteio próprio: não mexe no da frente)
+    // and at the back (its own draw: it does not change the front's)
     const hb = hash2(g.seed, 0xac);
     for (let k = 0; k < (hb & 7); k++) {
       const c = hash2(g.seed, k, 0xb1) % cols, fl = 1 + hash2(g.seed, k, 0xb2) % Math.max(1, lower - 1);
@@ -351,7 +351,7 @@ export function block(g: GenContext): void {
     const plant = planRoofPlant({ seed: g.seed, volume: 0, use, storeys: floors, x0: tx0, z0: tz0, x1: tx1, z1: tz1, age: (hash2(g.seed, 0xa9e) % 1000) / 1000 });
     roofPlant(g, lod > 0 ? plant.filter((it) => it.h >= 1.5) : plant, tx0, tx1, tz0, tz1, roofY, trim);
   }
-  // chão do lote e o estacionamento (vagas nos fundos e nas laterais; os carros são peças)
+  // the lot's ground and the car park (bays at the back and the sides; the cars are props)
   yard(mb, heights, f, W, D, shop ? 0x9c968c : 0x5c7b42, shop ? BMAT.Paving : BMAT.Grass);
   if (g.rows.length) parkingLots(mb, heights, f, g.rows);
   if (!shop) {
@@ -377,7 +377,7 @@ export function treeGeo(_mb: MeshBuilder, f: Frame, x: number, z: number, y: num
   part(f, 0, x, y, z, 0, 1, Math.max(0.6, Math.min(1.4, h / 7)), P_TREE);
 }
 
-/** Prédios especiais (escola, igreja, hospital, praça, parque, posto…), cada um com a sua forma. */
+/** Special buildings (school, church, hospital, square, park, gas station…), each with its own form. */
 function sideGarden(g: GenContext, corner: number, x0: number, x1: number, z0: number, bd: number, fence: number): void {
   const { mb, heights, f, W, D } = g;
   const gx0 = corner < 0 ? -W / 2 + 0.3 : x1 + 0.4, gx1 = corner < 0 ? x0 - 0.4 : W / 2 - 0.3;

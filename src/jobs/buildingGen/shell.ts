@@ -11,9 +11,9 @@ import { BAND_H, BAND_OUT, CORNICE_OUT, CURTAIN_MULLIONS, LEDGE_JAMB, PLINTH_COL
 import type { GenOutputs } from './outputs.ts';
 import type { GenContext } from './context.ts';
 
-/** Variantes de peça de fachada (mobiliário 8..15 no pool de props). */
+/** Facade prop variants (furniture 8..15 in the props pool). */
 export const PART = { WallAc: 8, RoofAc: 9, Vase: 10, Clothesline: 11, Dish: 12, Vent: 13, Chair: 14, Tank: 15 } as const;
-/** Emite uma peça na posição local (lx, y, lz) com a frente para a normal local (nlx, nlz). */
+/** Emits a prop at the local position (lx, y, lz) facing the local normal (nlx, nlz). */
 export function part(f: Frame, variant: number, lx: number, y: number, lz: number, nlx: number, nlz: number, scale = 1, kind?: number): void {
   const emit = f.out?.part;
   if (!emit) return;
@@ -38,8 +38,8 @@ export function captureVolume(out: GenOutputs, mb: MeshBuilder, f: Frame, x0: nu
 }
 
 /**
- * Prisma reto no espaço local: paredes com coordenada de fachada (u em
- * colunas, alinhadas a cada parede), topo opcional.
+ * A straight prism in local space: walls with facade coordinates (u in
+ * columns, aligned to each wall), an optional top.
  */
 export function prism(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number,
   wallCol: number, wallMat: number, colW: number, top: number, topMat: number, bottom = false, skip = 0): void {
@@ -140,7 +140,7 @@ export function ring(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: numb
   frame(mb, f, x0, x1, z0, z1, y0, y1, out, 0, col, BMAT.Plain, parts);
 }
 
-/** Pilares salientes na frente e no fundo, nas divisas das colunas. */
+/** Projecting piers at the front and the back, on the columns' boundaries. */
 export function piers(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, module: number, every: number, col: number): void {
   blank(mb);
   const cols = Math.max(1, Math.round((x1 - x0) / module));
@@ -152,7 +152,7 @@ export function piers(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: num
   }
 }
 
-/** Vida na sacada (peças do pool): vaso no canto, cadeira, varal; pelo hash da sacada (não usa o sorteio do prédio). */
+/** Life on the balcony (pool props): a pot in the corner, a chair, a clothesline; by the balcony's hash (not the building's draw). */
 export function balconyLife(f: Frame, seed: number, c: number, fl: number, x0: number, x1: number, z1: number, depth: number, y: number): void {
   if (!f.out?.part) return;
   const h = hash2(seed ^ 0x5ac, c * 131 + fl, 0x77);
@@ -162,7 +162,7 @@ export function balconyLife(f: Frame, seed: number, c: number, fl: number, x0: n
   if (k >= 70 && k < 82 && x1 - x0 > 2) part(f, PART.Clothesline, (x0 + x1) / 2, y, z1 + depth * 0.45, 0, 1, Math.min(1.6, (x1 - x0 - 0.6) / 1.8));
 }
 
-/** Porta de entrada na parede z = z1 (local), centrada em x: marco, folha de madeira e, nos prédios, marquise. */
+/** The entrance door on the wall z = z1 (local), centred on x: frame, wooden leaf and, on apartment buildings, a canopy. */
 export function door(mb: MeshBuilder, f: Frame, x: number, z1: number, y: number, trim: number, canopy: boolean): void {
   blank(mb);
   const w = canopy ? 1.8 : 1.0, hgt = canopy ? 2.6 : 2.2;
@@ -178,8 +178,8 @@ export function door(mb: MeshBuilder, f: Frame, x: number, z1: number, y: number
 }
 
 /**
- * Guarda-corpo de metal ao longo de z (local), de x0 a x1, sobre a laje em y: corrimão, travessa de baixo e
- * montantes a cada ~1,2 m na malha; na camada de detalhe (perto), os balaústres a cada 12 cm.
+ * A metal railing along z (local), from x0 to x1, on the slab at y: handrail, bottom rail and posts every ~1.2 m in
+ * the mesh; in the detail layer (near), the balusters every 12 cm.
  */
 export function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: number, y: number, col: number): void {
   blank(mb);
@@ -203,8 +203,8 @@ export function railing(mb: MeshBuilder, f: Frame, x0: number, x1: number, z: nu
 function lum(rgb: number): number { return (0.2126 * ((rgb >> 16) & 255) + 0.7152 * ((rgb >> 8) & 255) + 0.0722 * (rgb & 255)) / 255; }
 
 /**
- * Relevo da fachada no nível 0 (prédio baixo de apartamentos ou misto): friso de laje em cada andar, brises verticais
- * nos contemporâneos, pilastras entre as vitrines das lojas antigas e a porta de entrada dos prédios de moradia.
+ * The facade's relief at level 0 (a low apartment or mixed building): a slab band on each floor, vertical fins on
+ * contemporary ones, pilasters between the old shops' windows and the entrance door of residential buildings.
  */
 export function facadeRelief(g: GenContext, x0: number, x1: number, z0: number, z1: number, y0: number, groundH: number, fh: number,
   lower: number, colW: number, wallCol: number, shop: boolean): void {
@@ -229,7 +229,7 @@ export function facadeRelief(g: GenContext, x0: number, x1: number, z0: number, 
     blank(dm);
     frame(dm, f, x0, x1, z0, z1, f.base, y0 + 0.012, PLINTH_GROW, 0, PLINTH_COL, BMAT.Plain | (FIN.Stone << 4), FR_TOP);
   }
-  // brise vertical (lâminas de concreto) na frente dos contemporâneos, metade deles
+  // vertical fins (concrete blades) on the front of contemporary ones, half of them
   if (g.arch === ArchId.Contemporary && h % 2 === 0 && lower >= 3) {
     const cols = Math.max(1, Math.round((x1 - x0) / colW)), cw = (x1 - x0) / cols, bc = shadeHex(wallCol, 1.08);
     for (let c = 0; c <= cols; c++) {

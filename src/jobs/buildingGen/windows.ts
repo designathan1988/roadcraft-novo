@@ -9,8 +9,8 @@ import { blank, nx, nz, shadeHex, wx, wz, type Frame } from './geometry.ts';
 const WIN_TABLE = facadeWindowTable();
 
 /**
- * Fachada dos próximos vértices: [estilo, semente, tipo | pé-direito, largura da coluna].
- * Tipo nos bits 0-2, pé-direito (2,5 a 5,6 m em décimos) nos bits 3-7; coluna 0 = parede cega.
+ * Facade of the next vertices: [style, seed, kind | storey height, column width].
+ * Kind in bits 0-2, storey height (2.5 to 5.6 m in tenths) in bits 3-7; column 0 = blank wall.
  */
 export function setFac(mb: MeshBuilder, style: number, seed: number, kind: number, colW: number, fh: number): void {
   const fhq = Math.max(0, Math.min(31, Math.round((fh - 2.5) * 10)));
@@ -23,9 +23,9 @@ function mixHex(a: number, b: number, t: number): number {
 }
 
 /**
- * Janelas em 3D (camada de detalhe): peitoril saliente com a pingadeira e verga em cima de cada janela, nas
- * mesmas colunas e andares que o shader desenha (u em colunas por parede, andares a partir de y0, térreo de
- * loja com 4,4 m). Só a frente e as pontas de cada peça (o fundo encosta na parede).
+ * Windows in 3D (detail layer): a projecting sill with its drip and a lintel above each window, in the same columns
+ * and floors the shader draws (u in columns per wall, floors from y0, a shop ground floor of 4.4 m). Only the front
+ * and the ends of each piece (the back lies against the wall).
  */
 export function windowDetail(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, wy0: number, wy1: number,
   base: number, shop: boolean, colW: number, fh: number, arch: number, seed = 0, skip = 0): void {
@@ -108,7 +108,7 @@ export function windowDetailWall(mb: MeshBuilder, f: Frame, ax: number, az: numb
   }
 }
 
-/** Vidro inteiriço: montantes verticais (aletas de alumínio) entre os painéis, na altura toda da parede. */
+/** Curtain glass: vertical mullions (aluminium fins) between the panes, the wall's full height. */
 export function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, colW: number,
   skip: number, base: number, fh: number, col: number): void {
   // 4.0 curtain (facadeKit.ts:235-247): a fin 14 cm wide, 20 cm proud, at every bay's edge (the shader's mullions), a
@@ -130,7 +130,7 @@ export function curtainFins(mb: MeshBuilder, f: Frame, x0: number, x1: number, z
 /** The 4.0 curtain walls' mullion colours (signature.ts:150-152), by the facade's seed as render/city.ts picks them. */
 export const CURTAIN_MULLIONS = [0xd5dadd, 0x5a6168, 0xe8efee, 0xcfd6d3];
 
-/** Faces de uma peça saliente: 1 frente, 2 topo, 4 base, 8 pontas. */
+/** Faces of a projecting piece: 1 front, 2 top, 4 bottom, 8 ends. */
 const LEDGE_ALL = 15, LEDGE_SILL = 1 | 2 | 4, LEDGE_HEAD = 1 | 4;
 export const LEDGE_JAMB = 1 | 8;
 /** 4.0 FRAME_BAR (kit.ts:240): a window frame's bar, as a share of the opening. */
@@ -140,7 +140,7 @@ export const WIN_REVEAL = 0.2, WIN_REVEAL_SHADE = 0.68;
 /** Roadcraft 4.0 storey band and cornice (BAND_OUT, BAND_H, CORNICE_OUT) and plinth (PLINTH_GROW, PLINTH_MATERIAL). */
 export const BAND_OUT = 0.07, BAND_H = 0.22, CORNICE_OUT = 0.16, PLINTH_GROW = 0.12, PLINTH_COL = 0x7f786d;
 
-/** Peça saliente na parede: de u0 a u1 ao longo da parede, de y0 a y1, saindo `out` metros (faces escolhidas). */
+/** A piece projecting from the wall: u0 to u1 along the wall, y0 to y1, standing `out` metres out (the faces chosen). */
 export function ledge(mb: MeshBuilder, f: Frame, ax: number, az: number, dx: number, dz: number, nxl: number, nzl: number,
   u0: number, u1: number, y0: number, y1: number, out: number, col: number, faces = LEDGE_ALL, from = 0): void {
   // `from`: the piece stands out of a plane that far from the wall (into an opening when negative)

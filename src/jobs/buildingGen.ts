@@ -1,10 +1,9 @@
-// Gerador procedural de prédios (worker). Determinístico: lote + zona +
-// andares + semente + estilo → sempre o mesmo prédio nesta versão do gerador.
-// Casas com telhado e quintal, prédios de apartamento com sacadas, lojas,
-// torres de escritório com pódio, galpões. Janelas e interiores ficam no
-// shader (interior mapping); aqui só volumes, telhados, sacadas, muros.
-// lod 0 = célula perto (tudo); 1 = célula longe (sem peças pequenas);
-// 2 = ladrilho (sem platibandas); 3 = placa (só volumes e telhados).
+// Procedural building generator (worker). Deterministic: lot + zone + floors + seed + style → always the same
+// building in this version of the generator. Houses with a roof and a yard, apartment buildings with balconies,
+// shops, office towers on a podium, warehouses. Windows and interiors live in the shader (interior mapping); here
+// only volumes, roofs, balconies, walls.
+// lod 0 = near cell (everything); 1 = far cell (no small parts); 2 = tile (no parapets); 3 = plate (only volumes
+// and roofs).
 
 import { Rng, hash2 } from '../core/rng.ts';
 import { Zone, zoneDensity } from '../roads/zones.ts';
@@ -193,8 +192,8 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
 }
 
 /**
- * Peças repetidas dos prédios (ar-condicionado, vasos, varais, antenas, exaustores, caixas d'água) para o pool de
- * props: o mesmo gerador, no modo peças, com o mesmo sorteio da malha. Roda no job de peças da célula.
+ * The buildings' repeated parts (air conditioners, pots, clotheslines, antennas, exhaust fans, water tanks) for the
+ * props pool: the same generator, in parts mode, with the same draw as the mesh. Runs in the cell's props job.
  */
 export type LotGround40 = (x: number, z: number) => number;
 export function buildBuildingParts(heights: Float32Array, b: BoxColumns, emit: PartEmit, foot?: number[][], parts40?: PartSink, legacy = false): Array<LotGround40 | undefined> {
@@ -226,9 +225,9 @@ export function inFootprints(rects: number[], x: number, z: number, margin: numb
 }
 
 /**
- * Estacionamento do lote (prédio baixo de loja ou de apartamentos): fileiras de vagas de 2,5 × 5 m nos fundos e
- * nas laterais livres. Cada fileira = [ax, az, bx, bz] (linha do meio, local); a vaga se estende 2,5 m para cada lado
- * na perpendicular. A mesma conta no gerador (piso e faixas) e nas peças (carros), sem guardar nada.
+ * The lot's car park (a low shop or apartment building): rows of 2.5 × 5 m bays at the back and on the free sides.
+ * Each row = [ax, az, bx, bz] (the middle line, local); a bay reaches 2.5 m to each side across it. The same count
+ * in the generator (paving and markings) and in the props (cars), with nothing kept.
  */
 export function lotParking(b: BoxColumns, i: number): number[] {
   const zone = b.zone[i], floors = Math.max(1, b.floors[i]);
@@ -241,13 +240,13 @@ export function lotParking(b: BoxColumns, i: number): number[] {
   const bw = Math.max(8, Math.min(W - (shop ? 0.6 : 3), 40)), bd = Math.max(8, Math.min(D - (shop ? 4 : 7), D > 42 ? 50 : 26));
   const out: number[] = [];
   const xL = -W / 2 + 0.8, xR = W / 2 - 0.8;
-  // fundos: entre a divisa e o fundo do prédio (o mais recuado que o sorteio deixa)
+  // back: between the boundary and the building's back (the furthest back the draw allows)
   const back = D / 2 - (shop ? 0.4 : 4.5) - bd - 0.8, front = -D / 2 + 0.6;
   if (xR - xL >= 7.5) {
     if (back - front >= 16) out.push(xL, front + 2.5, xR, front + 2.5, xL, back - 2.5, xR, back - 2.5);
     else if (back - front >= 5.6) out.push(xL, front + 2.6, xR, front + 2.6);
   }
-  // laterais: faixa entre a parede do prédio e a divisa
+  // sides: the strip between the building's wall and the boundary
   const side = (W - bw) / 2 - 1.2;
   if (side >= 5.4 && D >= 12) {
     const z0 = Math.max(front, back + 0.8) + 0.4, z1 = D / 2 - 1.5;

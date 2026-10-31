@@ -1,6 +1,6 @@
-// Conexões de faixa escolhidas à mão num cruzamento: para cada faixa que chega, as vias de saída
-// que ela pode tomar. A mesma conta roda na página (setas pintadas, painel) e na simulação
-// (conexões que os carros usam), então a seta sempre bate com o comportamento.
+// Lane connections chosen by hand at a junction: for each incoming lane, the exit roads it may take. The same count
+// runs on the page (painted arrows, panel) and in the simulation (the connections cars use), so the arrow always
+// matches the behaviour.
 
 import { armOf } from './junction.ts';
 import { PROFILE_INFO, TurnBit } from './profiles.ts';
@@ -8,13 +8,13 @@ import { banned, type JunctionSpec } from './control.ts';
 import type { RoadNetwork } from './network.ts';
 import type { NodeId, SegId } from '../core/ids.ts';
 
-/** Faixas de um trecho num sentido (+1 de a para b). */
+/** Lanes of a segment in one direction (+1 from a to b). */
 export function lanesIn(profile: number, dir: number): number {
   const info = PROFILE_INFO[profile];
   return dir > 0 ? info.lanesFwd : info.lanesBack;
 }
 
-/** Setas efetivas: as da faixa, ou pela posição (direita vira à direita, esquerda à esquerda). */
+/** Effective arrows: the lane's own, or by position (the right lane turns right, the left one left). */
 export function defaultTurns(turns: number, idx: number, count: number): number {
   if (turns) return turns;
   if (count === 1) return TurnBit.Left | TurnBit.Straight | TurnBit.Right;
@@ -23,14 +23,14 @@ export function defaultTurns(turns: number, idx: number, count: number): number 
   return TurnBit.Straight;
 }
 
-/** Movimento chegando pelo rumo h e saindo pelo braço o: bit de seta (esquerda, reto, direita). */
+/** A movement arriving on heading h and leaving by arm o: its arrow bit (left, straight, right). */
 export function turnBit(hx: number, hz: number, ox: number, oz: number): number {
   const left = ox * hz - oz * hx;
   const fwd = ox * hx + oz * hz;
   return fwd > 0.7 ? TurnBit.Straight : left > 0 ? TurnBit.Left : TurnBit.Right;
 }
 
-/** Vias de saída escolhidas à mão para a faixa `idx` que chega por `seg`, ou null (automático). */
+/** Exit roads chosen by hand for lane `idx` arriving by `seg`, or null (automatic). */
 export function customExits(spec: JunctionSpec | undefined, seg: SegId, idx: number): SegId[] | null {
   const l = spec?.lanes;
   if (!l) return null;
@@ -38,7 +38,7 @@ export function customExits(spec: JunctionSpec | undefined, seg: SegId, idx: num
   return null;
 }
 
-/** Braços do nó: trecho, ponta (0 = a), direção de saída. */
+/** The node's arms: segment, end (0 = a), exit direction. */
 export function armsOf(net: RoadNetwork, n: NodeId): Array<{ s: SegId; end: 0 | 1; dx: number; dz: number }> {
   const sc = net.segs.cols;
   return net.segsOf(n, []).map((s) => {
@@ -49,8 +49,8 @@ export function armsOf(net: RoadNetwork, n: NodeId): Array<{ s: SegId; end: 0 | 
 }
 
 /**
- * Saídas automáticas e efetivas de cada faixa que chega por `seg` ao nó `n`: lista por faixa de
- * [trecho de saída, bit da seta]. `custom` diz se a faixa foi ajustada à mão.
+ * Automatic and effective exits of each lane arriving by `seg` at node `n`: a list per lane of
+ * [exit segment, arrow bit]. `custom` says whether the lane was set by hand.
  */
 export function laneExits(net: RoadNetwork, n: NodeId, seg: SegId, spec = net.junctions.get(n)): Array<{ exits: Array<[SegId, number]>; auto: Array<[SegId, number]>; custom: boolean }> {
   const sc = net.segs.cols;
@@ -80,7 +80,7 @@ export function laneExits(net: RoadNetwork, n: NodeId, seg: SegId, spec = net.ju
   return out;
 }
 
-/** Setas pintadas da ponta (3 bits por faixa, faixa 0 nos bits baixos), ou 0 se nenhuma faixa foi ajustada. */
+/** The end's painted arrows (3 bits per lane, lane 0 in the low bits), or 0 when no lane was set by hand. */
 export function arrowCode(net: RoadNetwork, n: NodeId, seg: SegId): number {
   const ex = laneExits(net, n, seg);
   if (!ex.some((e) => e.custom)) return 0;

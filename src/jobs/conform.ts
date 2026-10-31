@@ -1,6 +1,5 @@
-// Assenta o relevo de um ladrilho sob uma lista de trechos retos (worker):
-// cada amostra perto de uma via vai para a altura linear do trecho, com uma
-// borda suave. Não aterra água nem faz aterro alto (ponte) nem corte fundo.
+// Lays a tile's relief under a list of straight road pieces (worker): each sample near a road goes to the piece's
+// linear height, with a soft edge. It neither fills water nor builds a high fill (a bridge) nor a deep cut.
 
 import { HEIGHT_TILE_RES, MAP_TILES, SEA_LEVEL } from '../config.ts';
 import { heightIndex, worldOfSample } from '../world/heights.ts';

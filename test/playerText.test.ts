@@ -142,3 +142,20 @@ test('building functions, styles, the creator\'s choices and templates are keys 
     setLang('pt-BR');
   }
 });
+
+test('comments in src are English (a quotation in quotes may be Portuguese)', () => {
+  const STRONG = /\b(que|para|com|uma|não|nao|dos|das|pelo|pela|são|também|então|porque|quando|onde|até)\b|\b(de|da) [a-záéíóúãõç]{3,}/i;
+  // names and loanwords English writes with their accents
+  const LOAN = /\b(ipês?|façades?|Bézier|déco|de Casteljau)(?![\wà-ú])/gi;
+  const found: string[] = [];
+  for (const file of [...MIGRATED, ...CONTENT]) {
+    // CRLF too: a checkout may have either, and '.' does not match \r
+    fs.readFileSync(path.join(root, file), 'utf8').split(/\r?\n/).forEach((line, i) => {
+      const m = line.match(/(\/\/.*$|^\s*\/?\*+.*$)/);
+      if (!m) return;
+      const own = m[1].replace(/"[^"]*"/g, '').replace(/https?:\/\/\S+/g, '').replace(LOAN, '');
+      if (STRONG.test(own) || ACCENT.test(own)) found.push(`${file}:${i + 1} ${m[1].trim().slice(0, 80)}`);
+    });
+  }
+  assert.deepEqual(found, []);
+});
