@@ -130,11 +130,18 @@ export class Signals {
     this.seek(n);
   }
 
-  /** Near the camera or not: an actuated light starts from where its timed cycle stands now. */
+  /**
+   * Near the camera or not: an actuated light starts from where its timed cycle stands now. Its pedestrian calls start
+   * over too: calls made while it ran timed were never answered by a stage turning green (only an actuated one clears
+   * them), so they read as minutes-old waits and won the pedestrian priority the moment the camera came. Whoever still
+   * waits calls again within a second (peds.ts re-asks at a red every second), as 4.0 rebuilds the crossings' demand
+   * from the walkers there each tick (roadcraft sim/agents/walk.ts crossingStates).
+   */
   setActive(n: number, on: boolean): void {
     if (!on || this.fixed[n] || this.sim.nodePhases[n] === 0) { this.active.delete(n); this.on[n] = 0; return; }
     if (this.on[n]) return;
     this.seek(n);
+    for (let k = 0; k < 8; k++) this.call[n * 8 + k] = -1;
     this.active.add(n); this.on[n] = 1;
   }
 
