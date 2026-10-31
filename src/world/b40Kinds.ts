@@ -60,6 +60,39 @@ export type B40Lines = (typeof B40_LINES)[keyof typeof B40_LINES];
 export const B40_CROWN = { Cornice: 0, Deco: 1, Slab: 2, Attic: 3, None: 4 } as const;
 export type B40Crown = (typeof B40_CROWN)[keyof typeof B40_CROWN];
 
+/** What an open block is laid with, in the 4.0 LOT_SURFACES order. */
+export const B40_SURFACE = { Grass: 0, Paving: 1, Gravel: 2, Sand: 3, Water: 4, Asphalt: 5, Concrete: 6, Pavers: 7, Tiles: 8 } as const;
+export type B40Surface = (typeof B40_SURFACE)[keyof typeof B40_SURFACE];
+
+/** Free parts, in the 4.0 ELEMENT_KINDS order. */
+export const B40_ELEMENT = {
+  Stair: 0, Ramp: 1, Pillar: 2, Canopy: 3, Wall: 4, Slab: 5, Pavement: 6, Fence: 7, Tree: 8, Bench: 9, Ac: 10,
+  Planter: 11, Railing: 12, Awning: 13, Flowers: 14, Rocks: 15, Parking: 16, Clock: 17, Hedge: 18, Shrub: 19,
+  Gate: 20, Bin: 21, Lamp: 22, Bollard: 23, Drain: 24,
+} as const;
+export type B40Element = (typeof B40_ELEMENT)[keyof typeof B40_ELEMENT];
+
+// Names for the temporary adapter to the 4.0 record while r40/render lasts, and for diagnostics. The data path
+// always uses the codes above; nothing per entity may read these arrays.
+export const B40_USE_NAME = ['residential', 'commercial', 'industrial', 'mixed'] as const;
+export const B40_BAY_NAME = [
+  'wall', 'window', 'sashWindow', 'frenchWindow', 'bayWindow', 'ribbon', 'wideWindow', 'balcony', 'door',
+  'doubleDoor', 'garageDoor', 'shopfront', 'loadingDoor', 'pillar', 'loggia', 'brise', 'shutteredWindow', 'gourmet',
+] as const;
+export const B40_PATTERN_NAME = ['residential', 'storefront', 'office', 'industrial', 'arcade', 'gallery', 'artDeco', 'artDecoCrown', 'observation'] as const;
+export const B40_ROOF_NAME = ['flat', 'terrace', 'gable', 'hip', 'shed', 'sawtooth'] as const;
+export const B40_CORE_NAME = ['stair', 'lift', 'stairLift'] as const;
+export const B40_SPACE_NAME = ['unit', 'shop', 'office', 'workshop', 'corridor', 'lobby'] as const;
+export const B40_GROUND_NAME = ['shop', 'lobby', 'house', 'works'] as const;
+export const B40_ROOF_DETAIL_NAME = ['solar', 'skylight', 'vent', 'chimney', 'waterTank', 'spire', 'lantern'] as const;
+export const B40_SURFACE_NAME = ['grass', 'paving', 'gravel', 'sand', 'water', 'asphalt', 'concrete', 'pavers', 'tiles'] as const;
+export const B40_LINES_NAME = ['every', 'base', 'slab', 'none'] as const;
+export const B40_CROWN_NAME = ['cornice', 'deco', 'slab', 'attic', 'none'] as const;
+export const B40_ELEMENT_NAME = [
+  'stair', 'ramp', 'pillar', 'canopy', 'wall', 'slab', 'pavement', 'fence', 'tree', 'bench', 'ac', 'planter',
+  'railing', 'awning', 'flowers', 'rocks', 'parking', 'clock', 'hedge', 'shrub', 'gate', 'bin', 'lamp', 'bollard', 'drain',
+] as const;
+
 /** `FURNITURE_KINDS`, in the 4.0 order: the ids written into the interior table. */
 export const B40_FURNITURE = {
   Bed: 0, SingleBed: 1, Sofa: 2, Armchair: 3, Table: 4, Chair: 5, Desk: 6, OfficeChair: 7, Shelf: 8, Bookshelf: 9,

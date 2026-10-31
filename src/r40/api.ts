@@ -1,6 +1,7 @@
 // The Roadcraft 4.0 subsystem's public surface. Code outside `src/r40` imports from here, never from its internals.
 export { madeToMeasure } from './world/buildings/procedural.ts';
 export { hypot3 } from './core/hypot.ts';
+export { BUILDING_SCHEMA } from './world/buildings/types.ts';
 export { furnishLot, lotKind, planLot } from './world/growth/lotPlan.ts';
 export { emitChunk, letGoEmitted } from './render/buildings/buildingMesh.ts';
 export { PartyWalls } from './render/buildings/partyWalls.ts';
@@ -15,7 +16,11 @@ export { floorHeight } from './world/buildings/foundation.ts';
 export { interiorFurniture } from './render/buildings/buildingMesh.ts';
 export { createFurnitureGeometries } from './render/buildings/furnitureKit.ts';
 export type { PartKind } from './render/buildings/kit.ts';
-export type { Building, RoofKind } from './world/buildings/types.ts';
+export type {
+  Building, RoofKind, Volume, Storey, Facade, Core, BuildingElement,
+  FacadeGeometry, Relief, VolumeDress, Space, BuildingUse, BuildingFunction, LotSurface, BlockMode,
+} from './world/buildings/types.ts';
+export type { MaterialSpec, VolumeMaterials } from './world/buildings/materialTypes.ts';
 export type { BuildingChunk } from './render/buildings/chunk.ts';
 export type { PartBatch } from './render/buildings/chunk.ts';
 export type { MassDetail, MassingChunk } from './render/buildings/massing.ts';
