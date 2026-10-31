@@ -594,7 +594,10 @@ class TRAANode extends TempNode {
 
 			// convert the NDC offset to UV offset
 
-			const offsetUV = this.velocityNode.load( closestPositionTexel ).xy.mul( vec2( 0.5, - 0.5 ) );
+			const velocityTexel = this.velocityNode.load( closestPositionTexel );
+			const offsetUV = velocityTexel.xy.mul( vec2( 0.5, - 0.5 ) );
+			// z = 1: the surface itself moved since the last frame (render/velocity.ts stableVelocity), however slowly
+			const objectMoved = velocityTexel.z.greaterThan( 0.5 );
 
 			// sample the previous depth
 
@@ -646,7 +649,11 @@ class TRAANode extends TempNode {
 			// fading 15 % a frame; the history is trusted whole only once that memory is gone (else the walker left a trail).
 			// (only motion: at a thin line the depth flips between the line and what is behind it with the jitter, so the
 			// depth test alone, which still applies to this frame, would never let the memory clear)
-			const movedNow = motionFactor.greaterThanEqual( 0.002 ).or( hasValidHistory.not() );
+			// A surface that moved itself (a walker, a vehicle) moved, however slowly: a person walking 1.4 m/s 90 m away crosses
+			// under a quarter of a pixel a frame, read as still, so its few pixels (contrasted, a "thin line") kept their history
+			// whole at 2 % of the new frame and the people showed as translucent smears of the pavement behind them (2026-10-31).
+			// (Unreal's TAA and FSR2's reactive mask treat moving objects apart from the camera's motion for this.)
+			const movedNow = motionFactor.greaterThanEqual( 0.002 ).or( hasValidHistory.not() ).or( objectMoved );
 			const motionMemory = movedNow.select( float( 1 ), historyColor.a.mul( 0.85 ) );
 			const thinStill = movedNow.not().and( isDisocclusion.not() ).and( historyColor.a.lessThan( 0.02 ) ).and( lumaRange( positionTexel ).greaterThan( 0.3 ) );
 			currentWeight.assign( thinStill.select( currentWeight.min( 0.02 ), currentWeight ) );

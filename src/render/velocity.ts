@@ -9,7 +9,7 @@
 import * as THREE from 'three/webgpu';
 import { T } from './tsl.ts';
 
-const { Fn, uniform, vec4, modelWorldMatrix, positionLocal, positionPrevious } = T;
+const { Fn, uniform, vec4, float, select, length, modelWorldMatrix, positionLocal, positionPrevious } = T;
 
 const curVP = uniform(new THREE.Matrix4());
 const prevVP = uniform(new THREE.Matrix4());
@@ -43,10 +43,21 @@ export function previousModelMatrix(object: THREE.Object3D, frameId: number): TH
 
 const prevModel = uniform(new THREE.Matrix4()).onObjectUpdate((frame: { object: THREE.Object3D; frameId: number }) => previousModelMatrix(frame.object, frame.frameId));
 
-/** Velocity in NDC (current − previous), like three's, with the object's own previous matrix (E23: it was the current
- *  one, so what moved through its matrix had zero velocity and the anti-aliasing smeared it). */
+/** World distance (m) under which a surface counts as not having moved itself: its two positions are worked out from the
+ *  same numbers when it stands still (exactly equal); a walker covers ~2 cm a frame. */
+const MOVED_EPS = 1e-4;
+
+/**
+ * Velocity in NDC (current − previous), like three's, with the object's own previous matrix (E23: it was the current
+ * one, so what moved through its matrix had zero velocity and the anti-aliasing smeared it); z = 1 where the surface
+ * itself moved since the last frame (a walker, a vehicle, a falling piece), whatever the camera did: the TRAA keeps its
+ * "still thin line" history only where z is 0 (render/traa.ts). w = 1, as the vec2 it was wrote.
+ */
 export const stableVelocity = Fn(() => {
-  const cur = curVP.mul(modelWorldMatrix).mul(vec4(positionLocal, 1));
-  const prev = prevVP.mul(prevModel).mul(vec4(positionPrevious, 1));
-  return cur.xy.div(cur.w).sub(prev.xy.div(prev.w));
+  const world = modelWorldMatrix.mul(vec4(positionLocal, 1));
+  const prevWorld = prevModel.mul(vec4(positionPrevious, 1));
+  const cur = curVP.mul(world);
+  const prev = prevVP.mul(prevWorld);
+  const moved = select(length(world.xyz.sub(prevWorld.xyz)).greaterThan(MOVED_EPS), float(1), float(0));
+  return vec4(cur.xy.div(cur.w).sub(prev.xy.div(prev.w)), moved, 1);
 })();

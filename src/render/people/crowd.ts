@@ -21,7 +21,7 @@ import { PeopleCreator, creatorCatalog, type PlacedPerson } from './creator.ts';
 const {
   Fn, attribute, storage, uniformArray, vertexIndex, uint, float, int, vec3, vec4, cos, sin, floor, fract, mod, min, max,
   select, mix, normalize, transformNormalToView, varyingProperty, unpackUnorm4x8, unpackUnorm2x16, sRGBTransferEOTF,
-  interleavedGradientNoise, screenCoordinate, time, abs, dot, clamp,
+  interleavedGradientNoise, screenCoordinate, time, deltaTime, abs, dot, clamp,
 } = T;
 
 /** Person height on screen (px) above which level 0 is drawn; the level changes at a hard cut (opaque). */
@@ -134,9 +134,10 @@ export class PeopleRenderer {
       const ipos = attribute('ipos', 'vec4'), iprev = attribute('iprev', 'vec4'), info = attribute('iinfo', 'vec4'), anim = attribute('ianim', 'vec4');
       const vN = varyingProperty('vec3', 'vPersonN');
       const vC = varyingProperty('vec3', 'vPersonC');
-      const local = varyingProperty('vec3', 'vPersonLocal');
       // info.z: level fade (2 = shadow only); info.w: opacity, + 2 when it casts a shadow
-      const position = (shadow: boolean) => Fn(() => {
+      /** The body skinned at animation time `t`: its local position (feet on the slope, scaled, hidden when not shown), its
+       *  normal and what its colour reads. */
+      const skin = (t: Node, shadow: boolean) => {
         const code = uint(info.y);
         const vari = code.bitAnd(uint(63));
         const clip = code.shiftRight(uint(6)).bitAnd(uint(15));
@@ -154,7 +155,7 @@ export class PeopleRenderer {
         // animation: frame from time, blended with the next
         const vm = varMeta.element(vari);
         const ct = clips.element(int(vm.y.mul(16).add(float(clip))));
-        const f = mod(time.mul(ct.z).mul(anim.y).add(anim.x.mul(ct.y)), ct.y);
+        const f = mod(t.mul(ct.z).mul(anim.y).add(anim.x.mul(ct.y)), ct.y);
         const f0 = floor(f), a1 = fract(f);
         const f1 = mod(f0.add(1), ct.y);
         const row0 = uint(vm.x.add(ct.x).add(f0)).mul(uint(NB));
@@ -181,7 +182,10 @@ export class PeopleRenderer {
         const legs = clamp(float(1).sub(pos.y.div(0.9)), 0, 1);
         const sloped = vec3(pos.x, pos.y.add(anim.w.mul(pos.z).mul(legs)), pos.z);
         const p = select(shown, sloped.mul(anim.z), vec3(0));
-        local.assign(p);
+        return { p, nrm, va, vp, vm, region };
+      };
+      const position = (shadow: boolean) => Fn(() => {
+        const { p, nrm, va, vp, vm, region } = skin(time, shadow);
         const c = cos(ipos.w), s = sin(ipos.w);
         vN.assign(normalize(vec3(nrm.x.mul(c).add(nrm.z.mul(s)), nrm.y, nrm.x.negate().mul(s).add(nrm.z.mul(c)))));
         // colour: the texture's, tinted per person by region
@@ -202,8 +206,15 @@ export class PeopleRenderer {
       })();
       m.positionNode = position(false);
       if (lod === 1) m.castShadowPositionNode = position(true);
-      const pc = cos(iprev.w), ps = sin(iprev.w);
-      withPrevious(m, vec3(local.x.mul(pc).add(local.z.mul(ps)), local.y, local.x.negate().mul(ps).add(local.z.mul(pc))).add(iprev.xyz));
+      // where the body was a frame ago, for the velocity: its pose a frame back in its animation (the limbs move by
+      // themselves: with this frame's pose their motion had no velocity and the anti-aliasing smeared them), at the
+      // previous position and heading (as three skins a skinned mesh a second time with the previous bones)
+      const previous = Fn(() => {
+        const { p } = skin(time.sub(deltaTime), false);
+        const pc = cos(iprev.w), ps = sin(iprev.w);
+        return vec3(p.x.mul(pc).add(p.z.mul(ps)), p.y, p.x.negate().mul(ps).add(p.z.mul(pc))).add(iprev.xyz);
+      })();
+      withPrevious(m, previous);
       m.normalNode = transformNormalToView(normalize(vN));
       m.colorNode = vec4(vC, 1);
       m.roughnessNode = float(0.82);
