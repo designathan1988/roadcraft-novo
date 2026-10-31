@@ -8,16 +8,22 @@ const require = createRequire(import.meta.url);
 let client = null;
 let lib = null;
 
-/** Starts Steam. appId: steam_appid.txt next to the executable, otherwise 480 (Spacewar, test). */
-export function initSteam(appDir) {
+/**
+ * Starts Steam. The app id comes from steam_appid.txt next to the executable (or the working folder), or from the
+ * SteamAppId variable Steam sets when it launches the game. Without one Steam is not started: the library's default
+ * is app 480 (Spacewar), and achievements and the overlay would go to that app (D70). `load` gives the library.
+ */
+export function initSteam(appDir, load = () => require('steamworks.js')) {
   if (process.env.ROADCRAFT_SHOT || process.env.ROADCRAFT_NO_STEAM) return false;
+  let appId = Number(process.env.SteamAppId) || 0;
+  for (const dir of [process.cwd(), appDir, path.dirname(process.execPath)]) {
+    if (appId) break;
+    const f = path.join(dir, 'steam_appid.txt');
+    try { if (fs.existsSync(f)) appId = Number(fs.readFileSync(f, 'utf8').trim()) || 0; } catch { /* unreadable: no id */ }
+  }
+  if (!appId) { console.log('Steam not started: no app id (steam_appid.txt or SteamAppId)'); return false; }
   try {
-    lib = require('steamworks.js');
-    let appId = 480;
-    for (const dir of [process.cwd(), appDir, path.dirname(process.execPath)]) {
-      const f = path.join(dir, 'steam_appid.txt');
-      if (fs.existsSync(f)) { appId = Number(fs.readFileSync(f, 'utf8').trim()) || appId; break; }
-    }
+    lib = load();
     client = lib.init(appId);
     return true;
   } catch (err) {
