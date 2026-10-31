@@ -61,17 +61,18 @@ function run(steps: number): string {
   }
   const h = createHash('sha256'), t = peds.t;
   h.update(new Uint8Array(t.alive.buffer, 0, t.end));
+  const one = new Float64Array(1), oneBytes = new Uint8Array(one.buffer);
   // in the schema's order; only live people (a released id's leftovers are not behaviour)
   for (const k of Object.keys(t.cols)) {
-    const col = t.cols[k as keyof typeof t.cols] as unknown as { buffer: ArrayBuffer; BYTES_PER_ELEMENT: number };
-    const one = col.BYTES_PER_ELEMENT, bytes = new Uint8Array(col.buffer);
-    for (let p = 0; p < t.end; p++) if (t.alive[p]) h.update(bytes.subarray(p * one, (p + 1) * one));
+    const col = t.cols[k as keyof typeof t.cols] as unknown as ArrayLike<number>;
+    // the values, not the bytes: a column widened with the same numbers in it keeps the hash
+    for (let p = 0; p < t.end; p++) if (t.alive[p]) { one[0] = col[p]; h.update(oneBytes); }
   }
   return `${t.size} ${h.digest('hex')}`;
 }
 
-// recorded at ebe4221, before any block of peds.ts moves: "people sha256"
-const EXPECTED = '2400 698a2d34d15bdbcd31fe72b4bac1f4770edc57d3b47f56fd34a2c209273a15c5';
+// recorded at b674f77 (the hash by values; the same people as the byte hash recorded at ebe4221): "people sha256"
+const EXPECTED = '2400 f45cba49844ebe62db9d379eb7057344be86ebf47d894672c3a8475fe612424f';
 
 test('the pedestrians of a fixed city, seed and number of steps are the same, bit for bit', () => {
   const got = run(20 * 30);

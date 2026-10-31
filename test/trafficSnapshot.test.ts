@@ -53,21 +53,22 @@ function run(steps: number, window?: number, buses = false): string {
   }
   const h = createHash('sha256'), t = tr.veh;
   h.update(new Uint8Array(t.alive.buffer, 0, t.end));
+  const one = new Float64Array(1), oneBytes = new Uint8Array(one.buffer);
   // in the schema's order, not by name: renaming a column (with its meaning unchanged) leaves the hash as it was
   for (const k of Object.keys(t.cols)) {
-    const col = t.cols[k as keyof typeof t.cols] as unknown as ArrayLike<number> & { buffer: ArrayBuffer; BYTES_PER_ELEMENT: number };
-    // only live vehicles: a released id's leftovers are not behaviour
-    const one = col.BYTES_PER_ELEMENT, bytes = new Uint8Array(col.buffer);
-    for (let v = 0; v < t.end; v++) if (t.alive[v]) h.update(bytes.subarray(v * one, (v + 1) * one));
+    const col = t.cols[k as keyof typeof t.cols] as unknown as ArrayLike<number>;
+    // only live vehicles: a released id's leftovers are not behaviour; the values, not the bytes, so a column
+    // widened (Uint8 to Uint16) with the same numbers in it keeps the hash
+    for (let v = 0; v < t.end; v++) if (t.alive[v]) { one[0] = col[v]; h.update(oneBytes); }
   }
   h.update(JSON.stringify([tr.microN, t.size, t.end]));
   const busesNow = buses ? tr.lineStats(1)[0].buses : 0;
   return `${t.size} ${tr.microN} ${busesNow} ${h.digest('hex')}`;
 }
 
-// recorded at d540d98 (traffic code as at 71825f5), before the vehicle table's owner (P9.2): "vehicles micro buses sha256"
-const EXPECTED_MICRO = '114 113 0 b829699ce623f7ffdd499e8592dddd99abdab67900f7d940ddb09ab0cc7bf868';
-const EXPECTED_MIXED = '114 65 3 1095aa6510e25ef8e196a18ab04f16875f98ce9b2c1e8ea35c23a07f7eed3fb8';
+// recorded at b674f77 (the hash by values; the same traffic as the byte hashes recorded at d540d98): "vehicles micro buses sha256"
+const EXPECTED_MICRO = '114 113 0 2c8f347ebd1136ba454f48bf67fc4baff025b7a916c6382d0a106bf40b890af0';
+const EXPECTED_MIXED = '114 65 3 31bb30549063cb7619a82340b8626318c573aaa14fb099e5f806b7480af37bc4';
 
 test('the traffic of a fixed city, seed and number of steps is the same, bit for bit (all micro)', () => {
   // 60 s of simulated time at 20 Hz on the grid city
