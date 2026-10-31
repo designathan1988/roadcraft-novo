@@ -249,11 +249,15 @@ export class CameraRig {
   }
 
   /** One frame: keys by smoothed velocity with exact displacement over the step (independent of frame rate). */
+  /** Per-frame scratch (no record made each frame): the keys' goal and the step's travel per axis. */
+  private readonly goal: Record<Axis, number> = { fwd: 0, right: 0, turn: 0, tilt: 0, zoom: 0 };
+  private readonly travel: Record<Axis, number> = { fwd: 0, right: 0, turn: 0, tilt: 0, zoom: 0 };
+
   update(dt: number): void {
-    const goal: Record<Axis, number> = { fwd: 0, right: 0, turn: 0, tilt: 0, zoom: 0 };
+    const goal = this.goal, travel = this.travel;
+    for (const axis of AXES) { goal[axis] = 0; travel[axis] = 0; }
     for (const [axis, sign] of this.held.values()) goal[axis] += sign;
     const keep = Math.exp(-dt / EASE_S);
-    const travel: Record<Axis, number> = { fwd: 0, right: 0, turn: 0, tilt: 0, zoom: 0 };
     for (const axis of AXES) {
       const g = Math.max(-1, Math.min(1, goal[axis])) * (this.shift ? 3 : 1);
       const v0 = this.vel[axis];
