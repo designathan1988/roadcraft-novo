@@ -1,15 +1,17 @@
 /// <reference types="node" />
 // The interface's pure parts with the real modules (keys.ts): the game's one keyboard listener, fed key events the
 // way the browser sends them. Defect ids refer to DEFEITOS-roadcraft-novo.md.
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { installKeys, type GameKeyDeps } from '../src/ui/keys.ts';
 
 type Listener = (e: unknown) => void;
 /** A window with listeners, enough for installKeys (no DOM in Node). */
-function fakeWindow(): { send(type: string, e: Partial<KeyboardEvent>): { prevented: boolean } } {
+function fakeWindow(t: TestContext): { send(type: string, e: Partial<KeyboardEvent>): { prevented: boolean } } {
   const on = new Map<string, Listener[]>();
   const g = globalThis as Record<string, unknown>;
+  // gone with the test: a later test in the same process must not see a window (D36)
+  t.after(() => { delete g.window; });
   g.window = { addEventListener: (type: string, fn: Listener) => on.set(type, [...(on.get(type) ?? []), fn]) };
   for (const n of ['HTMLInputElement', 'HTMLSelectElement', 'HTMLTextAreaElement', 'HTMLButtonElement']) g[n] ??= class {};
   return {
@@ -37,8 +39,8 @@ function deps(over: Partial<GameKeyDeps> = {}): { d: GameKeyDeps; calls: string[
   return { d, calls };
 }
 
-test('B3: Ctrl + a letter, a digit or Space never reaches the plain game shortcuts', () => {
-  const w = fakeWindow();
+test('B3: Ctrl + a letter, a digit or Space never reaches the plain game shortcuts', (t) => {
+  const w = fakeWindow(t);
   const { d, calls } = deps();
   installKeys(d);
   for (const code of ['KeyC', 'KeyV', 'KeyK', 'KeyP', 'Space', 'Digit1', 'KeyZ', 'KeyH', 'KeyT', 'KeyW', 'KeyQ']) {
@@ -119,8 +121,8 @@ test('the in-game interface checks (tools/check-interface.mjs) all compile', asy
   assert.ok(Object.keys(SCENARIOS).length > 40);
 });
 
-test('reload keys (Ctrl+R, Ctrl+Shift+R, F5) never reach the browser, even from a text box', () => {
-  const w = fakeWindow();
+test('reload keys (Ctrl+R, Ctrl+Shift+R, F5) never reach the browser, even from a text box', (t) => {
+  const w = fakeWindow(t);
   const { d } = deps();
   installKeys(d);
   const box = new (globalThis as unknown as { HTMLInputElement: new () => object }).HTMLInputElement();
@@ -169,4 +171,8 @@ test('transit lines are named as Roadcraft 4.0', async () => {
 test('simulation demand factors as Roadcraft 4.0', async () => {
   const { demandFactor } = await import('../src/ui/readouts.ts');
   assert.deepEqual(['low', 'normal', 'peak', undefined].map((d) => demandFactor(d)), [0.55, 1, 1.55, 1]);
+});
+
+test('D36: no fake window is left behind for the tests after this file', () => {
+  assert.equal((globalThis as Record<string, unknown>).window, undefined);
 });
