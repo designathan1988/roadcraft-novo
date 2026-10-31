@@ -225,7 +225,8 @@ test('E7: rebuilding the final image frees every render target the old one held'
     assert.equal(count('GTAONode'), 1, 'ambient occlusion freed');
     assert.equal(count('BloomNode'), 1, 'bloom freed');
     assert.equal(count('TRAANode'), 2, 'both anti-aliasing histories freed');
-    assert.equal(count('RTTNode'), 2, 'the two copies of the image fed to the anti-aliasing freed');
+    // the two copies of the image fed to the anti-aliasing, and the occlusion's denoised target (render/aoDenoise.ts)
+    assert.equal(count('RTTNode'), 3, 'the two copies of the image fed to the anti-aliasing and the denoised occlusion freed');
     assert.equal(count('CSMShadowNode'), 1, 'cascades freed');
     assert.equal(count('ShadowNode'), 3, 'the three cascade shadow maps freed');
   } finally { for (const r of restore) r(); }

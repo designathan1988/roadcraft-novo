@@ -6,7 +6,7 @@
 import * as THREE from 'three/webgpu';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import GTAONode from 'three/addons/tsl/display/GTAONode.js';
-import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
+import { aoDenoise } from './aoDenoise.ts';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
@@ -207,9 +207,10 @@ export class Post {
       aoPass.thickness.value = 0.8;
       aoPass.scale.value = 1.05;
       aoPass.samples.value = 8;
-      const clean: Node = denoise(aoPass.getTextureNode(), depth, fromDepth, camera);
-      this.owned.push(clean);
-      const occ = clean.r;
+      // denoised as 4.0 does: its own pass at the occlusion's resolution, 8 taps, 8 bits (render/aoDenoise.ts)
+      const clean = aoDenoise(aoPass.getTextureNode(), depth, camera);
+      this.owned.push(clean.node, clean.texture);
+      const occ = clean.texture.sample(screenUV).r;
       color = vec4(color.rgb.mul(mix(float(1), occ, 0.85)), color.a);    }
     // the clouds' shadows on the ground (Roadcraft 4.0): each pixel's world position from the depth, carried up
     // along the sun to the clouds (not on the sky)
