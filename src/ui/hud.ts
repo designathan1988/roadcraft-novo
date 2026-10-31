@@ -81,7 +81,8 @@ export class Hud {
   private speedShown = 1;
   private status: CityStatus | null = null;
   private moneyShown = NaN;
-  private clockShown = '';
+  /** The minute the clock shows (hour x 60 + minute, in fives); -1 before the first. */
+  private clockMinute = -1;
   // popovers
   private pop: HTMLElement;
   private popId: PopId | null = null;
@@ -311,7 +312,7 @@ export class Hud {
   private relabel(): void {
     for (const f of this.relabels) f();
     this.compass.relabel();
-    this.moneyShown = NaN; this.clockShown = ''; this.impossibleShown = -1;
+    this.moneyShown = NaN; this.clockMinute = -1; this.impossibleShown = -1;
     if (this.status) this.setStatus(this.status);
     this.setInside(this.insideFloor);
     // the road catalogue and its section editor write their cards again, an open edit kept (the roads session's
@@ -707,9 +708,9 @@ export class Hud {
 
   /** Every frame: writes the clock only when the shown minute changes. */
   setClock(hour: number, simSpeed: number, paused = false): void {
-    const h = Math.floor(hour), m = Math.floor((hour - h) * 60);
-    const text = `${String(h).padStart(2, '0')}:${String(m - (m % 5)).padStart(2, '0')}`;
-    if (text !== this.clockShown) { this.clockShown = text; this.clockText.data = text; }
+    const h = Math.floor(hour), m = Math.floor((hour - h) * 60), shown = h * 60 + m - (m % 5);
+    // the text is made only when the shown minute changes (not a string per frame)
+    if (shown !== this.clockMinute) { this.clockMinute = shown; this.clockText.data = `${String(h).padStart(2, '0')}:${String(m - (m % 5)).padStart(2, '0')}`; }
     const now = paused ? 0 : simSpeed;
     if (now !== this.speedShown) { this.speedShown = now; this.syncSpeed(); }
   }
