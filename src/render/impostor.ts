@@ -134,6 +134,9 @@ export function bakeImpostors(renderer: THREE.WebGPURenderer, geos: THREE.Buffer
   renderer.setClearColor(prevClear, prevAlpha);
   renderer.setRenderTarget(prevRT);
   for (const m of meshes) m.geometry.dispose();
+  // the bake's materials and scene are done with (D35: their pipelines and bindings stayed in the renderer)
+  colorMat.dispose(); normalMat.dispose();
+  scene.clear();
   return { color: targets[0].texture, normal: targets[1].texture, targets };
 }
 
