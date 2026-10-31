@@ -374,7 +374,7 @@ test('F5: the creator reaches all 13 finishes by its choices, and "Vidro" is gla
   for (let f = 0; f < FINISHES.length; f++) for (let r = 0; r < ROOFS.length; r++) for (const id of finishesOf(f, r)) reached.add(id);
   const missing = Object.entries(FIN).filter(([, id]) => id > 0 && !reached.has(id)).map(([n]) => n);
   assert.deepEqual(missing, [], `${FINISH_COUNT - missing.length} of ${FINISH_COUNT} finishes reachable`);
-  assert.ok(finishesOf(FINISHES.indexOf('Vidro'), 0).has(FIN.Glass), '"Vidro" puts glass on the walls');
+  assert.ok(finishesOf(FINISHES.indexOf('design.finish.glass'), 0).has(FIN.Glass), '"Vidro" puts glass on the walls');
 });
 
 test('F9: civic buildings and warehouses fit their lot', () => {

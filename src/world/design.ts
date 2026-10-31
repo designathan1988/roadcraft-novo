@@ -1,18 +1,18 @@
-// Projeto de prédio feito pelo jogador (criador): planta, telhado, acabamento, cor, peças no
-// telhado e andares recuados. Vai nos campos `color` (bits) e `h` (cor da parede) do registro,
-// que os prédios v2 não usam: o salvamento não muda de formato. Bit 31 de color = tem projeto.
+// A building design made by the player (creator): plan, roof, finish, colour, rooftop gear and setback floors.
+// It goes in the record's `color` (bits) and `h` (wall colour) fields, which v2 buildings do not use: the save
+// format does not change. Bit 31 of color = has a design.
 
-export const SHAPES = ['Retângulo', 'Em L', 'Em U', 'Círculo', 'Hexágono', 'Octógono', 'Chanfrado'] as const;
-export const ROOFS = ['Plana', 'Terraço', '2 águas', '4 águas', '1 água', 'Dente de serra'] as const;
-export const FINISHES = ['Reboco', 'Tijolo', 'Vidro', 'Concreto', 'Metal', 'Madeira', 'Pedra', 'Cerâmica', 'Massa raspada', 'Painel'] as const;
-/** Peças no telhado (bits). */
-/** Janelas da fachada (por cima do que o acabamento daria). */
-export const WINDOWS = ['Do acabamento', 'Faixa de vidro', 'Janelas largas', 'Janelas estreitas', 'Parede cega'] as const;
-/** Ala lateral mais baixa (um terço dos andares). */
-export const WINGS = ['Sem ala', 'Ala à esquerda', 'Ala à direita', 'Alas dos dois lados'] as const;
+export const SHAPES = ['design.shape.rectangle', 'design.shape.lShaped', 'design.shape.uShaped', 'design.shape.circle', 'design.shape.hexagon', 'design.shape.octagon', 'design.shape.chamfered'] as const;
+export const ROOFS = ['design.roof.flat', 'design.roof.terrace', 'design.roof.gable', 'design.roof.hip', 'design.roof.shed', 'design.roof.sawtooth'] as const;
+export const FINISHES = ['design.finish.plaster', 'design.finish.brick', 'design.finish.glass', 'design.finish.concrete', 'design.finish.metal', 'design.finish.wood', 'design.finish.stone', 'design.finish.ceramicTile', 'design.finish.scrapedRender', 'design.finish.panel'] as const;
+/** Rooftop gear (bits). */
+/** Facade windows (over what the finish would give). */
+export const WINDOWS = ['design.windows.fromTheFinish', 'design.windows.glassBand', 'design.windows.wideWindows', 'design.windows.narrowWindows', 'design.windows.blankWall'] as const;
+/** A lower side wing (a third of the floors). */
+export const WINGS = ['design.wing.noWing', 'design.wing.wingOnTheLeft', 'design.wing.wingOnTheRight', 'design.wing.wingsOnBothSides'] as const;
 export const GEAR = { Tank: 1, Solar: 2, Chimney: 4, Spire: 8, Antenna: 16, AC: 32 } as const;
-export const GEAR_NAMES: Array<[number, string]> = [[GEAR.Tank, 'Caixa d’água'], [GEAR.Solar, 'Painéis solares'], [GEAR.Chimney, 'Chaminé'], [GEAR.Spire, 'Agulha'], [GEAR.Antenna, 'Antena'], [GEAR.AC, 'Ar-condicionado']];
-/** Cores prontas da paleta do criador. */
+export const GEAR_NAMES: Array<[number, string]> = [[GEAR.Tank, 'design.gear.waterTank'], [GEAR.Solar, 'design.gear.solarPanels'], [GEAR.Chimney, 'design.gear.chimney'], [GEAR.Spire, 'design.gear.spire'], [GEAR.Antenna, 'design.gear.antenna'], [GEAR.AC, 'design.gear.airConditioning']];
+/** The creator's ready colours. */
 export const PALETTE = [0xece6da, 0xd9c7a6, 0xc9a98a, 0xa9b4b8, 0x9b4a32, 0x6e7f8a, 0x2f3b48, 0xe9d38f, 0x8fb9a8, 0xd98e73, 0xf2f2ef, 0x555b61];
 
 export interface Design {
@@ -23,7 +23,7 @@ export interface Design {
 
 export const DEFAULT_DESIGN: Design = { shape: 0, roof: 0, finish: 0, gear: 0, setback: 0, wall: 0xd9c7a6 };
 
-/** Funções cívicas novas (Fn 14..33): projeto do criador e andares mínimos (o cemitério e o parquinho são à parte). */
+/** The newer civic functions (Fn 14..33): a creator design and the minimum floors (the cemetery and the playground are apart). */
 export const CIVIC_DESIGNS: Record<number, [Design, number]> = {
   14: [{ shape: 0, roof: 3, finish: 6, gear: GEAR.Spire, setback: 0, wall: 0xe8e2d4 }, 2],
   15: [{ shape: 6, roof: 0, finish: 6, gear: 0, setback: 0, wall: 0xd8cfbd }, 3],
@@ -47,8 +47,8 @@ export const CIVIC_DESIGNS: Record<number, [Design, number]> = {
 };
 
 /**
- * Marcos da cidade (o catálogo de lotes nomeados do roadcraft, `lots/*.json`): projetos prontos que o crescimento dá a
- * parte das torres comerciais. [projeto, andares mínimos].
+ * City landmarks (Roadcraft's catalogue of named lots, `lots/*.json`): ready designs that growth gives to some of the
+ * commercial towers. [design, minimum floors].
  */
 export const LANDMARKS: Array<[Design, number]> = [
   [{ shape: 3, roof: 0, finish: 2, gear: GEAR.Antenna, setback: 0, wall: 0x6e8fa3 }, 14], // roundGlass
@@ -78,14 +78,14 @@ export function decodeDesign(color: number, h: number): Design {
   return { shape: color & 7, roof: (color >> 3) & 7, finish: ((color >> 6) & 7) | (((color >>> 30) & 1) << 3), gear: (color >> 9) & 63, setback: (color >> 15) & 15, windows: (color >> 19) & 7, wing: (color >> 22) & 3, catalog: (color >>> 24) & 63, wall: Math.round(h) & 0xffffff };
 }
 
-/** Planta em partes no espaço local do lote (x ao longo da frente, z para a frente), dentro de w × d. */
+/** The plan in parts, in the lot's local space (x along the front, z towards the front), within w × d. */
 export function footprint(shape: number, w: number, d: number): { rects: Array<[number, number, number, number]>; poly: Array<[number, number]> | null } {
   const x0 = -w / 2, x1 = w / 2, z0 = -d / 2, z1 = d / 2;
   const arm = Math.max(4, Math.min(w, d) * 0.4);
   switch (shape) {
-    case 1: // L: faixa da frente inteira + braço do lado esquerdo até o fundo (sem sobrepor)
+    case 1: // L: the whole front strip + an arm on the left side to the back (no overlap)
       return { rects: [[x0, x1, z1 - arm, z1], [x0, x0 + arm, z0, z1 - arm]], poly: null };
-    case 2: // U: frente + dois braços
+    case 2: // U: front + two arms
       return { rects: [[x0, x1, z1 - arm, z1], [x0, x0 + arm, z0, z1 - arm], [x1 - arm, x1, z0, z1 - arm]], poly: null };
     case 3: case 4: case 5: {
       const n = shape === 3 ? 20 : shape === 4 ? 6 : 8;
@@ -94,7 +94,7 @@ export function footprint(shape: number, w: number, d: number): { rects: Array<[
       for (let k = 0; k < n; k++) { const a = off + (k / n) * Math.PI * 2; pts.push([Math.cos(a) * w / 2, Math.sin(a) * d / 2]); }
       return { rects: [], poly: pts };
     }
-    case 6: { // chanfrado: retângulo com cantos cortados
+    case 6: { // chamfered: a rectangle with its corners cut
       const c = Math.min(w, d) * 0.18;
       return { rects: [], poly: [[x0 + c, z0], [x1 - c, z0], [x1, z0 + c], [x1, z1 - c], [x1 - c, z1], [x0 + c, z1], [x0, z1 - c], [x0, z0 + c]] };
     }

@@ -16,7 +16,7 @@ import { topSwatch, type RoadCatalog } from './roadCatalog.ts';
 import { LANE_CHOICES, PARKING_PRESETS } from '../roads/roadVariant.ts';
 import { button, card, choices, dropdown, el, orow, range, soon, stepper, subhead, swatchArt, tab, textInput, type Choice } from './dom.ts';
 import { svg } from './icons.ts';
-import { fmtDec, fmtInt, loose, plural, t } from '../shared/i18n/index.ts';
+import { fmtDec, fmtInt, plural, t } from '../shared/i18n/index.ts';
 import { BOMB_START, bombStep } from '../shared/contracts/bomb.ts';
 import { lineName } from './transitNames.ts';
 import { openRoadKeys } from './roadKeysPanel.ts';
@@ -386,13 +386,13 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
     if (!b) note(p, t('v2.build.selectToEdit'));
   } else if (editing) {
     if (b) {
-      p.options.append(el('div', 'v2-pop-title', `${b.fn ? loose(FN_NAMES[b.fn]) : t(`zone.name.${b.zone}`)} · ${plural('ui.floors', b.floors)}`));
+      p.options.append(el('div', 'v2-pop-title', `${b.fn ? t(FN_NAMES[b.fn]) : t(`zone.name.${b.zone}`)} · ${plural('ui.floors', b.floors)}`));
       // the address under the title (the decay has its own row below, with Renovate)
       const address = b.address || (a.addressOf?.() ?? '');
       if (address) p.options.append(el('div', 'v2-pop-sub', address));
-      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
+      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? t(n) : t('building.fn.none')] as const), b.fn, (v) => a.buildingFn(Number(v)))));
       p.options.append(orow(t('ui.build.floors'), stepper(t('ui.build.floors'), String(b.floors), (d) => { a.floors(d); return String(b.floors === 0 && d < 0 ? 0 : Math.max(1, Math.min(60, b.floors + d))); })));
-      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
+      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, t(x.name)] as const)], b.arch, (v) => a.style(Number(v)))));
       p.options.append(orow(t('ui.build.actions'),
         button('v2-act danger', t('inspector.demolish'), () => a.demolishBuilding(), svg('demolish', 16)),
         button(`v2-act${h.insideFloor() >= 0 ? ' on' : ''}`, t('inside.toggle'), () => a.inside('toggle'), svg('interiorView', 16)),
@@ -408,8 +408,8 @@ export function renderBuild(h: DrawerHost, p: DrawerParts): void {
     } else {
       note(p, t('v2.build.selectToEdit'));
       p.options.append(subhead(t('ui.build.next')));
-      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, loose(x.name)] as const)], s.nextArch, (v) => { a.style(Number(v)); })));
-      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? loose(n) : t('building.fn.none')] as const), s.nextFn, (v) => { a.buildingFn(Number(v)); })));
+      p.options.append(orow(t('ui.build.style'), dropdown(t('ui.build.style'), [[-1, t('ui.build.styleAuto')], ...ARCHES.map((x, i) => [i, t(x.name)] as const)], s.nextArch, (v) => { a.style(Number(v)); })));
+      p.options.append(orow(t('builder.field.function'), dropdown(t('builder.field.function'), FN_NAMES.map((n, i) => [i, i ? t(n) : t('building.fn.none')] as const), s.nextFn, (v) => { a.buildingFn(Number(v)); })));
     }
     // extension point: the buildings session mounts its editor here (src/ui/creator.ts)
     p.options.append(h.buildingSlot);

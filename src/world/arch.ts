@@ -22,10 +22,10 @@ export const Fn = {
   Council: 14, Courthouse: 15, PostOffice: 16, University: 17, Library: 18, Museum: 19, Prison: 20, Cemetery: 21, BusStation: 22,
   Bank: 23, Pharmacy: 24, Bakery: 25, Restaurant: 26, SnackBar: 27, Bar: 28, Cinema: 29, Hotel: 30, Gym: 31, Club: 32, Office: 33, Playground: 34,
 } as const;
-export const FN_NAMES = ['', 'Escola', 'Igreja', 'Hospital', 'Posto de saúde', 'Praça', 'Parque', 'Posto de gasolina', 'Supermercado',
-  'Prefeitura', 'Delegacia', 'Bombeiros', 'Shopping', 'Quadra',
-  'Câmara de Vereadores', 'Fórum', 'Correios', 'Faculdade', 'Biblioteca', 'Museu', 'Presídio', 'Cemitério', 'Rodoviária',
-  'Agência bancária', 'Farmácia', 'Padaria', 'Restaurante', 'Lanchonete', 'Bar', 'Cinema', 'Hotel', 'Academia', 'Clube', 'Escritórios', 'Parquinho'];
+export const FN_NAMES = ['', 'building.fn.school', 'building.fn.church', 'building.fn.hospital', 'building.fn.clinic', 'building.fn.square', 'building.fn.park', 'building.fn.gasStation', 'building.fn.supermarket',
+  'building.fn.cityHall', 'building.fn.policeStation', 'building.fn.fireStation', 'building.fn.mall', 'building.fn.sportsCourt',
+  'building.fn.cityCouncil', 'building.fn.courthouse', 'building.fn.postOffice', 'building.fn.university', 'building.fn.library', 'building.fn.museum', 'building.fn.prison', 'building.fn.cemetery', 'building.fn.busStation',
+  'building.fn.bank', 'building.fn.pharmacy', 'building.fn.bakery', 'building.fn.restaurant', 'building.fn.snackBar', 'building.fn.bar', 'building.fn.cinema', 'building.fn.hotel', 'building.fn.gym', 'building.fn.club', 'building.fn.offices', 'building.fn.playground'];
 
 /** Draw by zone: [function, weight]. */
 const FN_BY_ZONE: Array<Array<[number, number]>> = [

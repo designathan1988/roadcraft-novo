@@ -13,6 +13,10 @@ import { ENGINE_EN } from '../src/shared/i18n/lang/engine.en.ts';
 import { setLang, t } from '../src/shared/i18n/index.ts';
 import { polygonLot } from '../src/world/lotEdit.ts';
 import { PROFILES, profileName } from '../src/roads/profiles.ts';
+import { FINISHES, GEAR_NAMES, ROOFS, SHAPES, WINDOWS, WINGS } from '../src/world/design.ts';
+import { FN_NAMES } from '../src/world/arch.ts';
+import { ARCHES } from '../src/world/archData.ts';
+import { PRESETS } from '../src/ui/creator.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ts = createRequire(path.join(root, 'package.json'))('typescript');
@@ -20,8 +24,10 @@ const ts = createRequire(path.join(root, 'package.json'))('typescript');
 const MIGRATED = [
   'src/features/roads/roadTool.ts', 'src/features/streetscape/itemTool.ts', 'src/features/zones/zoneTool.ts',
   'src/roads/construction/plan.ts', 'src/roads/construction/segmentEdits.ts', 'src/roads/signRule.ts',
-  'src/world/lotEdit.ts',
+  'src/world/lotEdit.ts', 'src/world/design.ts', 'src/world/arch.ts', 'src/world/archData.ts', 'src/ui/creator.ts',
+  'src/ui/drawers.ts',
 ];
+// a table value counts when it is a phrase (a short one like 'terminal' is also a tool id)
 const PT_VALUES = new Set(Object.values(ENGINE_PT));
 const ACCENT = /[ãõçáéíóúâêôàÃÕÇÁÉÍÓÚÂÊÔ]/;
 const WORDS = /\b(demais|nenhum|nenhuma|para o|para a|do lote|da via|Clique|Arraste|Solte)\b/;
@@ -33,7 +39,7 @@ function portuguese(file: string): string[] {
   const visit = (n: any): void => {
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) {
       const v: string = n.text;
-      if (!ts.isImportDeclaration(n.parent) && (ACCENT.test(v) || PT_VALUES.has(v) || WORDS.test(v))) {
+      if (!ts.isImportDeclaration(n.parent) && (ACCENT.test(v) || (PT_VALUES.has(v) && (v.includes(' ') || v.length >= 12)) || WORDS.test(v))) {
         out.push(`${file}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1} ${v.slice(0, 60)}`);
       }
     }
@@ -116,4 +122,17 @@ test('built-in road profiles are named by language keys and read in the player\'
     setLang('pt-BR');
   }
   assert.equal(profileName(avenue), 'Avenida');
+});
+
+test('building functions, styles, the creator\'s choices and templates are keys of both languages', () => {
+  const names = [...SHAPES, ...ROOFS, ...FINISHES, ...WINDOWS, ...WINGS, ...GEAR_NAMES.map((g) => g[1]), ...FN_NAMES.slice(1), ...ARCHES.map((a) => a.name), ...PRESETS.map((p) => p[0])];
+  assert.ok(names.length >= 96, `names: ${names.length}`);
+  assert.deepEqual(names.filter((n) => !(n in ENGINE_PT && n in ENGINE_EN)), []);
+  try {
+    setLang('en');
+    // the legacy phrase table had no English for it: an English player read "Cerâmica"
+    assert.equal(t(FINISHES[7]), 'Ceramic tile');
+  } finally {
+    setLang('pt-BR');
+  }
 });

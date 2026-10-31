@@ -95,48 +95,6 @@ export function loose(s: string): string { return current === 'en' ? legacyTrans
 /** Kept for the engine's test of the phrase table. */
 export const translate = legacyTranslate;
 
-/**
- * Keeps an element written by another area in Portuguese (the buildings session's creator) in the player's
- * language: its text is translated now, whenever it changes, and again (or back) when the language changes.
- */
-export function followLanguage(el: HTMLElement): void {
-  // each text and attribute as its author wrote it, and what was last written over it
-  const texts = new WeakMap<Node, { own: string; shown: string }>();
-  const attrs = new WeakMap<Element, Map<string, { own: string; shown: string }>>();
-  const show = (own: string): string => (current === 'en' ? legacyTranslate(own) : own);
-  const walk = (n: Node): void => {
-    if (n.nodeType === Node.TEXT_NODE) {
-      const v = n.nodeValue ?? '';
-      let k = texts.get(n);
-      if (!k || v !== k.shown) texts.set(n, k = { own: v, shown: v });
-      const x = show(k.own);
-      if (x !== v) { k.shown = x; n.nodeValue = x; }
-      return;
-    }
-    if (n.nodeType !== Node.ELEMENT_NODE) return;
-    const e = n as Element;
-    for (const a of ['title', 'placeholder', 'aria-label']) {
-      const v = e.getAttribute(a);
-      if (!v) continue;
-      let m = attrs.get(e);
-      if (!m) attrs.set(e, m = new Map());
-      let k = m.get(a);
-      if (!k || v !== k.shown) m.set(a, k = { own: v, shown: v });
-      const x = show(k.own);
-      if (x !== v) { k.shown = x; e.setAttribute(a, x); }
-    }
-    for (let c = e.firstChild; c; c = c.nextSibling) walk(c);
-  };
-  walk(el);
-  onLanguageChange(() => walk(el));
-  new MutationObserver((list) => {
-    for (const m of list) {
-      if (m.type === 'childList') m.addedNodes.forEach(walk);
-      else walk(m.target);
-    }
-  }).observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title', 'placeholder', 'aria-label'] });
-}
-
 /** A touch screen (a finger, not a mouse): the hints say "tap" where they say "click". */
 export const isTouch = (): boolean => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 

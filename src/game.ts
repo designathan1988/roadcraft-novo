@@ -32,7 +32,7 @@ import { StartMenu } from './ui/menu.ts';
 import { Weather, cloudsU, flashU, rainU, windU } from './render/weather.ts';
 import { Ambient } from './platform/audio.ts';
 import { Particles } from './render/particles.ts';
-import { fmtInt, followLanguage, onLanguageChange, plural, t } from './shared/i18n/index.ts';
+import { fmtInt, onLanguageChange, plural, t } from './shared/i18n/index.ts';
 import { HealthPanel } from './ui/health.ts';
 import { Creator } from './ui/creator.ts';
 import type { Design } from './world/design.ts';
@@ -628,7 +628,6 @@ export class Game {
     this.health = new HealthPanel(document.getElementById('hud')!, { world: () => this.healthWorld(), state: () => this.healthState() });
     this.creator = new Creator({ apply: (d, fl) => this.applyDesign(d, fl) });
     this.hud.buildingSlot.append(this.creator.el);
-    followLanguage(this.creator.el);
     this.creator.el.style.display = 'none';
     this.optionsPanel = new OptionsPanel(document.getElementById('hud')!, () => this.settings, this.parts.isWebGPU, (s) => { this.prefs!.update(s); void this.applySettings(); },
       !this.developer ? [] : [[t('game.options.worstCase'), t('game.options.worstCaseTip'), () => { if (this.discardOk()) void this.cities.testCity(); }],
