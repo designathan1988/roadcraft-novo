@@ -90,8 +90,8 @@ const CAR_STYLE_SHARE = [0.3, 0.3, 0.17, 0.08, 0.07, 0.08];
 export class Traffic {
   readonly sim: SimNet;
   readonly router: Router;
-  /** Region occupancy and the fleet governor (traffic/regions.ts). */
-  readonly regions = new Regions();
+  /** Region sums, governor: traffic/regions.ts. */
+  readonly regions: Regions;
   /** City speed/stopped measurement and segment probes (traffic/measure.ts). */
   readonly measure = new Measure();
   /** Bus stop cell index, waiting people and line figures (traffic/stops.ts). */
@@ -304,6 +304,7 @@ export class Traffic {
       this.router.segLoad = this.segLoad;
     };
     sim.net.segs.onGrow(onSegs);
+    this.regions = new Regions(sim, () => this.segLoad);
     const onConns = (cap: number) => {
       this.connHead = grow(this.connHead, cap, -1);
       this.connTail = grow(this.connTail, cap, -1);
@@ -788,6 +789,7 @@ export class Traffic {
     const n = Math.max(0, this.laneCount[lane] + delta);
     const so = laneSeg(lane) * 2 + (laneDir(lane) > 0 ? 0 : 1);
     this.segLoad[so] = Math.max(0, this.segLoad[so] + n - this.laneCount[lane]);
+    this.regions.loadChanged(so);
     this.laneCount[lane] = n;
     const occ = this.occupancy;
     if (!occ) return;
@@ -1216,7 +1218,7 @@ export class Traffic {
       const lane = c.conn[v] >= 0 ? this.sim.conns.cols.to[c.conn[v]] : c.lane[v];
       if (dead.has(laneSeg(lane)) || (c.lane[v] >= 0 && dead.has(laneSeg(c.lane[v])))) { c.why[v] = End.Lost; this.finish(v); }
     }
-    for (const s of segs) { this.segLoad[s * 2] = 0; this.segLoad[s * 2 + 1] = 0; }
+    for (const s of segs) { this.segLoad[s * 2] = 0; this.segLoad[s * 2 + 1] = 0; this.regions.track(s); }
     for (const s of segs) for (let k = 0; k < 16; k++) { this.laneCount[s * 16 + k] = 0; this.laneHead[s * 16 + k] = -1; this.laneTail[s * 16 + k] = -1; this.activeLanes.delete(s * 16 + k); }
   }
 
@@ -1374,7 +1376,7 @@ export class Traffic {
 
   step(dt: number): void {
     this.time += dt;
-    this.regions.measure(this.time, this.sim.net, this.segLoad);
+    this.regions.measure(this.time);
     this.routeBudget = ROUTE_BUDGET;
     this.advisor.step(this.time);
     const target = Math.min(MAX_VEHICLES, Math.floor(this.sim.laneMeters * this.density * this.dayFactor() * this.demand * this.trafficShare * this.gov));

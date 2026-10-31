@@ -142,6 +142,7 @@ export class SimNet {
         this.dirtyNodes.add(op.rec.a); this.dirtyNodes.add(op.rec.b);
         this.dirtyDeadEndsNear(op.rec.id);
         this.onSegAdded(op.rec.id);
+        this.onSegChanged(op.rec.id);
         break;
       }
       case 'remSeg': {
@@ -153,6 +154,7 @@ export class SimNet {
         // a dead end near it may now have room for its turning bulb (D41: only an added segment rechecked them)
         this.dirtyDeadEndsNear(op.id);
         net.removeSeg(op.id);
+        this.onSegChanged(op.id);
         this.removedSegs.push(op.id);
         this.epoch++;
         break;
@@ -161,6 +163,7 @@ export class SimNet {
         const sc = net.segs.cols;
         this.laneMeters -= sc.len[op.id] * (laneCount(sc.profile[op.id], 1) + laneCount(sc.profile[op.id], -1));
         net.setProfile(op.id, op.profile);
+        this.onSegChanged(op.id);
         // the road's width changed: the dead ends round it are measured again
         this.dirtyDeadEndsNear(op.id);
         this.laneMeters += sc.len[op.id] * (laneCount(op.profile, 1) + laneCount(op.profile, -1));
@@ -171,13 +174,16 @@ export class SimNet {
       case 'zone': net.setZone(op.id, op.side, op.zone); break; // pedestrians are born more where there is commerce
       // the player chose the control: the automatic one starts measuring again
       case 'junction': net.setJunction(op.id, op.spec); this.nodeFlow[op.id] = 0; this.onNodeReset(op.id); this.dirtyNodes.add(op.id); break;
-      case 'clear':
+      case 'clear': {
+        const end = net.segs.end;
         net.clear(); this.conns.clear(); this.nodeConn.fill(-1); this.laneConn.fill(-1);
         this.nodePhases.fill(0); this.nodeRing.fill(0); this.dirtyNodes.clear(); this.laneMeters = 0;
         this.turnAll.fill(0); this.turnCar.fill(0);
         this.nodeCtl.fill(0); this.conflicts.clear(); this.nodeFlow.fill(0); this.armMain.fill(0); this.nodeAuto.fill(0);
         this.removedSegs.length = 0; this.reprofiledSegs.length = 0; this.removedSegEnds.length = 0; this.removedNodes.length = 0;
+        for (let s = 0; s < end; s++) this.onSegChanged(s);
         break;
+      }
     }
   }
 
@@ -197,6 +203,8 @@ export class SimNet {
   onConnRemoved: (conn: number) => void = () => {};
   /** A new segment joined the network (the id may be reused). */
   onSegAdded: (seg: number) => void = () => {};
+  /** A segment was added, removed or reprofiled, or the network cleared (whoever sums per segment takes it again). */
+  onSegChanged: (seg: number) => void = () => {};
 
   /** Rebuilds the setbacks and connections of the nodes touched. Returns the nodes rebuilt. */
   rebuild(): number[] {
