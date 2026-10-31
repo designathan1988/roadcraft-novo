@@ -1029,3 +1029,20 @@ test('D29: a long diagonal road marks the cells it touches, not its whole boundi
   assert.ok(marked.size > 0);
   assert.equal(extra.length, 0, `${extra.length} of ${marked.size} cells marked for terrain lie away from the road`);
 });
+
+test('D48: a crossing added mid-road is settled: both pieces keep the street name, and undo restores the road', async () => {
+  const { createScriptApi } = await import('../src/app/scriptApi.ts');
+  const w = flatWorld(1e9);
+  road(w, -150, 0, 150, 0);
+  const s = w.roads.nearestSeg(40, 0, 2)![0];
+  w.setStreetName(s, 'Rua Teste');
+  // the named segment's ends: the crossing at x = 40 splits it in two
+  const ax = w.roads.nodes.cols.x[w.roads.segs.cols.a[s]], bx = w.roads.nodes.cols.x[w.roads.segs.cols.b[s]];
+  const before = shape(w);
+  const commands = new CommandStack();
+  const api = createScriptApi({ world: w, commands } as unknown as Parameters<typeof createScriptApi>[0]);
+  assert.equal(api.crossing(40, 0, Ctl.Zebra), 'ok');
+  for (const x of [(Math.min(ax, bx) + 40) / 2, (Math.max(ax, bx) + 40) / 2]) assert.equal(w.streetNames.get(w.roads.nearestSeg(x, 0, 3)![0]), 'Rua Teste', `piece at x = ${x} lost the name`);
+  commands.undo();
+  assert.equal(shape(w), before);
+});

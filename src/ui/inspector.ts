@@ -487,23 +487,22 @@ export class Inspector {
     return root;
   }
 
-  /** Records a road edit (charged; without the money it is undone and said). */
-  private edit(j: RoadJournal, ok: string): void {
-    if (j.empty) return;
+  /** Records a road edit (settled: names and junction specs handed on, charged; without the money it is undone and said). True when recorded. */
+  private edit(j: RoadJournal, ok: string): boolean {
+    if (j.empty) return false;
     const price = j.price;
-    if (!j.settle()) { this.a.toast(t('ui.insp.noMoney', { price: money(price) })); return; }
+    if (!j.settle()) { this.a.toast(t('ui.insp.noMoney', { price: money(price) })); return false; }
     this.commands.push(j);
     this.a.toast(ok);
     this.refresh();
+    return true;
   }
 
   /** A pedestrian crossing in the middle of the road (one undo step). */
   private crossing(s: SegId, ctl: number): void {
     const r = addCrossing(this.world, s, 0.5, ctl);
     if (typeof r === 'string') { this.a.toast(r); return; }
-    this.commands.push(r);
-    this.a.toast(t(ctl === Ctl.Zebra ? 'inspector.crossingZebra' : 'inspector.crossingSignal'));
-    this.close();
+    if (this.edit(r, t(ctl === Ctl.Zebra ? 'inspector.crossingZebra' : 'inspector.crossingSignal'))) this.close();
   }
 
   private raise(dy: number): void {
@@ -667,7 +666,7 @@ export class Inspector {
       ...(hasMedian ? [btn(t('ui.insp.uturn'), () => {
         const r = addUTurn(w, s, 0.5);
         if (typeof r === 'string') { this.a.toast(r); return; }
-        this.commands.push(r); this.a.toast(t('hint.uturn.placed')); this.close();
+        if (this.edit(r, t('hint.uturn.placed'))) this.close();
       })] : []),
       btn(t('inspector.addHeightPoint'), () => {
         const r = addHeightPoint(w, s);

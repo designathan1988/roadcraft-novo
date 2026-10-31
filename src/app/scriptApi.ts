@@ -157,6 +157,8 @@ export function createScriptApi(h: ScriptApiHost) {
       if (!s) return 'no road';
       const r = addCrossing(w, s[0], s[1], ctl);
       if (typeof r === 'string') return r;
+      // settled like every road edit: the split segment's name and junction specs go to its pieces, and it is charged
+      if (r.empty || !r.settle()) return 'refused';
       h.commands.push(r);
       return 'ok';
     },
@@ -166,6 +168,8 @@ export function createScriptApi(h: ScriptApiHost) {
       if (!s) return 'no road';
       const r = addUTurn(w, s[0], s[1]);
       if (typeof r === 'string') return r;
+      // settled like every road edit: the split segment's name and junction specs go to its pieces, and it is charged
+      if (r.empty || !r.settle()) return 'refused';
       h.commands.push(r);
       return 'ok';
     },
