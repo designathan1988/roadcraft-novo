@@ -970,3 +970,15 @@ test('cars: the cabin stays clear of the wheels (its door trim stood in the rear
     assert.equal(inside, 0, `${style}: ${inside} cabin triangles in a wheel's space`);
   }
 });
+
+test('D53: reset uninstalls through the source every cell that held a mesh (the seams clear their terrain holes)', () => {
+  const w = new World();
+  const uninstalled: Array<[number, number]> = [];
+  const src = { ...recordingSource(), installed: (c: number, level: number, m: PackedMesh | null) => { if (m === null) uninstalled.push([c, level]); } };
+  const layer = new CellLayer(src, w.dirty, Dirty.Buildings, new THREE.MeshBasicNodeMaterial(), { near: 1400, evict: 2600, margin: 40 });
+  const L = layer as unknown as { cells: Slot[][]; setMesh(s: Slot, m: PackedMesh | null, v: number, cell: number, level: number): void };
+  L.setMesh(L.cells[0][9], triangle(), 1, 9, 0);
+  uninstalled.length = 0;
+  layer.reset();
+  assert.deepEqual(uninstalled, [[9, 0]]);
+});

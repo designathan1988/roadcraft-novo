@@ -534,7 +534,12 @@ export class CellLayer {
 
   /** Forgets everything (when loading another city). */
   reset(): void {
-    for (const level of this.cells) for (const s of level) { this.setMesh(s, null, 0); s.requested = 0; }
+    // a cell that held or asked for a mesh is uninstalled through the source (the seams clear their holes in the
+    // terrain's paint, render/terrainSeams.ts): without it the next city kept the last one's holes (D53)
+    this.cells.forEach((level, l) => level.forEach((s, c) => {
+      if (s.mesh || s.requested) this.setMesh(s, null, 0, c, l); else this.setMesh(s, null, 0);
+      s.requested = 0;
+    }));
     for (const s of this.tiles) { this.setMesh(s, null, 0); s.requested = 0; }
     for (const s of this.plates) { this.setMesh(s, null, 0); s.requested = 0; }
     // versions only go forward: a job of the previous city still running answers with its old version and is dropped
