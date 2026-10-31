@@ -4,10 +4,13 @@
 // into this engine's mesh: the shell's faces with their paint and finish (the finishes texture array), and the parts
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
-import { madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, hypot3, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
+import { furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, hypot3, type PartKind, type Building, type RoofKind, type MadeBuilding } from '../r40/api.ts';
 import type { BufferGeometry } from 'three/webgpu';
 import { FIN } from './buildingFinishes.ts';
 import { Xoshiro128 } from '../core/rng.ts';
+import { madeToMeasure as massingB40 } from './b40/massing.ts';
+import { toBuilding40 } from './b40/adapter.ts';
+import { B40Table } from './b40/volumes.ts';
 import { MeshBuilder } from './meshBuilder.ts';
 
 /** Building materials as the generator writes them (jobs/buildingGen.ts BMAT). */
@@ -111,6 +114,7 @@ export type PartSink = (kind: string, x: number, y: number, z: number, yaw: numb
 type Body40 = Parameters<typeof furnishLot>[0];
 /** `placed`: the record as last placed in the world (one object: the party walls tell a building from its neighbours by identity). */
 interface KeptBody { use: string; density: string; W: number; D: number; body: Body40; placed?: { x: number; y: number; rot: number; b: Building } }
+const MASSING = new B40Table();
 const BODIES = new Map<number, KeptBody>();
 const BODIES_KEPT = 512;
 
@@ -123,13 +127,18 @@ function building40(lot: Lot40): Building {
     const rng = new Xoshiro128(seed);
     const plan = planLot(lotKind(lot.use, lot.density), lot.W, lot.D, rng);
     const env = plan.building;
-    const made = madeToMeasure(lot.use, lot.density, { W: env.x1 - env.x0, D: env.y1 - env.y0, backDoor: plan.back.use !== 'none' && plan.back.use !== 'loading', character: lot.seed & 0xffff, era: (lot.seed >>> 16) % 3 as 0 | 1 | 2 }, rng);
-    const body = made.body;
+    const madeB40 = massingB40(MASSING, lot.use, lot.density, { W: env.x1 - env.x0, D: env.y1 - env.y0, backDoor: plan.back.use !== 'none' && plan.back.use !== 'loading', character: lot.seed & 0xffff, era: (lot.seed >>> 16) % 3 as 0 | 1 | 2 }, rng);
+    const body = toBuilding40(MASSING, (lot.seed & 0x7fffffff) || 1, 0, 0, 0);
     // the plan's frame (x from the lot's left, y from the front) -> the lot's (x from its middle)
     const dx = env.x0 - lot.W / 2, dy = env.y0;
     for (const v of body.volumes) { v.x += dx; v.y += dy; }
     for (const e of body.elements ?? []) { e.x += dx; e.y += dy; }
     for (const c of body.cores ?? []) { c.x += dx; c.y += dy; }
+    const made: MadeBuilding = {
+      signature: { form: '', colour: 0, roof: '', storeys: 0 },
+      fn: (body.function ?? 'house') as MadeBuilding['fn'],
+      body, entrance: madeB40.entrance, backDoor: madeB40.backDoor, free: madeB40.free,
+    };
     furnishLot(body, plan, made, rng);
     const fresh: KeptBody = { use: lot.use, density: lot.density, W: lot.W, D: lot.D, body };
     BODIES.delete(seed);

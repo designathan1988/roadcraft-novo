@@ -21,6 +21,7 @@ export type {
   FacadeGeometry, Relief, VolumeDress, Space, BuildingUse, BuildingFunction, LotSurface, BlockMode,
 } from './world/buildings/types.ts';
 export type { MaterialSpec, VolumeMaterials } from './world/buildings/materialTypes.ts';
+export type { MadeBuilding, Envelope } from './world/buildings/procedural.ts';
 export type { BuildingChunk } from './render/buildings/chunk.ts';
 export type { PartBatch } from './render/buildings/chunk.ts';
 export type { MassDetail, MassingChunk } from './render/buildings/massing.ts';
