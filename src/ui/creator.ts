@@ -61,7 +61,7 @@ export class Creator {
       if (!v) return;
       const [, d, fl] = v.startsWith('m') ? loadMine()[Number(v.slice(1))] : PRESETS[Number(v.slice(1))];
       if (!d) return;
-      this.d = { ...d }; this.sync(); this.a.apply({ ...this.d }, fl);
+      this.d = { ...d }; this.floors = fl; this.sync(); this.a.apply({ ...this.d }, fl);
     });
     el.append(lab('Projeto'), this.presetSel);
     sel('Planta', SHAPES, 'shape');
