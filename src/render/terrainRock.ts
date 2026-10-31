@@ -74,11 +74,29 @@ export function soilTint(geo: N): N {
  * is first built, and built first inside one rock's If it was set only where that rock showed (a basalt wall with no
  * granite read zero weights: black walls, 2026-10-31).
  */
-function planes(p: N, n: N): { ws: N; uv: N[]; d: N[][] } {
+function planes(p: N, n: N, tile = ROCK_TILE): { ws: N; uv: N[]; d: N[][] } {
   const w3 = pow(abs(n), vec3(4, 4, 4));
   const ws = w3.div(max(w3.x.add(w3.y).add(w3.z), 1e-4)).toVar();
-  const uv = [p.zy.div(ROCK_TILE).toVar(), p.xz.div(ROCK_TILE).toVar(), p.xy.div(ROCK_TILE).toVar()];
+  const uv = [p.zy.div(tile).toVar(), p.xz.div(tile).toVar(), p.xy.div(tile).toVar()];
   return { ws, uv, d: uv.map((u) => [dFdx(u).toVar(), dFdy(u).toVar()]) };
+}
+
+/** The soil's map repeats every 13.6 m (4.0 uDirtScale). */
+const DIRT_TILE = 13.6;
+
+/**
+ * The soil's colour (linear) at `p`: read in plan on level ground and from the side on a slope, as the rock is (4.0
+ * terrain.ts:873-880: `sideW` = smoothstep(22°, 42°) of the slope). Read from above alone it smeared down every bank in
+ * long streaks (the dome's soil band, 2026-10-31).
+ */
+export function dirtColour(p: N, n: N, slopeDeg: N): N {
+  const tex = COOKED['terrain-land.map'], layer = int(LAND.Dirt);
+  const plan = texture(tex, p.xz.div(DIRT_TILE)).depth(layer).xyz;
+  const { ws, uv, d } = planes(p, n, DIRT_TILE);
+  const side = texture(tex, uv[0]).depth(layer).grad(d[0][0], d[0][1]).mul(ws.x)
+    .add(texture(tex, uv[1]).depth(layer).grad(d[1][0], d[1][1]).mul(ws.y))
+    .add(texture(tex, uv[2]).depth(layer).grad(d[2][0], d[2][1]).mul(ws.z)).xyz;
+  return sRGBTransferEOTF(mix(plan, side, smoothstep(22, 42, slopeDeg)));
 }
 
 /** One rock's triplanar read of `tex`, from its face layer (the walls) and its top layer (looking up): 4.0 rockTriColor. */

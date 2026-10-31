@@ -10,7 +10,7 @@ import { T, withPrevious, type Node } from './tsl.ts';
 import { GroundOverlays } from './groundOverlays.ts';
 import { TERRAIN_NOISE, WATER_TEX } from './surfaceBake.ts';
 import { COOKED, LAND, loadCookedSurfaces } from './cookedSurfaces.ts';
-import { rockColour, rockNormal, soilTint } from './terrainRock.ts';
+import { dirtColour, rockColour, rockNormal, soilTint } from './terrainRock.ts';
 import {
   HEIGHT_SPACING, HEIGHT_TILE_RES, MAP_HALF, MAP_SIZE, MAP_TAG, MAP_TILES, PLATE_SIZE, SEA_LEVEL, TILE_SIZE,
 } from '../config.ts';
@@ -546,7 +546,7 @@ export class TerrainRenderer {
       // the 4.0's dirt (terrain-land layer 8, 13.6 m), the soil of the rock it weathered from; the painted geology's
       // rock in its beds (terrainRock.ts); scree at the rock's fringe
       const geo = this.geologyAt(p);
-      const dirtC = sRGBTransferEOTF(texture(COOKED['terrain-land.map'], p.xz.div(13.6)).depth(int(LAND.Dirt)).xyz).mul(soilTint(geo));
+      const dirtC = dirtColour(p, n, blend.deg).mul(soilTint(geo));
       void dirt;
       const rockC = rockColour(p, n, blend.rockW, geo, blend.wanderA, blend.wanderC);
       // height blending (4.0 terrain.ts:877-888, Mishkinis): each layer's weight lifted by its own texture's
