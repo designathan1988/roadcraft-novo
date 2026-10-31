@@ -290,7 +290,7 @@ export class Traffic {
       const r = new Int32Array(cap * ROUTE_CAP); r.set(this.routes); this.routes = r;
       const m = new Int32Array(cap); m.set(this.micro); this.micro = m;
     });
-    sim.net.segs.onGrow((cap) => {
+    const onSegs = (cap: number) => {
       this.laneHead = grow(this.laneHead, cap * 16, -1);
       this.laneTail = grow(this.laneTail, cap * 16, -1);
       this.meso.grow(cap * 16);
@@ -301,18 +301,21 @@ export class Traffic {
       this.segLoad = grow(this.segLoad, cap * 2, 0);
       this.segWear = grow(this.segWear, cap, 0);
       this.router.segLoad = this.segLoad;
-    });
-    sim.conns.onGrow((cap) => {
+    };
+    sim.net.segs.onGrow(onSegs);
+    const onConns = (cap: number) => {
       this.connHead = grow(this.connHead, cap, -1);
       this.connTail = grow(this.connTail, cap, -1);
       this.junctions.growConns(cap);
-    });
-    sim.net.nodes.onGrow((cap) => {
+    };
+    sim.conns.onGrow(onConns);
+    const onNodes = (cap: number) => {
       this.nodePass = grow(this.nodePass, cap, 0);
       this.lastAdmit = grow(this.lastAdmit, cap, 0);
       this.releaseAt = grow(this.releaseAt, cap, 0);
       this.jamAt = grow(this.jamAt, cap, 0);
-    });
+    };
+    sim.net.nodes.onGrow(onNodes);
     const g = this;
     // the transitions between lanes and connections, for every module
     const moves = {
@@ -481,6 +484,11 @@ export class Traffic {
       tryDock: (v, lane) => g.tryDock(v, lane),
       unlink: (v) => g.unlink(v),
     });
+    // a network that grew before this Traffic was made (built first, mirrored later): its arrays take the network's
+    // size now, as the listeners above do for later growth (else segLoad stayed 1 << 15 and the router read NaN)
+    if (sim.net.segs.capacity > this.segWear.length) onSegs(sim.net.segs.capacity);
+    if (sim.conns.capacity > this.connHead.length) onConns(sim.conns.capacity);
+    if (sim.net.nodes.capacity > this.nodePass.length) onNodes(sim.net.nodes.capacity);
   }
 
   get count(): number { return this.veh.size; }
