@@ -263,10 +263,13 @@ export class PropRenderer {
       return;
     }
     const material = this.createMaterial('gpu');
+    // The 4.0 building parts have one level and no alpha: without the fade/alpha mask their shader keeps early-Z,
+    // which the whole pool lost to the dither (PowerVR architecture guide, "Do not use discard").
+    const opaqueMaterial = this.createMaterial('gpu', false);
     this.kinds.forEach((d, t) => d.lods.forEach((g, l) => {
       if (!g) return;
       g.setIndirect(this.drawAttr, (t * LODS + l) * 5 * 4);
-      const mesh = new THREE.Mesh(g, material);
+      const mesh = new THREE.Mesh(g, PART_TYPES.includes(d.type) ? opaqueMaterial : material);
       mesh.frustumCulled = false;
       mesh.userData.slot = t * LODS + l;
       const slot = t * LODS + l;
@@ -286,7 +289,7 @@ export class PropRenderer {
    * One material. 'gpu': the instance comes from the compute's visible list (WebGPU);
    * 'cpu': the instance comes from instanced attributes per cell (WebGL 2, near only).
    */
-  private createMaterial(source: 'gpu' | 'cpu'): THREE.MeshStandardNodeMaterial {
+  private createMaterial(source: 'gpu' | 'cpu', mask = true): THREE.MeshStandardNodeMaterial {
     const m = new THREE.MeshStandardNodeMaterial();
     const gpu = source === 'gpu';
     const slotU = gpu ? uniform(0, 'uint').onObjectUpdate(({ object }: { object: THREE.Object3D }) => object.userData.slot as number) : null;
@@ -489,7 +492,7 @@ export class PropRenderer {
     // fading between levels
     const noise = interleavedGradientNoise(screenCoordinate.xy);
     const fadeOk = select(vComp.greaterThan(0.5), noise.greaterThanEqual(float(1).sub(vFade)), noise.lessThan(vFade.add(0.002)));
-    m.maskNode = fadeOk.and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5))).and(isCardF.lessThan(0.5).or(leafC.a.greaterThan(0.5)));
+    if (mask) m.maskNode = fadeOk.and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5))).and(isCardF.lessThan(0.5).or(leafC.a.greaterThan(0.5)));
     return m;
   }
 
