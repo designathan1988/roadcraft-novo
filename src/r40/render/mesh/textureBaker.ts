@@ -51,33 +51,6 @@ export function fbm(
   return sum / total;
 }
 
-/** The RGBA texels of a tangent-space normal map derived from a height field by central difference, written into `out` (size * size * 4). */
-export function normalTexels(height: Float32Array, size: number, strength: number, out: Uint8Array | Uint8ClampedArray): void {
-  for (let y = 0; y < size; y++) {
-    const row = y * size;
-    const above = (y === 0 ? size - 1 : y - 1) * size;
-    const below = (y + 1 === size ? 0 : y + 1) * size;
-    let left = size - 1;
-    for (let x = 0; x < size; x++) {
-      const right = x + 1 === size ? 0 : x + 1;
-      const dx = ((height[row + right] as number) - (height[row + left] as number)) * strength;
-      const dy = ((height[below + x] as number) - (height[above + x] as number)) * strength;
-      left = x;
-      // Recipe heights are bounded near 0..1, so direct length cannot overflow
-      const length = Math.sqrt(dx * dx + dy * dy + 1);
-      const index = (y * size + x) * 4;
-      // Every channel in [-1, 1] as [0, 1]: three decodes all three with `* 2.0 - 1.0`
-      out[index] = Math.round(((-dx / length) * 0.5 + 0.5) * 255);
-      out[index + 1] = Math.round(((-dy / length) * 0.5 + 0.5) * 255);
-      out[index + 2] = Math.round(((1 / length) * 0.5 + 0.5) * 255);
-      out[index + 3] = 255;
-    }
-  }
-}
-
-/** A value in 0..1 as a texel byte. */
-const byte = (value: number): number => Math.round(Math.min(1, Math.max(0, value)) * 255);
-
 export interface SurfaceRecipe {
   readonly size: number;
   /** World units covered by one tile of the texture. */
@@ -92,50 +65,4 @@ export interface SurfaceRecipe {
   readonly relief: number;
   /** A surface of metal and non-metal side by side (a curtain wall's aluminium mullions round its glass) */
   readonly metallic?: boolean;
-}
-
-/** One recipe's colour, normal and roughness texels (RGBA, rows top first as a canvas holds them). */
-interface SurfaceTexels {
-  readonly size: number;
-  readonly map: Uint8Array;
-  readonly normal: Uint8Array;
-  /** Roughness in red and green and, for a `metallic` recipe, metalness in blue */
-  readonly rough: Uint8Array;
-}
-
-/** Bakes one recipe's colour, normal and roughness texels in a single sweep. */
-export function surfaceTexels(recipe: SurfaceRecipe): SurfaceTexels {
-  const size = recipe.size;
-  const n = size * size;
-  const map = new Uint8Array(n * 4);
-  // Float32, as the canvas bake kept them: the same bytes come out
-  const height = new Float32Array(n);
-  const rough = new Float32Array(n);
-  const metal = recipe.metallic ? new Float32Array(n) : undefined;
-  const out = { r: 0, g: 0, b: 0, h: 0, rough: 0.9, metal: 0 };
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      out.metal = 0;
-      recipe.shade(x, y, out);
-      const index = y * size + x;
-      map[index * 4] = byte(out.r);
-      map[index * 4 + 1] = byte(out.g);
-      map[index * 4 + 2] = byte(out.b);
-      map[index * 4 + 3] = 255;
-      height[index] = out.h;
-      rough[index] = out.rough;
-      if (metal) metal[index] = out.metal;
-    }
-  }
-  const normal = new Uint8Array(n * 4);
-  normalTexels(height, size, recipe.relief, normal);
-  const roughTexels = new Uint8Array(n * 4);
-  for (let i = 0; i < n; i++) {
-    const v = byte(rough[i] as number);
-    roughTexels[i * 4] = v;
-    roughTexels[i * 4 + 1] = v;
-    roughTexels[i * 4 + 2] = metal ? byte(metal[i] as number) : v;
-    roughTexels[i * 4 + 3] = 255;
-  }
-  return { size, map, normal, rough: roughTexels };
 }

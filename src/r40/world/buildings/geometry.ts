@@ -3,7 +3,7 @@ import { steadyRatio } from '../../core/scalar.ts';
 import type { Vec2 } from '../../core/vec2.ts';
 import { pointInPolygon } from '../../core/polygon.ts';
 import { TUNED_UNIT, m } from '../units.ts';
-import { localFootprint, edgeFrame, volumeSides, offsetRing, overlapArea, supportShare } from './footprints.ts';
+import { localFootprint, edgeFrame, volumeSides, offsetRing } from './footprints.ts';
 import {
   BAY_COMPONENTS,
   type BayComponent,
@@ -62,11 +62,6 @@ export function worldToLocal(b: Frame, p: Vec2): Vec2 {
   const dx = p.x - b.x;
   const dy = p.y - b.y;
   return { x: dx * c + dy * s, y: -dx * s + dy * c };
-}
-
-/** `worldToLocal` for a point the pointer gives (a click). */
-export function worldToLocalAt(b: Building, p: Vec2): Vec2 {
-  return worldToLocal(b, p);
 }
 
 /** A local direction turned into the world. */
@@ -172,11 +167,6 @@ export function solidFootprints(b: Building, grow = 0): Vec2[][] {
   return groundVolumes(b).filter((v) => !v.open).map((v) => volumeCorners(b, v, grow));
 }
 
-/** World corner rings of every ground volume: the building's footprint. */
-export function footprintRects(b: Building, grow = 0): Vec2[][] {
-  return groundVolumes(b).map((v) => volumeCorners(b, v, grow));
-}
-
 /** Local bounding box of the footprint, world units. */
 export function footprintBox(b: Building): { x0: number; y0: number; x1: number; y1: number } {
   const ground = groundVolumes(b);
@@ -193,12 +183,6 @@ export function footprintBox(b: Building): { x0: number; y0: number; x1: number;
   }
   if (!Number.isFinite(x0)) return { x0: 0, y0: 0, x1: b.module, y1: b.module };
   return { x0, y0, x1, y1 };
-}
-
-/** World centre of the footprint's bounding box. */
-export function footprintCentre(b: Building): Vec2 {
-  const f = footprintBox(b);
-  return localToWorld(b, (f.x0 + f.x1) / 2, (f.y0 + f.y1) / 2);
 }
 
 /** An element's plan, local frame: [x0, y0, x1, y1]. `w` runs across its facing, `d` along it. */
@@ -276,30 +260,6 @@ export function storedBounds(b: Building, grow = 0): Bounds {
   if (!box) byGrow.set(grow, box = buildingBounds(b, grow));
   return box;
 }
-
-// ------------------------------------------------------------------ solids
-
-
-/** Whether two volumes share floor area in plan (touching is not sharing). */
-export const planOverlap = (a: Volume, c: Volume): boolean =>
-  a.outline || c.outline ? overlapArea(localFootprint(a), localFootprint(c)) > EPS :
-  a.x < c.x + c.w - EPS && c.x < a.x + a.w - EPS && a.y < c.y + c.d - EPS && c.y < a.y + a.d - EPS;
-
-/** Whether a volume above the ground has something under every part of it */
-export function isSupported(b: Building, v: Volume): boolean {
-  // A cut or a clip carries nothing and needs nothing under it.
-  if (v.base === 0 || !isMass(v)) return true;
-  // A block may overhang - a cantilever, a balcony block, a brick set half over the edge
-  const floor = volumeElevation(b, v, v.base);
-  const bears = (o: Volume): boolean => Math.abs(volumeLift(o) - volumeLift(v)) < EPS
-    ? occupiesLevel(o, v.base - 1)
-    : volumeElevation(b, o, o.base) < floor - EPS && volumeElevation(b, o, volumeTop(o)) >= floor - EPS;
-  const supports = b.volumes.filter((o) => o.id !== v.id && isMass(o) && bears(o)).map(localFootprint);
-  return supportShare(localFootprint(v), supports) >= MIN_BEARING;
-}
-
-/** The share of a block's plan that must bear on the blocks under it. */
-const MIN_BEARING = 0.3;
 
 // ------------------------------------------------------------------ facades
 
@@ -460,40 +420,6 @@ export function projectionRect(b: Building, v: Volume, r: Relief): [number, numb
     case 1: return [v.x + v.w, v.y + a0, v.x + v.w + r.depth, v.y + a1];
     default: return [v.x - r.depth, v.y + a0, v.x, v.y + a1];
   }
-}
-
-/** World rings of the projections that stand on the ground (from the first storey of a ground volume) */
-export function groundProjections(b: Building, grow = 0): Vec2[][] {
-  const out: Vec2[][] = [];
-  for (const v of groundVolumes(b)) {
-    for (const r of v.reliefs ?? []) {
-      if (r.storey0 !== 0) continue;
-      const rect = projectionRect(b, v, r);
-      if (!rect) continue;
-      if (v.outline) {
-        const f = edgeFrame(v, r.side), width = bayWidth(b, v, r.side);
-        const start = r.bay0 * width, end = (r.bay1 + 1) * width;
-        const at = (a: number, d: number): Vec2 => localToWorld(b, f.x + f.tx * a + f.nx * d, f.y + f.ty * a + f.ny * d);
-        out.push([at(start - grow, -grow), at(end + grow, -grow), at(end + grow, r.depth + grow), at(start - grow, r.depth + grow)]);
-        continue;
-      }
-      const [x0, y0, x1, y1] = rect;
-      out.push([
-        localToWorld(b, x0 - grow, y0 - grow),
-        localToWorld(b, x1 + grow, y0 - grow),
-        localToWorld(b, x1 + grow, y1 + grow),
-        localToWorld(b, x0 - grow, y1 + grow),
-      ]);
-    }
-  }
-  return out;
-}
-
-/** Local centre of bay `index` on the facade line of `side`. */
-export function bayCentreLocal(b: Building, v: Volume, side: FaceId, index: number): Vec2 {
-  const s = sideStart(v, side);
-  const a = (index + 0.5) * bayWidth(b, v, side);
-  return { x: s.x + s.tx * a, y: s.y + s.ty * a };
 }
 
 /** What one exposed bay (or piece of one) of one storey is wherever its building stands. */
@@ -788,10 +714,3 @@ export function roofHeightAt(b: Building, v: Volume, p: Vec2): number {
 
 /** Height of a volume's top (eaves), above the building's ground floor, its lift included. */
 export const volumeHeight = (b: Building, v: Volume): number => volumeElevation(b, v, volumeTop(v));
-
-/** The highest point of the building above its ground floor. */
-export function buildingHeight(b: Building): number {
-  let h = 0;
-  for (const v of b.volumes) h = Math.max(h, volumeHeight(b, v) + roofRise(b, v));
-  return h;
-}

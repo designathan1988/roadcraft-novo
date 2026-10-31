@@ -58,26 +58,9 @@ export const FURNITURE_SIZE: Readonly<Record<FurnitureKind, readonly [number, nu
   // A flight to the floor above (its foot at the front), and the opening it arrives through.
   stairs: [1, 3.4, 2.9], stairwell: [1.15, 3.5, 1],
 };
-
-/** The pieces that give light: the room lights are where these are. */
-export const LAMP_KINDS: ReadonlySet<FurnitureKind> = new Set(['ceilingLamp', 'floorLamp', 'tableLamp']);
 export const isFurnitureKind = (v: unknown): v is FurnitureKind => (FURNITURE_KINDS as readonly unknown[]).includes(v);
 
 const RIGHT = Math.PI / 2;
-
-/** The building as drawn cut open at `level` */
-export function cutOpen(b: Building, level: number, view?: { x: number; y: number }): Building {
-  const top = Math.max(0, ...b.volumes.map((v) => volumeTop(v) - 1));
-  const at = Math.max(0, Math.min(level, top));
-  return {
-    ...b,
-    volumes: b.volumes
-      .filter((v) => v.open || v.base <= at)
-      .map((v) => (v.open ? v : { ...v, storeys: v.storeys.slice(0, at - v.base + 1) })),
-    cutaway: at,
-    ...(view ? { cutView: view } : {}),
-  };
-}
 
 /** A flight of stairs between two blocks of a building standing at floors of their own (a split level, `Volume.lift`) */
 export interface LevelFlight {
@@ -245,11 +228,6 @@ function roomLights(items: readonly Furniture[]): Furniture[] {
   }
   const [w, d, h] = FURNITURE_SIZE.ceilingLamp;
   return rooms.map((r) => ({ kind: 'ceilingLamp' as const, x: r.x / r.n, y: r.y / r.n, w: m(w), d: m(d), h: m(h), angle: 0 }));
-}
-
-/** A floor's furniture as stored pieces: what an edit starts from. */
-export function furnishingOf(b: Building, level: number): PlacedFurniture[] {
-  return interiorAt(b, level).furniture.map((f) => ({ kind: f.kind, x: f.x, y: f.y, angle: f.angle }));
 }
 
 function defaultFunction(b: Building): BuildingFunction {

@@ -1,6 +1,5 @@
-import type { ChangeRect } from './cells.ts';
+
 import { m } from './units.ts';
-import { lotCentre } from './lotRings.ts';
 
 /** THE WORLD'S TILES: an unbounded grid of 1,024 m squares, the unit the world is generated, kept, loaded and drawn by (CLAUDE.md, "Streaming world") */
 
@@ -27,21 +26,6 @@ export function tileKey(i: number, j: number): number {
   return (i + TILE_REACH) * (TILE_REACH * 2) + (j + TILE_REACH);
 }
 
-/** The column and row of a tile's key. */
-export function tileOfKey(key: number): TileIJ {
-  const side = TILE_REACH * 2;
-  return { i: Math.floor(key / side) - TILE_REACH, j: (key % side) - TILE_REACH };
-}
-
-/** The key of the tile a point lies in. */
-export const tileKeyAt = (x: number, y: number): number => {
-  const { i, j } = tileIJ(x, y);
-  return tileKey(i, j);
-};
-
-/** A tile's square as a diary rectangle (`changes.ts`): what a load or an unload of it reaches. */
-export const tileRect = (i: number, j: number): ChangeRect => [i * TILE, j * TILE, (i + 1) * TILE, (j + 1) * TILE];
-
 /** The ids a tile hands out: each tile its own range, so a tile is made, kept and loaded alone and two tiles never name one record alike */
 export const TILE_IDS = 1 << 20;
 
@@ -65,38 +49,3 @@ export function edgeNodeId(x: number, y: number): number | null {
   const step = Math.round(along / EDGE_STEP);
   return tileIdBase(tileKey(i, j)) + TILE_COUNTED + (onX ? 0 : 1 << 17) + step;
 }
-
-/** The tiles within `radius` tiles of the tile at (`i`, `j`), the nearest first (a square ring by ring). */
-export function tilesAround(i: number, j: number, radius: number): TileIJ[] {
-  const out: TileIJ[] = [{ i, j }];
-  for (let r = 1; r <= radius; r++) {
-    for (let di = -r; di <= r; di++) {
-      out.push({ i: i + di, j: j - r }, { i: i + di, j: j + r });
-    }
-    for (let dj = -r + 1; dj <= r - 1; dj++) {
-      out.push({ i: i - r, j: j + dj }, { i: i + r, j: j + dj });
-    }
-  }
-  return out;
-}
-
-/** Which tile a record belongs to: every record to one tile only, by the point that files it */
-/** The tile a record of the document belongs to (`OWNER`), from its value (a node, a lot, a barrier...) or, for a road or a span whose value is gone, from its per-tile id; null when it cannot be said (a pre-tile map's road). */
-export function tileOfRecord(part: string, id: number, value: unknown): number | null {
-  const v = value as { x?: number; y?: number; corners?: readonly { x: number; y: number }[]; points?: readonly { x: number; y: number }[] } | undefined;
-  if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) return OWNER.at(v as { x: number; y: number });
-  if (v?.corners?.length) return OWNER.at(lotCentre(v as { corners: readonly { x: number; y: number }[] }));
-  if (v?.points?.length) return OWNER.at(v.points[0]!);
-  return id >= TILE_IDS && (part === 'segments' || part === 'poleSpans') ? Math.floor(id / TILE_IDS) - 1 : null;
-}
-
-export const OWNER = {
-  /** A node: where it stands. */
-  node: (n: { readonly x: number; readonly y: number }): number => tileKeyAt(n.x, n.y),
-  /** A road: the tile of the middle of its ends (a border avenue on the edge: the tile whose low edge it is; a street crossing an edge: the side it mostly lies on); an end in another tile is kept with it as a borrowed node. */
-  segment: (a: { readonly x: number; readonly y: number }, b: { readonly x: number; readonly y: number }): number => tileKeyAt((a.x + b.x) / 2, (a.y + b.y) / 2),
-  /** A span: the tile of the middle of its poles, as a road's (its other pole, if across an edge, borrowed). */
-  span: (a: { readonly x: number; readonly y: number }, b: { readonly x: number; readonly y: number }): number => tileKeyAt((a.x + b.x) / 2, (a.y + b.y) / 2),
-  /** A building or a lot, a pole, a tree, a dab, an item: its anchor. */
-  at: (p: { readonly x: number; readonly y: number }): number => tileKeyAt(p.x, p.y),
-} as const;

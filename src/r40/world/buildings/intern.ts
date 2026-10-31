@@ -21,13 +21,6 @@ function letGoInterned(h: number, ref: WeakRef<object>): void {
 /** DO NOT keep the entry of an object collected (its WeakRef, its bucket, its hash's key): a bucket was only swept when its own hash came again, so every thread that read buildings (the page, each job worker, the simulation) kept an entry for every shape it ever read - ~39,000 a dense tile - in the one V8 heap the page and its workers share (`jobs/jobPool.ts` CAGE_BYTES), and the page died at ~7.5 GB moving round the city (conferencia conf7-conf9, 2026-10-17). Let go when the collector takes the object (MDN, FinalizationRegistry). */
 const collected = new FinalizationRegistry<{ readonly h: number; readonly ref: WeakRef<Plain> }>(({ h, ref }) => letGoInterned(h, ref));
 
-/** Entries of the table now, and hashes: what the tests read. */
-export function internedEntries(): { readonly entries: number; readonly hashes: number } {
-  let entries = 0;
-  for (const bucket of table.values()) entries += bucket.length;
-  return { entries, hashes: table.size };
-}
-
 /** Inside the hash: 32-bit FNV-1a over the key's pieces. */
 function mix(h: number, n: number): number {
   return Math.imul(h ^ n, 16777619) >>> 0;

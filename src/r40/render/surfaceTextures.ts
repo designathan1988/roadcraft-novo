@@ -38,30 +38,6 @@ class SurfaceTextureSet {
 
 const surfaces = new SurfaceTextureSet();
 
-/** The textures read from the build's files (`surfaceBakeClient.ts`), and where to read them again. */
-export function primeSurfaceTextures(loaded: ReadonlyMap<string, CompressedTexture>, source: (names: readonly string[]) => void): void {
-  surfaces.source = source;
-  for (const [name, texture] of loaded) {
-    texture.onUpdate = surfaces.letTexelsGo;
-    surfaces.byName.set(name, texture);
-  }
-}
-
-/** Texels read again: each let-go texture given its own and uploaded anew (it lets them go again after). */
-export function refillSurfaceTexels(loaded: ReadonlyMap<string, CompressedTexture>): void {
-  for (const [name, fresh] of loaded) {
-    const texture = surfaces.byName.get(name);
-    if (!texture || !surfaces.wanted.delete(name) || hasTexels(texture)) continue;
-    texture.mipmaps = fresh.mipmaps;
-    texture.needsUpdate = true;
-  }
-}
-
-/** Every baked texture let go, its texels needed again (the WebGL context restored). */
-export function wantAllTexels(): void {
-  surfaces.want([...surfaces.byName].filter(([, texture]) => !hasTexels(texture)).map(([name]) => name));
-}
-
 /** A baked texture by name, its anisotropy at least `anisotropy`; undefined where none was read (a worker, a test). */
 function surfaceTextureOrNone(name: string, anisotropy: number): Texture | undefined {
   const texture = surfaces.byName.get(name);
@@ -73,32 +49,10 @@ function surfaceTextureOrNone(name: string, anisotropy: number): Texture | undef
   return texture;
 }
 
-/** A baked texture by name (`bake/catalogue.ts`); the shaders need it, so a missing one is an error. */
-export function surfaceTexture(name: string, anisotropy: number): Texture {
-  const texture = surfaceTextureOrNone(name, anisotropy);
-  if (!texture) throw new Error(`Baked surface texture ${name} not loaded: cooked/surfaces (surface-bake-plugin) is missing it`);
-  return texture;
-}
-
 /** A surface's colour, normal and roughness maps; undefined where none were read (a worker, a test). */
 export function surfaceMaps(key: string, anisotropy: number): SurfaceBake | undefined {
   const map = surfaceTextureOrNone(`${key}:map`, anisotropy);
   const normalMap = surfaceTextureOrNone(`${key}:normal`, anisotropy);
   const roughnessMap = surfaceTextureOrNone(`${key}:rough`, anisotropy);
   return map && normalMap && roughnessMap ? { map, normalMap, roughnessMap } : undefined;
-}
-
-/** A surface's three maps, which its material's shader needs. */
-export function requireSurfaceMaps(key: string, anisotropy: number): SurfaceBake {
-  return {
-    map: surfaceTexture(`${key}:map`, anisotropy),
-    normalMap: surfaceTexture(`${key}:normal`, anisotropy),
-    roughnessMap: surfaceTexture(`${key}:rough`, anisotropy),
-  };
-}
-
-export function disposeSurfaceTextures(): void {
-  for (const texture of surfaces.byName.values()) texture.dispose();
-  surfaces.byName.clear();
-  surfaces.wanted.clear();
 }

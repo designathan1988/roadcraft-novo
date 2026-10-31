@@ -4,7 +4,6 @@ import { isSimple, pointInPolygon, signedArea } from '../../core/polygon.ts';
 import type { Vec2 } from '../../core/vec2.ts';
 import type { FaceId, RoofDetail, Volume } from './types.ts';
 import { identityMemo } from '../../core/identityMemo.ts';
-import { TUNED_UNIT } from '../units.ts';
 
 /** Polygon outlines are normalized to the volume's bounding rectangle. */
 export function validOutline(points: readonly Vec2[]): boolean {
@@ -54,9 +53,6 @@ function polygonArea(poly: clipping.MultiPolygon): number {
   return poly.reduce((total, rings) => total + rings.reduce((sum, ring, index) =>
     sum + (index === 0 ? 1 : -1) * Math.abs(signedArea(ring.map(([x, y]) => ({ x, y })))), 0), 0);
 }
-
-/** Two footprints overlapping by less than this area (a square of some 1.3 mm) only touch */
-export const AREA_EPS = 1e-5 * TUNED_UNIT * TUNED_UNIT;
 
 /** The area two rings share. DO NOT clip two rings whose boxes are apart (a building's boundary piece against every ring of its neighbours, each a polygon clipping: 11.7 s of a tile maker's 89 s, 2026-10-16): no area in common, exactly. */
 /** DO NOT sweep two convex rings with the general clipper (Martinez, `polygon-clipping`): nearly every block, lot and part is a rectangle, and the share of two convex rings is one ring clipped by the other's edges (Sutherland and Hodgman 1974). Only a ring that is not convex goes to the sweep. */
@@ -133,12 +129,6 @@ export function supportShare(ring: readonly Vec2[], supports: readonly Vec2[][])
   const area = Math.abs(signedArea(ring));
   if (supports.length === 0 || area < 1e-9) return 0;
   return Math.max(0, 1 - (area - coveredArea(ring, supports, area)) / area);
-}
-
-export function supportedBy(ring: readonly Vec2[], supports: readonly Vec2[][]): boolean {
-  if (supports.length === 0) return false;
-  const area = Math.abs(signedArea(ring));
-  return area - coveredArea(ring, supports, area) < AREA_EPS;
 }
 
 export function containsPoint(v: Volume, p: Vec2): boolean {

@@ -30,11 +30,6 @@ export function luminanceOf(hex: number): number {
   return 0.2126 * scratch.r + 0.7152 * scratch.g + 0.0722 * scratch.b;
 }
 
-/** The factor a colour is multiplied by after dark to reach `target` luminance, over the 1 it is drawn with by day */
-export function nightGain(hex: number, target: number): number {
-  return Math.max(0, target / Math.max(1e-4, luminanceOf(hex)) - 1);
-}
-
 /** A soft round falloff, white in the middle, for a pool or a splash of lamplight laid additively on the ground or a wall */
 export function lightPoolTexture(): DataTexture {
   const size = 64;

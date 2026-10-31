@@ -15,22 +15,3 @@ export interface Zone {
   readonly seed: number;
   readonly buildingIds: readonly number[];
 }
-
-export const isZoneUse = (value: unknown): value is ZoneUse => ZONE_USES.includes(value as ZoneUse);
-export const isZoneDensity = (value: unknown): value is ZoneDensity => ZONE_DENSITIES.includes(value as ZoneDensity);
-
-/** One zoned cell of the street grid */
-export interface ZoneMark {
-  readonly x: number;
-  readonly y: number;
-  readonly use: ZoneUse;
-  readonly density: ZoneDensity;
-  /** The building that grew on it, while that building stands. */
-  readonly building?: number;
-}
-
-export const isZoneMark = (raw: unknown): raw is ZoneMark => {
-  const v = raw as Partial<ZoneMark> | null;
-  return !!v && Number.isFinite(v.x) && Number.isFinite(v.y) && isZoneUse(v.use) && isZoneDensity(v.density) &&
-    (v.building === undefined || Number.isInteger(v.building));
-};

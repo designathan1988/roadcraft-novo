@@ -5,7 +5,6 @@ import { FINISHES, type Finish } from '../../world/buildings/materials.ts';
 import { FURNITURE_KINDS, type FurnitureKind } from '../../world/buildings/interior.ts';
 import { FACADE_PROP_KINDS } from './facadeProps.ts';
 import type { BuildingChunk, PartBatch, PartKind, RunChunk, ShellChunk } from './chunk.ts';
-import type { MassingChunk } from './massing.ts';
 import { ROOM_FLOATS } from './roomBehind.ts';
 import { LOOK_FLOATS, SHELL_PARTS, SHELL_PART_KINDS } from './shellParts.ts';
 import { POSE_FLOATS, poseMatrixInto } from './partPose.ts';
@@ -120,15 +119,6 @@ export function octNormal(x: number, y: number, z: number, out: Int16Array, at: 
     u = nu; v = nv;
   }
   out[at] = snorm16(u); out[at + 1] = snorm16(v);
-}
-
-/** A normal back from its two shorts, as the shell's program reads it (`finishes.ts` `shellOctNormal`). */
-export function octDecode(a: number, b: number): [number, number, number] {
-  let x = Math.max(-1, a / NORMAL_UNIT), y = Math.max(-1, b / NORMAL_UNIT);
-  const z = 1 - Math.abs(x) - Math.abs(y);
-  if (z < 0) { const nx = (1 - Math.abs(y)) * (x >= 0 ? 1 : -1), ny = (1 - Math.abs(x)) * (y >= 0 ? 1 : -1); x = nx; y = ny; }
-  const l = Math.hypot(x, y, z) || 1;
-  return [x / l, y / l, z / l];
 }
 
 /** A piece of a batch's shells of every finish, one geometry drawn in one call: 24 bytes a vertex, 44 on the far level's runs of bays with openings */
@@ -258,75 +248,9 @@ export function massGrid(square: MassSquare, lowest: number): ShellGrid {
   return { x: square.i0 * CELL - SHELL_GRID_MARGIN, y: lowest, z: -(square.j0 + square.n) * CELL - SHELL_GRID_MARGIN, step: span / 65535 };
 }
 
-/** A mass's places in floats, as the GPU reads them back (from its grid, if on one). */
-export function massPlaces(mass: CellMass): Float32Array {
-  const place = mass.place;
-  if (!place) return mass.position as Float32Array;
-  const q = mass.position as Uint16Array, n = q.length / 4, out = new Float32Array(n * 3), span = Math.fround(place.step * 65535);
-  for (let v = 0; v < n; v++) {
-    out[v * 3] = Math.fround(Math.fround(q[v * 4]! / 65535) * span) + Math.fround(place.x);
-    out[v * 3 + 1] = Math.fround(Math.fround(q[v * 4 + 1]! / 65535) * span) + Math.fround(place.y);
-    out[v * 3 + 2] = Math.fround(Math.fround(q[v * 4 + 2]! / 65535) * span) + Math.fround(place.z);
-  }
-  return out;
-}
-
-/** A mass's places in floats put on its square's grid; the mass as it was where a point falls off it. */
-export function massOnGrid(mass: CellMass, square: MassSquare): CellMass {
-  const p = massPlaces(mass), n = p.length / 3;
-  const grid = massGrid(square, mass.bounds[1]!);
-  const q = new Uint16Array(n * 4);
-  for (let v = 0; v < n; v++) {
-    for (let k = 0; k < 3; k++) {
-      const s = Math.round((p[v * 3 + k]! - (k === 0 ? grid.x : k === 1 ? grid.y : grid.z)) / grid.step);
-      if (!(s >= 0 && s <= 65535)) return mass;
-      q[v * 4 + k] = s;
-    }
-  }
-  return { ...mass, position: q, place: grid };
-}
-
-/** The masses of a cell's buildings, or a tile's or a plate's (`massLevels.ts`), merged as one set of arrays, on `square`'s grid when given (`massGrid`); null when none has any. */
-export function cellMass(masses: readonly MassingChunk[], square?: MassSquare): CellMass | null {
-  const merged = mergedMass(masses);
-  return merged && square ? massOnGrid(merged, square) : merged;
-}
-
-/** The masses merged, their places in floats. */
-function mergedMass(masses: readonly MassingChunk[]): CellMass | null {
-  let vertices = 0, indices = 0, error = 0;
-  for (const c of masses) { vertices += c.position.length / 3; indices += c.index.length; error = Math.max(error, c.error); }
-  if (indices === 0) return null;
-  const position = new Float32Array(vertices * 3), normal = new Int8Array(vertices * 4), color = new Uint16Array(vertices * 4);
-  const facade = new Float32Array(vertices * MASS_FACADE), grid = new Uint16Array(vertices * MASS_GRID), seed = new Float32Array(vertices), index = indexArray(vertices, indices);
-  let v = 0, n = 0, top = -Infinity;
-  for (const c of masses) {
-    position.set(c.position, v * 3);
-    for (let k = 0, count = c.position.length / 3; k < count; k++) {
-      const at = v + k;
-      normal[at * 4] = snorm(c.normal[k * 3]!); normal[at * 4 + 1] = snorm(c.normal[k * 3 + 1]!); normal[at * 4 + 2] = snorm(c.normal[k * 3 + 2]!);
-      for (let ch = 0; ch < 3; ch++) color[at * 4 + ch] = DataUtils.toHalfFloat(c.colour[k * 3 + ch]!);
-      // The chunk's facade (along, bay, storey, foot) and glazing (share, seed), split by what each needs.
-      facade[at * MASS_FACADE] = c.facade[k * 4]!; facade[at * MASS_FACADE + 1] = c.facade[k * 4 + 3]!;
-      grid[at * MASS_GRID] = DataUtils.toHalfFloat(c.facade[k * 4 + 1]!); grid[at * MASS_GRID + 1] = DataUtils.toHalfFloat(c.facade[k * 4 + 2]!);
-      grid[at * MASS_GRID + 2] = DataUtils.toHalfFloat(c.glazing[k * 2]!);
-      seed[at] = c.glazing[k * 2 + 1]!;
-    }
-    for (let i = 0; i < c.index.length; i++) index[n + i] = c.index[i]! + v;
-    for (let i = 1; i < c.position.length; i += 3) top = Math.max(top, c.position[i]!);
-    v += c.position.length / 3;
-    n += c.index.length;
-  }
-  return { position, normal, color, facade, grid, seed, index, bounds: shellBounds(position), top, error };
-}
-
 /** A mass vertex's numbers: its facade's full floats, its grid's half floats (`CellMass`): 44 bytes a vertex with its place, normal, colour and seed (52 in full floats). */
 export const MASS_FACADE = 2;
 export const MASS_GRID = 4;
-
-/** Every buffer of a cell's masses: handed over, not copied. */
-export const cellMassBuffers = (c: CellMass): ArrayBuffer[] =>
-  [c.position, c.normal, c.color, c.facade, c.grid, c.seed, c.index, c.bounds].map((a) => a.buffer as ArrayBuffer);
 
 /** Numbers a box of a box level is drawn from (`massBoxes.ts`): centre x, y, half sides, turn; wall's foot, top, floor; wall rgb, bay; roof rgb, storey; glass share, seed. */
 export const BOX_INSTANCE = 18;
@@ -337,45 +261,6 @@ export interface BoxMass {
   readonly bounds: Bounds;
   readonly top: number;
   readonly error: number;
-}
-
-/** A far level's masses: a mesh's arrays, or boxes to instance. */
-export type FarMass = CellMass | BoxMass;
-export const isBoxMass = (m: FarMass): m is BoxMass => 'boxes' in m;
-/** Every buffer of a far level's masses: handed over, not copied. */
-export const farMassBuffers = (m: FarMass): ArrayBuffer[] => (isBoxMass(m) ? [m.boxes.buffer as ArrayBuffer, m.bounds.buffer as ArrayBuffer] : cellMassBuffers(m));
-
-/** What a batch sends to the GPU, in bytes: every array but the bounds (kept on the page), the kit's shared geometry not counted. */
-export function cellBytes(arrays: CellArrays): number {
-  let bytes = 0;
-  for (const s of arrays.shells) bytes += s.position.byteLength + s.normal.byteLength + s.paint.byteLength + s.index.byteLength + (s.facade?.byteLength ?? 0) + (s.grid?.byteLength ?? 0) + (s.opening?.byteLength ?? 0);
-  for (const list of [arrays.parts, arrays.furniture]) {
-    for (const p of Object.values(list) as (InstanceArrays | undefined)[]) {
-      if (!p) continue;
-      bytes += p.poses.byteLength;
-      for (const a of [p.instanceColor, p.litSlot, p.rooms, p.looks]) if (a) bytes += a.byteLength;
-    }
-  }
-  return bytes;
-}
-
-/** Every array buffer of a batch: handed over, not copied (MDN, `postMessage` transfer). */
-export function cellBuffers(arrays: CellArrays): ArrayBuffer[] {
-  const out: ArrayBufferLike[] = [];
-  for (const s of arrays.shells) {
-    out.push(s.position.buffer, s.normal.buffer, s.paint.buffer, s.index.buffer, s.bounds.buffer);
-    if (s.facade) out.push(s.facade.buffer);
-    if (s.grid) out.push(s.grid.buffer);
-    if (s.opening) out.push(s.opening.buffer);
-  }
-  for (const list of [arrays.parts, arrays.furniture]) {
-    for (const p of Object.values(list) as (InstanceArrays | undefined)[]) {
-      if (!p) continue;
-      out.push(p.poses.buffer, p.bounds.buffer);
-      for (const a of [p.instanceColor, p.litSlot, p.rooms, p.looks]) if (a) out.push(a.buffer);
-    }
-  }
-  return out as ArrayBuffer[];
 }
 
 /** The most vertices a shell piece holds: every index of it fits 16 bits (meshoptimizer's advice: half the index memory and fetch), 65535 left out (WebGL 2.0 spec, "PRIMITIVE_RESTART_FIXED_INDEX is always enabled"). */
@@ -460,9 +345,6 @@ function shellArrays(chunks: readonly BuildingChunk[], of: FragmentsOf): ShellAr
 
 /** 1 in half float: an instance with no tint of its own. */
 const HALF_ONE = DataUtils.toHalfFloat(1);
-
-/** A number in [-1, 1] as a signed byte the GPU reads back normalised (x / 127, WebGL 2 `vertexAttribPointer`). */
-const snorm = (x: number): number => Math.round(Math.max(-1, Math.min(1, x)) * 127);
 
 /** A batch's own instance arrays from its chunks, in order: the matrices, the colours of a coloured kind */
 function partArrays(chunks: readonly BuildingChunk[], kind: PartKind, count: number, glassy: boolean, coloured: boolean, looked: boolean): {

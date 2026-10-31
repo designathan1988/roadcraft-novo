@@ -1,4 +1,4 @@
-import type { InstancedMesh, Mesh } from 'three';
+import type { Mesh } from 'three';
 
 /** CASTERS BY SIZE AND BY CASCADE: a mesh drawn into a sun cascade only when it holds instances and its widest thing reaches a texel there (`sunCascades.ts`). */
 
@@ -15,14 +15,4 @@ const casters = new Set<SizedCaster>();
 export function castBySize(caster: SizedCaster): () => void {
   casters.add(caster);
   return () => { casters.delete(caster); };
-}
-
-/** Each caster's `castShadow` for a cascade of `texel` world units; null: back to what its maker set, between the shadow passes (what the programs compiled ahead look at, `uploads.ts` shadowStandIns). */
-export function castCastersInto(texel: number | null): void {
-  for (const c of casters) {
-    if (texel === null) { c.mesh.castShadow = c.casts; continue; }
-    const instanced = c.mesh as InstancedMesh;
-    const holds = !instanced.isInstancedMesh || instanced.count > 0;
-    c.mesh.castShadow = c.casts && holds && c.radius() >= texel;
-  }
 }

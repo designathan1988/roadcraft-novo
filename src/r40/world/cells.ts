@@ -10,17 +10,6 @@ export const CELL = m(256);
 
 /** A cell's key from its column and row (both within ±32 767). */
 const cellKey = (cx: number, cy: number): number => (cx + 32768) * 65536 + (cy + 32768);
-const cellColumn = (key: number): number => Math.floor(key / 65536) - 32768;
-const cellRow = (key: number): number => (key % 65536) - 32768;
-
-/** The rectangle a cell covers. */
-export function cellRect(key: number): ChangeRect {
-  const x0 = cellColumn(key) * CELL, y0 = cellRow(key) * CELL;
-  return [x0, y0, x0 + CELL, y0 + CELL];
-}
-
-/** The key of the cell holding a point. */
-export const cellAt = (x: number, y: number): number => cellKey(Math.floor(x / CELL), Math.floor(y / CELL));
 
 /** Calls `visit` with every cell (of side `side`) a rectangle reaches. */
 function forCellsOver(rect: ChangeRect, visit: (key: number) => void, side = CELL): void {

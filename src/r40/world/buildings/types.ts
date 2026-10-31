@@ -1,4 +1,4 @@
-import { internMembers } from './intern.ts';
+
 import { m } from '../units.ts';
 import type { Vec2 } from '../../core/vec2.ts';
 import type { BuildingMaterials, MaterialSpec, VolumeMaterials } from './materialTypes.ts';
@@ -7,7 +7,6 @@ import type { BuildingMaterials, MaterialSpec, VolumeMaterials } from './materia
 
 declare const BuildingIdBrand: unique symbol;
 export type BuildingId = number & { readonly [BuildingIdBrand]: true };
-export const asBuildingId = (n: number): BuildingId => n as BuildingId;
 
 /** The schema written on every stored building. */
 export const BUILDING_SCHEMA = 2;
@@ -41,8 +40,6 @@ export type BayComponent = (typeof BAY_COMPONENTS)[number];
 
 export const FACADE_PATTERNS = ['residential', 'storefront', 'office', 'industrial', 'arcade', 'gallery', 'artDeco', 'artDecoCrown', 'observation'] as const;
 export type FacadePattern = (typeof FACADE_PATTERNS)[number];
-export const isFacadePattern = (value: unknown): value is FacadePattern =>
-  (FACADE_PATTERNS as readonly unknown[]).includes(value);
 
 export const ROOF_KINDS = ['flat', 'terrace', 'gable', 'hip', 'shed', 'sawtooth'] as const;
 export type RoofKind = (typeof ROOF_KINDS)[number];
@@ -51,8 +48,6 @@ import type { FlagDesign } from './flags.ts';
 
 const ROOF_DETAIL_KINDS = ['solar', 'skylight', 'vent', 'chimney', 'waterTank', 'spire', 'lantern'] as const;
 export type RoofDetailKind = (typeof ROOF_DETAIL_KINDS)[number];
-export const isRoofDetailKind = (value: unknown): value is RoofDetailKind =>
-  (ROOF_DETAIL_KINDS as readonly unknown[]).includes(value);
 export interface RoofDetail {
   id: number;
   kind: RoofDetailKind;
@@ -189,8 +184,6 @@ export interface Volume {
 
 /** The farthest a terrace of a lot stands above or below its building's floor. */
 export const MAX_TERRACE = m(5.5);
-/** The farthest a block's own floor stands above or below the building's ground floor. */
-export const MAX_LIFT = m(6);
 
 /** What an open block is laid with. */
 export const LOT_SURFACES = ['grass', 'paving', 'gravel', 'sand', 'water', 'asphalt', 'concrete', 'pavers', 'tiles'] as const;
@@ -326,34 +319,9 @@ export interface Building {
   /** The blueprint this building was placed from, for the UI only. */
   blueprint?: string;
 }
-
-// ------------------------------------------------------------------ limits Every figure is written in metres
-
-export const MIN_MODULE = m(2.4);
-export const MAX_MODULE = m(8);
 export const DEFAULT_MODULE = m(3);
-export const MIN_STOREY_HEIGHT = m(2.6);
-export const MAX_STOREY_HEIGHT = m(9);
-export const MAX_GROUND_HEIGHT = m(20);
-export const MAX_STOREYS = 60;
-/** Widest a volume may be on either axis, world units. */
-export const MAX_SIZE = m(160);
-export const MAX_VOLUMES = 24;
-/** Deepest a recess may go into a volume, and furthest a projection may stand out. */
-export const MAX_RECESS = m(4);
-export const MAX_PROJECTION = m(2.4);
 export const MIN_PITCH = 5;
 export const MAX_PITCH = 60;
-export const PALETTE_COUNT = 8;
-
-export const isBuildingUse = (v: unknown): v is BuildingUse =>
-  (BUILDING_USES as readonly unknown[]).includes(v);
-export const isBayComponent = (v: unknown): v is BayComponent =>
-  (BAY_COMPONENTS as readonly unknown[]).includes(v);
-export const isRoofKind = (v: unknown): v is RoofKind =>
-  (ROOF_KINDS as readonly unknown[]).includes(v);
-export const isSide = (v: unknown): v is Side => v === 0 || v === 1 || v === 2 || v === 3;
-export const isElementKind = (v: unknown): v is ElementKind => (ELEMENT_KINDS as readonly unknown[]).includes(v);
 /** A whole property - walls, gates, paths, car park, garden, cornices - fits. */
 export const MAX_ELEMENTS = 128;
 
@@ -394,24 +362,6 @@ export function jsonCopy(value: unknown): unknown {
   return out;
 }
 
-/** DO NOT turn this back into a copy (`cloneBuilding`) */
-/** `intern`: its members alike with other buildings' shared with them (`intern.ts`); false where the record is written out and let go. */
-export function settleBuilding<T extends object>(b: T, settled: WeakSet<object>, was?: object, intern = true): T {
-  if (settled.has(b)) return b;
-  const record = b as Record<string, unknown>;
-  // Only a record settled itself vouches for its members (one loaded from a file was never walked).
-  const old = was !== undefined && settled.has(was) ? was as Record<string, unknown> : undefined;
-  for (const key of Object.keys(record)) {
-    const value = record[key];
-    if (old !== undefined && typeof value === 'object' && value !== null && old[key] === value) continue;
-    settleMember(record, key, value);
-  }
-  // What it has alike with other buildings shared with them (`intern.ts`): a storey, a facade, a material once for the city.
-  if (intern) internMembers(record);
-  settled.add(b);
-  return b;
-}
-
 function settleMember(owner: Record<string, unknown>, key: string, value: unknown): void {
   if (typeof value === 'number') {
     if (Object.is(value, -0)) owner[key] = 0;
@@ -446,21 +396,10 @@ function settleValue(value: object): void {
 /** The level a volume's roof sits on (one past its top storey). */
 export const volumeTop = (v: Volume): number => v.base + v.storeys.length;
 
-export function volumeById(b: Building, id: number): Volume | undefined {
-  return b.volumes.find((v) => v.id === id);
-}
-
 /** City minutes a building stays as new before it starts to age: five days. */
 export const DECAY_GRACE = 5 * 1440;
 /** City minutes from the first stains to falling apart, without maintenance: thirty days. */
 export const DECAY_SPAN = 30 * 1440;
-
-/** DO NOT stamp every generated building at the same minute: the whole city would age at once (a diary entry and a tile write for every building, the same minute). Spread over one tenth of the ageing (`decayOf` steps in tenths), a pure function of the building's id so a building made again from its row (`growth/grownRows.ts`) gets the same. */
-export function generatedBuiltAt(id: number): number {
-  let h = Math.imul(id ^ 0x9e3779b9, 0x85ebca6b);
-  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
-  return ((h ^ (h >>> 16)) >>> 0) % (DECAY_SPAN / 10);
-}
 
 /** How run-down a building built at `builtAt` is at `now`, in tenths. */
 export function decayOf(builtAt: number | undefined, now: number): number {

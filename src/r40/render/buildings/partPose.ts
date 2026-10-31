@@ -18,13 +18,6 @@ export function poseMatrixInto(poses: ArrayLike<number>, at: number, out: Float3
   out[outAt + 12] = poses[at]!; out[outAt + 13] = poses[at + 1]!; out[outAt + 14] = poses[at + 2]!; out[outAt + 15] = 1;
 }
 
-/** Every pose of a batch as its matrix, 16 floats each: what a ruin is broken from (`fracture.ts`). */
-export function poseMatrices(poses: Float32Array, count: number): Float32Array {
-  const out = new Float32Array(count * 16);
-  for (let i = 0; i < count; i++) poseMatrixInto(poses, i * POSE_FLOATS, out, i * 16);
-  return out;
-}
-
 /** A model with a batch's poses as its instanced attributes, bound at instance `at`: the model's own attributes and index shared (three keeps one buffer per attribute, r186 `WebGLAttributes`). */
 export function posedCopy(model: BufferGeometry, poses: InstancedInterleavedBuffer, at = 0): BufferGeometry {
   const g = new BufferGeometry();

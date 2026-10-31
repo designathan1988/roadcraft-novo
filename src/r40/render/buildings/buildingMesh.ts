@@ -1,35 +1,34 @@
 // Part of the R40 building mesh pipeline (split by responsibility).
 import { resolveBlocks } from '../../world/buildings/blocks.ts';
-import { lotSurfaces } from '../../world/buildings/lots.ts';
 import { deriveSpaces } from '../../world/buildings/spaces.ts';
 import { spaceSeed } from './lightSlots.ts';
-import { buildingFrame, frameX, frameY, letGoLayout, bayWidth, closedBlocks, coveredSpans, facadeBays, levelElevation, levelHeight, projectionRect, volumeElevation, volumeHeight, volumeLift } from '../../world/buildings/geometry.ts';
+import { letGoLayout, bayWidth, closedBlocks, coveredSpans, facadeBays, levelElevation, levelHeight, projectionRect, volumeElevation, volumeHeight, volumeLift } from '../../world/buildings/geometry.ts';
 import { FURNITURE_KINDS, type Furniture, type FurnitureKind, interiorAt, letGoInterior } from '../../world/buildings/interior.ts';
 import { ROOM_FLOATS, roomsOfStorey } from './roomBehind.ts';
-import { edgeFrame, localFootprint } from '../../world/buildings/footprints.ts';
+import { edgeFrame } from '../../world/buildings/footprints.ts';
 import { BufferAttribute, BufferGeometry, Color, Group, InstancedBufferAttribute, InstancedInterleavedBuffer, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Mesh, Sphere, Vector3, Box3 } from 'three';
-import { type Bounds, type CellArrays, type CellSelection, FACADE_BYTES, FACADE_FLOATS, FACADE_GRID, FINISH_ATTRIBUTE, type KitBoxes, NORMAL_SHORTS, type ShellGrid, PAINT_ATTRIBUTE, SHELL_MESH, SHELL_NORMAL, cellArrays } from './cellArrays.ts';
-import { COVER_INSET, GROUND_ATTRIBUTE, LOOK_FLOATS, NO_GROUND, SHELL_PART_FACES, SHELL_PART_KINDS } from './shellParts.ts';
+import { type Bounds, type CellArrays, FACADE_BYTES, FACADE_FLOATS, FACADE_GRID, FINISH_ATTRIBUTE, type KitBoxes, NORMAL_SHORTS, type ShellGrid, PAINT_ATTRIBUTE, SHELL_MESH, SHELL_NORMAL } from './cellArrays.ts';
+import { GROUND_ATTRIBUTE, LOOK_FLOATS } from './shellParts.ts';
 import { partLook } from './fade.ts';
 import { m } from '../../world/units.ts';
 import { type Entrance, type Foundation, type GroundAt, type PavedAt, PLINTH_BURY, STEP_RUN, foundationOf, floorHeight } from '../../world/buildings/foundation.ts';
-import { FINISHES, type Finish, paletteOf, plinthMaterial, roofMaterial, trimMaterial, wallMaterial } from '../../world/buildings/materials.ts';
+import { type Finish, paletteOf, plinthMaterial, roofMaterial, trimMaterial, wallMaterial } from '../../world/buildings/materials.ts';
 import { FOLLOWS_GROUND, followPieces } from '../../world/buildings/elements.ts';
 import { type BayComponent, type Building, type BuildingElement, type FaceId, type Volume, volumeTop } from '../../world/buildings/types.ts';
 import { type BuildingKit, PART_KINDS, type PartKind } from './kit.ts';
 import { gpuOnlyAttributes } from '../mesh/gpuOnly.ts';
 import { machineRooms } from './roofPlan.ts';
 import type { FlagInstance } from './flagLayer.ts';
-import type { BuildingChunk, LotGround, PartBatch, RunChunk, ShellChunk } from './chunk.ts';
+import type { BuildingChunk, PartBatch, RunChunk, ShellChunk } from './chunk.ts';
 import { drawsSignature } from './signature.ts';
 import { type Cover, type PartyWalls, hiddenByCovers } from './partyWalls.ts';
-import { POSE_FLOATS, letGoPosed, partPoseDepth, poseMatrixInto, posedCopy } from './partPose.ts';
+import { POSE_FLOATS, letGoPosed, partPoseDepth, posedCopy } from './partPose.ts';
 import { partBandings } from './partFiling.ts';
-import { Shell, Emitter, bayKey, openingOf, REVEAL, paint, shaded, sideFrame, PLINTH_RISE, PLINTH_GROW, sideFrameInto, FLAT_DEPTH, slotOfBay, BAND_OUT, BAND_H, ROOF_PLANT, flagOf, partSink, setFlagSink, ShellPart, type PartSink, type FurnitureSink, type SlotAllocator, type Opening, type Paint, type V3, type BayFace } from './meshCore.ts';
+import { Shell, Emitter, bayKey, openingOf, REVEAL, paint, shaded, sideFrame, PLINTH_RISE, PLINTH_GROW, sideFrameInto, FLAT_DEPTH, slotOfBay, BAND_OUT, BAND_H, ROOF_PLANT, partSink, setFlagSink, ShellPart, type PartSink, type FurnitureSink, type SlotAllocator, type Opening, type Paint, type V3, type BayFace } from './meshCore.ts';
 import { emitPlinth, streakOf, emitBay, emitFacadeRuns, emitRelief, emitRecessedFlight, type FarBay } from './facadeEmit.ts';
 import { bothCovered, band, flushBand, emitRoof, emitRoofDetails } from './roofMesh.ts';
 import { emitInterior } from './interiorMesh.ts';
-import { emitLots, lotGroundOf } from './lotMesh.ts';
+import { emitLots } from './lotMesh.ts';
 import { emitLot, looseParts, elementPaint, emitElement } from './elementMesh.ts';
 
 export interface BuildingMeshes {
@@ -38,12 +37,6 @@ export interface BuildingMeshes {
   /** Shown or hidden as a whole. */
   setVisible(visible: boolean): void;
   dispose(): void;
-}
-
-export interface AssemblySelection {
-  readonly parts: ReadonlySet<PartKind>;
-  readonly shells: boolean;
-  readonly furniture: boolean;
 }
 
 export function emitBuilding(
@@ -317,16 +310,6 @@ export function emitBuilding(
 
 export const MACHINE_ROOM = paint({ finish: 'concrete', colour: 0xa7a49c });
 
-export function fliesFlag(b: Building): boolean {
-  return b.volumes.some((v) => (v.roofDetails ?? []).some((d) => (d.kind === 'spire' || d.kind === 'lantern') && flagOf(d) !== null));
-}
-
-export function signatureFloorOf(b: Building, naturalAt: GroundAt, pavedAt?: PavedAt): number | undefined {
-  if (!drawsSignature(b)) return undefined;
-  const resolved = resolveBlocks(b);
-  return resolved.volumes.some((v) => !v.open) ? floorHeight(resolved, naturalAt, pavedAt) : undefined;
-}
-
 export function letGoEmitted(b: Building): void {
   const closed = closedBlocks(resolveBlocks(b).volumes);
   letGoInterior(closed);
@@ -393,33 +376,6 @@ export function emitChunk(b: Building, groundAt: GroundAt, pavedAt?: PavedAt, na
   return flags.length ? { ...withSignature, flags } : withSignature;
 }
 
-export function chunkSummary(b: Building, groundAt: GroundAt, pavedAt?: PavedAt, naturalAt: GroundAt = groundAt, party?: PartyWalls): Pick<BuildingChunk, 'flags' | 'lotGround' | 'signatureFloor'> {
-  const resolved = resolveBlocks(b);
-  if (fliesFlag(resolved)) return emitChunk(b, groundAt, pavedAt, naturalAt, undefined, false, true, party);
-  const lots = resolved.volumes.filter((v) => v.open);
-  const closed = closedBlocks(resolved.volumes);
-  const floor = party ? party.floorOf(b) : closed.length > 0 ? floorHeight(resolved, naturalAt, pavedAt) : undefined;
-  const signature = closed.length > 0 && drawsSignature(b);
-  let lotGround: LotGround | undefined;
-  if (lots.length === 0) lotGround = lotGroundOf(resolved, [], floor, false);
-  else {
-    // The level `emitLots` lays the lots at: the building's floor, else the highest ground of the lots a little over.
-    let level = floor;
-    if (level === undefined) {
-      const f = buildingFrame(resolved);
-      let top = -Infinity;
-      for (const v of lots) {
-        for (const q of localFootprint(v)) top = Math.max(top, groundAt(frameX(f, q.x, q.y), frameY(f, q.x, q.y)));
-        top = Math.max(top, groundAt(frameX(f, v.x + v.w / 2, v.y + v.d / 2), frameY(f, v.x + v.w / 2, v.y + v.d / 2)));
-      }
-      level = top + m(0.12);
-    }
-    lotGround = lotGroundOf(resolved, lotSurfaces(resolved, level, pavedAt), level, true);
-  }
-  const out = lotGround ? { lotGround } : {};
-  return signature && floor !== undefined ? { ...out, signatureFloor: floor } : out;
-}
-
 export const shellChunkOf = (part: ShellPart, copy: boolean): ShellChunk => (copy
   ? { position: part.position.copy(), normal: part.normal.copy(), paint: part.paint.copy(), index: part.index.copy() }
   : { position: part.position.view(), normal: part.normal.view(), paint: part.paint.view(), index: part.index.view() });
@@ -442,74 +398,6 @@ export function runChunks(shell: Shell): Partial<Record<Finish, RunChunk>> | und
   return runs;
 }
 
-export const SHELL_PART_MATRIX = new Float32Array(16);
-
-export function shellPartFaces(parts: Readonly<Record<PartKind, PartBatch>>): Partial<Record<Finish, ShellChunk>> {
-  const shell = new Shell();
-  for (const kind of SHELL_PART_KINDS) {
-    const batch = parts[kind];
-    if (!batch?.count || !batch.looks || !batch.colours) continue;
-    const { poses, colours, looks } = batch;
-    const e = SHELL_PART_MATRIX, o = 0;
-    for (let i = 0; i < batch.count; i++) {
-      // The instance's matrix as the GPU makes it from its pose (`partPose.ts`).
-      poseMatrixInto(poses, i * POSE_FLOATS, e, 0);
-      const sx = poses[i * POSE_FLOATS + 5]!, sz = poses[i * POSE_FLOATS + 7]!;
-      // A model point (three's axes) through the matrix, then into the map's (x, y north, z up).
-      const at = (x: number, y: number, z: number, w: number): V3 => {
-        const X = e[o]! * x + e[o + 4]! * y + e[o + 8]! * z + e[o + 12]! * w;
-        const Y = e[o + 1]! * x + e[o + 5]! * y + e[o + 9]! * z + e[o + 13]! * w;
-        const Z = e[o + 2]! * x + e[o + 6]! * y + e[o + 10]! * z + e[o + 14]! * w;
-        return [X, -Z, Y];
-      };
-      const ground = looks[i * LOOK_FLOATS + 2]!;
-      shell.decay = looks[i * LOOK_FLOATS + 1]!;
-      shell.ground = ground > NO_GROUND / 2 ? ground : Number.NaN;
-      const paint: Paint = { rgb: [colours[i * 3]!, colours[i * 3 + 1]!, colours[i * 3 + 2]!], finish: FINISHES[looks[i * LOOK_FLOATS]!]! };
-      for (const f of SHELL_PART_FACES[kind]) {
-        const points = f.points.map(([u, v, w]): V3 => {
-          // A paving's side stands in from its top's edge by `COVER_INSET`, whatever its size.
-          const x = f.inset ? Math.sign(u) * Math.max(0.5 - COVER_INSET / sx, 0) : u;
-          const z = f.inset ? Math.sign(-v) * Math.max(0.5 - COVER_INSET / sz, 0) : -v;
-          return at(x, w, z, 1);
-        });
-        shell.face(points, at(f.n[0], f.n[2], -f.n[1], 0), paint);
-      }
-    }
-  }
-  return shellChunks(shell);
-}
-
-export function withShellParts(chunk: BuildingChunk): BuildingChunk {
-  const laid = shellPartFaces(chunk.parts);
-  const shells: Partial<Record<Finish, ShellChunk>> = { ...chunk.shells };
-  for (const [finish, add] of Object.entries(laid) as [Finish, ShellChunk][]) {
-    const was = shells[finish];
-    if (!was) { shells[finish] = add; continue; }
-    const base = was.position.length / 3;
-    // `b` after `a` (a part's faces are never a run of bays: the runs stay as they were).
-    const joined = <T extends Float32Array | Int16Array | Uint16Array>(a: T, b: T, make: (n: number) => T): T => {
-      const out = make(a.length + b.length);
-      out.set(a);
-      out.set(b, a.length);
-      return out;
-    };
-    const index = new Uint32Array(was.index.length + add.index.length);
-    index.set(was.index);
-    for (let k = 0; k < add.index.length; k++) index[was.index.length + k] = add.index[k]! + base;
-    shells[finish] = {
-      position: joined(was.position, add.position, (n) => new Float32Array(n)),
-      normal: joined(was.normal, add.normal, (n) => new Int16Array(n)),
-      paint: joined(was.paint, add.paint, (n) => new Uint16Array(n)),
-      index,
-    };
-  }
-  const none: PartBatch = { poses: new Float32Array(0), colours: new Float32Array(0), count: 0, looks: new Float32Array(0) };
-  const parts = { ...chunk.parts } as Record<PartKind, PartBatch>;
-  for (const kind of SHELL_PART_KINDS) parts[kind] = none;
-  return { ...chunk, shells, parts };
-}
-
 export const KIT_BOXES = new WeakMap<BuildingKit, KitBoxes>();
 
 export function kitBoxes(kit: BuildingKit): KitBoxes {
@@ -529,20 +417,6 @@ export function kitBoxes(kit: BuildingKit): KitBoxes {
   }
   // The bandings as the kit's levels are now: a small prop's simplified levels come in once loaded.
   return { ...boxes, bandings: partBandings(kit.screen) };
-}
-
-export const WHOLE: Omit<CellSelection, 'ghost' | 'dim'> = { parts: PART_KINDS, shells: true, furniture: true };
-
-export function assembleBuildingMeshes(
-  chunks: readonly BuildingChunk[],
-  kit: BuildingKit,
-  ghost = false,
-  dim = false,
-  selection?: AssemblySelection,
-): BuildingMeshes {
-  const take: CellSelection = { ...WHOLE, ...(selection ? { parts: [...selection.parts], shells: selection.shells, furniture: selection.furniture } : {}), ghost, dim };
-  // A lost and restored WebGL context fills the meshes again from the chunks (`gpuOnly.ts`).
-  return meshesOf(cellArrays(chunks, take, kitBoxes(kit)), kit, ghost, dim, () => cellArrays(chunks, take, kitBoxes(kit)));
 }
 
 export function meshesOf(arrays: CellArrays, kit: BuildingKit, ghost: boolean, dim: boolean, refill?: () => CellArrays): BuildingMeshes {
@@ -751,17 +625,6 @@ export function gridBounds(b: Bounds, grid: ShellGrid): Bounds {
 export const boxOf = (b: Bounds): Box3 => new Box3(new Vector3(b[0], b[1], b[2]), new Vector3(b[3], b[4], b[5]));
 
 export const sphereOf = (b: Bounds): Sphere => new Sphere(new Vector3(b[6], b[7], b[8]), b[9]);
-
-export function buildBuildingMeshes(
-  buildings: Iterable<Building>,
-  groundAt: GroundAt,
-  kit: BuildingKit,
-  ghost = false,
-  pavedAt?: PavedAt,
-  naturalAt: GroundAt = groundAt,
-): BuildingMeshes {
-  return assembleBuildingMeshes([...buildings].map((b) => emitChunk(b, groundAt, pavedAt, naturalAt)), kit, ghost);
-}
 
 export type { BuildingChunk, LotGround, LotGroundRecipe, PartBatch,  } from './chunk.ts';
 export { COLOURED_PARTS } from './cellArrays.ts';

@@ -678,28 +678,3 @@ export function madeToMeasure(use: 'residential' | 'commercial' | 'industrial', 
   if (use === 'commercial') return density === 'high' ? office(rng, env) : shop(rng, env, density);
   return works(rng, env, density);
 }
-
-/** The signature of any building, grown or not, read off its record as the eye reads it */
-export function bodySignature(body: BlueprintBody): Signature {
-  const solid = body.volumes.filter((v) => !v.open);
-  if (!solid.length) return signatureOf(`${body.function ?? body.use}|`, body);
-  const x0 = Math.min(...solid.map((v) => v.x)), x1 = Math.max(...solid.map((v) => v.x + v.w));
-  const y0 = Math.min(...solid.map((v) => v.y));
-  const width = Math.max(1e-6, x1 - x0);
-  const token = (v: Volume): string => {
-    const col = Math.round(((v.x + v.w / 2 - x0) / width) * 2);
-    const row = v.y - y0 < m(1) ? 'f' : 'b';
-    const whole = v.w > width * 0.8 ? 'W' : '';
-    return `${row}${col}${whole}${v.base}+${v.storeys.length}${v.roof}`;
-  };
-  return signatureOf(`${body.function ?? body.use}|${solid.map(token).sort().join(';')}`, body);
-}
-
-/** How unlike two signatures are, 0 (the same building) to about 4 */
-export function signatureDistance(a: Signature, b: Signature): number {
-  // The channels read straight, no list a colour (four a pair of buildings, every candidate against every neighbour).
-  const r1 = (a.colour >> 16) & 255, g1 = (a.colour >> 8) & 255, b1 = a.colour & 255;
-  const r2 = (b.colour >> 16) & 255, g2 = (b.colour >> 8) & 255, b2 = b.colour & 255;
-  const colour = Math.min(1, Math.hypot(r1 - r2, g1 - g2, b1 - b2) / 90);
-  return (a.form === b.form ? 0 : 1.5) + colour + (a.roof === b.roof ? 0 : 0.7) + Math.min(1, Math.abs(a.storeys - b.storeys) / 2) * 0.8;
-}
