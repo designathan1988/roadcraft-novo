@@ -25,7 +25,7 @@ import { addCrossing, addUTurn, buildRoad, duplicateRoad, joinAt, moveNode, plan
 import { heightAt } from '../world/heights.ts';
 import { GroundStroke, waterAt } from '../world/ground.ts';
 import { ElementStroke } from '../world/items.ts';
-import { BrushStroke, LANDFORM_ROCK, type BrushMode } from '../world/brush.ts';
+import { BrushStroke, LANDFORM_ROCK, landformRockRadius, type BrushMode } from '../world/brush.ts';
 import { demolishBox } from '../features/demolition/demolish.ts';
 import { lotAt, polygonLot } from '../world/lotEdit.ts';
 import { addressAt } from '../roads/streetNames.ts';
@@ -139,9 +139,8 @@ export function createScriptApi(h: ScriptApiHost) {
       const st = new BrushStroke(w), rk = LANDFORM_ROCK[mode];
       st.dab(x, z, { mode, radius, strength }, 1);
       const g = rk !== undefined ? new GroundStroke(w) : null;
-      if (g && rk !== undefined) g.dab(x, z, radius * 0.95, 'paint', rk, 1, 1);
-      // the label is the legacy dictionary's key the undo toast translates with loose() (shared/i18n), as the brush's own
-      // (app/input.ts); command labels become t() keys with the text tables (plan P21)
+      // the same rock as the tool's dab (D6: the API painted a gully's at 0.95 of the radius, the tool at 0.6)
+      if (g && rk !== undefined) g.dab(x, z, landformRockRadius(mode, radius), 'paint', rk, 1, 1);
       if (st.finish()) { if (g?.finish()) h.commands.push({ label: 'cmd.place.terrain', apply: () => { st.apply(); g.apply(); }, invert: () => { g.invert(); st.invert(); } }); else h.commands.push(st); }
     },
     /** Ground elements (kind 30..40) scattered in a circle. */

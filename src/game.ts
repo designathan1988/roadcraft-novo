@@ -66,12 +66,12 @@ import { nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
 import { Ground, GroundStroke, WATER_MAP_RES, waterCoord, waterIndex } from './world/ground.ts';
 import { ElementStroke, Item, ItemsCommand } from './world/items.ts';
-import { RoadTool } from './features/roads/roadTool.ts';
+import { RoadTool, heightStep } from './features/roads/roadTool.ts';
 import { ZoneTool } from './features/zones/zoneTool.ts';
 import { Growth } from './world/growth.ts';
 import { streetChain, demolishSeg, segPreview } from './roads/build.ts';
 import { RoadPreview } from './render/preview.ts';
-import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParams } from './world/brush.ts';
+import { BrushStroke, FlattenMap, LANDFORM_ROCK, landformRockRadius, type BrushMode, type BrushParams } from './world/brush.ts';
 import { World } from './world/world.ts';
 import { heightAt } from './world/heights.ts';
 import { type SaveActions } from './platform/mapFile.ts';
@@ -792,7 +792,7 @@ export class Game {
       else {
         this.stroke.dab(hit.x, hit.z, this.brush, dt);
         const rock = LANDFORM_ROCK[this.brush.mode];
-        if (this.rockStroke && rock !== undefined) this.rockStroke.dab(hit.x, hit.z, this.brush.radius * (this.brush.mode === 'gully' ? 0.6 : 0.95), 'paint', rock, 1, 1);
+        if (this.rockStroke && rock !== undefined) this.rockStroke.dab(hit.x, hit.z, landformRockRadius(this.brush.mode, this.brush.radius), 'paint', rock, 1, 1);
       }
     }
     if (this.tool === 'river') this.river.hover(hit);
@@ -1053,8 +1053,8 @@ export class Game {
       return true;
     }
     const road = ROAD_TOOLS.includes(t) && t !== 'bulldoze';
-    if (road && c === (this.settings.roadUp ?? 'PageUp')) { this.setElevation(this.roadTool.elevation + 4); return true; }
-    if (road && c === (this.settings.roadDown ?? 'PageDown')) { this.setElevation(this.roadTool.elevation - 4); return true; }
+    if (road && c === (this.settings.roadUp ?? 'PageUp')) { this.setElevation(heightStep(this.roadTool.elevation, 1)); return true; }
+    if (road && c === (this.settings.roadDown ?? 'PageDown')) { this.setElevation(heightStep(this.roadTool.elevation, -1)); return true; }
     // the alignment key (V): straight, curve, free, straight again (Roadcraft 4.0)
     const drawing: Tool[] = ['road', 'curve', 'free', 'blocks'];
     if (drawing.includes(t) && c === (this.settings.roadAlign ?? 'KeyV') && !e.shiftKey) { this.setTool(t === 'road' ? 'curve' : t === 'curve' ? 'free' : 'road'); return true; }

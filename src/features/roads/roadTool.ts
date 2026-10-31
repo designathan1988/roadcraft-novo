@@ -17,6 +17,14 @@ import type { World } from '../../world/world.ts';
 import { money, t } from '../../shared/i18n/index.ts';
 import { NO_NODE, NO_SEG } from '../../core/ids.ts';
 
+/**
+ * The road's height after one press of the height keys (PageUp/PageDown): a metre up or down, landing on whole metres
+ * (Roadcraft 4.0 editor/roadTool.ts stepHeight; its hint says ±1 m, roadKeys.heightUp/heightDown).
+ */
+export function heightStep(now: number, dir: 1 | -1): number {
+  return dir > 0 ? Math.floor(now + 1e-6) + 1 : Math.ceil(now - 1e-6) - 1;
+}
+
 const p2 = new Float64Array(2);
 
 export class RoadTool {

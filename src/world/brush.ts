@@ -14,6 +14,8 @@ export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten' | 'mesa' | 'can
 
 /** Ready-made landforms: the rock painted on the ground where the shape rises or falls (Ground). */
 export const LANDFORM_ROCK: Partial<Record<BrushMode, number>> = { mesa: 9, canyon: 9, escarpment: 10, sugarloaf: 8, gully: 2 };
+/** Radius of the rock a landform dab paints: a gully's bed is narrower than its banks (0.6), the others 0.95 of the dab. */
+export function landformRockRadius(mode: BrushMode, radius: number): number { return radius * (mode === 'gully' ? 0.6 : 0.95); }
 
 export interface BrushParams {
   mode: BrushMode;
