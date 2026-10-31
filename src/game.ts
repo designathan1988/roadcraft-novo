@@ -235,6 +235,8 @@ export class Game {
   private hitKind: 'pistol' | 'bomb' | null = null;
   /** What the player chose to see (layers, the building seen inside): app/viewState.ts. */
   private readonly viewState = new ViewState();
+  /** The ambient sound's input, one object written each frame (no literal per frame). */
+  private readonly ambientIn: Parameters<Ambient['update']>[1] = { rain: 0, wind: 0, traffic: 0, height: 0, day: 1, green: 0 };
   private insideFloor = 0;
   /** Loading, ready, an operation under way, or failed; and what changed since the last save (app/lifecycle.ts). */
   readonly life: Lifecycle;
@@ -770,10 +772,10 @@ export class Game {
     pr?.lap(PART.effects, performance.now());
     {
       const st = this.simStats?.type === 'stats' ? this.simStats : null;
-      this.ambient.update(dt, {
-        rain: rainU.value, wind: windU.value, traffic: Math.min(1, (st?.micro ?? 0) / 120),
-        height: this.rig.eye.y - groundY, day: 1 - nightU.value, green: this.green,
-      });
+      const a = this.ambientIn;
+      a.rain = rainU.value; a.wind = windU.value; a.traffic = Math.min(1, (st?.micro ?? 0) / 120);
+      a.height = this.rig.eye.y - groundY; a.day = 1 - nightU.value; a.green = this.green;
+      this.ambient.update(dt, a);
     }
     this.hud.setClock(this.hour, this.clock.speed, this.clock.paused);
     this.hud.setMoney(this.world.money, this.world.unlimited);
