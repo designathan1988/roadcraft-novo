@@ -943,10 +943,21 @@ export class TerrainRenderer {
     this.heightTex.needsUpdate = true;
   }
 
+  /** The view-projection matrix of the frame (kept: not a matrix per frame). */
+  private readonly pv = new THREE.Matrix4();
+
+  /** A water buffer's drawn instances and its upload range. */
+  private waterCount(g: THREE.InstancedBufferGeometry, a: THREE.InstancedBufferAttribute, n: number): void {
+    g.instanceCount = n;
+    a.clearUpdateRanges();
+    a.addUpdateRange(0, n);
+    a.needsUpdate = true;
+  }
+
   /** CDLOD selection from the camera. */
   update(camera: THREE.Camera, viewPos: THREE.Vector3): void {
     camera.updateMatrixWorld();
-    const pv = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const pv = this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.camPos.copy(viewPos);
     this.camUniform.value.copy(viewPos);
@@ -977,12 +988,8 @@ export class TerrainRenderer {
     this.shadowInst.clearUpdateRanges();
     this.shadowInst.addUpdateRange(0, this.shadowCount * 4);
     this.shadowInst.needsUpdate = true;
-    for (const [g, a, n] of [[this.waterGeo, this.waterInst, this.waterNear], [this.waterFarGeo, this.waterFarInst, this.waterFarCount]] as const) {
-      g.instanceCount = n;
-      a.clearUpdateRanges();
-      a.addUpdateRange(0, n);
-      a.needsUpdate = true;
-    }
+    this.waterCount(this.waterGeo, this.waterInst, this.waterNear);
+    this.waterCount(this.waterFarGeo, this.waterFarInst, this.waterFarCount);
     this.inst.clearUpdateRanges();
     this.inst.addUpdateRange(0, this.count * 4);
     this.inst.needsUpdate = true;

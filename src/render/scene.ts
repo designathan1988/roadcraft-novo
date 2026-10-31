@@ -230,18 +230,18 @@ export class SkyEnvironment {
 }
 
 const SUN_STEP = 0.2;
-const _sunDir = new THREE.Vector3();
+const _sunDir = new THREE.Vector3(), _sunPos = new THREE.Vector3();
+/** The angle snapped to the light's step (degrees to radians). */
+const quantDeg = (deg: number): number => THREE.MathUtils.degToRad(Math.round(deg / SUN_STEP) * SUN_STEP);
 
 /** Places the sun by elevation and azimuth in degrees. */
 export function setSun(p: { sun: THREE.DirectionalLight; sky: GradientSky }, elevation: number, azimuth: number): void {
   const phi = THREE.MathUtils.degToRad(90 - elevation);
   const theta = THREE.MathUtils.degToRad(azimuth);
-  const dir = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
-  p.sky.sunPosition.value.copy(dir);
+  p.sky.sunPosition.value.copy(_sunPos.setFromSphericalCoords(1, phi, theta));
   // the light (and the shadow) moves in 0.2° steps: snapping the cascades to the texel grid only holds with the
   // light still; turning a little every frame made every shadow edge crawl one texel per frame (the image shook)
-  const q = (deg: number) => THREE.MathUtils.degToRad(Math.round(deg / SUN_STEP) * SUN_STEP);
-  _sunDir.setFromSphericalCoords(1, q(90 - elevation), q(azimuth));
+  _sunDir.setFromSphericalCoords(1, quantDeg(90 - elevation), quantDeg(azimuth));
   p.sun.position.copy(_sunDir).multiplyScalar(1000);
   sunDirection.copy(_sunDir);
   p.sun.target.position.set(0, 0, 0);

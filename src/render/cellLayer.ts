@@ -169,7 +169,9 @@ export class CellLayer {
 
   /** Takes this kind's dirty cells and asks for the new meshes. */
   processDirty(): void {
-    const cells = this.dirty.length === 1 ? this.dirty[0].drain() : [...new Set(this.dirty.flatMap((r) => r.drain()))];
+    let cells = this.dirty[0].drain();
+    // a second reader (the seams follow two kinds): merged only when both brought cells (rare), nothing made otherwise
+    for (let k = 1; k < this.dirty.length; k++) { const more = this.dirty[k].drain(); if (!more.length) continue; cells = cells.length ? [...new Set([...cells, ...more])] : more; }
     if (cells.length) this.events++;
     for (const c of cells) {
       this.cellVer[c]++;
