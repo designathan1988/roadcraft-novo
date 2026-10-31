@@ -57,3 +57,14 @@ test('choosing the road paint is an undoable edit of the map', () => {
   commands.redo();
   assert.equal(look.paint, 'eu');
 });
+
+test('D43: undoing during a cloud drag drops the drag instead of moving another cloud or throwing', () => {
+  const look = new MapLook(), commands = new CommandStack();
+  const clouds = new Clouds({ heights: new Float32Array(4), look, run: (c) => commands.run(c), toast: () => {}, changed: () => {}, target: () => ({ x: 0, z: 0 }) });
+  clouds.click(0, 0);
+  assert.equal(look.clouds.length, 1);
+  assert.equal(clouds.grab(0, 0), true);
+  commands.undo();
+  assert.doesNotThrow(() => clouds.drop({ x: 500, z: 500 }));
+  assert.equal(look.clouds.length, 0);
+});

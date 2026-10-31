@@ -25,7 +25,8 @@ export interface CloudHost {
 export class Clouds {
   readonly view = new CloudPuffs();
   tool: SkyToolState = { cloud: 'add', fog: 'none', size: 500, base: 900, density: 0.8, fogHeight: 6 };
-  private held = -1;
+  /** The cloud being dragged (the object, not its index: an undo during the drag replaces the list, D43). */
+  private held: Cloud | null = null;
   private host: CloudHost;
 
   constructor(host: CloudHost) { this.host = host; }
@@ -34,7 +35,7 @@ export class Clouds {
   get list(): readonly Cloud[] { return this.host.look.clouds; }
   private get items(): readonly Cloud[] { return this.host.look.clouds; }
   /** The cloud being dragged, or -1. */
-  get grabbed(): number { return this.held; }
+  get grabbed(): number { return this.held ? this.items.indexOf(this.held) : -1; }
 
   /** Shows the map's clouds (after a map is opened or made). */
   show(): void { this.view.set(this.items); }
@@ -55,12 +56,13 @@ export class Clouds {
   }
 
   /** Starts dragging the cloud over (x, z); false when there is none. */
-  grab(x: number, z: number): boolean { this.held = this.at(x, z); return this.held >= 0; }
+  grab(x: number, z: number): boolean { const i = this.at(x, z); this.held = i >= 0 ? this.items[i] : null; return i >= 0; }
 
   /** Drops the dragged cloud over (x, z), at the same height over the ground; null cancels. */
   drop(at: { x: number; z: number } | null): void {
-    const i = this.held;
-    this.held = -1;
+    const i = this.held ? this.items.indexOf(this.held) : -1;
+    this.held = null;
+    // the list changed under the drag (undo, redo, another map): that cloud is gone, the move is dropped
     if (i < 0 || !at) return;
     const c = this.items[i], base = c.y - this.ground(c.x, c.z);
     this.replace(this.items.map((d, k) => (k === i ? { ...c, x: at.x, z: at.z, y: this.ground(at.x, at.z) + base } : d)), 'move cloud');
