@@ -286,6 +286,7 @@ export class Traffic {
     this.sig.queue = (n, mask) => this.armsQueue(n, mask);
     this.sig.busNear = (n, mask) => this.busNearArms(n, mask);
     sim.onNodeReset = (n) => { this.advisor.reset(n); };
+    sim.onArmsRemapped = (n, old) => this.advisor.remap(n, old);
     this.veh.onGrow((cap) => {
       const r = new Int32Array(cap * ROUTE_CAP); r.set(this.routes); this.routes = r;
       const m = new Int32Array(cap); m.set(this.micro); this.micro = m;
@@ -484,8 +485,7 @@ export class Traffic {
       tryDock: (v, lane) => g.tryDock(v, lane),
       unlink: (v) => g.unlink(v),
     });
-    // a network that grew before this Traffic was made (built first, mirrored later): its arrays take the network's
-    // size now, as the listeners above do for later growth (else segLoad stayed 1 << 15 and the router read NaN)
+    // a network that grew before this Traffic was made: its arrays take the network's size now (else the router read NaN)
     if (sim.net.segs.capacity > this.segWear.length) onSegs(sim.net.segs.capacity);
     if (sim.conns.capacity > this.connHead.length) onConns(sim.conns.capacity);
     if (sim.net.nodes.capacity > this.nodePass.length) onNodes(sim.net.nodes.capacity);

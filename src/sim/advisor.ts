@@ -49,6 +49,21 @@ export class FlowAdvisor {
     this.since[n] = -1;
   }
 
+  /**
+   * The node's arms were laid out again (a road added or removed there, a new width): each arm's counters follow its
+   * segment to its new index; a new arm starts at zero (D24: the counters stayed by index and mixed arms up).
+   */
+  remap(n: number, oldArms: ArrayLike<number>): void {
+    const pass = this.pass, seen = this.seen, rate = this.rate, arms = this.sim.armSeg, o = n * 8;
+    const p = pass.slice(o, o + 8), s = seen.slice(o, o + 8), r = rate.slice(o, o + 8);
+    for (let k = 0; k < 8; k++) {
+      const seg = arms[o + k];
+      let j = -1;
+      if (seg >= 0) for (let i = 0; i < 8; i++) if (oldArms[i] === seg) { j = i; break; }
+      pass[o + k] = j >= 0 ? p[j] : 0; seen[o + k] = j >= 0 ? s[j] : 0; rate[o + k] = j >= 0 ? r[j] : 0;
+    }
+  }
+
   /** Avalia a próxima fatia de nós. */
   step(time: number): void {
     const sim = this.sim, nodes = sim.net.nodes, end = nodes.end;

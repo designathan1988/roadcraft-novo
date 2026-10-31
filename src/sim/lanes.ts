@@ -183,6 +183,8 @@ export class SimNet {
 
   /** A node new, removed or with its control chosen (ids are reused): whoever measures the flow resets its own. */
   onNodeReset: (n: number) => void = () => {};
+  /** A node's arms were laid out again: `oldArms` is armSeg[n * 8 .. + 8] as it was (per-arm counters follow their segment). */
+  onArmsRemapped: (n: number, oldArms: ArrayLike<number>) => void = () => {};
 
   /** The flow asks for another control at an automatic node: stored, and the node is rebuilt at the next step. */
   setFlow(n: NodeId, flow: number): void {
@@ -341,6 +343,8 @@ export class SimNet {
     segs.forEach((s, i) => { this.retreat[s * 2 + ends[i]] = ret[i]; });
     const ring = segs.some((s) => (sc.flags[s] & SegFlag.Ring) !== 0);
     this.nodeRing[n] = ring ? 1 : 0;
+    // the arms as they were, for whoever counts per arm (the order can change with the arms: D24)
+    const oldArms = this.armSeg.slice(n * 8, n * 8 + 8);
     const armIndex = new Map<number, number>();
     order.forEach((i, k) => armIndex.set(i, k));
     // control: each arm's rule and, with lights, the stages (opposite arms together)
@@ -363,6 +367,7 @@ export class SimNet {
     let mainBits = 0;
     order.forEach((i, k) => { if (main.includes(segs[i])) mainBits |= 1 << k; });
     this.armMain[n] = mainBits;
+    this.onArmsRemapped(n, oldArms);
     const spec = net.junctions.get(n);
 
     const pa = new Float64Array(4), pb = new Float64Array(4);
