@@ -83,34 +83,6 @@ function asphalt(): THREE.DataTexture {
  * Sidewalk: grey concrete pavers in running bond (22 × 11 cm), chamfer, dirt and moss in the joints.
  * R = relative tone (0.5 = the sidewalk colour), G = paver face (0 at the joint, 1 in the middle).
  */
-function footway(): THREE.DataTexture {
-  const size = 512, PAVER = 16, bevel = 2, data = new Uint8Array(size * size * 4);
-  const grain = makeNoise(0x77c1), stain = makeNoise(0x1d3f), blot = makeNoise(0x5e2d);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const u = x / size, v = y / size, w = PAVER;
-    const row = Math.floor(y / w);
-    const sx = (x + (row % 2 === 0 ? 0 : w)) % size;
-    const col = Math.floor(sx / (2 * w));
-    const ex = Math.min(sx % (2 * w), 2 * w - (sx % (2 * w)));
-    const ey = Math.min(y % w, w - (y % w));
-    const face = Math.min(1, Math.max(0, (Math.min(ex, ey) - 1.1) / bevel));
-    const chamfer = face * face * (3 - 2 * face);
-    const blockTone = (cellHash(col, row, 0x5a1b) - 0.5) * 0.1;
-    const speck = fbm(grain, u * 128, v * 128, 128, 2);
-    const dirt = fbm(stain, u * 3, v * 3, 3, 3);
-    const spot = fbm(blot, u * 15, v * 15, 15, 2);
-    const mark = spot > 0.7 ? (spot - 0.7) * 1.2 : 0;
-    const tone = 0.54 + blockTone + (speck - 0.5) * 0.08 - (dirt - 0.5) * 0.14 - mark * 0.22;
-    const lum = tone * chamfer + 0.28 * (1 - chamfer);
-    const o = (y * size + x) * 4;
-    data[o] = Math.round(Math.min(1, Math.max(0, lum / 0.54 * 0.5)) * 255);
-    data[o + 1] = Math.round(chamfer * 255);
-    data[o + 2] = 0; data[o + 3] = 255;
-  }
-  return texture(data, size);
-}
-
-/** Side of the grass tile (m). */
 export const GRASS_TILE = 19.2;
 
 /**
@@ -150,7 +122,6 @@ function grass(): THREE.DataTexture {
 
 export const GRASS_TEX = grass();
 export const ASPHALT_TEX = asphalt();
-export const FOOTWAY_TEX = footway();
 
 /**
  * Water normals as Roadcraft 4.0's (`render/water.ts` waterNormalTexels): height = ridged crests (period 24, 3
@@ -188,39 +159,6 @@ export const ROCK_TILE = 23.2;
  * mottling, vertical streaks, dark joints and lichen patches; the normal from the same height (relief 2.2). Two 512²
  * maps: albedo (rgb) + roughness (a), normal (rgb).
  */
-function rock(): [THREE.DataTexture, THREE.DataTexture] {
-  const N = 512, alb = new Uint8Array(N * N * 4), nrm = new Uint8Array(N * N * 4), h = new Float32Array(N * N);
-  const mottle = makeNoise(101), streakN = makeNoise(103), jointN = makeNoise(107), lichenN = makeNoise(109), grainN = makeNoise(113);
-  const col = new Float32Array(N * N * 3);
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    const u = x / N, v = y / N, i = y * N + x;
-    const m = fbm(mottle, u * 8, v * 8, 8, 5);
-    const streak = fbm(streakN, u * 32, v * 4, 32, 3);
-    // joints: thin dark lines where a stretched noise crosses its middle
-    const jv = fbm(jointN, u * 6, v * 3, 6, 4);
-    const joint = Math.max(0, 1 - Math.abs(jv - 0.5) * 40);
-    const lichen = Math.max(0, (fbm(lichenN, u * 12, v * 12, 12, 4) - 0.62) * 5);
-    const grain = grainN(u * 128, v * 128, 128);
-    const k = (0.78 + 0.44 * m) * (0.9 + 0.2 * streak) * (1 - 0.45 * joint) * (0.93 + 0.14 * grain);
-    let r = 0.46 * k, g = 0.455 * k, b = 0.44 * k;
-    const l = Math.min(1, lichen);
-    r += (0.55 * k - r) * l * 0.6; g += (0.56 * k - g) * l * 0.6; b += (0.36 * k - b) * l * 0.6;
-    col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
-    h[i] = m * 0.6 + streak * 0.25 - joint * 0.3 + grain * 0.08;
-  }
-  const relief = 2.2 * N / 64;
-  const at = (x: number, y: number) => h[((y + N) % N) * N + ((x + N) % N)];
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    const i = y * N + x, o = i * 4;
-    alb[o] = Math.round(Math.min(1, col[i * 3]) * 255); alb[o + 1] = Math.round(Math.min(1, col[i * 3 + 1]) * 255); alb[o + 2] = Math.round(Math.min(1, col[i * 3 + 2]) * 255);
-    alb[o + 3] = Math.round((0.86 + 0.1 * (1 - h[i])) * 255);
-    const dx = (at(x + 1, y) - at(x - 1, y)) * 0.5 * relief, dy = (at(x, y + 1) - at(x, y - 1)) * 0.5 * relief;
-    const len = Math.hypot(dx, dy, 1);
-    nrm[o] = Math.round((-dx / len * 0.5 + 0.5) * 255); nrm[o + 1] = Math.round((-dy / len * 0.5 + 0.5) * 255); nrm[o + 2] = Math.round((1 / len * 0.5 + 0.5) * 255); nrm[o + 3] = 255;
-  }
-  return [texture(alb, N), texture(nrm, N)];
-}
-export const [ROCK_TEX, ROCK_NORMAL] = rock();
 
 /**
  * Tileable noise for the terrain's blend wander (Roadcraft 4.0 reads its dirt texture's channels at four scales):
