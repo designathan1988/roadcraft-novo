@@ -62,6 +62,8 @@ export class World {
   money: number = START_MONEY;
   /** Sandbox mode: nothing is charged. */
   unlimited = false;
+  /** A new city's money: the starting cash, and the developer's unlimited money off. */
+  startMoney(): void { this.money = START_MONEY; this.unlimited = false; }
   readonly heightsSab: SharedArrayBuffer;
   readonly heights: Float32Array;
   /** Painted ground (RGBA per 4 m sample, see world/ground.ts) and water (8 m). */

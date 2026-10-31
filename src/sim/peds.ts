@@ -1346,5 +1346,11 @@ export class Peds {
     this.t.clear();
     this.head.fill(-1);
     this.heapN = 0;
+    // nothing of the previous city is left to step out: its bus passengers, its spaced starts, its window and its
+    // buildings' doors (D2: passengers of the last city got off after another opened)
+    this.outOfBus.length = 0;
+    this.startKey.fill(-1);
+    this.windowNodes.length = 0;
+    this.setDoors(new Float32Array(0));
   }
 }

@@ -12,7 +12,7 @@ import { BULB_R, BULB_WALK, bulbAt } from '../roads/junction.ts';
 import { FOOTWAY_RISE, edgeRise } from '../roads/kerb.ts';
 import { PROFILE_INFO, setCustomProfiles } from '../roads/profiles.ts';
 import { Zone } from '../roads/zones.ts';
-import { START_MONEY, type World } from '../world/world.ts';
+import type { World } from '../world/world.ts';
 import type { Hud } from '../ui/hud.ts';
 import { fmtInt, t } from '../shared/i18n/index.ts';
 import { achieve } from '../platform/steam.ts';
@@ -55,7 +55,8 @@ export class CityFlows {
     setCustomProfiles([]);
     this.h.clearPage();
     w.signTexts.clear(); w.streetNames.clear();
-    w.money = START_MONEY;
+    // a new city starts with the ordinary money (D63: the developer's unlimited money stayed on)
+    w.startMoney();
     // another city: nothing of it is in the save yet, and it is not the city the slot holds
     w.tileInSave.fill(0);
     this.h.forgetSlot();
