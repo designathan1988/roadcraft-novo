@@ -153,12 +153,12 @@ export function moveNode(world: World, n: NodeId, x: number, z: number): RoadJou
     });
     if (crosses) return text('road.move.crosses');
   }
-  const recs = segs.map((s) => j.removeSeg(s));
-  const rec = net.nodeRec(n);
-  j.removeNode(n);
-  net.addNode({ ...rec, x, z, y });
-  j.recordAddNode(n);
+  // everything inside the guard: a throw half way puts the road back as it was (D67)
   j.guard(() => {
+    const recs = segs.map((s) => j.removeSeg(s));
+    const rec = net.nodeRec(n);
+    j.removeNode(n);
+    j.addNodeRec({ ...rec, x, z, y });
     for (const r of recs) {
       const s = j.addSeg({ ...r, cx: r.cx + dx / 2, cz: r.cz + dz / 2 });
       // like a new road: what stands in the way goes, the terrain settles under it
@@ -253,26 +253,31 @@ export function duplicateRoad(world: World, s: SegId): RoadJournal | string {
   const total = new RoadJournal(world, 'duplicar via');
   let prev: Anchor | null = null;
   const d = new Float64Array(2);
-  for (const id of road) {
-    const fwd = sc.a[id] === start;
-    const q = net.quad(id);
-    const pts = fwd ? [q.x0, q.z0, q.cx, q.cz, q.x1, q.z1] : [q.x1, q.z1, q.cx, q.cz, q.x0, q.z0];
-    const shifted: number[] = [];
-    for (const [i, t] of [[0, 0], [1, 0.5], [2, 1]] as const) {
-      bezD(q, fwd ? t : 1 - t, d);
-      const l = Math.hypot(d[0], d[1]) || 1, sgn = fwd ? 1 : -1;
-      const nx = (d[1] / l) * sgn, nz = (-d[0] / l) * sgn;
-      shifted.push(pts[i * 2] + nx * off, pts[i * 2 + 1] + nz * off);
+  // the pieces inside the guard: if building one throws, the pieces already built go too (D67)
+  const refused = total.guard(() => {
+    for (const id of road) {
+      const fwd = sc.a[id] === start;
+      const q = net.quad(id);
+      const pts = fwd ? [q.x0, q.z0, q.cx, q.cz, q.x1, q.z1] : [q.x1, q.z1, q.cx, q.cz, q.x0, q.z0];
+      const shifted: number[] = [];
+      for (const [i, t] of [[0, 0], [1, 0.5], [2, 1]] as const) {
+        bezD(q, fwd ? t : 1 - t, d);
+        const l = Math.hypot(d[0], d[1]) || 1, sgn = fwd ? 1 : -1;
+        const nx = (d[1] / l) * sgn, nz = (-d[0] / l) * sgn;
+        shifted.push(pts[i * 2] + nx * off, pts[i * 2 + 1] + nz * off);
+      }
+      const a: Anchor = prev ?? snap(net, shifted[0], shifted[1], 2);
+      const b = snap(net, shifted[4], shifted[5], 2);
+      const plan = planRoad(world, a, { x: shifted[2], z: shifted[3] }, b, prof, 0);
+      if (!plan.ok) return plan.reason;
+      const j = buildRoad(world, plan, a, b, prof, 0, 'duplicar via');
+      total.append(j);
+      prev = snap(net, shifted[4], shifted[5], 1.5);
+      start = fwd ? sc.b[id] : sc.a[id];
     }
-    const a: Anchor = prev ?? snap(net, shifted[0], shifted[1], 2);
-    const b = snap(net, shifted[4], shifted[5], 2);
-    const plan = planRoad(world, a, { x: shifted[2], z: shifted[3] }, b, prof, 0);
-    if (!plan.ok) { total.invert(); return plan.reason; }
-    const j = buildRoad(world, plan, a, b, prof, 0, 'duplicar via');
-    total.append(j);
-    prev = snap(net, shifted[4], shifted[5], 1.5);
-    start = fwd ? sc.b[id] : sc.a[id];
-  }
+    return null;
+  });
+  if (refused !== null) { total.invert(); return refused; }
   void nc;
   return total;
 }

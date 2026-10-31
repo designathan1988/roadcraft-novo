@@ -117,8 +117,7 @@ export class RoadJournal implements Command {
     for (const s of segs) this.removeSeg(s);
     const rec = net.nodeRec(id);
     this.removeNode(id);
-    net.addNode({ ...rec, y });
-    this.ops.push({ t: 'addNode', rec: net.nodeRec(id) });
+    this.addNodeRec({ ...rec, y });
     for (const r of recs) this.addSeg({ ...r, flags: r.flags & ~KIND_MASK });
   }
   removeNode(id: NodeId): void {
@@ -127,7 +126,11 @@ export class RoadJournal implements Command {
     this.ops.push({ t: 'remNode', rec });
   }
   /** Records a node already placed in the network (move node: same id somewhere else). */
-  recordAddNode(id: NodeId): void { this.ops.push({ t: 'addNode', rec: this.net.nodeRec(id) }); }
+  /**
+   * Adds the node `rec` (with its id and junction) to the network, recorded first: if the add throws, a guard's
+   * rollback removes what was made (removing a node that is not there does nothing). D67: it was added, then recorded.
+   */
+  addNodeRec(rec: NodeRec): void { this.ops.push({ t: 'addNode', rec }); this.net.addNode(rec); }
   addSeg(rec: Omit<SegRec, 'id'>): SegId {
     // a new road records how it is built over the terrain before it is conformed (the refund reads the same)
     if (kindOfFlags(rec.flags) < 0) {
@@ -300,7 +303,14 @@ export class RoadJournal implements Command {
   }
 
   /** Appends another (not yet charged) journal to this one: it becomes a single undo step. */
-  append(other: RoadJournal): void { this.ops.push(...other.ops); this.value += other.value; this.freeValue += other.freeValue; }
+  append(other: RoadJournal): void {
+    // one by one: spreading a large journal into push overflows the argument stack (D68)
+    for (let i = 0; i < other.ops.length; i++) this.ops.push(other.ops[i]);
+    this.value += other.value; this.freeValue += other.freeValue;
+    // what its settle would hand on (names and junction settings of the segments it split or removed, D67b)
+    for (const g of other.gone) this.gone.push(g);
+    for (const [from, pieces] of other.heirs) this.inherit(from, pieces);
+  }
 
   /** Redo: runs the ops in order. If one throws, those already run go back and the error goes on: nothing changed. */
   apply(): void {

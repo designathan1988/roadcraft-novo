@@ -5,6 +5,7 @@ import { World } from '../src/world/world.ts';
 import { buildRoad, duplicateRoad, joinAt, moveNode, planRoad, reverseRoad, snap, splitAt } from '../src/roads/build.ts';
 import { PROFILE_INFO } from '../src/roads/profiles.ts';
 import { asSeg } from '../src/core/ids.ts';
+import { RoadJournal } from '../src/roads/build.ts';
 
 function flatWorld(): World {
   const w = new World();
@@ -87,4 +88,39 @@ test('duplicar cria uma via paralela do mesmo perfil', () => {
   assert.ok(w.roads.nearestSeg(0, off, 1.5) || w.roads.nearestSeg(0, -off, 1.5));
   j.invert();
   assert.equal(w.roads.segs.size, n0);
+});
+
+test('D67: moving a node that fails half way leaves the road as it was (all inside the guard)', () => {
+  const w = flatWorld();
+  road(w, -60, 0, 0, 0); road(w, 0, 0, 0, 60);
+  const n = w.roads.nearestNode(0, 0, 2), before = shape(w);
+  const net = w.roads, orig = net.addNode.bind(net);
+  let armed = true;
+  net.addNode = (r) => { if (armed) { armed = false; throw new Error('boom'); } return orig(r); };
+  assert.throws(() => moveNode(w, n, 10, -10), /boom/);
+  net.addNode = orig;
+  assert.equal(shape(w), before);
+  assert.equal(net.nodes.alive[n], 1);
+});
+
+test('D67: duplicating a road that fails on a later piece builds nothing', () => {
+  const w = flatWorld();
+  road(w, -150, 0, 150, 0);
+  const s = w.roads.nearestSeg(0, 0, 2)![0], before = shape(w), segs = w.roads.segs.size;
+  const net = w.roads, orig = net.addSeg.bind(net);
+  let calls = 0;
+  net.addSeg = (r) => { if (++calls === 2) throw new Error('boom'); return orig(r); };
+  assert.throws(() => duplicateRoad(w, s), /boom/);
+  net.addSeg = orig;
+  assert.equal(shape(w), before);
+  assert.equal(w.roads.segs.size, segs);
+});
+
+test('D68: appending a journal of 200,000 steps does not overflow the stack', () => {
+  const w = flatWorld();
+  const a = new RoadJournal(w, 'a'), b = new RoadJournal(w, 'b');
+  const ops = (b as unknown as { ops: unknown[] }).ops;
+  for (let i = 0; i < 200_000; i++) ops.push({ t: 'name', id: 0, from: undefined, to: undefined });
+  a.append(b);
+  assert.equal((a as unknown as { ops: unknown[] }).ops.length, 200_000);
 });
