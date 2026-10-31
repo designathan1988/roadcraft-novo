@@ -14,7 +14,7 @@ import type { PropsProbe } from './propsProbe.ts';
 import { PROP, PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, buildPropKinds, buildingPartModels, propCastsShadow, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -163,7 +163,7 @@ export class PropRenderer {
     this.distU = uniformArray(this.distArr, 'float');
     this.radiusU = uniformArray(this.kinds.map((d) => d.radius), 'float');
     this.stretchU = uniformArray(this.kinds.map((d) => propStretch(d)), 'float');
-    this.castU = uniformArray(this.kinds.map((d) => (propCastsShadow(d, 0) ? 1 : 0)), 'float');
+    this.castU = uniformArray(this.kinds.map((d) => (propKindCasts(d) ? 1 : 0)), 'float');
 
     // ---- compute. The visible list is compact: each draw's instances in one run, the runs back to back. Count (how
     // many each draw gets), prefix (where each run starts), fill. No draw has a cap of its own: a forest of 250,000
@@ -271,9 +271,8 @@ export class PropRenderer {
       mesh.userData.slot = t * LODS + l;
       const slot = t * LODS + l;
       mesh.onBeforeRender = () => { this.drawsThisFrame[slot]++; };
-      // only the near level casts shadows (propCastsShadow); of the 4.0 building parts only the boxes (sills, fins) and the
-      // lot pieces: thin frames, railings and small props none (each cascade would draw them again)
-      mesh.castShadow = propCastsShadow(d, l) && (!PART_TYPES.includes(t) || t === PROP.BBox || t === PROP.BLot);
+      // only the near level casts shadows, and only the kinds propKindCasts lets in (by type, not by kind index)
+      mesh.castShadow = l === 0 && propKindCasts(d);
       // low props: the views and the near cascade only (their shadow is under a texel of the far ones)
       if (propIsSmallCaster(d)) mesh.layers.set(SMALL_CASTER_LAYER);
       mesh.receiveShadow = true;

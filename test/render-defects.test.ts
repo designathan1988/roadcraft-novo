@@ -718,6 +718,46 @@ test('shadows (4.0 port): low props cast only into the near cascade; the far cas
   assert.equal(city.layers.test(csm.lights[2].shadow.camera.layers), true, 'the far cascade still draws the city');
 });
 
+test('GPU 100 % (2026-10-31): the far cascades keep their own layers when three draws them, so the small casters stay out', async () => {
+  const sun = await import('../src/render/sun.ts') as Record<string, unknown>;
+  const { Post } = await import('../src/render/post.ts');
+  const smallLayer = sun.SMALL_CASTER_LAYER as number;
+  const renderer = fakeRenderer();
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), light = new THREE.DirectionalLight();
+  camera.layers.enable(smallLayer); // the views draw the small casters (cameraRig.ts)
+  const scene = new THREE.Scene(); scene.add(light);
+  const post = new Post(renderer, scene, camera, light, { shadows: true, ao: false, bloom: false });
+  const csm = post.csm as unknown as { _init(b: unknown): void; lights: Array<{ shadow: THREE.LightShadow }> };
+  csm._init({ camera, renderer });
+  post.setCamera(camera);
+  // three r186 ShadowNode.updateShadow (ShadowNode.js:677): a shadow camera holding nothing but layer 0 is drawn with the
+  // view camera's layers, the small casters' among them
+  const drawn = (shadowCam: THREE.Camera): number => ((shadowCam.layers.mask & 0xFFFFFFFE) === 0 ? camera.layers.mask : shadowCam.layers.mask);
+  const small = 1 << smallLayer;
+  assert.notEqual(drawn(csm.lights[0].shadow.camera) & small, 0, 'the near cascade draws the small casters');
+  assert.equal(drawn(csm.lights[1].shadow.camera) & small, 0, 'the middle cascade does not');
+  assert.equal(drawn(csm.lights[2].shadow.camera) & small, 0, 'the far cascade does not');
+  assert.notEqual(drawn(csm.lights[2].shadow.camera) & 1, 0, 'the far cascade still draws the city (layer 0)');
+});
+
+test('GPU 100 % (2026-10-31): of the 4.0 building parts only the boxes and the lot pieces cast, read by the kind\'s type, not its index', async () => {
+  const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
+  const { PART_PROP } = await import('../src/jobs/parts40.ts');
+  const { PROP, FURN } = await import('../src/jobs/props.ts');
+  const { kinds, kindOf } = PM.buildPropKinds(PM.buildPropDefs(PM.buildingPartModels()));
+  const casts = PM.propKindCasts as ((k: (typeof kinds)[number], index: number) => boolean) | undefined;
+  assert.ok(casts, 'one rule for whether a kind casts, read by the renderer');
+  const thin: number[] = [PART_PROP.BFrame, PART_PROP.BRail, PART_PROP.BMisc, PART_PROP.BPropA, PART_PROP.BPropB];
+  const wrong: string[] = [];
+  kinds.forEach((k, i) => { if (thin.includes(k.type) && casts!(k, i)) wrong.push(`kind ${i} (part type ${k.type})`); });
+  assert.deepEqual(wrong, [], 'thin building parts (frames, railings, doors, small parts) drawn into the shadow cascades');
+  const box = kinds.findIndex((k) => k.type === PART_PROP.BBox), lot = kinds.findIndex((k) => k.type === PART_PROP.BLot);
+  assert.ok(casts!(kinds[box], box), 'the boxes (sills, fins, shutters) cast');
+  assert.ok(casts!(kinds[lot], lot), 'the lot pieces cast');
+  const roofAc = kindOf[PROP.Furniture * PM.VARIANTS + FURN.RoofAc];
+  assert.ok(casts!(kinds[roofAc], roofAc), `a rooftop condenser (kind ${roofAc}) casts`);
+});
+
 test('E23: an object moved by its matrix has the previous frame\'s matrix in its velocity', async () => {
   const vel = await import('../src/render/velocity.ts') as Record<string, unknown>;
   const prev = vel.previousModelMatrix as ((o: THREE.Object3D, frameId: number) => THREE.Matrix4) | undefined;

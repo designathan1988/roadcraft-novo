@@ -11,7 +11,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { SHADOW_REACH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
+import { CASCADE_LAYER, SHADOW_REACH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
 import { cloudShadowAt, cloudShadowStrength } from './cloudShadow.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
@@ -294,9 +294,11 @@ export class Post {
     const ortho = (camera as THREE.OrthographicCamera).isOrthographicCamera === true;
     csm.maxFar = ortho ? (camera as THREE.OrthographicCamera).far : PERSP_SHADOW_FAR;
     csm.updateFrustums();
-    // the near cascade draws the small casters too; the far ones only what is bigger than their texel
+    // the near cascade draws the small casters too; the far ones only what is bigger than their texel. Each holds its own
+    // layer besides 0, or three draws it with the view camera's layers (sun.ts CASCADE_LAYER)
     (csm as unknown as { lights: Array<{ shadow: THREE.LightShadow }> }).lights.forEach((l, i) => {
       l.shadow.camera.layers.set(0);
+      l.shadow.camera.layers.enable(CASCADE_LAYER + i);
       if (i === 0) l.shadow.camera.layers.enable(SMALL_CASTER_LAYER);
     });
   }

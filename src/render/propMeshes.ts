@@ -9,7 +9,7 @@ import { impostorQuad } from './impostor.ts';
 import { SMALL_CASTER } from './sun.ts';
 import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
 import { partGeometries } from '../r40/api.ts';
-import { PART_BASE, PART_DIST, POOL_PARTS, VARIANT_TYPES } from '../jobs/parts40.ts';
+import { PART_BASE, PART_DIST, PART_PROP, PART_TYPES, POOL_PARTS, VARIANT_TYPES } from '../jobs/parts40.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 import { parkMiller } from '../core/rng.ts';
 
@@ -703,6 +703,17 @@ export function propCastsShadow(k: PropKind, level: number): boolean {
   if (level !== 0 || !g || k.type === PROP.Wire) return false;
   if (!g.boundingBox) g.computeBoundingBox();
   return g.boundingBox!.max.y - Math.max(0, g.boundingBox!.min.y) >= FLAT_PROP;
+}
+
+/**
+ * Whether a kind's near level casts into the sun's cascades: what is tall enough (`propCastsShadow`) and, of the 4.0
+ * building parts, only the boxes (sills, fins, shutters) and the lot pieces; thin frames, railings and the small parts
+ * none (each cascade would draw them again for a shadow under its texel). Read by the kind's TYPE: kinds are not numbered
+ * as types (a type split by model or variant shifts every kind after it), and testing the kind's index against the part
+ * types let all the frames, railings, doors and balcony props cast into the three cascades (61 kinds below the parts).
+ */
+export function propKindCasts(k: PropKind): boolean {
+  return propCastsShadow(k, 0) && (!PART_TYPES.includes(k.type) || k.type === PART_PROP.BBox || k.type === PART_PROP.BLot);
 }
 
 /** A prop low enough to cast only into the near cascade (sun.ts SMALL_CASTER_LAYER). */

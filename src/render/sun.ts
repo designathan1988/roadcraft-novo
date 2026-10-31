@@ -17,5 +17,11 @@ export const SHADOW_LENGTH = 600;
  * do not (Roadcraft 4.0 drew a caster into a cascade only if it was bigger than that cascade's texel).
  */
 export const SMALL_CASTER_LAYER = 4;
+/**
+ * First of the cascades' own layers (one each: CASCADE_LAYER + i). three r186 draws a shadow camera that holds nothing but
+ * layer 0 with the view camera's layers (ShadowNode.updateShadow, `(mask & 0xFFFFFFFE) === 0`): the far cascades, set to
+ * layer 0 alone, drew the small casters too. A layer of its own keeps each cascade's layers as they are set.
+ */
+export const CASCADE_LAYER = 5;
 /** Height under which a prop is a small caster (m). */
 export const SMALL_CASTER = 1.2;
