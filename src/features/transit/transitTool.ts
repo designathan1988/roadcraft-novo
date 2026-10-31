@@ -8,6 +8,7 @@ import { bez, bezD } from '../../roads/geometry.ts';
 import { PROFILE_INFO } from '../../roads/profiles.ts';
 import type { RoadNetwork } from '../../roads/network.ts';
 import type { Transit } from '../../world/transit.ts';
+import type { DirtyCells } from '../../core/grid.ts';
 import { t } from '../../shared/i18n/index.ts';
 import type { LineRow } from '../../ui/drawers.ts';
 
@@ -17,6 +18,10 @@ export interface LineStat { id: number; buses: number; perHour: number; waiting:
 export interface TransitHost {
   readonly transit: Transit;
   readonly roads: RoadNetwork;
+  readonly heights: Float32Array;
+  readonly dirty: DirtyCells;
+  /** The stops, stations and line paths drawn (render/transit.ts TransitRenderer). */
+  readonly view: { update(transit: Transit, net: RoadNetwork, heights: Float32Array, version: number, dirty?: DirtyCells): void };
   run(cmd: Command): void;
   toast(text: string): void;
   /** A line was made (the achievement). */
@@ -126,12 +131,15 @@ export class TransitTool {
   }
 
   /**
-   * Keeps the simulation's lines in step (when the lines or the roads change: `roadsVersion`) and, while the tool is
+   * Draws the stops (TransitRenderer.update: it rebuilds only when the lines change or a road near a stop is edited),
+   * keeps the simulation's lines in step (when the lines or the roads change: `roadsVersion`) and, while the tool is
    * open, the panel's list (only when the lines, the selection or the simulation's figures change: no list made
    * every frame).
    */
   sync(roadsVersion: number, toolOpen: boolean, stats: readonly LineStat[] | null): void {
     const tr = this.host.transit;
+    // the stops: rebuilt when the lines change or a road is edited near a stop (not on every road edit)
+    this.host.view.update(tr, this.host.roads, this.host.heights, tr.version, this.host.dirty);
     const v = tr.version * 100000 + roadsVersion;
     if (v !== this.sent) {
       this.sent = v;

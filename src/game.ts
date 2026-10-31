@@ -280,7 +280,8 @@ export class Game {
     this.fog = new FogControl(this.world.look, () => { this.unsaved = true; });
     this.sky = new WeatherControl({ weather: this.weather, look: this.world.look, setThunder: (v) => { this.ambient.thunderVolume = v; }, option: () => this.prefs?.now.weather, changed: () => { this.unsaved = true; } });
     this.lines = new TransitTool({
-      transit: this.transit, roads: this.world.roads, run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
+      transit: this.transit, roads: this.world.roads, heights: this.world.heights, dirty: this.world.dirty, view: this.transitView,
+      run: (cmd) => this.commands.run(cmd), toast: (text) => this.hud.toast(text),
       lineMade: () => achieve('PRIMEIRA_LINHA'), sendLines: (lines) => this.sim.postMessage({ type: 'lines', lines } satisfies ToSim),
       showLines: (rows, current) => this.hud.setLines(rows, current),
     });
