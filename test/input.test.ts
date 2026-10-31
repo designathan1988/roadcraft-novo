@@ -122,7 +122,7 @@ function toolHost() {
   const calls: string[] = [];
   const host = {
     zoneLayer: false, brush: { mode: 'raise' }, lotMode: 'edit', skyTool: { cloud: 'none', fog: 'none' },
-    riverPts: [], insideId: -1,
+    riverPts: [], view: { insideId: -1, zoneToolInHand: () => {} },
     roadTool: { setMode: () => {}, cancel: () => {} },
     itemTool: { setMode: () => {}, cancel: () => {} },
     transitView: { showPaths: false },
