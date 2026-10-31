@@ -28,13 +28,16 @@ const walls40Top = new Map<string, number>();
 export function wallsHeightOf(b: HeightRec, i: number): number {
   const zone = b.zone[i];
   if (R40_ZONES.has(zone) && !b.fn[i] && !hasDesign(b.color[i]) && !b.shapeN?.[i]) {
-    const key = b.seed[i] + '|' + zone + '|' + b.floors[i] + '|' + Math.round(b.w[i]) + 'x' + Math.round(b.d[i]);
+    // the effective seed and the exact size: what volumes40 reads (D65: seed 0 and a rounded size made different
+    // buildings share one height)
+    const seed = b.seed[i] || i + 1;
+    const key = seed + '|' + zone + '|' + b.floors[i] + '|' + b.w[i] + 'x' + b.d[i];
     let top = walls40Top.get(key);
     if (top === undefined) {
       const dens = zoneDensity(zone);
       const use = zone === Zone.Commercial || zone === Zone.ComLow || zone === Zone.ComHigh || zone === Zone.Mixed ? 'commercial' : 'residential';
       const density = dens === 0 || (use === 'residential' && b.floors[i] <= 2) ? 'low' : dens === 2 || (use === 'commercial' && b.floors[i] >= 8) ? 'high' : 'medium';
-      const lot: Lot40 = { cx: b.x[i], cz: b.z[i], W: b.w[i], D: b.d[i], rot: b.rot[i], use, density, seed: b.seed[i] || i + 1, groundAt: () => 0 };
+      const lot: Lot40 = { cx: b.x[i], cz: b.z[i], W: b.w[i], D: b.d[i], rot: b.rot[i], use, density, seed, groundAt: () => 0 };
       top = Math.max(0, ...volumes40(lot).map((v) => v.y1));
       if (walls40Top.size > 4096) walls40Top.clear();
       walls40Top.set(key, top);
