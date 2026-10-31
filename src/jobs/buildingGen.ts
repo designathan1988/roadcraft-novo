@@ -13,7 +13,8 @@ import { ARCHES, ArchId, Fn, PANE_ROW, chimneyOf, pickArch } from '../world/arch
 import { type BoxColumns, type PackedMesh } from '../shared/contracts/worker.ts';
 import { CIVIC_DESIGNS, decodeDesign, hasDesign } from '../world/design.ts';
 import { catalogProjects } from '../world/catalog.ts';
-import { layLot40, massLot40, setRuinSource, volumes40, wallsTop40, type AttachSink, type Lot40, type PartSink } from './building40.ts';
+import { layLot40, massLot40, partyWallsOf, setRuinSource, volumes40, wallsTop40, type AttachSink, type Lot40, type PartSink } from './building40.ts';
+import type { PartyWalls } from '../r40/api.ts';
 import { planCells, type CellPlan } from './buildingGen/plan.ts';
 import { lotFit } from './buildingGen/polygon.ts';
 import { type Frame } from './buildingGen/geometry.ts';
@@ -88,12 +89,27 @@ export function buildBuildings(heights: Float32Array, b: BoxColumns, originX: nu
   const sink = out ?? newOutputs();
   if (lod === -1 && !sink.detail) sink.detail = mb;
   const plan = planCells(b);
+  // the shell passes: the 4.0 lots of the job read as one another's neighbours (a wall back to back with a
+  // neighbour's block is not laid)
+  let party: PartyWalls | undefined;
+  if (!legacy && (lod === 0 || lod === 1)) {
+    const lots: Lot40[] = [];
+    for (let i = 0; i < b.count; i++) if (isLot40(b, i, plan)) lots.push(lot40Of(b, i, lotFit(b, i), b.zone[i], Math.max(1, b.floors[i]), heights));
+    party = partyWallsOf(lots);
+  }
   for (let i = 0; i < b.count; i++) {
     mb.curTag = buildingTag(b.seed[i], b.x[i], b.z[i]);
-    genOne(mb, heights, b, i, plan, lod, legacy, sink);
+    genOne(mb, heights, b, i, plan, lod, legacy, sink, party);
     mb.curTag = 0;
   }
   return mb.pack(originX, originZ, extent);
+}
+
+/** Whether building i is drawn by the 4.0 path (the same tests genOne makes, in its order). */
+function isLot40(b: BoxColumns, i: number, plan: CellPlan): boolean {
+  if (b.floors[i] === 0 || b.zone[i] === 0 || b.fn[i] || b.shapeN[i] || !R40_ZONES.has(b.zone[i])) return false;
+  const ds = hasDesign(b.color[i]) ? decodeDesign(b.color[i], b.h[i]) : null;
+  return !ds && !plan.landmark[i];
 }
 
 /** The generic generator's entry point for its regression tests: the production R/C/M path is the 4.0 one. */
@@ -110,7 +126,7 @@ function lot40Of(b: BoxColumns, i: number, fit: { cx: number; cz: number; W: num
 }
 
 /** One building of the boxes (the cell plan already made) into mb, at level lod. */
-function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number, plan: CellPlan, lod: number, legacy: boolean, out: GenOutputs): void {
+function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number, plan: CellPlan, lod: number, legacy: boolean, out: GenOutputs, party?: PartyWalls): void {
   const rot = b.rot[i];
   const zone = b.zone[i];
   if (lod < 0 && (b.floors[i] === 0 || zone === 0)) return;
@@ -157,7 +173,7 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
   else if (!legacy && lod === 1 && R40_ZONES.has(zone) && !b.shapeN[i]) {
     // the same 4.0 building at 4.0's facade level (L1): its walls, openings and roofs, without the small parts
     const lot40 = lot40Of(b, i, fit, zone, floors, heights);
-    layLot40(lot40, mb, null, PANE_ROW, true);
+    layLot40(lot40, mb, null, PANE_ROW, true, party);
     if (out.tops) out.tops[i] = wallsTop40(lot40);
   }
   else if (!legacy && lod >= 2 && R40_ZONES.has(zone) && !b.shapeN[i]) {
@@ -173,7 +189,7 @@ function genOne(mb: MeshBuilder, heights: Float32Array, b: BoxColumns, i: number
     // 4.0's own volumes, so the inside view, the camera and the collapse read the building actually drawn.
     const lot40 = lot40Of(b, i, fit, zone, floors, heights);
     if (lod === -3) { if (out.layout) for (const v of volumes40(lot40)) out.layout.push(v as Volume); return; }
-    if (lod === 0) { layLot40(lot40, mb, null, PANE_ROW); if (out.tops) out.tops[i] = wallsTop40(lot40); }
+    if (lod === 0) { layLot40(lot40, mb, null, PANE_ROW, false, party); if (out.tops) out.tops[i] = wallsTop40(lot40); }
     else if (lod === -2) {
       // With the 4.0 sink the parts come from layLot40; without one this pass has to fall back to the generic parts,
       // or a caller that does not ask for the 4.0 pool silently loses every part.

@@ -3,6 +3,7 @@ export { Rng } from './core/rng.ts';
 export { madeToMeasure } from './world/buildings/procedural.ts';
 export { furnishLot, lotKind, planLot } from './world/growth/lotPlan.ts';
 export { emitChunk, letGoEmitted } from './render/buildings/buildingMesh.ts';
+export { PartyWalls } from './render/buildings/partyWalls.ts';
 export { PLATE_DETAIL, TILE_DETAIL, emitMassing } from './render/buildings/massing.ts';
 export { partGeometries } from './render/buildings/kit.ts';
 export { COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT } from './render/buildings/cellArrays.ts';

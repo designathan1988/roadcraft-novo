@@ -4,7 +4,7 @@
 // into this engine's mesh: the shell's faces with their paint and finish (the finishes texture array), and the parts
 // (glass, frames, sills, doors, shutters, railings, AC units, the lot's boxes...) laid out of their models
 // (kit.ts partGeometries) at their poses. The Building lives only here, while it is emitted.
-import { Rng, madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
+import { Rng, madeToMeasure, furnishLot, lotKind, planLot, emitChunk, letGoEmitted, PartyWalls, PLATE_DETAIL, TILE_DETAIL, emitMassing, partGeometries, COLOURED_PARTS, COLOUR_RANGE, PAINT_UNIT, NORMAL_UNIT, POSE_FLOATS, LOOK_FLOATS, FINISHES, roofMaterial, wallMaterial, levelElevation, levelHeight, localToWorld, volumeElevation, floorHeight, interiorFurniture, type PartKind, type Building, type RoofKind } from '../r40/api.ts';
 import type { BufferGeometry } from 'three/webgpu';
 import { FIN } from './buildingFinishes.ts';
 import { MeshBuilder } from './meshBuilder.ts';
@@ -108,7 +108,8 @@ export type PartSink = (kind: string, x: number, y: number, z: number, yaw: numb
  * A body depends on the lot's seed, use, density and size alone, so it is made once and kept for the next jobs.
  */
 type Body40 = Parameters<typeof furnishLot>[0];
-interface KeptBody { use: string; density: string; W: number; D: number; body: Body40 }
+/** `placed`: the record as last placed in the world (one object: the party walls tell a building from its neighbours by identity). */
+interface KeptBody { use: string; density: string; W: number; D: number; body: Body40; placed?: { x: number; y: number; rot: number; b: Building } }
 const BODIES = new Map<number, KeptBody>();
 const BODIES_KEPT = 512;
 
@@ -137,8 +138,23 @@ function building40(lot: Lot40): Building {
   }
   // the 4.0 lot frame: origin at the front's middle, +y away from the street, the map's y = -world z
   const c = Math.cos(lot.rot), s = Math.sin(lot.rot);
-  const fx = lot.cx + (lot.D / 2) * s, fz = lot.cz + (lot.D / 2) * c;
-  return { ...kept.body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: -fz, rotation: lot.rot } as Building;
+  const fx = lot.cx + (lot.D / 2) * s, fy = -(lot.cz + (lot.D / 2) * c);
+  const p = kept.placed;
+  if (p && p.x === fx && p.y === fy && p.rot === lot.rot) return p.b;
+  const b = { ...kept.body, id: (lot.seed & 0x7fffffff) || 1, x: fx, y: fy, rotation: lot.rot } as Building;
+  kept.placed = { x: fx, y: fy, rot: lot.rot, b };
+  return b;
+}
+
+/**
+ * The lots of one job read as one another's neighbours (4.0 partyWalls.ts): a bay standing back to back against a
+ * neighbour's block is never seen and is not laid. Without it every wall between touching lots was drawn twice,
+ * hidden (this engine never built one, 2026-10-31).
+ */
+export function partyWallsOf(lots: readonly Lot40[]): PartyWalls | undefined {
+  if (lots.length < 2) return undefined;
+  const ground = lots[0].groundAt;
+  return new PartyWalls(lots.map(building40), (x, y) => ground(x, -y));
 }
 
 /** The 4.0 building's volumes as the engine's layout shape: world rects with their storey ranges, grounded at the
@@ -181,11 +197,11 @@ export function wallsTop40(lot: Lot40): number {
   return top;
 }
 
-export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number, far = false): Laid40 {
+export function layLot40(lot: Lot40, shell: MeshBuilder | null, pool: PartSink | null, paneRow: number, far = false, party?: PartyWalls): Laid40 {
   const b = building40(lot);
   // far: 4.0's facade level (L1: the openings drawn by the shader, no small parts), the near level otherwise
   // no rooms behind the panes nor light slots: this engine's panes map their rooms in the shader (render/city.ts)
-  const chunk = emitChunk(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), undefined, far, true, undefined, false);
+  const chunk = emitChunk(b, (x, y) => lot.groundAt(x, -y), undefined, (x, y) => lot.groundAt(x, -y), undefined, far, true, party, false);
   letGoEmitted(b);
   let laidShell = 0, laidParts = 0;
   const n = [0, 0, 0];
