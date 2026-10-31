@@ -77,8 +77,10 @@ p.on('exit', (code) => {
 function print(now, base) {
   const failures = [];
   const row = (...c) => console.log(c.map((x, i) => String(x).padStart(i ? 12 : 9)).join(''));
-  // tris: three's count, the quantity of the owner's baseline; drawn: the triangles the GPU drew (D81: three counts an
-  // indirect props draw as one instance). The gate compares tris, as the baseline does, until the owner reviews it.
+  // tris: three's count (renderer.info), the quantity the owner's baseline was recorded in; drawn: the triangles the
+  // GPU drew. three counts an indirect props draw as one instance, so tris leaves out every tree, pole and facade part
+  // past the first of each draw (D81). The gate compares drawn, the real cost, with the limits the baseline gives (the
+  // owner's review, 2026-10-31): no limit was raised for it.
   row('view', 'draws', 'limit', 'tris', 'limit', 'drawn', 'MB', 'limit', 'cars', 'peds');
   for (const v of VIEWS) {
     const n = now[v.name], b = base?.[v.name];
@@ -91,7 +93,9 @@ function print(now, base) {
     if (b) {
       if (!n.draws || !n.tris) failures.push(`${v.name} has an empty frame (${n.draws} draws, ${n.tris} tris)`);
       if (n.draws > drawLimit) failures.push(`${v.name} draws ${n.draws} > ${drawLimit}`);
-      if (n.tris > triLimit) failures.push(`${v.name} tris ${n.tris} > ${triLimit}`);
+      // without the GPU's count the view cannot be judged: it fails rather than fall back to the count that misses props
+      if (!n.trisDrawn) failures.push(`${v.name} has no GPU triangle count (drawn)`);
+      else if (n.trisDrawn > triLimit) failures.push(`${v.name} drawn tris ${n.trisDrawn} > ${triLimit}`);
       if (mb > mbLimit) failures.push(`${v.name} MB ${mb} > ${mbLimit}`);
     }
   }
