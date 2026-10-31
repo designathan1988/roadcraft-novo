@@ -19,6 +19,9 @@ import { PART_PROP, POOL_PARTS, partKey, partW } from './parts40.ts';
 import { inFootprints, lotParking, buildBuildingParts, type LotGround40 } from './buildingGen.ts';
 import { inPolygon, lotFit, lotPolygon } from './buildingGen/polygon.ts';
 
+/** A prop's type from its `extra` word (5 bits; the rest is its key): the one decoder of that format. */
+export const propType = (extra: number): number => extra & 31;
+
 /** Tipos de peça (4 bits; 15 = vaga livre). */
 export const PROP = { Tree: 0, Conifer: 1, Bush: 2, Lamp: 3, LampDouble: 4, Signal: 5, Bench: 6, Bin: 7, Wire: 8, Sign: 9, ParkedCar: 10, Furniture: 11, Barrier: 12, Pole: 13, Ground: 14, Person: 15, Oak: 16, Palm: 17, ...PART_PROP } as const;
 /** Types 16..23 belong to the roads/vegetation work, 24..30 to the buildings work (see the shared notes); 18..23 are

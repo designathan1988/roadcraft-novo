@@ -11,7 +11,7 @@ import { CELL_SIZE, MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../shared/contracts/worker.ts';
 import type { PropsProbe } from './propsProbe.ts';
-import { PROP, PROP_FREE, PROP_TYPES } from '../jobs/props.ts';
+import { PROP, PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
 import { buildPropDefs, buildPropKinds, propCastsShadow, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
@@ -607,7 +607,7 @@ export class PropRenderer {
     const n = new Uint32Array(KINDS);
     let top = -Infinity;
     for (let i = 0; i < p.count; i++) {
-      const type = p.extra[i] & 31;
+      const type = propType(p.extra[i]);
       if (type >= PROP_TYPES) continue;
       const k = this.kindOf[type * VARIANTS + propVariant(type, p.data[i * 4 + 3], p.extra[i])];
       n[k]++;
@@ -708,12 +708,12 @@ export class PropRenderer {
       const base = def.lods[1] ?? def.lods[0];
       if (!base) continue;
       let n = 0;
-      for (let i = 0; i < p.count; i++) if ((p.extra[i] & 31) === t) n++;
+      for (let i = 0; i < p.count; i++) if (propType(p.extra[i]) === t) n++;
       if (n === 0) continue;
       const pose = new Float32Array(n * 4), key = new Float32Array(n);
       let k = 0;
       for (let i = 0; i < p.count; i++) {
-        if ((p.extra[i] & 31) !== t) continue;
+        if (propType(p.extra[i]) !== t) continue;
         pose.set(p.data.subarray(i * 4, i * 4 + 4), k * 4);
         key[k] = p.extra[i];
         k++;

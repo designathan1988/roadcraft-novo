@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
-import { buildProps, PROP } from '../src/jobs/props.ts';
+import { buildProps, PROP, propType } from '../src/jobs/props.ts';
 import { emptyBoxes } from '../src/shared/contracts/worker.ts';
 import { cellId, cellX } from '../src/core/grid.ts';
 
@@ -26,7 +26,7 @@ test('peças: determinísticas, cada uma na sua célula, semáforo por braço', 
   // automático: avenida principal, a rua dá a preferência (placas, sem semáforo)
   let auto = 0;
   for (let i = 0; i < 4; i++) { const g = net.gather(segs, []); const r = buildProps(w.heights, g, emptyBoxes(0), [cellId(cellX(-1), cellX(-1)), cellId(cellX(1), cellX(-1)), cellId(cellX(-1), cellX(1)), cellId(cellX(1), cellX(1))][i]);
-    for (let k = 0; k < r.count; k++) if ((r.extra[k] & 15) === PROP.Signal) auto++; }
+    for (let k = 0; k < r.count; k++) if (propType(r.extra[k]) === PROP.Signal) auto++; }
   assert.equal(auto, 0);
   net.setJunction(c, { ctl: Ctl.Signal });
   const cells = [cellId(cellX(-1), cellX(-1)), cellId(cellX(1), cellX(-1)), cellId(cellX(-1), cellX(1)), cellId(cellX(1), cellX(1))];
@@ -38,7 +38,7 @@ test('peças: determinísticas, cada uma na sua célula, semáforo por braço', 
     for (let i = 0; i < a.count; i++) {
       const x = a.data[i * 4], z = a.data[i * 4 + 2];
       assert.equal(cellId(cellX(x), cellX(z)), cell, 'peça fora da célula');
-      const t = a.extra[i] & 15;
+      const t = propType(a.extra[i]);
       if (t === PROP.Signal) signals++;
       if (t === PROP.Lamp || t === PROP.LampDouble) lamps++;
       if (t === PROP.Tree || t === PROP.Conifer) trees++;
@@ -49,4 +49,11 @@ test('peças: determinísticas, cada uma na sua célula, semáforo por braço', 
   assert.ok(lamps >= 4 * 5, `postes ${lamps}`);
   assert.ok(trees > 20, `árvores ${trees}`);
   assert.ok(total < 2000);
+});
+
+test('D15: a prop type is read with its 5 bits (a type over 15 is not the signal)', () => {
+  // the format: type & 31, the key above it (src/jobs/props.ts); the old & 15 read type 16 + Signal as a Signal
+  const extra = ((PROP.Signal + 16) | (7 << 5)) >>> 0;
+  assert.notEqual(propType(extra), PROP.Signal);
+  assert.equal(propType(extra), PROP.Signal + 16);
 });

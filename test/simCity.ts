@@ -8,7 +8,7 @@ import { SimNet, encodeOps, decodeOp } from '../src/sim/lanes.ts';
 import { Traffic } from '../src/sim/traffic.ts';
 import type { NetOp } from '../src/roads/network.ts';
 
-export interface SimCity { w: World; sim: SimNet; ops: NetOp[] }
+export interface SimCity { w: World; sim: SimNet }
 
 /** n × n grid of roads `step` metres apart, centred on the origin; the second row and column are avenues (profile 3). */
 /** `profile`: the profile of street i (horizontal or not), instead of an avenue at `avenue` and local streets. */
@@ -34,7 +34,7 @@ export function gridCity(n = 4, step = 120, avenue = 1, profile?: (i: number, ho
   sim.rebuild();
   // a freshly opened map: nothing was on the segments the building replaced
   sim.removedSegs.length = 0; sim.reprofiledSegs.length = 0;
-  return { w, sim, ops: [] };
+  return { w, sim };
 }
 
 /** Applies ops to the simulation's network through the worker's encoding. */
