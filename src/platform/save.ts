@@ -82,6 +82,9 @@ export function encodeMeta(m: SaveMeta): Uint8Array {
 export function decodeMeta(data: Uint8Array): SaveMeta {
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let o = 0;
+  // a length read from the file is checked against the bytes there before anything is allocated or read (D73)
+  const need = (bytes: number): void => { if (!(bytes >= 0) || o + bytes > data.byteLength) throw new Error('map description cut short'); };
+  need(20);
   if (dv.getUint32(o, true) !== MAGIC_META) throw new Error('not a map description');
   o += 4;
   const version = dv.getUint32(o, true); o += 4;
@@ -90,10 +93,12 @@ export function decodeMeta(data: Uint8Array): SaveMeta {
   const gameId = dv.getUint32(o, true); o += 4;
   const count = dv.getUint32(o, true); o += 4;
   if (count !== TILE_COUNT) throw new MapSizeError(Math.round(Math.sqrt(count)));
+  need(Math.ceil(TILE_COUNT / 8) + 4);
   const tiles = new Uint8Array(TILE_COUNT);
   for (let i = 0; i < TILE_COUNT; i++) tiles[i] = (dv.getUint8(o + (i >> 3)) >> (i & 7)) & 1;
   o += Math.ceil(TILE_COUNT / 8);
   const n = dv.getUint32(o, true); o += 4;
+  need(n * 8);
   const camera = new Float64Array(n);
   for (let i = 0; i < n; i++, o += 8) camera[i] = dv.getFloat64(o, true);
   const hour = o + 8 <= data.byteLength ? dv.getFloat64(o, true) : undefined;
@@ -101,12 +106,14 @@ export function decodeMeta(data: Uint8Array): SaveMeta {
   let transit: Float64Array | undefined;
   if (o + 4 <= data.byteLength) {
     const k = dv.getUint32(o, true); o += 4;
+    need(k * 8);
     transit = new Float64Array(k);
     for (let i = 0; i < k; i++, o += 8) transit[i] = dv.getFloat64(o, true);
   }
   let profiles: string | undefined;
   if (o + 4 <= data.byteLength) {
     const k = dv.getUint32(o, true); o += 4;
+    need(k);
     profiles = new TextDecoder().decode(data.subarray(o, o + k)); o += k;
   }
   const money = o + 8 <= data.byteLength ? dv.getFloat64(o, true) : undefined;
@@ -114,6 +121,7 @@ export function decodeMeta(data: Uint8Array): SaveMeta {
   let junctions: string | undefined;
   if (o + 4 <= data.byteLength) {
     const k = dv.getUint32(o, true); o += 4;
+    need(k);
     junctions = new TextDecoder().decode(data.subarray(o, o + k)); o += k;
   }
   const biome = o + 4 <= data.byteLength ? dv.getUint32(o, true) : 0;
@@ -121,6 +129,7 @@ export function decodeMeta(data: Uint8Array): SaveMeta {
   let extra: string | undefined;
   if (o + 4 <= data.byteLength) {
     const k = dv.getUint32(o, true); o += 4;
+    need(k);
     extra = new TextDecoder().decode(data.subarray(o, o + k)); o += k;
   }
   return { seed, gameId, tiles, camera, hour, transit, profiles, money, junctions, biome, extra };

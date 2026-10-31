@@ -19,3 +19,17 @@ test('meta: céu e clima do jogador vão e voltam; salvamento antigo (sem eles) 
   assert.equal(d5.biome, 2);
   assert.deepEqual(d5.tiles, tiles);
 });
+
+test('D73: a map description whose length fields lie is refused as cut short, never allocated from', () => {
+  const tiles = new Uint8Array(TILE_COUNT);
+  const enc = encodeMeta({ seed: 9, gameId: 3, tiles, camera: new Float64Array([1, 2]), hour: 7, biome: 2, extra: '{}' });
+  const camAt = 20 + Math.ceil(TILE_COUNT / 8);
+  const bad = enc.slice();
+  new DataView(bad.buffer).setUint32(camAt, 0xffffffff, true);
+  assert.throws(() => decodeMeta(bad), /cut short/);
+  // a string length past the end (the extra, the last field)
+  const cut = enc.slice(0, enc.length - 1);
+  assert.throws(() => decodeMeta(cut), /cut short/);
+  // too short to hold even the header
+  assert.throws(() => decodeMeta(enc.slice(0, 10)), /cut short/);
+});
