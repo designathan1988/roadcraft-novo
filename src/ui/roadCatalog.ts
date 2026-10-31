@@ -11,7 +11,7 @@ import { STEP_LIMITS, fromWork, insertionIndex, movedStrip, newStrip, toWork, wi
 import { el } from './dom.ts';
 import { svg } from './icons.ts';
 import { fmtDec, lang, loose, money, plural, t } from '../shared/i18n/index.ts';
-import { readStored, writeStored } from '../shared/storage.ts';
+import { readTemplates, writeTemplates } from '../roads/roadTemplates.ts';
 
 const CATS: Array<[Category, string]> = [['ruas', 'catalog.cat.streets'], ['avenidas', 'catalog.cat.avenues'], ['rodovias', 'catalog.cat.highways'],
   ['especiais', 'catalog.cat.special'], ['trilhos', 'catalog.cat.rails'], ['meus', 'catalog.cat.mine']];
@@ -30,18 +30,6 @@ const TURNS: Array<[number, string]> = [
 export interface CatalogActions {
   use(id: number): void;
   toast(text: string): void;
-}
-
-/** The player's templates, kept in the browser (they serve every map). */
-function readTemplates(): Array<Omit<Profile, 'id'>> {
-  try {
-    const raw = readStored('roadTemplates');
-    const list = raw ? JSON.parse(raw) as Array<Omit<Profile, 'id'>> : [];
-    return Array.isArray(list) ? list.filter((p) => p && Array.isArray(p.strips) && p.strips.length > 0) : [];
-  } catch { return []; }
-}
-function writeTemplates(list: Array<Omit<Profile, 'id'>>): boolean {
-  return writeStored('roadTemplates', JSON.stringify(list));
 }
 
 /** A road's name in the player's language (the engine names its profiles in Portuguese). */
@@ -350,6 +338,7 @@ export class RoadCatalog {
     const old = this.editor, kept = old.state();
     this.editor = new SectionEditor(this.editorHost());
     old.el.replaceWith(this.editor.el);
+    old.dispose();
     if (kept) this.editor.restore(kept);
     this.built = '';
     if (this.el.isConnected) this.build();
@@ -491,6 +480,9 @@ const SPEED: [number, number] = [20, 120];
  * is docked above the drawer and folds to its head.
  */
 class SectionEditor {
+  /** Its own resize listener, taken off in dispose() (D8: each editor made on a language change left one behind). */
+  private readonly onResize = (): void => { if (this.isOpen) this.place(); };
+  dispose(): void { removeEventListener('resize', this.onResize); }
   readonly el: HTMLElement;
   private base: Omit<Profile, 'id'> | null = null;
   private work: Strip[] = [];
@@ -523,7 +515,7 @@ class SectionEditor {
     this.chip = el('div', 'rp-chip');
     this.foot = el('div', 'rp-foot');
     this.fold = iconBtn('fold', t('profileEditor.fold'), () => { this.el.classList.toggle('folded'); this.fold.setAttribute('aria-expanded', String(!this.el.classList.contains('folded'))); this.place(); });
-    addEventListener('resize', () => { if (this.isOpen) this.place(); });
+    addEventListener('resize', this.onResize);
     this.fold.dataset.action = 'fold';
     const close = iconBtn('close', t('profileEditor.close'), () => this.close());
     head.append(titles, this.chip, this.foot, this.fold, close);
