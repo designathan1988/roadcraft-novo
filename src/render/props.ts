@@ -14,6 +14,7 @@ import type { PropsProbe } from './propsProbe.ts';
 import { PROP, PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
+import { PartSize } from './partSize.ts';
 import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
@@ -101,6 +102,8 @@ export class PropRenderer {
   private stretchU: Node;
   /** 1 for the kinds whose near level casts a sun shadow. */
   private castU: Node;
+  /** The 4.0 building parts' size on the screen (their level and where they leave the drawing, per instance). */
+  private partSize: PartSize;
   /** Toward the sun (xyz). */
   private sunU = uniform(new THREE.Vector3(0, 1, 0));
   private reset: Node;
@@ -164,6 +167,7 @@ export class PropRenderer {
     this.radiusU = uniformArray(this.kinds.map((d) => d.radius), 'float');
     this.stretchU = uniformArray(this.kinds.map((d) => propStretch(d)), 'float');
     this.castU = uniformArray(this.kinds.map((d) => (propKindCasts(d) ? 1 : 0)), 'float');
+    this.partSize = new PartSize(this.kinds);
 
     // ---- compute. The visible list is compact: each draw's instances in one run, the runs back to back. Count (how
     // many each draw gets), prefix (where each run starts), fill. No draw has a cap of its own: a forest of 250,000
@@ -193,12 +197,17 @@ export class PropRenderer {
           for (const t of VARIANT_TYPES) isVar = select(type.equal(uint(t)), uint(1), isVar);
           const variant = select(isVar.equal(uint(1)), extraC.element(i).shiftRight(uint(29)).bitAnd(uint(7)), uint(pose.w).shiftRight(uint(12)).bitAnd(uint(15)));
           const kind = kindOfC.element(type.mul(VARIANTS).add(variant)).toVar();
+          // a 4.0 building part: its scale per axis from its key (render/partSize.ts)
+          const isPart = this.partSize.isPart(kind);
+          const s3 = this.partSize.scale(extraC.element(i), isVar).toVar();
           // the kind's reach times the instance's scale (or plus the span, for wires and walls): a fixed radius cut
-          // big trees and long wires at the edge of the screen
+          // big trees and long wires at the edge of the screen. A part's: its model's reach at its own scale (its w's high
+          // bits are its colour, not a scale)
           const rk = this.radiusU.element(kind);
           const bits = float(uint(pose.w).shiftRight(uint(16)).bitAnd(uint(63)));
           const mode = this.stretchU.element(kind);
-          const r = select(mode.lessThan(0.5), rk.mul(bits.div(42).add(0.5)), rk.add(bits.mul(select(mode.lessThan(1.5), float(1), float(0.1)))));
+          const rProp = select(mode.lessThan(0.5), rk.mul(bits.div(42).add(0.5)), rk.add(bits.mul(select(mode.lessThan(1.5), float(1), float(0.1)))));
+          const r = select(isPart, this.partSize.radius(kind, s3), rProp).toVar();
           // in the view, or (near level only) its shadow is: the sphere swept along the shadow, away from the sun,
           // as long as its height casts it (a tree outside the edge of the screen shadows the street in it)
           const sun = this.sunU;
@@ -212,10 +221,12 @@ export class PropRenderer {
           }
           If(inView.add(inShadow).greaterThan(0.5), () => {
             const d = length(p.sub(this.camU)).toVar();
+            // a part's levels end where its size on the screen says, within its type's distance (render/partSize.ts)
+            const partEnd = this.partSize.ends(kind, s3, this.distU.element(kind.mul(LODS)));
             for (let l = 0; l < LODS; l++) {
               const slot = kind.mul(LODS).add(l);
-              const end = this.distU.element(slot);
-              const start = l === 0 ? float(-1) : this.distU.element(slot.sub(1));
+              const end = select(isPart, partEnd[l], this.distU.element(slot));
+              const start = l === 0 ? float(-1) : select(isPart, partEnd[l - 1], this.distU.element(slot.sub(1)));
               // enters level l at the end of the previous one (fading), leaves at the end of its own
               const bandIn = start.mul(1 - FADE_BAND);
               // shadow-only instances go into the near level of the kinds that cast (the main pass culls them on screen)
@@ -707,7 +718,8 @@ export class PropRenderer {
     const meshes: THREE.Mesh[] = [];
     for (let t = 0; t < PROP_TYPES; t++) {
       const def = this.defs[t];
-      const base = def.lods[1] ?? def.lods[0];
+      // a building part's level 1 is its far model (a lot part's top): near, its own
+      const base = PART_TYPES.includes(t) ? def.lods[0] : def.lods[1] ?? def.lods[0];
       if (!base) continue;
       let n = 0;
       for (let i = 0; i < p.count; i++) if (propType(p.extra[i]) === t) n++;
@@ -801,6 +813,7 @@ export class PropRenderer {
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
     (this.sunU.value as THREE.Vector3).copy(sunDirection);
+    this.partSize.setView(camera, this.pixelScale);
     this.kinds.forEach((d, k) => d.dist.forEach((x, l) => { this.distArr[k * LODS + l] = d.lods[l] && this.kindNear[k] > 0 ? x * this.pixelScale : 0; }));
     this.updateResidency(camPos);
     if (this.kindNearDue) this.countKindsNear(camPos);

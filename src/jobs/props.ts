@@ -14,7 +14,7 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from '../shared/contracts/worker.ts';
-import { PART_PROP, POOL_PARTS, partKey, partW } from './parts40.ts';
+import { PART_PROP, POOL_PARTS, partKey, partW, poolTint } from './parts40.ts';
 import { inFootprints, lotParking, buildBuildingParts, type LotGround40 } from './buildingGen.ts';
 import { inPolygon, lotFit, lotPolygon } from './buildingGen/polygon.ts';
 
@@ -445,7 +445,7 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   const grounds40 = buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot,
     env?.parts40 ? (kind, x, y, z, yaw, sx, sy, sz, rgb) => {
       const tv = POOL_PARTS[kind];
-      if (tv) out.addPart(tv[0], x, y, z, partW(yaw, rgb), partKey(tv[0], sx, sy, sz, tv[1]));
+      if (tv) out.addPart(tv[0], x, y, z, partW(yaw, poolTint(kind, rgb)), partKey(tv[0], sx, sy, sz, tv[1]));
     } : undefined);
   lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot, grounds40);
 

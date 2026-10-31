@@ -28,6 +28,24 @@ export const PART_DIST: Readonly<Record<number, number>> = {
 /** How far from the camera a cell asks for its building parts (the farthest type, and a cell's reach). */
 export const PARTS_RANGE = 800 + 128;
 
+/**
+ * Pool types whose part kinds all draw one model and carry no variant (BBox: the sill, the shutter, the fin and the lamp
+ * are each the kit's unit box): one mesh draws them, each kind's base colour baked into the instance's (`poolTint`).
+ * Merged as one mesh per kind before, every box instance drew the four coincident boxes (48 triangles where 12 draw it)
+ * and showed the last one's colour (the lamp's).
+ */
+export const SHARED_MODEL_TYPES: ReadonlySet<number> = new Set<number>([PROP.BBox]);
+
+/** The colour (sRGB 0xRRGGBB) an instance of part `kind` carries: its tint, times its kind's base where its pool type
+ *  draws several kinds with one model (`SHARED_MODEL_TYPES`). */
+export function poolTint(kind: string, rgb: number): number {
+  const tv = POOL_PARTS[kind];
+  if (!tv || !SHARED_MODEL_TYPES.has(tv[0])) return rgb;
+  const base = PART_BASE[kind]?.[0] ?? 0xffffff;
+  const ch = (shift: number): number => Math.round((((rgb >> shift) & 255) * ((base >> shift) & 255)) / 255);
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+}
+
 /** Scale range of the log code, metres: SCALE_MIN * 2^(code / max * SCALE_OCTAVES). */
 export const SCALE_MIN = 0.005, SCALE_OCTAVES = 13;
 function q(s: number, bits: number): number {

@@ -8,8 +8,8 @@ import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts'
 import { impostorQuad } from './impostor.ts';
 import { SMALL_CASTER } from './sun.ts';
 import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
-import { partGeometries } from '../r40/api.ts';
-import { PART_BASE, PART_DIST, PART_PROP, PART_TYPES, POOL_PARTS, VARIANT_TYPES } from '../jobs/parts40.ts';
+import { BRISE_BLADE, FRAME_BAR, SHELL_PARTS, partGeometries, partTopGeometries } from '../r40/api.ts';
+import { PART_BASE, PART_DIST, PART_PROP, PART_TYPES, POOL_PARTS, SHARED_MODEL_TYPES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
 import { parkMiller } from '../core/rng.ts';
 
@@ -26,6 +26,47 @@ export interface PropDef {
   radius: number;
   /** Other models of the type, drawn for the variants MODELS maps to them (index 1, 2…). */
   alts?: PropDef[];
+  /** A 4.0 building-part type: the part kind each variant draws (index = variant; one name for a type of one model). */
+  partNames?: string[];
+}
+
+/**
+ * A 4.0 building part's size rules, judged per instance by the cull pass at its own scale (Roadcraft 4.0 partCells.ts
+ * levelAt): its model's box (under a pixel across its diagonal it is not drawn), how far it reaches from its origin (its
+ * cull sphere), its bars (a frame's rails and stiles, a railing's, a brise's blades: under half a pixel across it is not
+ * drawn; none for a solid part) and whether its far level is a shell part's top (switched to once the half of its
+ * smaller side that the sides stand for is under PART_ERROR_PX).
+ */
+export interface PartMeta {
+  extent: readonly [number, number, number];
+  reach: readonly [number, number, number];
+  pieces: ReadonlyArray<readonly [number, number, number]>;
+  topLevel: boolean;
+}
+
+/** A part's bars, in its unit model's axes (Roadcraft 4.0 kit.ts `pieces`; the values of R5's own models, r40 kit.ts). */
+const PART_PIECES: Readonly<Record<string, ReadonlyArray<readonly [number, number, number]>>> = {
+  frame: [[1, FRAME_BAR, 1], [FRAME_BAR, 1, 1]],
+  railing: [[1, 0.06, 0.05], [0.05, 0.06, 1], [0.015, 0.94, 0.015]],
+  roofRailing: [[1, 0.06, 0.05], [0.02, 0.94, 0.02]],
+  brise: [[BRISE_BLADE, 1, 1]],
+};
+
+/** Below this, in pixels, the error a part's far level makes passes unseen (Roadcraft 4.0 kit.ts PART_ERROR_PX). */
+export const PART_ERROR_PX = 1.5;
+/** A part made of bars leaves the drawing once its widest bar is under this many pixels across (4.0 partCells.ts BAR_PIXELS). */
+export const BAR_PIXELS = 0.5;
+
+/** A part kind's rules from the model it draws (its level 0) and its 4.0 name. */
+function partMeta(name: string, g: THREE.BufferGeometry, topLevel: boolean): PartMeta {
+  if (!g.boundingBox) g.computeBoundingBox();
+  const b = g.boundingBox!;
+  return {
+    extent: [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z],
+    reach: [Math.max(-b.min.x, b.max.x), Math.max(-b.min.y, b.max.y), Math.max(-b.min.z, b.max.z)],
+    pieces: PART_PIECES[name] ?? [],
+    topLevel,
+  };
 }
 
 const m4 = new THREE.Matrix4();
@@ -510,26 +551,45 @@ function person(): PropDef {
  * shader drops the others). Scale per axis and colour come with each instance.
  */
 function buildingPartDefs(models: Readonly<Record<string, THREE.BufferGeometry>>): Map<number, PropDef> {
-  const byType = new Map<number, THREE.BufferGeometry[]>();
-  for (const [kind, [type, variant]] of Object.entries(POOL_PARTS)) {
-    const g = models[kind];
-    if (!g) continue;
-    const [rgb, metal] = PART_BASE[kind] ?? [0xffffff, false];
-    const mat = VARIANT_TYPES.has(type) ? PMAT.Sign0 + variant : metal ? PMAT.Metal : PMAT.Plain;
+  const byType = new Map<number, { near: THREE.BufferGeometry[]; far: THREE.BufferGeometry[]; names: string[] }>();
+  // the shell parts' far level: their tops (Roadcraft 4.0: a lot's box, rail or slab from afar)
+  const tops = partTopGeometries() as Readonly<Record<string, THREE.BufferGeometry | null>>;
+  /** A model posed as a part of the pool, in the kit's colour and with the model's own tones (the facade props). */
+  const posed = (g: THREE.BufferGeometry, rgb: number, mat: number): THREE.BufferGeometry => {
     const one = part(g, rgb, mat);
-    // the models' own tones (the facade props are toned per vertex)
     const tones = g.getAttribute('color');
     if (tones) {
       const flat = g.index ? g.toNonIndexed() : g;
       const t = flat.getAttribute('color'), col = one.getAttribute('pcol');
       for (let i = 0; i < col.count; i++) col.setXYZ(i, col.getX(i) * t.getX(i), col.getY(i) * t.getY(i), col.getZ(i) * t.getZ(i));
     }
-    const list = byType.get(type) ?? [];
-    list.push(one);
-    byType.set(type, list);
+    return one;
+  };
+  for (const [kind, [type, variant]] of Object.entries(POOL_PARTS)) {
+    const g = models[kind];
+    if (!g) continue;
+    const entry = byType.get(type) ?? { near: [], far: [], names: [] };
+    byType.set(type, entry);
+    if (SHARED_MODEL_TYPES.has(type)) {
+      // one model draws all the type's kinds (their colours come with the instances, parts40.ts poolTint)
+      if (entry.near.length === 0) entry.near.push(posed(g, 0xffffff, PMAT.Plain));
+      else if (models[entry.names[0]] !== g) throw new Error(`[props] part ${kind} does not draw the model ${entry.names[0]} does`);
+      entry.names.push(kind);
+      continue;
+    }
+    const [rgb, metal] = PART_BASE[kind] ?? [0xffffff, false];
+    const mat = VARIANT_TYPES.has(type) ? PMAT.Sign0 + variant : metal ? PMAT.Metal : PMAT.Plain;
+    entry.near.push(posed(g, rgb, mat));
+    const top = tops[kind];
+    if (top) entry.far.push(posed(top, rgb, mat));
+    entry.names[VARIANT_TYPES.has(type) ? variant : 0] = kind;
   }
   const defs = new Map<number, PropDef>();
-  for (const [type, parts] of byType) defs.set(type, { lods: [merge(parts), null, null], dist: [PART_DIST[type] ?? 100, 0, 0], radius: 5 });
+  for (const [type, e] of byType) {
+    const d = PART_DIST[type] ?? 100;
+    const far = e.far.length ? merge(e.far) : null;
+    defs.set(type, { lods: [merge(e.near), far, null], dist: [d, far ? d : 0, 0], radius: 5, partNames: e.names });
+  }
   return defs;
 }
 
@@ -574,6 +634,8 @@ export interface PropKind {
   lods: Array<THREE.BufferGeometry | null>;
   dist: [number, number, number];
   radius: number;
+  /** A 4.0 building part's size rules (judged per instance in the cull pass); none for the other props. */
+  part?: PartMeta;
 }
 
 /** Variants a type's instance can have (4 bits in the pose). */
@@ -671,6 +733,13 @@ export function propCullRadius(k: PropKind, poseW: number): number {
   return mode === 1 ? k.radius + bits : mode === 2 ? k.radius + bits * 0.1 : k.radius * (bits / 42 + 0.5);
 }
 
+/** A part kind's rules, by its type's part names and its sub-kind (variant), from the model it draws. */
+function kindPart(d: PropDef, sub: number, lods: Array<THREE.BufferGeometry | null>): PartMeta | undefined {
+  const name = d.partNames?.[sub] ?? d.partNames?.[0];
+  const g = lods[0];
+  return name && g ? partMeta(name, g, lods[1] !== null && lods[1] !== undefined && (SHELL_PARTS as ReadonlySet<string>).has(name)) : undefined;
+}
+
 /** The kinds the renderer draws, in kind order (`propKindTable`). */
 export function buildPropKinds(defs: PropDef[]): { kinds: PropKind[]; kindOf: Uint32Array } {
   const { kindOf } = propKindTable();
@@ -681,11 +750,11 @@ export function buildPropKinds(defs: PropDef[]): { kinds: PropKind[]; kindOf: Ui
       for (const m of [d, ...(d.alts ?? [])]) kinds.push({ type, lods: m.lods, dist: m.dist, radius: reachOf(m.lods) });
       return;
     }
-    if (!split) { kinds.push({ type, lods: d.lods, dist: d.dist, radius: reachOf(d.lods) }); return; }
+    if (!split) { kinds.push({ type, lods: d.lods, dist: d.dist, radius: reachOf(d.lods), part: kindPart(d, 0, d.lods) }); return; }
     const subs = Math.max(...split) + 1;
     for (let s = 0; s < subs; s++) {
       const lods = d.lods.map((g) => variantPart(g, (v) => split[v] === s));
-      kinds.push({ type, lods, dist: d.dist, radius: reachOf(lods) });
+      kinds.push({ type, lods, dist: d.dist, radius: reachOf(lods), part: kindPart(d, s, lods) });
     }
   });
   return { kinds, kindOf };

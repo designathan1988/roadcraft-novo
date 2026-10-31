@@ -758,6 +758,41 @@ test('GPU 100 % (2026-10-31): of the 4.0 building parts only the boxes and the l
   assert.ok(casts!(kinds[roofAc], roofAc), `a rooftop condenser (kind ${roofAc}) casts`);
 });
 
+test('GPU 100 % (2026-10-31): a box part (sill, shutter, fin, lamp) draws one box, its own colour in the instance', async () => {
+  const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
+  const P40 = await import('../src/jobs/parts40.ts') as Record<string, unknown> & typeof import('../src/jobs/parts40.ts');
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs(PM.buildingPartModels()));
+  const box = kinds.filter((k) => k.type === P40.PART_PROP.BBox);
+  assert.equal(box.length, 1, 'one kind draws the box parts');
+  const tris = (box[0].lods[0]!.attributes.position.count) / 3;
+  assert.equal(tris, 12, `a box part draws ${tris} triangles (the four kinds' boxes merged one over another drew 48)`);
+  const tint = P40.poolTint as ((kind: string, rgb: number) => number) | undefined;
+  assert.ok(tint, 'the instance carries its kind\'s colour');
+  assert.equal(tint!('concrete', 0xffffff), 0xcfc9bd, 'a concrete sill keeps the kit\'s concrete colour');
+  assert.equal(tint!('shutter', 0xffffff), 0x9aa1a4, 'a shutter keeps the kit\'s shutter colour');
+  assert.equal(tint!('frame', 0x123456), 0x123456, 'a part with a model of its own keeps its tint');
+});
+
+test('GPU 100 % (2026-10-31): the 4.0 parts carry their size rules: bars, and a lot part\'s top as its far level', async () => {
+  const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
+  const { PART_PROP } = await import('../src/jobs/parts40.ts');
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs(PM.buildingPartModels()));
+  type K = (typeof kinds)[number] & { part?: { extent: number[]; pieces: number[][]; topLevel: boolean } };
+  const parts = (kinds as K[]).filter((k) => k.type >= PART_PROP.BFrame);
+  assert.ok(parts.every((k) => !k.lods[0] || k.part), 'every building part kind has its size rules');
+  const frame = (kinds as K[]).find((k) => k.type === PART_PROP.BFrame)!;
+  assert.equal(frame.part?.pieces.length, 2, 'a frame is judged by its bars (rails and stiles)');
+  const rail = (kinds as K[]).find((k) => k.type === PART_PROP.BRail)!;
+  assert.equal(rail.part?.pieces.length, 3, 'a railing by its rails and balusters');
+  const lots = (kinds as K[]).filter((k) => k.type === PART_PROP.BLot && k.lods[0]);
+  assert.equal(lots.length, 3, 'a lot\'s box, rail and slab');
+  for (const k of lots) {
+    assert.ok(k.part?.topLevel && k.lods[1], 'a lot part has its top as its far level');
+    const near = k.lods[0]!.attributes.position.count / 3, far = k.lods[1]!.attributes.position.count / 3;
+    assert.ok(far < near, `its top draws fewer triangles (${far} < ${near})`);
+  }
+});
+
 test('E23: an object moved by its matrix has the previous frame\'s matrix in its velocity', async () => {
   const vel = await import('../src/render/velocity.ts') as Record<string, unknown>;
   const prev = vel.previousModelMatrix as ((o: THREE.Object3D, frameId: number) => THREE.Matrix4) | undefined;

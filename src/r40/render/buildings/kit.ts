@@ -59,7 +59,7 @@ function boxWithout(w: number, h: number, d: number, x: number, y: number, z: nu
 }
 
 /** A window frame's bar across the unit square. */
-const FRAME_BAR = 0.045;
+export const FRAME_BAR = 0.045;
 
 /** Window frame: outer border, a mullion and a transom, in a unit square */
 // The sides', the mullion's and the transom's ends lie in the border's outer faces: left out, 60 triangles where 72 drew the same.
@@ -154,7 +154,7 @@ function glassRailGeometry(): BufferGeometry {
 /** A bay's rack of sun fins: six vertical blades across the unit width, the storey's height, standing out of the wall */
 const BRISE_FINS = 6;
 /** A blade's thickness across the unit width. */
-const BRISE_BLADE = 0.035;
+export const BRISE_BLADE = 0.035;
 function briseGeometry(): BufferGeometry {
   const t = BRISE_BLADE;
   const parts: BufferGeometry[] = [];
@@ -209,6 +209,18 @@ function shellPartGeometry(faces: readonly ShellPartFace[]): BufferGeometry {
   g.computeBoundingBox();
   g.computeBoundingSphere();
   return g;
+}
+
+/**
+ * Each shell part's far model: its upward faces alone (null for a part with none). From where its sides are under a pixel
+ * its top draws it, 2 triangles where the whole part draws 8-10 (Roadcraft 4.0's lot parts from afar); the props pool
+ * switches to it per instance by the error it makes (render/props.ts).
+ */
+export function partTopGeometries(): Record<ShellPartKind, BufferGeometry | null> {
+  return Object.fromEntries(SHELL_PART_KINDS.map((kind) => {
+    const up = SHELL_PART_FACES[kind].filter((f) => f.n[2] > 0);
+    return [kind, up.length ? shellPartGeometry(up) : null];
+  })) as Record<ShellPartKind, BufferGeometry | null>;
 }
 
 /** The parts' models (unit-sized, posed per instance): what the kit draws with, and what a worker lays out of the parts (Roadcraft 5: jobs/building40.ts). */
