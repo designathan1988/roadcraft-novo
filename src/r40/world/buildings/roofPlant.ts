@@ -1,5 +1,6 @@
 import { m } from '../units.ts';
 import type { BuildingUse } from './types.ts';
+import { stream } from '../../../core/rng.ts';
 
 /** WHAT STANDS ON A FLAT ROOF, chosen and packed per building. */
 
@@ -79,17 +80,6 @@ const CLEAR = m(0.6);
 /** The parapet's margin: nothing stands against the roof's edge. */
 const EDGE = m(0.8);
 
-/** A small seeded stream (mulberry32): the same roof, the same plant. */
-function stream(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
-}
 
 export function planRoofPlant(site: RoofSite): RoofPlantItem[] {
   const W = site.x1 - site.x0, D = site.y1 - site.y0;

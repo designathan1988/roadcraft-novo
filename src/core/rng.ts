@@ -30,6 +30,12 @@ export class Rng {
   int(a: number, bExclusive: number): number { return a + Math.floor(this.next() * (bExclusive - a)); }
 }
 
+/** A seeded stream of numbers in [0, 1): the Rng as a function (the same mulberry32 sequence). One copy for all. */
+export function stream(seed: number): () => number {
+  const r = new Rng(seed);
+  return () => r.next();
+}
+
 const GRAD = new Float32Array([1, 0, -1, 0, 0, 1, 0, -1, 0.7071, 0.7071, -0.7071, 0.7071, 0.7071, -0.7071, -0.7071, -0.7071]);
 
 /** 2D gradient noise, roughly in [-1, 1]. */

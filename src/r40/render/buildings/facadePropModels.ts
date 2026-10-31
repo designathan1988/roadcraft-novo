@@ -12,6 +12,7 @@ import {
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { weldGeometry } from '../mesh/weld.ts';
 import { AC, type FacadePropKind, POT_HIGH } from './facadeProps.ts';
+import { stream } from '../../../core/rng.ts';
 
 /** The models of the props on the facades and balconies (`facadeProps.ts` places them) */
 
@@ -105,20 +106,10 @@ function potGeometry(): BufferGeometry {
   return merged([tone(body, grey(1)), tone(rim, grey(0.92)), tone(soil, [0.24, 0.17, 0.11])]);
 }
 
-/** A small seeded stream for the plant's leaves: the same model every load. */
-function leafStream(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), a | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
-}
 
 /** A potted plant's leaves from the soil (y 0) up: a rosette of leaves arching out and down */
 function foliageGeometry(): BufferGeometry {
-  const rnd = leafStream(0x1eaf);
+  const rnd = stream(0x1eaf);
   const parts: BufferGeometry[] = [];
   const leaves = 14;
   for (let k = 0; k < leaves; k++) {
@@ -154,7 +145,7 @@ function foliageGeometry(): BufferGeometry {
   const clump = new IcosahedronGeometry(0.1, 1);
   const p = clump.getAttribute('position');
   for (let i = 0; i < p.count; i++) {
-    const k = 0.75 + 0.5 * leafStream(i * 7919 + 13)();
+    const k = 0.75 + 0.5 * stream(i * 7919 + 13)();
     p.setXYZ(i, p.getX(i) * k, Math.max(0, p.getY(i) * k * 0.9 + 0.12), p.getZ(i) * k);
   }
   clump.computeVertexNormals();
@@ -255,12 +246,12 @@ export function createFacadePropGeometries(): Record<FacadePropKind, BufferGeome
 
 /** A round potted shrub (a boxwood, a fern, a geranium) */
 function bushGeometry(): BufferGeometry {
-  const rnd = leafStream(0xb05);
+  const rnd = stream(0xb05);
   const parts: BufferGeometry[] = [];
   const core = new IcosahedronGeometry(0.15, 1);
   const p = core.getAttribute('position');
   for (let i = 0; i < p.count; i++) {
-    const k = 0.8 + 0.35 * leafStream(i * 104_729 + 7)();
+    const k = 0.8 + 0.35 * stream(i * 104_729 + 7)();
     p.setXYZ(i, p.getX(i) * k, Math.max(0.01, p.getY(i) * k * 0.85 + 0.13), p.getZ(i) * k);
   }
   core.computeVertexNormals();

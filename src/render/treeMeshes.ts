@@ -4,6 +4,7 @@
 // Every vertex: position, normal, pcol (linear colour + finish id), pext (atlas uv, billboard corner in metres).
 
 import * as THREE from 'three/webgpu';
+import { stream } from '../core/rng.ts';
 
 /** Finishes shared with propMeshes.ts (PMAT): heart shading as foliage, cards as foliage cut by the leaf atlas. */
 export const TREE_MAT = { Leaf: 1, Bark: 6, LeafCard: 26 } as const;
@@ -25,16 +26,6 @@ const BLOOM_PINK = tone(0x9a5078, 0xd88ab0);
 const FLOWERS = [tone(0xb9b2a4, 0xe8e2d6), tone(0x9c4a68, 0xd0759a), tone(0x8e2f2f, 0xc4524c)];
 const HEART_SHRINK = 0.62;
 
-function random(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
-}
 
 function noise3(x: number, y: number, z: number, seed: number): number {
   const hash = (i: number, j: number, k: number): number => {
@@ -68,7 +59,7 @@ class Builder {
   readonly leaves: LeafPoint[] = [];
   readonly rng: () => number;
   private n = new THREE.Vector3(); private e = new THREE.Vector3(); private c = new THREE.Vector3();
-  constructor(seed: number) { this.rng = random(seed); }
+  constructor(seed: number) { this.rng = stream(seed); }
 
   private vert(x: number, y: number, z: number, nx: number, ny: number, nz: number, r: number, g: number, b: number, mat: number, u = 0, v = 0, cx = 0, cy = 0): void {
     this.pos.push(x, y, z); this.nrm.push(nx, ny, nz); this.col.push(r, g, b, mat / 255); this.ext.push(u, v, cx, cy);
@@ -292,7 +283,7 @@ export function buildLeafAtlas(): THREE.Texture {
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const g = cv.getContext('2d')!;
-  const rng = random(7);
+  const rng = stream(7);
   const leaf = (x: number, y: number, len: number, wid: number, ang: number, shade: number) => {
     g.save(); g.translate(x, y); g.rotate(ang);
     const v = Math.round(150 + 105 * shade);
@@ -339,7 +330,7 @@ export function ipeTree(lod: TreeLod, bloom: 'yellow' | 'pink', seed = 61): THRE
 /** A flowering bush: a wide, low mass on the ground, flowers on its top (~1.5 m). */
 export function floweringBush(lod: TreeLod, seed = 67): THREE.BufferGeometry {
   const b = new Builder(seed);
-  const rng = random(seed + 3);
+  const rng = stream(seed + 3);
   const flower = FLOWERS[seed % FLOWERS.length];
   const toneAt: ToneAt = (p) => (p.y > 0.5 && rng() < 0.3 ? flower : SHRUB);
   b.mass(new THREE.Vector3(0, 0.42, 0), 0.36, new THREE.Vector3(1.5, 1, 1.3), toneAt, seed, 0.25, crownShade(0, 0.8, 0.55), lod === 0 ? 1 : 0, 0);

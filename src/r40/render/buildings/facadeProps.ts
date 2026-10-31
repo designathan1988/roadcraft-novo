@@ -1,5 +1,6 @@
 import type { BayComponent, BuildingUse } from '../../world/buildings/types.ts';
 import { m } from '../../world/units.ts';
+import { stream } from '../../../core/rng.ts';
 
 /** WHAT HANGS ON A FACADE AND STANDS ON ITS BALCONIES: the life of a Brazilian block of flats */
 
@@ -61,13 +62,7 @@ const NO_PROPS: readonly FacadeProp[] = Object.freeze([]);
 export function facadeProps(component: BayComponent, level: number, use: BuildingUse, old: number, hash: number, W: number, o: PropOpening): readonly FacadeProp[] {
   if (level < 1 || !FURNISHED.has(component)) return NO_PROPS;
   const out: FacadeProp[] = [];
-  let state = hash >>> 0;
-  const rnd = (): number => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(state ^ (state >>> 15), state | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
+  const rnd = stream(hash);
   const pick = (list: readonly number[]): number => list[Math.floor(rnd() * list.length) % list.length]!;
   const one = (kind: FacadePropKind, a: number, h: number, o0: number, turn: number, colour: number, s = 1): void => {
     out.push({ kind, a, h, out: o0, turn, sx: m(s), sy: m(s), sz: m(s), colour });

@@ -1,6 +1,8 @@
 // What stands on a flat roof, chosen and packed per roof: Roadcraft 4.0 world/buildings/roofPlant.ts (its catalogue,
 // chances, sizes and packing, in metres), so the same kinds of plant stand on the same kinds of roof.
 
+import { stream } from '../core/rng.ts';
+
 export type RoofPlantKind =
   | 'tank' | 'tankBox' | 'hatch' | 'condenser' | 'airHandler' | 'solar' | 'mast' | 'dish' | 'skylight' | 'vent' | 'liftRoom' | 'chimney';
 
@@ -61,17 +63,6 @@ const CATALOGUE: readonly Kind[] = [
 /** Grid cell of the packing, the clear way kept round each piece, the parapet's margin. */
 const CELL = 0.5, CLEAR = 0.6, EDGE = 0.8;
 
-/** A small seeded stream (mulberry32): the same roof, the same plant. */
-function stream(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
-}
 
 /** The plant of one roof (4.0 planRoofPlant, roofPlant.ts:94-145): each kind by its chance, packed at random free places. */
 export function planRoofPlant(site: RoofSite): RoofPlantItem[] {
