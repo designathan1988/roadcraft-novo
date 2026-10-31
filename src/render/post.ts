@@ -5,7 +5,7 @@
 
 import * as THREE from 'three/webgpu';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
-import { ao } from 'three/addons/tsl/display/GTAONode.js';
+import GTAONode from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
@@ -48,6 +48,22 @@ class FadingCSM extends CSMShadowNode {
   updateFrustums(): void {
     super.updateFrustums();
     if (this.reachU) this.reachU.value = Math.min(this.maxFar, (this.camera as THREE.PerspectiveCamera | null)?.far ?? this.maxFar);
+  }
+}
+
+/**
+ * GTAO drawn at half the frame's size that reads the centre's depth as it reads its samples (bilinear). r186 GTAONode
+ * at a scale under 1 takes the centre's depth as the nearest of the four texels under it (`sampleCenterDepth`, against
+ * banding), while the samples marched round it are read bilinear: on a ground seen at a slant the centre stands half a
+ * texel nearer the camera than its own plane, the ground round it reads as a horizon, and the ground darkened up to the
+ * distance where a texel's depth step passes the thickness (0.8 m): a line straight across the view (10 of the 21 grey
+ * levels, 2026-10-31). The node's own scale is told 1 (its shader then samples the centre bilinear); the pass's size
+ * stays half (`setSize`), so the cost is the half-size pass's.
+ */
+class HalfSizeGtao extends GTAONode {
+  override setSize(width: number, height: number): void {
+    super.setSize(width, height);
+    (this as unknown as { _resolutionScale: { value: number } })._resolutionScale.value = 1;
   }
 }
 
@@ -98,12 +114,10 @@ export class Post {
       // darkened the ground up to a line straight across the view (21 levels of grey at 11 h on the empty map,
       // 2026-10-31; 10 with the depth's normals). Half the frame's size, as 4.0's high tier (quality.ts:196): at the
       // frame's own size the AO and its denoise ran the GPU to 100 % in the standard views (the owner, 2026-10-31).
-      // Open: the 10 levels left at half size (r186 GTAONode sampleCenterDepth takes the centre's depth as the
-      // nearest of four texels under a scale of 1).
       const depth = depthTex;
       // no normal node: rebuilt from the depth (r186 GTAONode.js:61 and DenoiseNode.js:29 take null; the types do not)
       const fromDepth = null as unknown as Node;
-      const aoPass = ao(depth, fromDepth, camera);
+      const aoPass = new HalfSizeGtao(depth, fromDepth, camera);
       this.owned.push(aoPass);
       aoPass.resolutionScale = 0.5;
       aoPass.radius.value = 1.3;
