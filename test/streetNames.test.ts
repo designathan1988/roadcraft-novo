@@ -79,7 +79,9 @@ test('placa = regra: Pare posto na perna muda a regra dela; tirar a placa devolv
   assert.notEqual(effectiveControl(w.roads, n).legs.get(leg), Rule.Stop);
   rem.invert();
   assert.equal(effectiveControl(w.roads, n).legs.get(leg), Rule.Stop);
-  add.invert(); rem.invert();
+  // undo in order: the removal was already undone above, now the sign itself (D16: rem was inverted a second time)
+  add.invert();
+  assert.equal(effectiveControl(w.roads, n).legs.get(leg), before.legs.get(leg));
   // dê a preferência
   const y = signRuleCommand(w, 6, -25, SIGN_YIELD, true);
   assert.ok(typeof y !== 'string');
