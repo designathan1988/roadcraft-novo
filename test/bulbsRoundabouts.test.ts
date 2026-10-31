@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { RoadJournal, buildRoad, buildRoundabout, bulbAt, planRoad, roundaboutRefusal, snap } from '../src/roads/build.ts';
 import { SegFlag } from '../src/roads/flags.ts';
+import { waterCoord, waterIndex } from '../src/world/ground.ts';
+import { heightIndex, sampleCoord } from '../src/world/heights.ts';
+import { t } from '../src/shared/i18n/index.ts';
 
 function world(): World {
   const w = new World();
@@ -61,4 +64,27 @@ test('a roundabout on vacant ground comes with four approaches; over roads it cu
   assert.equal(v.roads.segs.size, size);
   const cut = buildRoundabout(v, 0, 0, 30, true);
   assert.ok(cut && cut.settle(), 'asked to cut: the roundabout takes the road in');
+});
+
+test('D49: a roundabout over a river the player drew is refused like one over the sea', () => {
+  const w = world();
+  const ground = w.heights[0];
+  // a band of water above the ground across the ring's place
+  for (let z = -60; z <= 60; z += 2) for (let x = -10; x <= 10; x += 2) w.water[waterIndex(waterCoord(x), waterCoord(z))] = ground + 1;
+  assert.equal(roundaboutRefusal(w, 0, 0, 25), t('road.ring.water'));
+});
+
+test('D49: a dead end\'s turning bulb does not fill a pond the player drew at its edge', () => {
+  const w = world();
+  // a small pond (level 10.4 over ground 10) just beyond the end of a 200 m street: within the bulb's disc (18.5 m),
+  // but not in the road's corridor (water there lifts the road onto a bridge and no terrain is touched at all)
+  for (let z = -4; z <= 4; z += 2) for (let x = 216; x <= 220; x += 2) w.water[waterIndex(waterCoord(x), waterCoord(z))] = 10.4;
+  road(w, 0, 0, 200, 0);
+  const end = w.roads.nearestNode(200, 0, 1);
+  assert.equal(bulbAt(w.roads, end), true);
+  assert.equal(w.roads.nodes.cols.y[end], 10, 'the street stays on the ground');
+  for (const x of [216, 218]) {
+    const i = heightIndex(sampleCoord(x), sampleCoord(0));
+    assert.ok(Math.abs(w.heights[i] - 10) < 1e-6, `ground changed under the pond at x = ${x}: ${w.heights[i]}`);
+  }
 });

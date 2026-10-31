@@ -10,6 +10,7 @@ import { RoadJournal } from './journal.ts';
 import { smoothGround } from './grade.ts';
 import { clearAndConform, conformDisc } from './execute.ts';
 import { NO_NODE, type NodeId, type SegId } from '../../core/ids.ts';
+import { waterAt } from '../../world/ground.ts';
 
 export function roundaboutRefusal(world: World, cx: number, cz: number, radius: number, cut = true): string {
   const net = world.roads, p = new Float64Array(2);
@@ -30,7 +31,9 @@ export function roundaboutRefusal(world: World, cx: number, cz: number, radius: 
   const half = PROFILE_INFO[RING_PROFILE].right;
   for (const r of [radius - half, radius, radius + half]) for (let k = 0; k < 48; k++) {
     const a = (k / 48) * Math.PI * 2;
-    if (heightAt(world.heights, cx + Math.cos(a) * r, cz + Math.sin(a) * r) < SEA_LEVEL + 0.3) return text('road.ring.water');
+    const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r, ground = heightAt(world.heights, x, z);
+    // the sea, or a river or lake of the player's (D49: the ring was laid over drawn water and filled it)
+    if (ground < SEA_LEVEL + 0.3 || waterAt(world.water, x, z) > ground) return text('road.ring.water');
   }
   return '';
 }

@@ -309,7 +309,8 @@ export function conformDisc(j: RoadJournal, world: World, cx: number, cz: number
     const k = heightIndex(gx, gz);
     // as under a road: water is never filled, and a disc high above or deep below the ground leaves it alone
     const gap = y - UNDER_DROP - h[k];
-    if (h[k] < SEA_LEVEL + 0.3 || gap > ROAD_TUNING.economy.bridgeFrom || gap < -ROAD_TUNING.economy.tunnelFrom) continue;
+    // (the sea, and the player's rivers and lakes: D49, the disc filled a drawn river)
+    if (h[k] < SEA_LEVEL + 0.3 || waterAt(world.water, worldOfSample(gx), worldOfSample(gz)) > h[k] || gap > ROAD_TUNING.economy.bridgeFrom || gap < -ROAD_TUNING.economy.tunnelFrom) continue;
     const target = d < edge || underARoad(world, worldOfSample(gx), worldOfSample(gz)) ? y - UNDER_DROP : y + rise - BESIDE_DROP;
     const w = d < edge + 0.5 ? 1 : 1 - smooth((d - edge - 0.5) / Math.max(0.5, r - edge - 0.5));
     const v = h[k] + (target - h[k]) * w;
