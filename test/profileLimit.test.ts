@@ -1,12 +1,16 @@
 /// <reference types="node" />
 // D44: a map holds up to MAX_PROFILES road profiles, and a profile id past 255 survives the segment table, the road
 // graph sent to the workers, the lots and the road mesh's tag (profile and the two end rules, read by the shader).
-import { test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world/world.ts';
 import { RoadNetwork } from '../src/roads/network.ts';
 import { buildRoadMesh } from '../src/jobs/roadMesh.ts';
-import { MAX_PROFILES, PROFILES, registerProfile, packRoadTag, unpackRoadTag } from '../src/roads/profiles.ts';
+import { MAX_PROFILES, PROFILES, customProfiles, registerProfile, packRoadTag, unpackRoadTag, setCustomProfiles } from '../src/roads/profiles.ts';
+
+// the profiles this file registers leave with it (D18: about 300 stayed in the global table for later tests)
+const startCount = PROFILES.length, startCustom = customProfiles();
+afterEach(() => { setCustomProfiles(startCustom); });
 
 /** A profile no other has: a local street whose sidewalks are `w` metres wide. */
 function custom(w: number): number {
@@ -44,4 +48,8 @@ test('D44: a segment with profile 300 keeps it in the network, the graph and its
   const tags = new Set<number>();
   for (let i = 0; i < m.vertexCount; i++) tags.add(unpackRoadTag(m.position[i * 4 + 3])[0]);
   assert.ok(tags.has(300), `profiles in the mesh tags: ${[...tags]}`);
+});
+
+test('D18: the file leaves the global profile table as it found it (checked by the last test of the file)', () => {
+  assert.equal(PROFILES.length, startCount);
 });
