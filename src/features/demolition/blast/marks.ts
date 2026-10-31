@@ -5,6 +5,7 @@
 // only the slot written goes up. Nothing is done a frame.
 
 import * as THREE from 'three/webgpu';
+import { parkMiller } from '../../../core/rng.ts';
 
 const MAX_CRATERS = 60;
 const MAX_SOOT = 600;
@@ -115,8 +116,7 @@ function craterTexture(road: boolean): THREE.CanvasTexture | null {
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const g = c.getContext('2d')!;
-  let seed = road ? 7 : 13;
-  const rnd = (): number => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const rnd = parkMiller(road ? 7 : 13);
   const mid = size / 2;
   for (let i = 0; i < 40; i++) {
     const a = rnd() * Math.PI * 2, r = size * (0.15 + rnd() * 0.3);
@@ -185,8 +185,7 @@ function sootTexture(): THREE.CanvasTexture | null {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
-  let seed = 29;
-  const rnd = (): number => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const rnd = parkMiller(29);
   for (let k = 0; k < 26; k++) {
     const x = 64 + (rnd() - 0.5) * 70, y = 64 + (rnd() - 0.5) * 70, r = 10 + rnd() * 34;
     const grad = g.createRadialGradient(x, y, 0, x, y, r);

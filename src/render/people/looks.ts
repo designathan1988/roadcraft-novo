@@ -2,6 +2,7 @@
 // No three.js here: the tests run it under Node.
 
 import { CLIP, type CookedPeople } from './format.ts';
+import { hash32 } from '../../core/rng.ts';
 
 export interface LookChoice {
   variation: number;
@@ -14,14 +15,8 @@ export interface LookChoice {
   hash: number;
 }
 
-/** Integer hash (lowbias32). */
-export function hash32(x: number): number {
-  x = (x ^ (x >>> 16)) >>> 0;
-  x = Math.imul(x, 0x7feb352d) >>> 0;
-  x = (x ^ (x >>> 15)) >>> 0;
-  x = Math.imul(x, 0x846ca68b) >>> 0;
-  return (x ^ (x >>> 16)) >>> 0;
-}
+/** Integer hash (lowbias32): the core one, re-exported for the people modules. */
+export { hash32 };
 
 /** Natural walking speed of the cooked walk at its own rate, m/s (Rocketbox: ~1.5 m a cycle of ~1.1 s). */
 const WALK_SPEED = 1.4;

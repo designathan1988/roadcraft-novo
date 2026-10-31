@@ -11,6 +11,7 @@ import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, typ
 import { partGeometries } from '../r40/api.ts';
 import { PART_BASE, PART_DIST, POOL_PARTS, VARIANT_TYPES } from '../jobs/parts40.ts';
 import { cypressTree, floweringBush, hedge, ipeTree, mixedTree, oakTree, palmTree, shrub } from './treeMeshes.ts';
+import { parkMiller } from '../core/rng.ts';
 
 export const PMAT = { Plain: 0, Leaf: 1, Glass: 2, Red: 3, Yellow: 4, Green: 5, Bark: 6, Metal: 7, Wire: 8, Sign0: 9, Atlas: 25, LeafCard: 26, Impostor: 30, Paint: 31 } as const;
 /** Faces per variant: Sign0 … Sign0 + 15. */
@@ -458,8 +459,7 @@ function parkedCar(): PropDef {
 function ground(): PropDef {
   const v = (k: number) => PMAT.Sign0 + k;
   const parts: THREE.BufferGeometry[] = [];
-  let seed = 7;
-  const r = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const r = parkMiller(7);
   const scatter = (n: number, make: (i: number, x: number, z: number) => void) => {
     for (let i = 0; i < n; i++) { const a = r() * Math.PI * 2, d = Math.sqrt(r()) * 1.4; make(i, Math.cos(a) * d, Math.sin(a) * d); }
   };

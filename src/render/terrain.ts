@@ -21,6 +21,7 @@ import { ECO_RES } from './ecology.ts';
 import { GROUND_COLORS, NO_WATER, WATER_SPACING, WATER_TILE_RES } from '../world/ground.ts';
 import type { World } from '../world/world.ts';
 import { heightAt } from '../world/heights.ts';
+import { parkMiller } from '../core/rng.ts';
 
 /**
  * Farthest the terrain is cut along the roads (render/terrainSeams.ts, jobs/terrainSeams.ts): the 4 m cells the seams
@@ -687,8 +688,7 @@ export class TerrainRenderer {
     const heightAt = this.heightFn();
     // one tuft: BLADES thin triangles round its centre (x, z jitter, lean, height factor in the colour slot)
     const pos: number[] = [], nrm: number[] = [], bl: number[] = [];
-    let s = 3;
-    const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    const r = parkMiller(3);
     for (let i = 0; i < BLADES; i++) {
       const a = r() * Math.PI * 2, d = r() * 0.3, w = 0.06 + r() * 0.04, h = 0.35 + r() * 0.3, turn = r() * Math.PI;
       const cx = Math.cos(a) * d, cz = Math.sin(a) * d, tx = Math.cos(turn) * w, tz = Math.sin(turn) * w;

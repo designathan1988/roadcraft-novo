@@ -11,6 +11,7 @@ import { baseHeight, waterLevelAt } from './terrainGen.ts';
 import { SHAPE_STRIDE, emptyBoxes, type BoxColumns } from '../shared/contracts/worker.ts';
 import { PROFILE_INFO } from '../roads/profiles.ts';
 import { BESIDE_DROP, UNDER_DROP, edgeRise } from '../roads/kerb.ts';
+import { smoothstep01 } from '../core/math.ts';
 
 export const BLOCK = 88; // grid spacing (m)
 export const DEBUG_PROFILE = 1; // street with parking, ~16 m
@@ -114,7 +115,7 @@ export function conformTileToGrid(heights: Float32Array, tile: number, seed: num
       // under either street wins over beside the other (a junction's corner)
       const underOne = dX < halfOf(i) || dZ < halfOf(j);
       if (best < half + blend) {
-        const k = underOne || best <= half + 0.5 ? 1 : 1 - smooth((best - half - 0.5) / (blend - 0.5));
+        const k = underOne || best <= half + 0.5 ? 1 : 1 - smoothstep01((best - half - 0.5) / (blend - 0.5));
         // under the street below its surface; beside it level with its outer strip's top (roads/kerb.ts; the grid's
         // profiles are symmetric)
         const want = underOne ? target - UNDER_DROP : target + edgeRise(lineProfile(line), true) - BESIDE_DROP;
@@ -128,7 +129,6 @@ export function conformTileToGrid(heights: Float32Array, tile: number, seed: num
   return { min, max };
 }
 
-function smooth(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }
 
 /** Buildings of the blocks whose center lies in this tile. */
 export function debugTileBoxes(tile: number, seed: number): BoxColumns {

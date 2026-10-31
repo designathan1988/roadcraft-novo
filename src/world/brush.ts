@@ -8,6 +8,7 @@ import type { Command } from '../core/commands.ts';
 import { cellsOfSamples, heightAt, heightIndex, sampleCoord, worldOfSample } from './heights.ts';
 import { NO_WATER, WATER_MAP_RES, WATER_SPACING, WATER_TILE_RES, waterCoord, waterIndex } from './ground.ts';
 import type { World } from './world.ts';
+import { smoothstep01 } from '../core/math.ts';
 
 export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten' | 'mesa' | 'canyon' | 'escarpment' | 'sugarloaf' | 'gully';
 
@@ -40,7 +41,6 @@ function extendBounds(world: World, idx: number, v: number): void {
   if (v > world.tileMax[tile]) world.tileMax[tile] = v;
 }
 
-function smoothstep01(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }
 
 /**
  * Flattens the whole map to one height. It is the only edit that touches the whole map (asked for by the player,

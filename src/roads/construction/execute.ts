@@ -19,6 +19,7 @@ import { arcAtT } from './plan.ts';
 import type { RoadPlan } from './plan.ts';
 import { profileY } from './grade.ts';
 import type { NodeId, SegId } from '../../core/ids.ts';
+import { smoothstep01 } from '../../core/math.ts';
 
 // ------------------------------------------------------------ execution
 
@@ -257,7 +258,7 @@ export function clearAndConform(j: RoadJournal, world: World, q: Quad, profile: 
         const left = (x - px[i]) * (pz[b] - pz[a]) - (z - pz[i]) * (px[b] - px[a]) > 0;
         target = py[i] + edgeRise(profile, left) - BESIDE_DROP;
       }
-      const w = d <= half + 0.5 ? 1 : 1 - smooth((d - half - 0.5) / (bl - 0.5));
+      const w = d <= half + 0.5 ? 1 : 1 - smoothstep01((d - half - 0.5) / (bl - 0.5));
       const v = Math.max(TERRAIN_MIN_Y, Math.min(TERRAIN_MAX_Y, old + (target - old) * w));
       if (Math.abs(v - old) < 0.005) continue;
       idx.push(k); before.push(old); after.push(v);
@@ -291,7 +292,6 @@ function buildingTop(col: World['buildings']['cols'], id: number): number {
   return col.floors[id] * (arch?.floorH ?? 5.6) + 4;
 }
 
-export function smooth(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }
 
 /**
  * The ground under a disc of road (a turning bulb, a roundabout) whose paved edge is `edge` m from (cx, cz): below its
@@ -312,7 +312,7 @@ export function conformDisc(j: RoadJournal, world: World, cx: number, cz: number
     // (the sea, and the player's rivers and lakes: D49, the disc filled a drawn river)
     if (h[k] < SEA_LEVEL + 0.3 || waterAt(world.water, worldOfSample(gx), worldOfSample(gz)) > h[k] || gap > ROAD_TUNING.economy.bridgeFrom || gap < -ROAD_TUNING.economy.tunnelFrom) continue;
     const target = d < edge || underARoad(world, worldOfSample(gx), worldOfSample(gz)) ? y - UNDER_DROP : y + rise - BESIDE_DROP;
-    const w = d < edge + 0.5 ? 1 : 1 - smooth((d - edge - 0.5) / Math.max(0.5, r - edge - 0.5));
+    const w = d < edge + 0.5 ? 1 : 1 - smoothstep01((d - edge - 0.5) / Math.max(0.5, r - edge - 0.5));
     const v = h[k] + (target - h[k]) * w;
     idx.push(k); before.push(h[k]); after.push(v);
   }

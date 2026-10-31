@@ -18,6 +18,7 @@ import { heightAt } from '../world/heights.ts';
 import { ZONE_COLORS } from '../roads/zones.ts';
 import { MeshBuilder } from './meshBuilder.ts';
 import type { PackedMesh, RoadGraph } from '../shared/contracts/worker.ts';
+import { smoothstep01 } from '../core/math.ts';
 
 export const RMAT = { Asphalt: 2, Plain: 3, Sidewalk: 4, Grass: 5, Concrete: 6, Curb: 7, Zone: 8, Pavers: 9, Stone: 10 } as const;
 /** The footway's top over the carriageway: one figure with the ground's shaping (roads/kerb.ts). */
@@ -42,7 +43,6 @@ function rampShare(d: number): number {
  *  overhang, an abutment's length, and how near an abutment a pier may stand. */
 export const PIER_SPACING_ELEVATED = 29.6, PIER_SPACING_BRIDGE = 38.4;
 const CAP_H = 0.72, CAP_OVERHANG = 0.64, ABUTMENT_LEN = 1.6, ABUTMENT_CLEAR = 10.4, PARAPET_FROM = 0.64, PARAPET_FULL = 1.28;
-const smooth01 = (t: number) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
 
 /** Where the piers of a span from s0 to s1 go: every `spacing` from half a spacing in, never within ABUTMENT_CLEAR of an
  *  abutment; one at mid-span when none fits. */
@@ -396,7 +396,7 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
     // parapets on both edges, growing in with the deck's height over the ground (Roadcraft: smoothstep 0.64–1.28 m)
     const lift = (k: number) => F[k * 5 + 4] - ground[k];
     const railed = (k: number) => lift(k) > PARAPET_FROM;
-    const parapet = (k: number) => CURB_H + (1.0 - CURB_H) * smooth01((lift(k) - PARAPET_FROM) / (PARAPET_FULL - PARAPET_FROM));
+    const parapet = (k: number) => CURB_H + (1.0 - CURB_H) * smoothstep01((lift(k) - PARAPET_FROM) / (PARAPET_FULL - PARAPET_FROM));
     const top = (h: number) => () => h;
     for (const [u, inward] of [[first.u0, true], [last.u1, false]] as Array<[number, boolean]>) {
       const w = inward ? 0.25 : -0.25;

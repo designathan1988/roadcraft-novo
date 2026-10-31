@@ -5,6 +5,7 @@
 import { HEIGHT_TILE_RES, MAP_TILES, SEA_LEVEL } from '../config.ts';
 import { heightIndex, worldOfSample } from '../world/heights.ts';
 import { BESIDE_DROP, UNDER_DROP } from '../roads/kerb.ts';
+import { smoothstep01 } from '../core/math.ts';
 
 /**
  * Per segment: x0, z0, y0, x1, z1, y1, half width (the outer edge), and the outer strip's rise over the road on its left
@@ -54,7 +55,7 @@ export function conformTile(heights: Float32Array, tile: number, segs: Float32Ar
         if (d >= half + BLEND) continue;
         const surface = segs[o + 2] + (segs[o + 5] - segs[o + 2]) * t;
         if (d < half) { if (d < underD) { underD = d; underY = surface; } continue; }
-        const k = d <= half + 0.5 ? 1 : 1 - smooth((d - half - 0.5) / (BLEND - 0.5));
+        const k = d <= half + 0.5 ? 1 : 1 - smoothstep01((d - half - 0.5) / (BLEND - 0.5));
         if (k > bestK) {
           bestK = k; besideSurface = surface;
           // u+ (the left of a to b) lies along (dz, -dx)
@@ -79,4 +80,3 @@ export function conformTile(heights: Float32Array, tile: number, segs: Float32Ar
   return { min, max };
 }
 
-function smooth(t: number): number { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); }

@@ -36,6 +36,15 @@ export function stream(seed: number): () => number {
   return () => r.next();
 }
 
+/**
+ * Park-Miller stream (seed x 16807 mod 2^31 - 1), in [0, 1): what the blast marks, the prop meshes and the terrain's
+ * scatter used, each with its own copy. Not for new code (the period and the low bits are poor): Rng/stream instead.
+ */
+export function parkMiller(seed: number): () => number {
+  let s = seed;
+  return () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+}
+
 const GRAD = new Float32Array([1, 0, -1, 0, 0, 1, 0, -1, 0.7071, 0.7071, -0.7071, 0.7071, 0.7071, -0.7071, -0.7071, -0.7071]);
 
 /** 2D gradient noise, roughly in [-1, 1]. */
