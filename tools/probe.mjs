@@ -45,7 +45,7 @@ const FRAMES = (n) => `new Promise((done) => { const R = window.__roadcraft, P =
   requestAnimationFrame(step); })`;
 
 const SETUP = {
-  street: viewScript(view.street, { before: 'R.frames.fixDetail(true);', after: 'await R.frames.settle(20);' }),
+  street: viewScript(view.street, { after: 'await R.frames.settle(20);' }),
   district: viewScript(view.district, { after: 'await R.frames.settle(20);' }),
   city: viewScript(view.city, { after: 'await R.frames.settle(20);' }),
   night: viewScript(view.night, { after: 'await R.frames.settle(20);' }),

@@ -13,7 +13,7 @@ const V1: Record<string, string[] | null> = {
   panels: ['registerBuilderTab'],
   people: ['ready', 'groups', 'last'],
   demo: ['hitKind', 'force'],
-  frames: ['settle', 'stats', 'drawnStats', 'fixDetail', 'gpu', 'profile', 'drawn'],
+  frames: ['settle', 'stats', 'drawnStats', 'gpu', 'profile', 'drawn'],
   world: null, actions: null,
   history: ['undo', 'redo', 'canUndo'],
   tools: ['current', 'set', 'select', 'inspect', 'click', 'options', 'selected', 'design', 'inspector'],

@@ -64,7 +64,6 @@ export interface AutomationHost {
   stats(): Record<string, number>;
   /** stats() plus the triangles the GPU drew (trisDrawn, D81). */
   drawnStats(): Promise<Record<string, number>>;
-  fixDetail(on: boolean): void;
   gpu(): GpuTiming | null;
   /** The frame's time per system (?perf only, else null). */
   profile(): FrameProfile | null;
@@ -163,7 +162,7 @@ export interface CityAutomation {
   };
   /** The game's own tools for play (pistol, bomb): what the last shot hit, waiting for the simulation, and the force. */
   readonly demo: { hitKind(): 'pistol' | 'bomb' | null; force(): number };
-  readonly frames: { settle(frames: number): Promise<void>; stats(): Record<string, number>; drawnStats(): Promise<Record<string, number>>; fixDetail(on: boolean): void; gpu(): GpuTiming | null; profile(): FrameProfile | null;
+  readonly frames: { settle(frames: number): Promise<void>; stats(): Record<string, number>; drawnStats(): Promise<Record<string, number>>; gpu(): GpuTiming | null; profile(): FrameProfile | null;
     /** Frames drawn since the game started (a still or hidden frame draws nothing). */
     drawn(): number;
   };
@@ -265,7 +264,7 @@ export function createAutomation(page: AutomationPage, game: () => AutomationHos
       toScreen: (x, y, z) => g().toScreen(x, y, z),
       following: () => g().following(), followAt: (x, z, r) => g().followAt(x, z, r),
     },
-    frames: { settle: (n) => g().settle(n), stats: () => g().stats(), drawnStats: () => g().drawnStats(), fixDetail: (on) => g().fixDetail(on), gpu: () => g().gpu(), profile: () => g().profile(), drawn: () => g().framesDrawn() },
+    frames: { settle: (n) => g().settle(n), stats: () => g().stats(), drawnStats: () => g().drawnStats(), gpu: () => g().gpu(), profile: () => g().profile(), drawn: () => g().framesDrawn() },
     get world() { return g().world; },
     get actions() { return g().actions; },
     history: { undo: () => g().undo(), redo: () => g().redo(), canUndo: () => g().canUndo() },

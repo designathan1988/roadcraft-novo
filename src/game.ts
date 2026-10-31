@@ -675,7 +675,7 @@ export class Game {
     const info = this.parts.renderer.info.render as { drawCalls: number; triangles: number };
     return {
       draws: info.drawCalls, tris: info.triangles,
-      buildings: this.world.buildings.size, segs: this.world.roads.segs.size, detail: this.detailAuto,
+      buildings: this.world.buildings.size, segs: this.world.roads.segs.size,
       cityMB: Math.round(this.city.gpuBytes / 1e6), roadsMB: Math.round(this.roads.gpuBytes / 1e6),
       ...(this.simStats?.type === 'stats' ? { cars: this.simStats.cars, micro: this.simStats.micro, peds: this.simStats.peds } : {}),
     };
@@ -735,7 +735,6 @@ export class Game {
     // minimized or hidden: nothing is drawn; the simulation goes on in its worker (the clock does not jump on return)
     if (document.hidden) { this.last = now; return; }
     this.health?.frame(now - this.last);
-    this.adaptDetail(now - this.last);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     const pr = this.profile;
@@ -1211,43 +1210,10 @@ export class Game {
     this.post.bloomOverride = null;
   }
 
-  /**
-   * Detail kept to what the GPU draws in time (screen-space error with a frame-time budget, as the engines that show
-   * whole cities do): every 3 s, the frames of the window over 20 ms (a slower card) raise the pixel error a little,
-   * frames all at the screen's rate bring it back; on a card with room it stays at the full detail.
-   */
-  private frameTimes: number[] = [];
-  private detailAuto = 1;
-  /** Counting by the tools (`fixDetail`): the detail does not adapt to the frame time while they measure. */
-  private detailFixed = false;
-  private adaptDetail(ms: number): void {
-    if (this.detailFixed || ms <= 0 || ms > 250) return;
-    const t = this.frameTimes;
-    t.push(ms);
-    if (t.length < 180) return;
-    t.sort((a, b) => a - b);
-    const p90 = t[Math.floor(t.length * 0.9)];
-    t.length = 0;
-    const before = this.detailAuto;
-    if (p90 > 20) this.detailAuto = Math.max(0.35, this.detailAuto * 0.85);
-    else if (p90 < 17.5) this.detailAuto = Math.min(1, this.detailAuto * 1.1);
-    if (this.detailAuto !== before) this.updatePixelScale();
-  }
-
-  /**
-   * For the tools that count what is drawn (tools/budget.mjs): the adaptive detail held at full (`on`) or left to adapt
-   * again. Otherwise the counts depended on how busy the machine was while the city loaded (the detail shrinks when
-   * the 90th percentile frame passes 20 ms), and two builds were not comparable.
-   */
-  fixDetail(on: boolean): void {
-    this.detailFixed = on;
-    this.frameTimes.length = 0;
-    if (on && this.detailAuto !== 1) { this.detailAuto = 1; this.updatePixelScale(); }
-  }
-
   /** Detail distances by screen-space error: more pixels, detail reaches farther. */
   private updatePixelScale(): void {
-    const res = (this.prefs ? this.settings.resolution * this.settings.detail : 1) * this.detailAuto;
+    // only the window and the player's resolution and detail: never the frame time (no quality cut to pass a budget)
+    const res = this.prefs ? this.settings.resolution * this.settings.detail : 1;
     const k = Math.min(3, Math.max(0.3, window.innerHeight * window.devicePixelRatio * res / 1080));
     // (the seams keep their reach: the terrain cuts within a fixed distance, render/terrain.ts SEAM_REACH)
     for (const l of this.layers) if (l !== this.seams) l.pixelScale = k;
@@ -1331,7 +1297,7 @@ export class Game {
         const r = g.canvas.getBoundingClientRect();
         return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
       },
-      settle: (n) => g.settle(n), stats: () => g.stats(), drawnStats: () => g.drawnStats(), fixDetail: (on) => g.fixDetail(on), gpu: () => g.gpuTiming,
+      settle: (n) => g.settle(n), stats: () => g.stats(), drawnStats: () => g.drawnStats(), gpu: () => g.gpuTiming,
       profile: () => g.profile,
       tool: () => g.tool,
       click: (x, z, shift, alt) => {
