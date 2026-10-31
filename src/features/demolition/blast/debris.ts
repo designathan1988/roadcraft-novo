@@ -263,8 +263,12 @@ export class Debris {
     }
   }
 
+  /** Bumped at each redraw of the pieces: the shadow cascades draw their still casters again (render/post.ts). */
+  drawn = 0;
+
   /** All pieces' matrices and colours, shape by shape (bounded by MAX_PIECES; only while something moves or changed). */
   private draw(): void {
+    this.drawn++;
     const counts = this.counts;
     counts.fill(0);
     const meshes = this.meshes;

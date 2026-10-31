@@ -15,7 +15,7 @@ import { PROP, PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
 import { PartSize } from './partSize.ts';
-import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propLayer, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -23,7 +23,7 @@ import { PAINTS } from '../shared/vehiclePaints.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
-import { SHADOW_LENGTH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
+import { SHADOW_LENGTH, sunDirection } from './sun.ts';
 import type { SegId } from '../core/ids.ts';
 
 const {
@@ -199,10 +199,9 @@ export class PropRenderer {
           const kind = kindOfC.element(type.mul(VARIANTS).add(variant)).toVar();
           // a 4.0 building part: its scale per axis from its key (render/partSize.ts)
           const isPart = this.partSize.isPart(kind);
-          const s3 = this.partSize.scale(extraC.element(i), isVar).toVar();
+          const s3 = this.partSize.scale(extraC.element(i), select(isVar.equal(uint(1)), float(1), float(0))).toVar();
           // the kind's reach times the instance's scale (or plus the span, for wires and walls): a fixed radius cut
-          // big trees and long wires at the edge of the screen. A part's: its model's reach at its own scale (its w's high
-          // bits are its colour, not a scale)
+          // big trees and long wires at the edge of the screen. A part's: its model's reach at its scale (w holds its colour)
           const rk = this.radiusU.element(kind);
           const bits = float(uint(pose.w).shiftRight(uint(16)).bitAnd(uint(63)));
           const mode = this.stretchU.element(kind);
@@ -284,8 +283,8 @@ export class PropRenderer {
       mesh.onBeforeRender = () => { this.drawsThisFrame[slot]++; };
       // only the near level casts shadows, and only the kinds propKindCasts lets in (by type, not by kind index)
       mesh.castShadow = l === 0 && propKindCasts(d);
-      // low props: the views and the near cascade only (their shadow is under a texel of the far ones)
-      if (propIsSmallCaster(d)) mesh.layers.set(SMALL_CASTER_LAYER);
+      // low props, leaves in the wind (propLayer)
+      mesh.layers.set(propLayer(d, l));
       mesh.receiveShadow = true;
       this.group.add(mesh);
       this.slotMesh[t * LODS + l] = mesh;
@@ -718,7 +717,7 @@ export class PropRenderer {
     const meshes: THREE.Mesh[] = [];
     for (let t = 0; t < PROP_TYPES; t++) {
       const def = this.defs[t];
-      // a building part's level 1 is its far model (a lot part's top): near, its own
+      // a part's level 1 is its far model
       const base = PART_TYPES.includes(t) ? def.lods[0] : def.lods[1] ?? def.lods[0];
       if (!base) continue;
       let n = 0;
@@ -813,7 +812,8 @@ export class PropRenderer {
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
     (this.sunU.value as THREE.Vector3).copy(sunDirection);
-    this.partSize.setView(camera, this.pixelScale);
+    // a new scale moves every distance: the cascades' casters changed
+    if (this.partSize.setView(camera, this.pixelScale)) this.changed = true;
     this.kinds.forEach((d, k) => d.dist.forEach((x, l) => { this.distArr[k * LODS + l] = d.lods[l] && this.kindNear[k] > 0 ? x * this.pixelScale : 0; }));
     this.updateResidency(camPos);
     if (this.kindNearDue) this.countKindsNear(camPos);

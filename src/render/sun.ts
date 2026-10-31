@@ -23,5 +23,14 @@ export const SMALL_CASTER_LAYER = 4;
  * layer 0 alone, drew the small casters too. A layer of its own keeps each cascade's layers as they are set.
  */
 export const CASCADE_LAYER = 5;
+/**
+ * Layers of the casters that move (traffic, people, trees in the wind, a collapse's pieces), the small ones apart (the near
+ * cascade only, as SMALL_CASTER_LAYER). The cascades keep the still casters' depth and draw these over it each frame
+ * (render/post.ts CachedShadowNode, Roadcraft 4.0's static shadow cache); the views draw them as any.
+ */
+export const MOVER_LAYER = 8;
+export const MOVER_SMALL_LAYER = 9;
+/** The mover layers' bits in a layer mask. */
+export const MOVER_BITS = (1 << MOVER_LAYER) | (1 << MOVER_SMALL_LAYER);
 /** Height under which a prop is a small caster (m). */
 export const SMALL_CASTER = 1.2;

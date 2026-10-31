@@ -713,6 +713,8 @@ export class Game {
   private lastInput = 0;
   private drawnView = new THREE.Matrix4();
   private drawnProj = new THREE.Matrix4();
+  /** What the demolition drew when the shadow cascades last took it (Demolition.drawnVersion). */
+  private shadowDemolition = -1;
 
   /** Input marks the frames as live (hover previews, brush ring, menus over the 3D view). */
   private watchInput(): void {
@@ -852,9 +854,14 @@ export class Game {
     pr?.lap(PART.props, T5);
 
     if (this.post) {
-      // the shadow cascades are redrawn only when something casting changed or moves (render/post.ts prepareShadows)
-      if (this.props.changed || this.layers.some((l) => l.changed)) this.post.invalidateShadows();
+      // the cascades' still casters are drawn again only when something casting changed: the city's meshes or props, the
+      // transit stops, a collapse's pieces moving, the inside view's cut (render/post.ts CachedShadowNode; the movers are
+      // drawn each frame)
+      const demolished = this.demolition.drawnVersion();
+      if (this.props.changed || this.layers.some((l) => l.changed) || this.transitView.changed || demolished !== this.shadowDemolition || this.viewState.insideId >= 0) this.post.invalidateShadows();
+      this.shadowDemolition = demolished;
       this.props.changed = false;
+      this.transitView.changed = false;
       this.post.setCamera(cam);
       this.post.render(!this.clock.paused || windU.value > 0.001 || this.demolition.moving());
     }

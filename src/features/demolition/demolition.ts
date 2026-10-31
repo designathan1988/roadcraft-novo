@@ -73,6 +73,8 @@ export class Demolition {
   active(): boolean { return this.blast.active() || this.ruins.moving(); }
   /** Anything casting a shadow moves: the shadow maps are redrawn while it does. */
   moving(): boolean { return this.blast.moving() || this.ruins.moving(); }
+  /** Changes with what the feature draws (pieces redrawn, a ruin or a part shown or gone): what casts a shadow changed. */
+  drawnVersion(): number { return this.blast.debris.drawn + this.ruins.draw.drawn; }
   /** Everything gone (a new city). */
   clear(): void { this.blast.clear(); this.ruins.clear(); }
   /** Every part drawn once at load (`on`), so no shader is compiled during play. */

@@ -9,6 +9,7 @@ import { PAINTS } from '../shared/vehiclePaints.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { rainU } from './weather.ts';
+import { MOVER_LAYER } from './sun.ts';
 import { PeopleRenderer } from './people/crowd.ts';
 
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -65,6 +66,8 @@ class Batch {
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = shadows;
     this.mesh.receiveShadow = true;
+    // traffic moves: the shadow cascades draw it over their still casters each frame (render/sun.ts MOVER_LAYER)
+    this.mesh.layers.set(MOVER_LAYER);
   }
 
   /** `lod`: near/middle cross over by complementary masks (near: noise < lod; middle: lod = −1 − f, noise ≥ f), so

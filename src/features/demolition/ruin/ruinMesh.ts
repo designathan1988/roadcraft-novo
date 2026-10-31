@@ -28,6 +28,8 @@ const rotate = (q: Node, v: Node): Node => {
 
 export class RuinDraw {
   readonly group = new THREE.Group();
+  /** Bumped when a ruin or an attached part shows or goes: the shadow cascades draw their still casters again. */
+  drawn = 0;
   /** ROWS × 4 numbers per fragment (see ROWS). */
   readonly poses = new Float32Array(MAX_FRAGMENTS * ROWS * 4);
   private poseAttr = new THREE.StorageBufferAttribute(this.poses, 4);
@@ -84,6 +86,7 @@ export class RuinDraw {
 
   /** Ruin slot `k` drawn from `r` (its fragments' rows written by the caller). */
   show(k: number, r: RuinData): void {
+    this.drawn++;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(r.position, 4));
     g.setAttribute('nrm', new THREE.BufferAttribute(r.normal, 4, true));
@@ -99,6 +102,7 @@ export class RuinDraw {
 
   /** Slot `k` no longer drawn; its geometry freed. */
   hide(k: number): void {
+    this.drawn++;
     const m = this.shells[k];
     if (m.geometry !== this.empty) m.geometry.dispose();
     m.geometry = this.empty;
@@ -107,6 +111,7 @@ export class RuinDraw {
 
   /** An instance of `kind`, tinted `rgb` (sRGB) over the kind's own colour; -1 when the batch is full or the kind unknown. */
   addAttached(kind: string, rgb: number): number {
+    this.drawn++;
     const model = this.model.get(kind);
     if (model === undefined || this.attached.instanceCount >= MAX_ATTACHED) return -1;
     const id = this.attached.addInstance(model);
@@ -117,7 +122,7 @@ export class RuinDraw {
   private colour = new THREE.Color();
   private tint = new THREE.Color();
 
-  removeAttached(id: number): void { if (id >= 0) this.attached.deleteInstance(id); }
+  removeAttached(id: number): void { this.drawn++; if (id >= 0) this.attached.deleteInstance(id); }
   setAttached(id: number, m: THREE.Matrix4): void { if (id >= 0) this.attached.setMatrixAt(id, m); }
 
   /** Fragment `f`'s rows changed: uploaded with the others at the end of the frame. */

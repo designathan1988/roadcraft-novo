@@ -11,7 +11,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { CASCADE_LAYER, SHADOW_REACH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
+import { CASCADE_LAYER, MOVER_BITS, MOVER_LAYER, MOVER_SMALL_LAYER, SHADOW_REACH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
 import { cloudShadowAt, cloudShadowStrength } from './cloudShadow.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 
@@ -35,8 +35,90 @@ export interface PostOptions { shadows: boolean; ao: boolean; bloom: boolean }
  * far end of the last one: there every shadow (a forest's trees) stopped on a straight line across the screen, the
  * ground darker on the near side of it.
  */
+/** A cascade's still casters drawn again after this many frames however still (ten seconds at 60 Hz), for a change nothing
+ *  told it of; the cascades' counts start this many frames apart, so their safety draws never fall in one frame (4.0
+ *  sunCascades.ts SAFETY_FRAMES, SAFETY_STAGGER). */
+const SAFETY_FRAMES = 600;
+const SAFETY_STAGGER = 10;
+
+/**
+ * A cascade drawn as Roadcraft 4.0's static shadow cache (sunCascades.ts): the still casters' depth kept in a store of the
+ * map's own format and size, copied into the map each frame, and the casters that move (sun.ts MOVER layers: traffic,
+ * people, leaves in the wind) drawn over it. The still casters are drawn again only when the cascade moved (its camera's
+ * matrices), something casting changed (`stale`, Post.invalidateShadows) or SAFETY_FRAMES passed. They were drawn into the
+ * three maps every frame, the whole near city, for a wind that moved only the trees (Unity HDRP mixed cached shadows,
+ * Unreal virtual shadow maps' cached pages, Acton "CSM Scrolling", SIGGRAPH 2012).
+ */
+class CachedShadowNode extends THREE.ShadowNode {
+  private store: THREE.DepthTexture | null = null;
+  private readonly view = new THREE.Matrix4();
+  private readonly proj = new THREE.Matrix4();
+  private age: number;
+  private readonly stale: boolean[];
+  private readonly index: number;
+  constructor(light: THREE.Light, shadow: THREE.LightShadow, stale: boolean[], index: number) {
+    super(light as THREE.DirectionalLight, shadow);
+    this.stale = stale;
+    this.index = index;
+    this.age = index * SAFETY_STAGGER;
+  }
+
+  /** three's ShadowNode.renderShadow (the shadow map and its override material already bound by updateShadow), cached. */
+  renderShadow(frame: { renderer: THREE.WebGPURenderer; scene: THREE.Scene }): void {
+    const self = this as unknown as { shadow: THREE.LightShadow; shadowMap: THREE.RenderTarget; light: THREE.Light };
+    const { shadow, shadowMap, light } = self;
+    const { renderer, scene } = frame;
+    shadow.updateMatrices(light);
+    shadowMap.setSize(shadow.mapSize.width, shadow.mapSize.height, shadowMap.depth);
+    const cam = shadow.camera, mask = cam.layers.mask, depth = shadowMap.depthTexture!;
+    const w = shadow.mapSize.width, h = shadow.mapSize.height;
+    if (this.store && (this.store.image.width !== w || this.store.image.height !== h)) { this.store.dispose(); this.store = null; }
+    const kept = this.store !== null && !this.stale[this.index] && ++this.age < SAFETY_FRAMES && this.view.equals(cam.matrixWorld) && this.proj.equals(cam.projectionMatrix);
+    const name = scene.name;
+    scene.name = `Shadow Map [ ${light.name || 'ID: ' + light.id} ]`;
+    if (!kept) {
+      // the still casters into the map (cleared), then kept
+      cam.layers.mask = mask & ~MOVER_BITS;
+      renderer.render(scene, cam);
+      this.store ??= new THREE.DepthTexture(w, h);
+      renderer.copyTextureToTexture(depth, this.store);
+      this.view.copy(cam.matrixWorld);
+      this.proj.copy(cam.projectionMatrix);
+      this.age = 0;
+      this.stale[this.index] = false;
+    } else {
+      renderer.copyTextureToTexture(this.store!, depth);
+    }
+    // the movers over them, the depth kept
+    const movers = mask & MOVER_BITS;
+    if (movers !== 0) {
+      cam.layers.mask = movers;
+      const auto = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.render(scene, cam);
+      renderer.autoClear = auto;
+    }
+    cam.layers.mask = mask;
+    scene.name = name;
+  }
+
+  override dispose(): void {
+    this.store?.dispose();
+    this.store = null;
+    super.dispose();
+  }
+}
+
 class FadingCSM extends CSMShadowNode {
+  /** Per cascade: its still casters must be drawn again (Post.invalidateShadows). */
+  readonly stale = [true, true, true];
   private reachU = T.uniform(PERSP_SHADOW_FAR);
+  /** The cascades' shadows as cached ones (three's CSM makes plain ShadowNodes in `_init`). */
+  _init(builder: unknown): void {
+    (CSMShadowNode.prototype as unknown as { _init(b: unknown): void })._init.call(this, builder);
+    const self = this as unknown as { lights: Array<THREE.Light & { shadow: THREE.LightShadow }>; _shadowNodes: Node[] };
+    self._shadowNodes = self.lights.map((l, i) => T.nodeObject(new CachedShadowNode(l, l.shadow, this.stale, i)));
+  }
   setup(builder: unknown): Node {
     const shadowed = (super.setup as (b: unknown) => Node)(builder);
     this.reachU.value = Math.min(this.maxFar, (this.camera as THREE.PerspectiveCamera | null)?.far ?? this.maxFar);
@@ -295,11 +377,13 @@ export class Post {
     csm.maxFar = ortho ? (camera as THREE.OrthographicCamera).far : PERSP_SHADOW_FAR;
     csm.updateFrustums();
     // the near cascade draws the small casters too; the far ones only what is bigger than their texel. Each holds its own
-    // layer besides 0, or three draws it with the view camera's layers (sun.ts CASCADE_LAYER)
+    // layer besides 0, or three draws it with the view camera's layers (sun.ts CASCADE_LAYER); and the movers' (drawn over
+    // the still casters, CachedShadowNode)
     (csm as unknown as { lights: Array<{ shadow: THREE.LightShadow }> }).lights.forEach((l, i) => {
       l.shadow.camera.layers.set(0);
       l.shadow.camera.layers.enable(CASCADE_LAYER + i);
-      if (i === 0) l.shadow.camera.layers.enable(SMALL_CASTER_LAYER);
+      l.shadow.camera.layers.enable(MOVER_LAYER);
+      if (i === 0) { l.shadow.camera.layers.enable(SMALL_CASTER_LAYER); l.shadow.camera.layers.enable(MOVER_SMALL_LAYER); }
     });
   }
 
@@ -325,6 +409,8 @@ export class Post {
     this.shadowView.copy(cam.matrixWorld);
     this.shadowProj.copy(cam.projectionMatrix);
     this.shadowSun.copy(this.sun.position);
+    // something casting changed: every cascade draws its still casters again (a moved cascade sees that itself)
+    if (this.shadowDirty) (csm as unknown as FadingCSM).stale.fill(true);
     this.shadowDirty = false;
     for (const l of csm.lights) { l.shadow.autoUpdate = false; l.shadow.needsUpdate = !still; }
   }

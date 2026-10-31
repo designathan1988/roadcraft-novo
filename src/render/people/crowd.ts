@@ -12,6 +12,7 @@
 import * as THREE from 'three/webgpu';
 import { T, withPrevious, type Node } from '../tsl.ts';
 import { rainU } from '../weather.ts';
+import { MOVER_LAYER } from '../sun.ts';
 import { CLIP, CLIP_PROP, REGION, checkCooked, type CookedPeople } from './format.ts';
 import { hash32, pickLook, riderHash, type LookChoice } from './looks.ts';
 import { MOTO_PELVIS, aboard, seatsOf } from './occupants.ts';
@@ -218,6 +219,8 @@ export class PeopleRenderer {
       mesh.frustumCulled = false;
       mesh.castShadow = lod === 1;
       mesh.receiveShadow = true;
+      // people walk: drawn over the cascades' still casters each frame (render/sun.ts MOVER_LAYER)
+      mesh.layers.set(MOVER_LAYER);
       this.meshes.push(mesh);
       this.group.add(mesh);
     }

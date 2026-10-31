@@ -9,7 +9,7 @@
 // the point under the cursor slipped and came back on every wheel notch (the image "shook").
 
 import * as THREE from 'three/webgpu';
-import { SMALL_CASTER_LAYER } from './sun.ts';
+import { MOVER_LAYER, MOVER_SMALL_LAYER, SMALL_CASTER_LAYER } from './sun.ts';
 import { MAP_HALF } from '../config.ts';
 import { heightAt } from '../world/heights.ts';
 
@@ -124,8 +124,9 @@ export class CameraRig {
     this.heights = heights;
     this.persp = new THREE.PerspectiveCamera(45, 1, 0.2, 60000);
     this.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 80000);
-    // the views see the small casters' layer (render/sun.ts: the far shadow cascades do not)
-    for (const c of [this.persp, this.ortho]) c.layers.enable(SMALL_CASTER_LAYER);
+    // the views see the small casters' layer (render/sun.ts: the far shadow cascades do not) and the movers' (the
+    // cascades draw them over their still casters' depth)
+    for (const c of [this.persp, this.ortho]) { c.layers.enable(SMALL_CASTER_LAYER); c.layers.enable(MOVER_LAYER); c.layers.enable(MOVER_SMALL_LAYER); }
     this.target.y = heightAt(heights, 0, 0);
     this.y = this.target.y;
   }

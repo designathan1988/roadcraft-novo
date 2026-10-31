@@ -793,6 +793,39 @@ test('GPU 100 % (2026-10-31): the 4.0 parts carry their size rules: bars, and a 
   }
 });
 
+test('GPU 100 % (2026-10-31): a cascade keeps its still casters and draws only the movers over them while it stays put', async () => {
+  const { Post } = await import('../src/render/post.ts');
+  const sun = await import('../src/render/sun.ts') as unknown as Record<string, number>;
+  const renderer = fakeRenderer();
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 30000), light = new THREE.DirectionalLight();
+  const scene = new THREE.Scene(); scene.add(light);
+  const post = new Post(renderer, scene, camera, light, { shadows: true, ao: false, bloom: false });
+  const csm = post.csm as unknown as { _init(b: unknown): void; lights: Array<THREE.DirectionalLight & { shadow: THREE.LightShadow }>; _shadowNodes: Array<Record<string, unknown> & { renderShadow(f: unknown): void }> };
+  csm._init({ camera, renderer });
+  post.setCamera(camera);
+  const l = csm.lights[0];
+  l.position.set(0, 100, 0); l.target.position.set(10, 0, 0); l.updateMatrixWorld(); l.target.updateMatrixWorld();
+  const node = csm._shadowNodes[0];
+  const map = { setSize() { /* fixed */ }, depth: 1, depthTexture: new THREE.DepthTexture(2048, 2048) };
+  node.shadowMap = map;
+  const calls: string[] = [];
+  const r = {
+    autoClear: true,
+    render: (_s: unknown, cam: THREE.Camera) => calls.push(`render ${(cam.layers.mask & sun.MOVER_BITS) === cam.layers.mask ? 'movers' : (cam.layers.mask & sun.MOVER_BITS) === 0 ? 'still' : 'mixed'} clear=${r.autoClear}`),
+    copyTextureToTexture: (a: unknown) => calls.push(a === map.depthTexture ? 'copy map>store' : 'copy store>map'),
+  };
+  assert.equal(typeof node.renderShadow, 'function', 'the cascade draws through its own renderShadow');
+  node.renderShadow({ renderer: r, scene: new THREE.Scene() });
+  assert.deepEqual(calls, ['render still clear=true', 'copy map>store', 'render movers clear=false'], 'first frame: the still casters, kept, the movers over them');
+  calls.length = 0;
+  node.renderShadow({ renderer: r, scene: new THREE.Scene() });
+  assert.deepEqual(calls, ['copy store>map', 'render movers clear=false'], 'the cascade stayed put: its still casters come from the store');
+  calls.length = 0;
+  post.invalidateShadows(); post.prepareShadows(true);
+  node.renderShadow({ renderer: r, scene: new THREE.Scene() });
+  assert.deepEqual(calls[0], 'render still clear=true', 'something casting changed: the still casters drawn again');
+});
+
 test('E23: an object moved by its matrix has the previous frame\'s matrix in its velocity', async () => {
   const vel = await import('../src/render/velocity.ts') as Record<string, unknown>;
   const prev = vel.previousModelMatrix as ((o: THREE.Object3D, frameId: number) => THREE.Matrix4) | undefined;

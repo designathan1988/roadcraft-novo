@@ -39,6 +39,8 @@ export class TransitRenderer {
   private up = new THREE.Vector3(0, 1, 0);
   private spot = new Float64Array(3);
   private built = -1;
+  /** The stops were rebuilt since the game last read it: they cast, so the cascades' still casters are drawn again. */
+  changed = false;
   /** Road edits since the last build (its own list of dirty road cells). */
   private roadEdits: DirtyReader | null = null;
   /** Cells within reach of a stop (a road edit there can turn a shelter or move a platform). */
@@ -124,6 +126,7 @@ export class TransitRenderer {
     if (this.roadEdits) for (const c of this.roadEdits.drain()) if (this.stopCells.has(c)) near = true;
     if (version === this.built && !near) return;
     this.built = version;
+    this.changed = true;
     this.stopCells.clear();
     let stops = 0;
     for (const l of transit.lines) stops += l.stops.length / 2;

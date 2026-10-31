@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BARRIER, FURN, PROP, PROP_TYPES, SIGN, WIRE_Y } from '../jobs/props.ts';
 import { impostorQuad } from './impostor.ts';
-import { SMALL_CASTER } from './sun.ts';
+import { MOVER_LAYER, MOVER_SMALL_LAYER, SMALL_CASTER, SMALL_CASTER_LAYER } from './sun.ts';
 import { buildCarBody, buildCarSilhouette, type CarArchetype, type CarStyle, type Lamp } from './carBody.ts';
 import { BRISE_BLADE, FRAME_BAR, SHELL_PARTS, partGeometries, partTopGeometries } from '../r40/api.ts';
 import { PART_BASE, PART_DIST, PART_PROP, PART_TYPES, POOL_PARTS, SHARED_MODEL_TYPES, VARIANT_TYPES } from '../jobs/parts40.ts';
@@ -783,6 +783,27 @@ export function propCastsShadow(k: PropKind, level: number): boolean {
  */
 export function propKindCasts(k: PropKind): boolean {
   return propCastsShadow(k, 0) && (!PART_TYPES.includes(k.type) || k.type === PART_PROP.BBox || k.type === PART_PROP.BLot);
+}
+
+/** A kind whose near model has leaves: they sway in the wind (render/props.ts), so its shadow moves. */
+export function propSways(k: PropKind): boolean {
+  const c = k.lods[0]?.attributes.pcol as THREE.BufferAttribute | undefined;
+  if (!c) return false;
+  for (let i = 0; i < c.count; i += 3) {
+    const m = Math.round(c.getW(i) * 255);
+    if (m === PMAT.Leaf || m === PMAT.LeafCard) return true;
+  }
+  return false;
+}
+
+/**
+ * The layer a kind's level is drawn on: a low prop's, the views and the near cascade only (its shadow is under a texel of
+ * the far ones); a leafy kind's near level, the movers' (drawn over the cascades' still casters each frame, sun.ts).
+ */
+export function propLayer(k: PropKind, level: number): number {
+  const small = propIsSmallCaster(k);
+  if (level === 0 && propSways(k)) return small ? MOVER_SMALL_LAYER : MOVER_LAYER;
+  return small ? SMALL_CASTER_LAYER : 0;
 }
 
 /** A prop low enough to cast only into the near cascade (sun.ts SMALL_CASTER_LAYER). */
