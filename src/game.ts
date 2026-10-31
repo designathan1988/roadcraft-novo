@@ -18,7 +18,6 @@ import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
 import { GpuTiming } from './render/gpuTiming.ts';
 import { TerrainRenderer } from './render/terrain.ts';
 import { createPoseBuffers, PoseReader, viewPoseBuffers } from './shared/contracts/poses.ts';
-import { encodeOps } from './sim/lanes.ts';
 import { VehicleRenderer } from './render/vehicles.ts';
 import type { PersonOptions } from './shared/contracts/people.ts';
 import { PropRenderer } from './render/props.ts';
@@ -40,12 +39,11 @@ import { nightU } from './render/scene.ts';
 import { Transit } from './world/transit.ts';
 import { PROFILES, customProfiles, onProfileAdded } from './roads/profiles.ts';
 import { arrowCode } from './roads/laneLinks.ts';
-import type { NetOp } from './roads/network.ts';
 import type { FromSim, ToSim } from './sim/worker.ts';
 import { Inspector } from './ui/inspector.ts';
 import { BOMB_START } from './shared/contracts/bomb.ts';
 import { Demolition } from './features/demolition/demolition.ts';
-import { demandFactor, zoomPercent } from './ui/readouts.ts';
+import { zoomPercent } from './ui/readouts.ts';
 import { ItemTool } from './features/streetscape/itemTool.ts';
 import { Hud, type HudActions, type LotMode, type SkyMode, type Tool } from './ui/hud.ts';
 import { GROUND_TOOLS, ROAD_TOOLS, TERRAIN_TOOLS } from './ui/hudActions.ts';
@@ -63,7 +61,6 @@ import { ViewState } from './app/viewState.ts';
 import { chooseRoadPaint, showRoadPaint } from './features/roads/roadPaint.ts';
 import { InsideView } from './render/inside.ts';
 import { TextSigns, signKey } from './render/textSigns.ts';
-import { lotToWorld } from './world/lotEdit.ts';
 import type { FeatureActions, LotFeatureActions } from './app/featureActions.ts';
 import { nameStreetCommand } from './roads/streetNames.ts';
 import { laneCount, roadClasses } from './roads/roadVariant.ts';
@@ -73,7 +70,6 @@ import { RoadTool } from './features/roads/roadTool.ts';
 import { ZoneTool } from './features/zones/zoneTool.ts';
 import { Growth } from './world/growth.ts';
 import { streetChain, demolishSeg, segPreview } from './roads/build.ts';
-import { Zone } from './roads/zones.ts';
 import { RoadPreview } from './render/preview.ts';
 import { BrushStroke, FlattenMap, LANDFORM_ROCK, type BrushMode, type BrushParams } from './world/brush.ts';
 import { World } from './world/world.ts';
@@ -91,8 +87,9 @@ import { clickTool, type ClickHost } from './app/clicks.ts';
 import { selectBuilding, showSelection as showSelectionOf, type SelectionHost } from './app/buildings.ts';
 import { LotEditing } from './app/lotEditing.ts';
 import { Gesture, bindInput, type InputControl } from './app/input.ts';
-import { asNode, asSeg, type NodeId, type SegId } from './core/ids.ts';
+import type { NodeId, SegId } from './core/ids.ts';
 import { signTextCommand } from './features/streetscape/signText.ts';
+import { SimLink } from './app/simLink.ts';
 
 /** Still frames drawn before the loop rests (the temporal anti-aliasing converges in about this many). */
 const STILL_FRAMES = 40;
@@ -159,18 +156,14 @@ export class Game {
   /** The view the city opened with (Home goes back to it). */
   private homeView: Float64Array | null = null;
   private creator!: Creator;
-  private roadsVersion = 0;
   private occupancySab: SharedArrayBuffer;
   private trafficLook: TrafficLook;
   private occSent = 0;
-  private netOps: NetOp[] = [];
+  /** The page's link to the simulation worker (app/simLink.ts). */
+  private simLink!: SimLink;
   /** Nodes whose hand-adjusted arrows need to be recomputed. */
   private arrowNodes = new Set<NodeId>();
-  private camSent = 0;
   /** Doors sent to the simulation: when, and from where (the camera moving or the city growing sends them again). */
-  private doorsSent = 0;
-  private doorsAt = { x: Infinity, z: Infinity, count: -1 };
-  private demandSent = 0;
   private canvas: HTMLCanvasElement;
 
   /** The tool in hand and the landform it raises (app/tools.ts). */
@@ -329,7 +322,7 @@ export class Game {
       else if (e.data.type === 'hit') this.onHit(e.data.people, e.data.vehicles);
       else if (e.data.type === 'autoControl') this.world.roads.setFlow(e.data.node, e.data.flow);
       else if (e.data.type === 'manoeuvres') { const r = this.manoeuvreWait; this.manoeuvreWait = null; r?.(e.data); }
-      else if (e.data.type === 'resync') this.resyncSim(e.data.reason);
+      else if (e.data.type === 'resync') this.simLink.resync(e.data.reason);
       else if (e.data.type === 'inspect') { /* read by the motion probe's own listener (tools/check-sim.mjs) */ }
       else { console.error('simulation:', e.data.message); this.health?.add('error', t('health.msg.simulation', { message: e.data.message.split(String.fromCharCode(10))[0] })); }
     };
@@ -341,8 +334,12 @@ export class Game {
       this.pool.broadcast({ type: 'profiles', list });
       this.sim.postMessage({ type: 'profiles', list } satisfies ToSim);
     });
-    // the simulation mirrors the network: changes go as a batch every frame
-    this.world.roads.listeners.push((op) => this.netOps.push(op));
+    // the simulation mirrors the network: changes go as a batch every frame (app/simLink.ts)
+    this.simLink = new SimLink({
+      world: this.world, target: () => this.rig.target, hour: () => this.hour,
+      demandChoice: () => this.prefs?.now, hasLines: () => this.transit.lines.length > 0,
+    }, this.sim);
+    this.world.roads.listeners.push((op) => this.simLink.queue(op));
     // hand-adjusted arrows: nodes to redo when the control or the segments change
     this.world.roads.listeners.push((op) => {
       const arr = this.trafficLook.arrows.image.data as Float32Array;
@@ -462,7 +459,7 @@ export class Game {
       turn: (d) => this.rig.turnTo(this.rig.yaw - d * Math.PI / 4), // left (−1) turns as Q does
       tilt: (d) => this.rig.rotate(0, d * 60),
       zoneLayer: (on) => { this.viewState.set('zones', on); this.hud.layersChanged(); },
-      simulation: (sim) => { this.prefs!.update(sim); this.demandSent = 0; },
+      simulation: (sim) => { this.prefs!.update(sim); this.simLink.demandNow(); },
       settings: () => {
         const st = this.prefs?.now;
         return { traffic: st?.traffic ?? 1, people: st?.people ?? 1, demand: st?.demand ?? 'normal', paint: this.world.look.paint, furniture: st?.furniture ?? 0, roadUp: st?.roadUp ?? 'PageUp', roadDown: st?.roadDown ?? 'PageDown', roadAlign: st?.roadAlign ?? 'KeyV', preset: st?.preset ?? 'high', webgpu: !!this.parts?.isWebGPU };
@@ -846,7 +843,7 @@ export class Game {
     const T3 = pf ? performance.now() : 0;
     pr?.lap(PART.layersUpdate, T3);
     this.syncSim(now);
-    this.lines.sync(this.roadsVersion, this.tool === 'transit', this.simStats?.type === 'stats' ? this.simStats.lines : null);
+    this.lines.sync(this.simLink.roadsVersion, this.tool === 'transit', this.simStats?.type === 'stats' ? this.simStats.lines : null);
     this.updateInfo(now);
     pr?.lap(PART.sim, performance.now());
     this.vehicles.update(cam, this.rig.eye, now);
@@ -946,74 +943,11 @@ export class Game {
     this.sim.postMessage({ type: 'speed', value: this.clock.running } satisfies ToSim);
   }
 
-  /**
-   * The simulation's mirror of the network failed to apply a change: send it the whole network again (a 'clear', then
-   * every node, segment and junction; pending changes are already in it). Its vehicles start over, and the flow-based
-   * controls it had chosen are forgotten on both sides.
-   */
-  private resyncSim(reason: string): void {
-    const net = this.world.roads, nc = net.nodes.cols, ops: NetOp[] = [{ t: 'clear' }];
-    for (let i = 0; i < net.nodes.end; i++) { const n = asNode(i); if (net.nodes.alive[n]) ops.push({ t: 'addNode', rec: { id: n, x: nc.x[n], z: nc.z[n], y: nc.y[n] } }); }
-    for (let i = 0; i < net.segs.end; i++) { const s = asSeg(i); if (net.segs.alive[s]) ops.push({ t: 'addSeg', rec: net.segRec(s) }); }
-    for (const [id, spec] of net.junctions) ops.push({ t: 'junction', id, spec });
-    for (const id of [...net.flow.keys()]) net.setFlow(id, 0);
-    this.netOps.length = 0;
-    const extra: string[] = [];
-    const enc = encodeOps(ops, extra);
-    this.sim.postMessage({ type: 'ops', ops: enc, extra } satisfies ToSim, [enc.buffer]);
-    this.roadsVersion++;
-    console.error('simulation: the whole network sent again', reason);
-  }
-
-  /** Sends the network changes and the camera position to the simulation. */
+  /** The camera's spot for the traffic overlay and the occupancy texture, then the simulation link's batch and timers. */
   private syncSim(now: number): void {
-    if (this.netOps.length) {
-      // the stops follow the roads: resend the lines only when segments changed (a zone dab or a junction control does not)
-      if (this.transit.lines.length && this.netOps.some((op) => op.t === 'addSeg' || op.t === 'remSeg' || op.t === 'profile' || op.t === 'clear')) this.roadsVersion++;
-      const extra: string[] = [];
-      const ops = encodeOps(this.netOps, extra);
-      this.netOps.length = 0;
-      this.sim.postMessage({ type: 'ops', ops, extra } satisfies ToSim, [ops.buffer]);
-    }
+    this.simLink.sync(now);
     this.trafficLook.center.value.set(this.rig.target.x, this.rig.target.z);
     if (now - this.occSent > 500) { this.occSent = now; this.trafficLook.occupancy.needsUpdate = true; }
-    if (now - this.demandSent > 2000) {
-      this.demandSent = now;
-      const st = this.prefs?.now;
-      const demand = demandFactor(st?.demand);
-      this.sim.postMessage({ type: 'demand', hour: this.hour, demand, traffic: st?.traffic ?? 1, people: st?.people ?? 1 } satisfies ToSim);
-    }
-    if (now - this.camSent > 250) {
-      this.camSent = now;
-      this.sim.postMessage({ type: 'camera', x: this.rig.target.x, z: this.rig.target.z } satisfies ToSim);
-    }
-    if (now - this.doorsSent > 3000) this.sendDoors(now);
-  }
-
-  /**
-   * Doors of the buildings near the camera (roadcraft `lotDoors`): the middle of the lot's front, facing the road.
-   * Pedestrians spawned there walk out of them to the sidewalk. Only when the camera moved 80 m or the city changed.
-   */
-  private sendDoors(now: number): void {
-    this.doorsSent = now;
-    const t = this.rig.target, w = this.world, col = w.buildings.cols;
-    const moved = Math.hypot(t.x - this.doorsAt.x, t.z - this.doorsAt.z) > 80;
-    if (!moved && w.buildings.size === this.doorsAt.count) return;
-    this.doorsAt = { x: t.x, z: t.z, count: w.buildings.size };
-    const R = 450, pts: number[] = [], docks: number[] = [];
-    w.buildingIndex.query(t.x - R, t.z - R, t.x + R, t.z + R, (id) => {
-      if (pts.length >= 6000 || col.floors[id] === 0) return;
-      const k = col.d[id] / 2 - 0.3, s = Math.sin(col.rot[id]), c = Math.cos(col.rot[id]);
-      pts.push(col.x[id] + s * k, col.z[id] + c * k);
-      // warehouse loading dock (trucks back into it): inside the gate, lot frame (−w/2 + 10, d/2 − 6), facing the street
-      if (col.zone[id] === Zone.Industrial && docks.length < 1500) {
-        const [dx, dz] = lotToWorld({ x: col.x[id], z: col.z[id], rot: col.rot[id] }, -col.w[id] / 2 + 10, col.d[id] / 2 - 6);
-        docks.push(dx, dz, col.rot[id]);
-      }
-    });
-    const arr = new Float32Array(pts), dk = new Float32Array(docks);
-    this.sim.postMessage({ type: 'doors', pts: arr } satisfies ToSim, [arr.buffer]);
-    this.sim.postMessage({ type: 'docks', pts: dk } satisfies ToSim, [dk.buffer]);
   }
 
   /** Arrows at segment ends on nodes with adjusted lane connections (only the nodes that changed). */
@@ -1352,7 +1286,7 @@ export class Game {
       clouds: () => g.clouds.list.length,
       terminals: () => g.transit.terminals,
       autosaveNow: () => { g.autosaveAt = 0; },
-      demandSentAt: () => g.demandSent,
+      demandSentAt: () => g.simLink.demandSentAt,
       setHour: (h) => g.world.setHour(h),
       weather: () => ({ clouds: g.weather.fixed?.clouds ?? cloudsU.value, rain: g.weather.fixed?.rain ?? rainU.value, storm: g.weather.fixed?.storm ?? 0, wind: g.weather.windFixed }),
       inspector: () => ({ open: g.inspector.isOpen, seg: g.inspector.seg }),
