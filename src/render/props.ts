@@ -14,7 +14,7 @@ import type { PropsProbe } from './propsProbe.ts';
 import { PROP, PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
 import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
-import { buildPropDefs, buildPropKinds, propCastsShadow, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { buildPropDefs, buildPropKinds, buildingPartModels, propCastsShadow, propCullRadius, propIsSmallCaster, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
 import { nightU } from './scene.ts';
@@ -96,6 +96,8 @@ export class PropRenderer {
   private readonly drawsThisFrame = new Uint32Array(DRAWS);
   private distU: Node;
   private radiusU: Node;
+  /** The 4.0 building parts' unit models, built once here: the props pool draws them, the ruins take them (features/demolition). */
+  readonly partModels: Readonly<Record<string, THREE.BufferGeometry>>;
   private stretchU: Node;
   /** 1 for the kinds whose near level casts a sun shadow. */
   private castU: Node;
@@ -135,7 +137,8 @@ export class PropRenderer {
     this.pool = pool;
     this.dirty = world.dirty.reader(Dirty.Props);
     this.enabled = isWebGPU; // compute culling: WebGPU only (on WebGL 2 the props are left out for now)
-    this.defs = buildPropDefs();
+    this.partModels = buildingPartModels();
+    this.defs = buildPropDefs(this.partModels);
     const built = buildPropKinds(this.defs);
     this.kinds = built.kinds;
     this.kindOf = built.kindOf;

@@ -509,8 +509,7 @@ function person(): PropDef {
  * partGeometries), in the kit's colours; a type that holds several kinds keeps each kind's vertices as its variant (the
  * shader drops the others). Scale per axis and colour come with each instance.
  */
-function buildingPartDefs(): Map<number, PropDef> {
-  const models = partGeometries() as unknown as Record<string, THREE.BufferGeometry>;
+function buildingPartDefs(models: Readonly<Record<string, THREE.BufferGeometry>>): Map<number, PropDef> {
   const byType = new Map<number, THREE.BufferGeometry[]>();
   for (const [kind, [type, variant]] of Object.entries(POOL_PARTS)) {
     const g = models[kind];
@@ -534,8 +533,13 @@ function buildingPartDefs(): Map<number, PropDef> {
   return defs;
 }
 
-/** All props, in type order. */
-export function buildPropDefs(): PropDef[] {
+/** The 4.0 building parts' unit models (r40 kit.ts), built once by their owner (render/props.ts) and read by the props pool and the ruins. */
+export function buildingPartModels(): Readonly<Record<string, THREE.BufferGeometry>> {
+  return partGeometries() as unknown as Record<string, THREE.BufferGeometry>;
+}
+
+/** All props, in type order; `partModels` from `buildingPartModels`. */
+export function buildPropDefs(partModels: Readonly<Record<string, THREE.BufferGeometry>>): PropDef[] {
   const defs: PropDef[] = [];
   defs[PROP.Tree] = { ...tree(), alts: [ipe('yellow', 4)] };
   defs[PROP.Conifer] = conifer();
@@ -556,7 +560,7 @@ export function buildPropDefs(): PropDef[] {
   defs[PROP.Oak] = { ...oak(), alts: [ipe('pink', 5)] };
   defs[PROP.Palm] = palm();
   // 18..23: the roads/vegetation work's, empty for now; 24..29 the 4.0 building parts
-  const parts = buildingPartDefs();
+  const parts = buildingPartDefs(partModels);
   for (let t = PROP.Palm + 1; t < PROP_TYPES; t++) defs[t] = parts.get(t) ?? { lods: [null, null, null], dist: [0, 0, 0], radius: 0 };
   if (defs.length !== PROP_TYPES) throw new Error(`prop types: ${defs.length} definitions for ${PROP_TYPES} types`);
   return defs;

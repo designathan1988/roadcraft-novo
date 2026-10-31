@@ -289,7 +289,7 @@ test('the ambient occlusion reads the depth alone, at half resolution (no shadin
 test('E5, E25: each prop draw carries one variant only (a hydrant does not process the vertices of 13 other pieces)', async () => {
   const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
   const { PROP } = await import('../src/jobs/props.ts');
-  const defs = PM.buildPropDefs();
+  const defs = PM.buildPropDefs(PM.buildingPartModels());
   // what the renderer draws: one geometry per kind and level (before: per type and level)
   const build = PM.buildPropKinds as ((d: typeof defs) => { kinds: Array<{ type: number; lods: Array<THREE.BufferGeometry | null> }> }) | undefined;
   const draws = build ? build(defs).kinds : defs.map((d, type) => ({ type, lods: d.lods }));
@@ -314,7 +314,7 @@ test('E5, E25: each prop draw carries one variant only (a hydrant does not proce
 test('E26: props that lie on the ground cast no sun shadow', async () => {
   const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
   const { PROP } = await import('../src/jobs/props.ts');
-  const { kinds } = PM.buildPropKinds(PM.buildPropDefs());
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs(PM.buildingPartModels()));
   // the rule the renderer uses (before: every near level but the wires)
   const casts = (PM.propCastsShadow as ((k: (typeof kinds)[number], l: number) => boolean) | undefined) ?? ((k, l) => l === 0 && k.type !== PROP.Wire);
   const flat: string[] = [];
@@ -333,7 +333,7 @@ test('E26: props that lie on the ground cast no sun shadow', async () => {
 test('E27: the cull sphere of every prop holds the whole piece at its largest scale', async () => {
   const PM = await import('../src/render/propMeshes.ts') as Record<string, unknown> & typeof import('../src/render/propMeshes.ts');
   const { PROP } = await import('../src/jobs/props.ts');
-  const { kinds } = PM.buildPropKinds(PM.buildPropDefs());
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs(PM.buildingPartModels()));
   // the radius the cull pass uses for an instance (before: the kind's radius, whatever the scale)
   const cullRadius = (PM.propCullRadius as ((k: (typeof kinds)[number], w: number) => number) | undefined) ?? ((k) => k.radius);
   const out: string[] = [];
@@ -695,7 +695,7 @@ test('shadows (4.0 port): low props cast only into the near cascade; the far cas
   const sun = await import('../src/render/sun.ts') as Record<string, unknown>;
   const { Post } = await import('../src/render/post.ts');
   const { PROP } = await import('../src/jobs/props.ts');
-  const { kinds } = PM.buildPropKinds(PM.buildPropDefs());
+  const { kinds } = PM.buildPropKinds(PM.buildPropDefs(PM.buildingPartModels()));
   const smallLayer = sun.SMALL_CASTER_LAYER as number | undefined;
   assert.equal(typeof smallLayer, 'number', 'a layer for the small casters');
   const small = PM.propIsSmallCaster as ((k: (typeof kinds)[number]) => boolean) | undefined;

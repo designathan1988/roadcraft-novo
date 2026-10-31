@@ -565,7 +565,7 @@ export class Game {
     scene.add(this.weather.group);
     this.particles = new Particles(this.world);
     this.demolition = new Demolition({
-      world: this.world, vehicles: this.vehicles, burst: (x, y, z, kind, strength, seconds) => this.particles.burst(x, y, z, kind, strength, seconds),
+      world: this.world, partModels: this.props.partModels, vehicles: this.vehicles, burst: (x, y, z, kind, strength, seconds) => this.particles.burst(x, y, z, kind, strength, seconds),
       push: (cmd) => this.commands.push(cmd), sim: { postMessage: (msg) => this.sim.postMessage(msg) }, hud: this.hud, ambient: this.ambient, flash: flashU,
     });
     scene.add(this.particles.mesh);

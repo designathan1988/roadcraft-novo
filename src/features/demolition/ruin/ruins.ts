@@ -50,6 +50,8 @@ interface Ruin {
 
 export interface RuinHost {
   world: World;
+  /** The building parts' unit models, built once by the props pool (render/props.ts). */
+  partModels: Readonly<Record<string, THREE.BufferGeometry>>;
   /** Dust, smoke and fire at a point (Blast.emitAt). */
   emit(x: number, y: number, z: number, kind: number, strength: number, seconds: number): void;
   /** A fire that keeps burning at a point (Blast.burn). */
@@ -59,7 +61,7 @@ export interface RuinHost {
 }
 
 export class Ruins {
-  readonly draw = new RuinDraw();
+  readonly draw: RuinDraw;
   private host: RuinHost;
   private worker: Worker;
   private ruins: Ruin[] = [];
@@ -85,6 +87,7 @@ export class Ruins {
   private one = new THREE.Vector3(1, 1, 1);
 
   constructor(host: RuinHost) {
+    this.draw = new RuinDraw(host.partModels);
     this.host = host;
     for (let k = 0; k < MAX_RUINS; k++) this.ruins.push(emptyRuin());
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: 'ruins' });

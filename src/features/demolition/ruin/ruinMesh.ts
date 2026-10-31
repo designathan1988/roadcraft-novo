@@ -7,7 +7,7 @@
 import * as THREE from 'three/webgpu';
 import { T, type Node } from '../../../render/tsl.ts';
 import { createBuildingMaterial } from '../../../render/city.ts';
-import { partGeometries, createFurnitureGeometries } from '../../../r40/api.ts';
+import { createFurnitureGeometries } from '../../../r40/api.ts';
 import { partBase } from '../../../jobs/building40.ts';
 import type { RuinData } from './fracture.ts';
 
@@ -41,7 +41,8 @@ export class RuinDraw {
   private lo = Infinity;
   private hi = -1;
 
-  constructor() {
+  /** `partModels`: the building parts' unit models as their owner built them (render/props.ts PropRenderer.partModels). */
+  constructor(partModels: Readonly<Record<string, THREE.BufferGeometry>>) {
     for (let f = 0; f < MAX_FRAGMENTS; f++) this.poses[(f * ROWS + 2) * 4 + 3] = this.poses[(f * ROWS + 4) * 4 + 3] = 1;
     const pose = storage(this.poseAttr, 'vec4', MAX_FRAGMENTS * ROWS).toReadOnly();
     const fragBase = uniform(0).onObjectUpdate(({ object }: { object: { userData: { fragBase?: number } } }) => object.userData.fragBase ?? 0);
@@ -68,7 +69,7 @@ export class RuinDraw {
     }
     // the kit's models, every one with the same attributes (position, normal, colour) and an index, as a batch needs
     const models: Array<[string, THREE.BufferGeometry, number]> = [];
-    for (const [kind, g] of Object.entries(partGeometries())) if (g) models.push([kind, g as THREE.BufferGeometry, partBase(kind)]);
+    for (const [kind, g] of Object.entries(partModels)) if (g) models.push([kind, g, partBase(kind)]);
     for (const [kind, g] of Object.entries(createFurnitureGeometries())) models.push(['f:' + kind, g as THREE.BufferGeometry, 0xffffff]);
     const plain = models.map(([kind, g, base]) => [kind, uniformModel(g), base] as const);
     let verts = 0, idx = 0;

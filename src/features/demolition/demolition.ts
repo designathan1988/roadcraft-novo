@@ -15,6 +15,8 @@ import { buildingDown, dropBomb } from './bomb.ts';
 
 export interface DemolitionHost {
   world: World;
+  /** The building parts' unit models, built once by the props pool (render/props.ts PropRenderer.partModels). */
+  partModels: Readonly<Record<string, THREE.BufferGeometry>>;
   /** The vehicles' bodies by model and the ones near a point (render/vehicles.ts). */
   vehicles: { wreckModels: THREE.BufferGeometry[]; vehiclesNear(x: number, z: number, r: number, out: number[]): number };
   /** A burst of particles (render/particles.ts Particles.burst). */
@@ -38,6 +40,7 @@ export class Demolition {
     this.blast = new Blast(host.vehicles.wreckModels, host.burst, groundAt);
     this.ruins = new Ruins({
       world: host.world,
+      partModels: host.partModels,
       emit: host.burst,
       burn: (x, y, z, size, seconds) => this.blast.burn(x, y, z, size, seconds),
       down: (id) => {
