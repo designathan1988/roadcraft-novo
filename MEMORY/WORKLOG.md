@@ -107,3 +107,15 @@ QUAL DOIS CLAUDES?
   and everything inside read as floating in the void. Fixed in cameraRig.syncCamera (the eye clamps to the map;
   the look target stays). The grass tufts past the edge never grow (material + GPU cull) - the field ends with the
   terrain. Photo: edge-clamped.png (the frame is all world), grass-edge-fixed.png.
+
+---
+## 2026-11-01 (5th) | each shadow cascade culls its own casters — commit (see git log)
+- Cause 1 of the GPU-100% list, fixed: the cascades render sequentially inside the shadow phase, so the props'
+  fill runs between passes - prepareCascade (casters only, level 0, the cascade's own frustum with the same sun
+  sweep, no dissolve state) before each cascade's render, prepareMain after the last. The dissolve state runs once
+  a frame. Budget, before -> after: street drawn 16,205,613 -> 15,362,635 (-843k), district 13,486,825 ->
+  13,006,289 (-480k), night -80k; city/map unchanged (their shadows are the cell/tile casters). Photos:
+  shadow-street.png (city shadows intact), shadow-props.png (rooftop plant shadows crisp at street level).
+- Still open from the five causes: the kept-frame store copy (48 MiB/frame - needs the mover-map sampled with max),
+  occlusion for props/vehicles/people (depth pyramid), depth prepass + mask-free variants, vehicles/people
+  per-cascade lists (small), the cloud-shadow MAP, the budget city/map architecture (tile fidelity cost).
