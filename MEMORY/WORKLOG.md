@@ -134,3 +134,15 @@ QUAL DOIS CLAUDES?
 - Still open: the kept-frame store copy (mover map + max sampling), depth prepass + mask-free variants for
   props/roads/terrain, vehicles/people per-cascade lists, the cloud-shadow map, the budget's city/map
   architecture (the tile fidelity cost stands until then).
+
+---
+## 2026-11-01 (7th) | vehicles and people culled per cascade too — commit (git log)
+- The colour lists snapshot per frame (vehicles' batches, crowd's LODs); prepareCascade compacts each to the
+  instances its own frustum sweeps (conservative radius: 12 for vehicles where the pose's flag is lost, 0.6 for
+  people) and uploads it; the last cascade restores. Runs on the same renderShadow hooks as the props.
+- Photo: cascade-vehicles.png (the truck, its shadow, the crossings intact). Budget holds: street 15.36M,
+  city 6.66M drawn with 175 draws (within), night 12.49M; city/map rows stand over by the tile fidelity cost.
+- Day total: street 16.21M -> 15.36M drawn; city 7.10M -> 6.66M and its draws back within; night 13.40M -> 12.49M.
+- Still open: the kept-frame store copy (needs the mover map + max sampling in every material's shadow filter),
+  depth prepass + mask-free variants for props/roads/terrain, the cloud-shadow map (overcast days), the budget's
+  city/map architecture (tile fidelity cost; the SSE/occlusion/lossless fixes are all in).
