@@ -24,7 +24,9 @@ export function emitRoofPlant(e: Emitter, b: Building, v: Volume, z: number, tri
   if (v.roofDetails?.length) return;
   // Drains in two opposite corners, where the roof's fall takes the water.
   if (v.outline) return;
-  // THE FAR LEVEL LEAVES OUT WHAT IS UNDER ITS ERROR (`FLAT_DEPTH`, 0.3 m): the drains and fittings a few centimetres proud, the masts and posts a few thick.
+  // THE FAR LEVEL LEAVES OUT WHAT IS UNDER ITS ERROR (`FLAT_DEPTH`, 0.3 m) - in a thing's largest dimension, not its
+  // thickness: a mast 8 cm thick stands 3.5 m tall, and leaving it out was 3.5 m of error at the level switch
+  // (measured, test/lodLevels.test.ts). Fittings a few centimetres proud stay far-left-out.
   const far = e.shell.far;
   for (const [dx, dy] of far ? [] : [[m(0.7), m(0.7)], [v.w - m(0.7), v.d - m(0.7)]] as const) {
     const x = v.x + dx;
@@ -48,9 +50,10 @@ export function emitRoofPlant(e: Emitter, b: Building, v: Volume, z: number, tri
       case 'tankBox':
         // A concrete water tank on a tall block, its lid and a ladder up its side.
         e.box(it.x0, it.y0, it.x1, it.y1, z, z + it.h, trim, ROOF_PLANT);
+        // The ladder stands it.h + 0.9 m tall: taller than the far level leaves out, it keeps its rungs.
+        e.box(it.x1 - m(0.05), cy - m(0.25), it.x1 + m(0.05), cy + m(0.25), z, z + it.h + m(0.9), DRAIN);
         if (far) break;
         e.box(it.x0 + m(0.3), it.y0 + m(0.3), it.x0 + m(1.1), it.y0 + m(1.1), z + it.h, z + it.h + m(0.12), DRAIN);
-        e.box(it.x1 - m(0.05), cy - m(0.25), it.x1 + m(0.05), cy + m(0.25), z, z + it.h + m(0.9), DRAIN);
         break;
       case 'hatch':
         e.box(it.x0, it.y0, it.x1, it.y1, z, z + it.h, ROOF_PLANT);
@@ -82,14 +85,14 @@ export function emitRoofPlant(e: Emitter, b: Building, v: Volume, z: number, tri
         break;
       }
       case 'mast':
-        if (far) break;
+        // 8 cm thick, it.h (3.5 m) tall: the far level draws it - its omission read as 3.5 m of error at the switch.
         e.box(cx - m(0.04), cy - m(0.04), cx + m(0.04), cy + m(0.04), z, z + it.h, DRAIN);
         e.box(cx - m(0.6), cy - m(0.02), cx + m(0.6), cy + m(0.02), z + it.h - m(0.4), z + it.h - m(0.36), DRAIN);
         if (it.variant % 2 === 1) e.box(cx - m(0.02), cy - m(0.45), cx + m(0.02), cy + m(0.45), z + it.h - m(0.9), z + it.h - m(0.86), DRAIN);
         break;
       case 'dish':
-        // Its post thinner than the dish's plate, never in the plate's sides.
-        if (!far) e.box(cx - m(0.04), cy - m(0.04), cx + m(0.04), cy + m(0.04), z, z + m(0.7), DRAIN);
+        // Its post (0.7 m) holds the plate up: without it the plate floated 0.5 m over the roof at the far level.
+        e.box(cx - m(0.04), cy - m(0.04), cx + m(0.04), cy + m(0.04), z, z + m(0.7), DRAIN);
         e.box(cx - m(0.4), cy - m(0.05), cx + m(0.4), cy + m(0.05), z + m(0.5), z + it.h, it.variant % 2 ? DRAIN : CONDENSER);
         break;
       case 'skylight':
@@ -146,8 +149,8 @@ export function emitTerrace(e: Emitter, b: Building, v: Volume, z: number, trim:
   // Tables under parasols.
   for (const { x: tx, y: ty } of terraceParasols(b, v)) {
     e.box(tx - m(0.4), ty - m(0.4), tx + m(0.4), ty + m(0.4), z + m(0.7), z + m(0.75), trim);
-    // Its pole, a few centimetres thick, under the far level's error (`FLAT_DEPTH`).
-    if (!e.shell.far) e.box(tx - m(0.04), ty - m(0.04), tx + m(0.04), ty + m(0.04), z, z + PARASOL_LOW, DRAIN);
+    // The canopy hangs 2.3 m over the deck: its pole holds it at every level, or the canopy floats at the far one.
+    e.box(tx - m(0.04), ty - m(0.04), tx + m(0.04), ty + m(0.04), z, z + PARASOL_LOW, DRAIN);
     e.box(tx - PARASOL_HALF, ty - PARASOL_HALF, tx + PARASOL_HALF, ty + PARASOL_HALF, z + PARASOL_LOW, z + PARASOL_HIGH, PARASOL);
     for (const s of [-1, 1]) e.box(tx + s * m(0.7) - m(0.2), ty - m(0.2), tx + s * m(0.7) + m(0.2), ty + m(0.2), z, z + m(0.45), trim);
   }
@@ -159,7 +162,8 @@ export function emitTerrace(e: Emitter, b: Building, v: Volume, z: number, trim:
   const bays = Math.max(1, Math.round(span / m(2.4)));
   const pergola = rnd(9) < 0.45;
   for (const px of pergola ? [lx - m(1.2), lx + m(1.2)] : []) {
-    for (let k = 0; k <= bays && !e.shell.far; k++) {
+    // The posts hold the beam 2.4 m up at every level: without them the beam floated at the far level's switch.
+    for (let k = 0; k <= bays; k++) {
       const py = dy0 + (span * k) / bays;
       e.box(px - m(0.07), py - m(0.07), px + m(0.07), py + m(0.07), z, z + m(2.4), DECK);
     }

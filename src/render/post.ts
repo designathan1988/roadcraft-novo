@@ -12,9 +12,10 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
-import { CASCADE_LAYER, MOVER_BITS, MOVER_LAYER, MOVER_SMALL_LAYER, SHADOW_REACH, SMALL_CASTER_LAYER, sunDirection } from './sun.ts';
+import { CASCADE_LAYER, CELL_CASTER_LAYER, MOVER_BITS, MOVER_LAYER, MOVER_SMALL_LAYER, SHADOW_REACH, SMALL_CASTER_LAYER, TILE_CASTER_LAYER, sunDirection } from './sun.ts';
 import { cloudShadowAt, cloudShadowStrength } from './cloudShadow.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
+import { showOccludedForShadows } from './visibility.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
 const {
@@ -78,9 +79,10 @@ class CachedShadowNode extends THREE.ShadowNode {
     const name = scene.name;
     scene.name = `Shadow Map [ ${light.name || 'ID: ' + light.id} ]`;
     if (!kept) {
-      // the still casters into the map (cleared), then kept
+      // the still casters into the map (cleared), then kept; a caster hidden from the colour pass still casts
       cam.layers.mask = mask & ~MOVER_BITS;
-      renderer.render(scene, cam);
+      showOccludedForShadows(true);
+      try { renderer.render(scene, cam); } finally { showOccludedForShadows(false); }
       this.store ??= new THREE.DepthTexture(w, h);
       renderer.copyTextureToTexture(depth, this.store);
       this.view.copy(cam.matrixWorld);
@@ -96,8 +98,8 @@ class CachedShadowNode extends THREE.ShadowNode {
       cam.layers.mask = movers;
       const auto = renderer.autoClear;
       renderer.autoClear = false;
-      renderer.render(scene, cam);
-      renderer.autoClear = auto;
+      showOccludedForShadows(true);
+      try { renderer.render(scene, cam); } finally { showOccludedForShadows(false); renderer.autoClear = auto; }
     }
     cam.layers.mask = mask;
     scene.name = name;
@@ -386,6 +388,8 @@ export class Post {
       l.shadow.camera.layers.set(0);
       l.shadow.camera.layers.enable(CASCADE_LAYER + i);
       l.shadow.camera.layers.enable(MOVER_LAYER);
+      // caster LOD: the near cascade draws the cells' own meshes; the far cascades draw the tile masses
+      l.shadow.camera.layers.enable(i === 0 ? CELL_CASTER_LAYER : TILE_CASTER_LAYER);
       if (i === 0) { l.shadow.camera.layers.enable(SMALL_CASTER_LAYER); l.shadow.camera.layers.enable(MOVER_SMALL_LAYER); }
     });
   }

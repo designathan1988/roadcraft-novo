@@ -10,6 +10,10 @@ import { boxTransfer } from '../shared/contracts/worker.ts';
 import type { World } from '../world/world.ts';
 import { heightAt } from '../world/heights.ts';
 import { CellLayer, type LayerSource } from './cellLayer.ts';
+import { FINE_PIXELS, NEAR_PIXELS, distanceForError } from './viewError.ts';
+import { FLAT_DEPTH } from '../r40/render/buildings/meshCore.ts';
+import { PLATE_DETAIL, TILE_DETAIL } from '../r40/render/buildings/massing.ts';
+import { m } from '../r40/world/units.ts';
 import { T, lodFadeMask, useCompactVertex, withPrevious, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
 import { ARCHES, ARCH_COUNT, facadeWindowTable } from '../world/arch.ts';
@@ -18,6 +22,7 @@ import { layDepthFirst } from './depthPrepass.ts';
 import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
 import { FINISH_BY_MAT, FINISH_COUNT, FINISH_LOOKS, FINISH_SIZE } from '../jobs/buildingFinishes.ts';
 import { WIN_REVEAL_SHADE } from '../jobs/buildingGen.ts';
+import type { BuildingOccluders } from './visibility.ts';
 
 const {
   attribute, uniform, vec3, vec4, float, int, mix, clamp, fract, fwidth, smoothstep, floor, mod, select, hash, min, abs,
@@ -87,7 +92,7 @@ function wallNoise(): THREE.DataTexture {
 export const WALL_NOISE = wallNoise();
 
 /** Buildings: the mesh source for the cell layer. */
-export function createCity(world: World, pool: JobPool): CellLayer {
+export function createCity(world: World, pool: JobPool, occluders?: BuildingOccluders): CellLayer {
   const src: LayerSource = {
     hasContent: (c) => world.cellBuildings[c] > 0,
     buildCell: (c, level, priority, done) => {
@@ -119,9 +124,17 @@ export function createCity(world: World, pool: JobPool): CellLayer {
         (r) => { if (r.built) world.setBuiltTops(r.built); done(r.mesh); }, { key: `plate:${p}`, priority, transfer: boxTransfer(boxes) });
     },
   };
-  // L0 full detail near, L1 facade level in the middle, L2 masses far: `detail` has to stay below `near`, or the cell
-  // jumps from L0 straight to the tile's massing and the town turns into boxes at the near boundary (4.0's L1 band).
-  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near: 1800, evict: 3000, margin: 40, detail: 700, plate: 4200, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
+  // L0 full detail near, L1 facade level in the middle, L2 masses far. The switches are DERIVED from each level's
+  // own geometric error through the screen-space-error rule (viewError.ts, Cesium's maximumScreenSpaceError): the
+  // far level and the tile masses carry 4.0's FAR_ERROR 1.5 m over their drops (massCells.ts:19, `level.error =
+  // Math.max(FAR_ERROR, mass.error)`), the facade's flattening is FLAT_DEPTH, the plate's its own PLATE_DETAIL.drop;
+  // each at its documented pixel budget. `pixelScale` (game.ts, viewScale) moves them with the real projection.
+  // `detail` has to stay below `near`, or the cell jumps from L0 straight to the tile's massing at the near boundary.
+  const farError = m(1.5); // 4.0 massCells.ts FAR_ERROR: the far level's own error floor
+  const near = distanceForError(Math.max(farError, TILE_DETAIL.drop), NEAR_PIXELS);
+  const detail = distanceForError(FLAT_DEPTH, FINE_PIXELS);
+  const plate = distanceForError(PLATE_DETAIL.drop, NEAR_PIXELS);
+  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near, evict: near * 1.43, margin: 40, detail, plate, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z), occluders, rebuildOccluders: true, lodCasters: true }, false, true);
 }
 
 
@@ -132,7 +145,7 @@ export function createCity(world: World, pool: JobPool): CellLayer {
 /** Cells whose window detail is on screen at full fade (the detail layer writes it): there the walls open at the windows. */
 export const DETAIL_SHOWN = new Uint8Array(CELL_COUNT);
 
-export function createCityDetail(world: World, pool: JobPool, material: THREE.Material): CellLayer {
+export function createCityDetail(world: World, pool: JobPool, material: THREE.Material, occluders?: BuildingOccluders): CellLayer {
   const src: LayerSource = {
     hasContent: (c) => world.cellBuildings[c] > 0,
     buildCell: (c, level, priority, done) => {
@@ -146,7 +159,7 @@ export function createCityDetail(world: World, pool: JobPool, material: THREE.Ma
     buildPlate: (_p, _q, done) => done(null),
   };
   return new CellLayer(src, world.dirty, Dirty.Buildings, material, { near: 1100, evict: 1400, margin: 30, detail: 150, far: 1400, budget: 48e6, shadows: false, sparse: true, publish: DETAIL_SHOWN,
-    eyeHeight: (x, z) => heightAt(world.heights, x, z) }, false, true);
+    eyeHeight: (x, z) => heightAt(world.heights, x, z), occluders }, false, true);
 }
 
 /** Direction to the sun (from the scene's directional light, read once per render). */

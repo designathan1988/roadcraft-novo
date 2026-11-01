@@ -12,6 +12,8 @@ import { wallsHeightOf } from './jobs/buildingGen.ts';
 import { roadGraphTransfer } from './shared/contracts/worker.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
+import { viewScale } from './render/viewError.ts';
+import { BuildingOccluders } from './render/visibility.ts';
 import { createRoads, createTrafficLook, type TrafficLook } from './render/roads.ts';
 import type { CellLayer } from './render/cellLayer.ts';
 import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
@@ -124,6 +126,8 @@ export class Game {
   /** The terrain cut along the roads near the camera. */
   private seams: CellLayer;
   private layers: CellLayer[];
+  /** The frame's building occluders (built by the city layer, read by the detail and road layers). */
+  private occluders!: BuildingOccluders;
   private sim: Worker;
   private poses: PoseReader;
   private vehicles: VehicleRenderer;
@@ -300,15 +304,17 @@ export class Game {
       return top;
     };
     this.terrain = new TerrainRenderer(this.world);
-    this.city = createCity(this.world, this.pool);
-    this.cityDetail = createCityDetail(this.world, this.pool, this.city.material);
+    this.occluders = new BuildingOccluders(this.world);
+    this.city = createCity(this.world, this.pool, this.occluders);
+    this.cityDetail = createCityDetail(this.world, this.pool, this.city.material, this.occluders);
     // per segment: occupancy a→b, b→a, asphalt wear (simulation), free
     this.occupancySab = new SharedArrayBuffer(OCCUPANCY_SEGS * 4);
     this.trafficLook = createTrafficLook(this.occupancySab);
-    this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook, this.world.heights);
+    this.roads = createRoads(this.world.roads, this.pool, this.world.dirty, this.trafficLook, this.world.heights, this.occluders);
     // the terrain cut along the roads near the camera (render/terrainSeams.ts)
     this.seams = createTerrainSeams(this.world.roads, this.pool, this.world.dirty, this.terrain);
-    this.layers = [this.roads, this.city, this.cityDetail, this.seams];
+    // the city first: it builds this frame's building occluders; the detail and the roads hide behind them
+    this.layers = [this.city, this.cityDetail, this.roads, this.seams];
     // the near levels are chosen by the 3D distance (from high up the cells under the camera are far)
     for (const l of this.layers) l.groundAt = (x, z) => heightAt(this.world.heights, x, z);
 
@@ -552,10 +558,15 @@ export class Game {
       return;
     }
     const { scene, renderer } = this.parts;
+    // WebGPU: the grass field is culled on the GPU (the props' indirect pattern); WebGL 2 keeps the whole field
+    if (this.parts.isWebGPU) this.terrain.grassGpuCulling();
     scene.add(this.terrain.mesh);
     scene.add(this.terrain.waterMesh);
-    // the sea plane gets the terrain's water (it reads the ground's height under each pixel)
+    // the sea gets the terrain's water; its geometry is the water table's own sea (no masked plane, audit F8)
     this.parts.water.material = this.terrain.createSeaMaterial();
+    this.parts.water.geometry.dispose();
+    this.parts.water.geometry = this.terrain.buildSeaGeometry();
+    this.parts.water.frustumCulled = true;
     for (const l of this.layers) scene.add(l.group);
     scene.add(this.preview.mesh, this.preview.marker, this.preview.circle);
     scene.add(this.vehicles.group);
@@ -602,7 +613,7 @@ export class Game {
     this.rig.resize(window.innerWidth, window.innerHeight);
     this.updatePixelScale();
     this.rig.update(0);
-    this.terrain.update(this.rig.persp, this.rig.eye);
+    this.terrain.update(this.rig.persp, this.rig.eye, renderer);
     // the props compute runs once here (compiles at load)
     this.props.bake(renderer);
     if (this.props.enabled) this.props.update(renderer, this.rig.persp, this.rig.eye, performance.now());
@@ -665,10 +676,16 @@ export class Game {
   /** Frame numbers (automated photos and debugging). */
   stats(): Record<string, number> {
     const info = this.parts.renderer.info.render as { drawCalls: number; triangles: number };
+    // three's own ledger (docs/pages/Info.html): every class of GPU memory, not just the two cell layers.
+    const mem = (this.parts.renderer.info.memory ?? {}) as { total?: number; attributesSize?: number; indexAttributesSize?: number; texturesSize?: number; renderTargets?: number; programsSize?: number; storageAttributesSize?: number; uniformBuffersSize?: number };
+    const mb = (n?: number) => Math.round((n ?? 0) / 1e6);
     return {
       draws: info.drawCalls, tris: info.triangles,
       buildings: this.world.buildings.size, segs: this.world.roads.segs.size,
       cityMB: Math.round(this.city.gpuBytes / 1e6), roadsMB: Math.round(this.roads.gpuBytes / 1e6),
+      memMB: mb(mem.total), attrsMB: mb(mem.attributesSize), indexMB: mb(mem.indexAttributesSize),
+      texMB: mb(mem.texturesSize), rt: mem.renderTargets ?? 0, progMB: mb(mem.programsSize),
+      storMB: mb(mem.storageAttributesSize), uniMB: mb(mem.uniformBuffersSize),
       ...(this.simStats?.type === 'stats' ? { cars: this.simStats.cars, micro: this.simStats.micro, peds: this.simStats.peds } : {}),
     };
   }
@@ -676,11 +693,16 @@ export class Game {
   /**
    * stats() plus the triangles the GPU really drew (D81): three counts an indirect draw as one instance, so the props
    * (GPU-culled, drawn indirect) are missing from `tris`; `trisDrawn` replaces their count with the GPU-written one.
+   * The grass field is counted with the geometry's own instance count (an indexed indirect draw keeps it), so its
+   * count is replaced the same way.
    */
   async drawnStats(): Promise<Record<string, number>> {
     const s = this.stats();
     const p = await this.props.drawnTriangles(this.parts.renderer);
-    return { ...s, trisDrawn: s.tris - p.counted + p.drawn };
+    let tris = s.tris - p.counted + p.drawn;
+    const g = await this.terrain.grassDrawn(this.parts.renderer);
+    if (g) tris = tris - g.counted + g.drawn;
+    return { ...s, trisDrawn: tris };
   }
 
   /** Camera and hour for automated photos; waits for the meshes to be ready. */
@@ -834,8 +856,10 @@ export class Game {
     const T2 = pf ? performance.now() : 0;
     pr?.lap(PART.growth, T2);
     this.terrain.uploadDirtyLayers();
-    this.terrain.update(cam, this.rig.eye);
+    if (this.terrain.seaStale) { this.terrain.seaStale = false; this.parts.water.geometry.dispose(); this.parts.water.geometry = this.terrain.buildSeaGeometry(); }
+    this.terrain.update(cam, this.rig.eye, this.parts.renderer);
     pr?.lap(PART.terrain, performance.now());
+    this.updatePixelScale(); // the ortho's zoom and the camera's mode change the view's pixels per metre per frame
     for (const l of this.layers) l.update(cam, this.rig.eye);
     const T3 = pf ? performance.now() : 0;
     pr?.lap(PART.layersUpdate, T3);
@@ -1128,11 +1152,13 @@ export class Game {
     this.post.bloomOverride = null;
   }
 
-  /** Detail distances by screen-space error: more pixels, detail reaches farther. */
+  /** Detail distances by screen-space error: more pixels, detail reaches farther. The scale comes from the camera's
+   *  own projection (viewScale: the perspective's fov, the orthographic's zoom), not a fixed reference alone. */
   private updatePixelScale(): void {
     // only the window and the player's resolution and detail: never the frame time (no quality cut to pass a budget)
     const res = this.prefs ? this.settings.resolution * this.settings.detail : 1;
-    const k = Math.min(3, Math.max(0.3, window.innerHeight * window.devicePixelRatio * res / 1080));
+    const framePx = window.innerHeight * window.devicePixelRatio * res;
+    const k = Math.min(3, Math.max(0.3, viewScale(this.rig.camera, framePx)));
     // (the seams keep their reach: the terrain cuts within a fixed distance, render/terrain.ts SEAM_REACH)
     for (const l of this.layers) if (l !== this.seams) l.pixelScale = k;
     if (this.props) this.props.pixelScale = k;

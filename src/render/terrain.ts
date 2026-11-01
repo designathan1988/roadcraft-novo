@@ -22,6 +22,7 @@ import { SLOPE_RES } from './landSlope.ts';
 import { GROUND_COLORS, NO_WATER, WATER_SPACING, WATER_TILE_RES } from '../world/ground.ts';
 import type { World } from '../world/world.ts';
 import { heightAt } from '../world/heights.ts';
+import { BLADES, GrassCulling, TUFT_SIDE, TUFT_STEP } from './grassCulling.ts';
 import { parkMiller } from '../core/rng.ts';
 
 /**
@@ -37,6 +38,7 @@ const {
   Fn, attribute, clamp, float, floor, fract, int, ivec2, max, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot,
   transformNormalToView, uniform, varyingProperty, vec2, vec3, vec4, length, abs, sRGBTransferEOTF,
   positionWorld, fwidth, mx_noise_float, select, texture, instanceIndex, hash, sin, cos, time, positionLocal, step, modelWorldMatrix,
+  storage,
 } = T;
 
 /** Colour of each ground kind (sRGB). */
@@ -51,12 +53,8 @@ const GRASS_MEAN = 0.0864;
 /** Water tiles nearer than this (m) use the 8 m grid; farther ones the 32 m grid. */
 const WATER_FINE = 1500;
 
-/** Grass tufts: grid spacing (m), tufts per side of the camera-locked grid, and the eye height above which they go. */
-const TUFT_STEP = 0.9;
-const TUFT_SIDE = 160;
+/** The eye height above which the grass tufts go. */
 const TUFT_EYE = 140;
-/** Blades per tuft (one triangle each). */
-const BLADES = 7;
 
 type N = Node;
 
@@ -127,6 +125,8 @@ export class TerrainRenderer {
   readonly camUniform: Node = uniform(new THREE.Vector3());
   /** Centre of the grass field: on the ground ahead of the eye, where the view looks. */
   private grassCentre: Node = uniform(new THREE.Vector2());
+  /** GPU grass culling (render/grassCulling.ts), once the backend is known. */
+  private grassCulling: GrassCulling | null = null;
   private fwd = new THREE.Vector3();
   readonly rangeBase: Node = uniform(0);
   /** Distance factor of the LOD bands (larger = more detail). */
@@ -338,6 +338,52 @@ export class TerrainRenderer {
     const cx = clamp(gx, int(0), int(WRES - 1)), cz = clamp(gz, int(0), int(WRES - 1));
     const layer = cz.shiftRight(int(7)).mul(int(MAP_TILES)).add(cx.shiftRight(int(7)));
     return textureLoad(this.waterTex, ivec2(cx.bitAnd(int(127)), cz.bitAnd(int(127)))).depth(layer).r;
+  }
+
+  /** The same level on the CPU (the array the texture is sent from), for the sea's geometry. */
+  private waterLevelAt(gx: number, gz: number): number {
+    const WRES = WATER_TILE_RES * MAP_TILES;
+    const cx = Math.min(WRES - 1, Math.max(0, gx)), cz = Math.min(WRES - 1, Math.max(0, gz));
+    const layer = ((cz >> 7) * MAP_TILES + (cx >> 7)) * WATER_TILE_RES * WATER_TILE_RES;
+    return this.world.water[layer + (cz & 127) * WATER_TILE_RES + (cx & 127)]!;
+  }
+
+  /** Set when the water table was re-uploaded: the sea's geometry is stale (game.ts rebuilds it, at most then). */
+  seaStale = false;
+
+  /**
+   * The sea as geometry, not a masked plane (audit F8): a grid over the map, keeping a vertex only where the sea
+   * was ever visible - the ground under sea level (the colour's depth, and with it the alpha, is exactly the
+   * ground's drop below `SEA_LEVEL`: everywhere else the old plane drew fully transparent) and no river or lake
+   * standing above it (their own water tiles draw there, the mask's own rule). Without the mask's discard the
+   * opaque land's depth rejects the sea's pixels early (early-Z: the water shader ran under every inland pixel of
+   * the plane), and the four table reads a pixel paid are gone. The 128 m edge at the coast lies under the
+   * terrain's own waterline.
+   */
+  buildSeaGeometry(): THREE.BufferGeometry {
+    const STEP = 128;
+    const n0 = Math.ceil(MAP_SIZE / STEP) + 1;
+    const pos = new Float32Array(n0 * n0 * 3);
+    const keep = new Uint8Array(n0 * n0);
+    for (let j = 0; j < n0; j++) for (let i = 0; i < n0; i++) {
+      const x = -MAP_HALF + Math.min(i * STEP, MAP_SIZE), z = -MAP_HALF + Math.min(j * STEP, MAP_SIZE), k = j * n0 + i;
+      pos[k * 3] = x; pos[k * 3 + 1] = SEA_LEVEL; pos[k * 3 + 2] = z;
+      // 2 m past the waterline: the extra vertices stay hidden under the beach slope, so the 128 m grid cannot gap
+      if (heightAt(this.world.heights, x, z) >= SEA_LEVEL + 2) continue;
+      const gx = Math.floor((x + MAP_HALF) / WATER_SPACING), gz = Math.floor((z + MAP_HALF) / WATER_SPACING);
+      const level = Math.max(Math.max(this.waterLevelAt(gx - 1, gz - 1), this.waterLevelAt(gx, gz - 1)), Math.max(this.waterLevelAt(gx - 1, gz), this.waterLevelAt(gx, gz)));
+      keep[k] = level < SEA_LEVEL + 0.6 ? 1 : 0;
+    }
+    const idx = new Uint32Array(n0 * n0 * 6);
+    let n = 0;
+    for (let j = 0; j + 1 < n0; j++) for (let i = 0; i + 1 < n0; i++) {
+      const a = j * n0 + i, b = a + 1, c = a + n0, d = c + 1;
+      if (keep[a]! && keep[b]! && keep[c]! && keep[d]!) { idx[n++] = a; idx[n++] = c; idx[n++] = b; idx[n++] = b; idx[n++] = c; idx[n++] = d; }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(new THREE.BufferAttribute(idx.subarray(0, n), 1));
+    return g;
   }
 
   /** Painted ground sample (kind, strength, forest, clearing) at a global 4 m sample. */
@@ -668,8 +714,12 @@ export class TerrainRenderer {
    * in whole steps: no swimming), each tuft placed on the height texture and skipped where there is a road, water,
    * sand, a slope, painted ground or forest litter. Shorter toward the edge of the field (no visible border). One
    * draw call; hidden when the eye is above TUFT_EYE m (city and neighbourhood views gain nothing).
+   *
+   * `gpu` (WebGPU): the instance comes from the cull compute's visible list (grassGpuCulling) and the draw reads its
+   * count indirectly — the field no longer shades the half of it that is behind the camera. WebGL 2 draws the whole
+   * field as before (the fallback path must not change).
    */
-  private createGrass(): THREE.Mesh {
+  private createGrass(gpu = false): THREE.Mesh {
     const heightAt = this.heightFn();
     // one tuft: BLADES thin triangles round its centre (x, z jitter, lean, height factor in the colour slot)
     const pos: number[] = [], nrm: number[] = [], bl: number[] = [];
@@ -685,12 +735,17 @@ export class TerrainRenderer {
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
     g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nrm), 3));
     g.setAttribute('tip', new THREE.BufferAttribute(new Float32Array(bl), 1));
+    // indexed so the indirect draw (WebGPU) reads the same five-word arguments the props' draws do
+    const index = new Uint16Array(BLADES * 3);
+    for (let i = 0; i < index.length; i++) index[i] = i;
+    g.setIndex(new THREE.BufferAttribute(index, 1));
     g.instanceCount = TUFT_SIDE * TUFT_SIDE;
+    if (gpu && this.grassCulling) g.setIndirect(this.grassCulling.indirectAttr, 0);
     const centre = this.grassCentre;
     const vTip = varyingProperty('float', 'vGrassTip');
     const vShade = varyingProperty('float', 'vGrassShade');
     const position = Fn(() => {
-      const id = instanceIndex.toFloat();
+      const id = (gpu ? storage(this.grassCulling!.visibleAttr, 'uint', TUFT_SIDE * TUFT_SIDE).toReadOnly().element(instanceIndex) : instanceIndex).toFloat();
       const ix = id.mod(TUFT_SIDE), iz = floor(id.div(TUFT_SIDE));
       const origin = floor(centre.div(TUFT_STEP)).sub(TUFT_SIDE / 2);
       const cell = origin.add(vec2(ix, iz));
@@ -707,7 +762,9 @@ export class TerrainRenderer {
       // geology (8-10) does not bare the ground (4.0: the slope decides)
       const grassy = max(max(max(step(kind, float(0.5)), step(abs(kind.sub(3)), float(0.5))), step(abs(kind.sub(11.5)), float(1))), step(abs(kind.sub(9)), float(1.5)));
       const ok = step(this.roadCover(base), float(0.02)).mul(step(slope, float(0.35))).mul(step(float(SEA_LEVEL + 1.1), h))
-        .mul(max(grassy, step(gs.g, float(0.3)))).mul(step(gs.b, float(0.5)));
+        .mul(max(grassy, step(gs.g, float(0.3)))).mul(step(gs.b, float(0.5)))
+        // the field is camera-locked: a tuft past the map's edge hangs over the void - it never grows
+        .mul(step(abs(base.x), float(MAP_HALF))).mul(step(abs(base.y), float(MAP_HALF)));
       // shorter toward the edge of the field and with distance
       const dist = length(base.sub(centre));
       const grow = float(1).sub(smoothstep(float(TUFT_SIDE * TUFT_STEP * 0.3), float(TUFT_SIDE * TUFT_STEP * 0.5), dist));
@@ -740,6 +797,30 @@ export class TerrainRenderer {
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     return mesh;
+  }
+
+  /**
+   * WebGPU: the field is culled on the GPU (render/grassCulling.ts). Called once, after the scene knows the backend.
+   * The image cannot change: the kept tufts are a superset of the visible ones, and their placement math is the
+   * material's own, word for word.
+   */
+  grassGpuCulling(): void {
+    if (this.grassCulling) return;
+    this.grassCulling = new GrassCulling(this.world.heights, this.grassCentre);
+    // the draw and its material now read the visible list; the old (whole-field) pair is not on the GPU yet
+    const fresh = this.createGrass(true);
+    this.grassMesh.geometry.dispose();
+    (this.grassMesh.material as THREE.Material).dispose();
+    this.grassMesh.geometry = fresh.geometry;
+    this.grassMesh.material = fresh.material;
+  }
+
+  /**
+   * The tufts the last frame's cull kept, and what three counts for the field (measurement): an indirect draw is
+   * counted with the geometry's own instance count, as the props' were (D81). Null on WebGL 2 (no cull: all drawn).
+   */
+  async grassDrawn(renderer: THREE.WebGPURenderer): Promise<{ counted: number; drawn: number } | null> {
+    return this.grassCulling?.drawn(renderer) ?? null;
   }
 
   /**
@@ -785,6 +866,9 @@ export class TerrainRenderer {
       return vec3(xz.x, y, xz.y);
     });
     const m = new WaterNodeMaterial({ transparent: true });
+    // transparent: the depth is kept read-only, so overlapping water (a river's mouth over the sea) blends instead
+    // of fighting, and later transparent layers behind it sort right (audit F8)
+    m.depthWrite = false;
     waterEnv(m);
     // the sea is a plane at sea level (scene.ts): no level to read and no current
     if (!sea) { m.positionNode = pos(); withPrevious(m); }
@@ -840,13 +924,7 @@ export class TerrainRenderer {
     m.roughnessNode = mix(float(0.15), float(0.72), foam);
     m.metalnessNode = float(0);
     if (!sea) m.maskNode = p.y.greaterThan(float(-1500));
-    else {
-      // no sea under a river or lake standing above it (their beds go under the sea level: it showed through their water)
-      const g = p.xz.add(float(MAP_HALF)).div(float(WATER_SPACING));
-      const ix = int(floor(g.x.add(0.5))), iz = int(floor(g.y.add(0.5)));
-      const w = max(max(loadW(ix.sub(1), iz.sub(1)), loadW(ix, iz.sub(1))), max(loadW(ix.sub(1), iz), loadW(ix, iz)));
-      m.maskNode = w.lessThan(float(SEA_LEVEL + 0.6));
-    }
+    // the sea needs no mask: its geometry (buildSeaGeometry) already ends where a river or a lake stands above it
     return m;
   }
 
@@ -899,12 +977,15 @@ export class TerrainRenderer {
     if (w.waterDirty.size) {
       for (const l of w.waterDirty) this.waterTex.addLayerUpdate(l);
       w.waterDirty.clear(); this.waterTex.needsUpdate = true;
+      this.seaStale = true; // the sea's geometry ends where the water table says: rebuilt by the game's frame
     }
     const dirty = this.world.layerDirty;
     if (dirty.size === 0) return;
     for (const l of dirty) this.heightTex.addLayerUpdate(l);
     dirty.clear();
     this.heightTex.needsUpdate = true;
+    // the grass cull's height range reads these heights on the CPU: the field must be re-ranged
+    this.grassCulling?.invalidateHeights();
   }
 
   /** The view-projection matrix of the frame (kept: not a matrix per frame). */
@@ -919,7 +1000,7 @@ export class TerrainRenderer {
   }
 
   /** CDLOD selection from the camera. */
-  update(camera: THREE.Camera, viewPos: THREE.Vector3): void {
+  update(camera: THREE.Camera, viewPos: THREE.Vector3, renderer?: THREE.WebGPURenderer): void {
     camera.updateMatrixWorld();
     const pv = this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
@@ -932,6 +1013,8 @@ export class TerrainRenderer {
     const ahead = Math.min(45, eyeAboveGround * 1.2 + 10);
     const fl = Math.hypot(this.fwd.x, this.fwd.z) || 1;
     (this.grassCentre.value as THREE.Vector2).set(viewPos.x + this.fwd.x / fl * ahead, viewPos.z + this.fwd.z / fl * ahead);
+    // the grass cull runs with this camera's own planes (the frustum above is this camera's), before the draw
+    if (renderer) this.grassCulling?.cull(renderer, this.frustum, this.grassMesh.visible);
     this.count = 0;
     this.waterFrame++;
     this.waterNear = 0; this.waterFarCount = 0;

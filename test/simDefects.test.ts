@@ -882,7 +882,7 @@ test('C51: a pedestrian hit by a shot or a blast falls out of sight over a momen
 });
 
 test('C52: the bicycle wheels roll (marked as wheels for the shader, with spokes that show it)', async () => {
-  const mod = await import('../src/render/vehicles.ts') as unknown as { bikeModel?: () => import('three').BufferGeometry };
+  const mod = await import('../src/render/vehicleModels.ts') as unknown as { bikeModel?: () => import('three').BufferGeometry };
   assert.ok(typeof mod.bikeModel === 'function', 'the bicycle model can be checked');
   const g = mod.bikeModel(), glow = g.getAttribute('glow').array as Float32Array;
   const parts = new Set<number>();

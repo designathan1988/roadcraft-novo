@@ -9,7 +9,7 @@ import * as THREE from 'three/webgpu';
 import type { World } from '../../../world/world.ts';
 import { heightAt } from '../../../world/heights.ts';
 import { buildingTag } from '../../../jobs/buildingGen.ts';
-import { HIDDEN, hiddenU } from '../../../render/inside.ts';
+import { HIDDEN, hiddenCountU, hiddenU } from '../../../render/inside.ts';
 import { Puff } from '../../../render/particles.ts';
 import { ATTACH, type RuinData } from './fracture.ts';
 import { MAX_FRAGMENTS, MAX_RUINS, POSE_ROWS, RuinDraw } from './ruinMesh.ts';
@@ -186,6 +186,7 @@ export class Ruins {
     // cell drawn again without it in the meantime
     let h = 0;
     for (let i = 1; i < HIDDEN; i++) if (this.hiddenUntil[i] < this.hiddenUntil[h]) h = i;
+    if (this.hiddenUntil[h] <= 0) hiddenCountU.value++;
     hiddenU.array[h].set(buildingTag(col.seed[r.id], col.x[r.id], col.z[r.id]), col.x[r.id], col.z[r.id], (Math.hypot(col.w[r.id], col.d[r.id]) / 2 + 2) ** 2);
     this.hiddenUntil[h] = this.clock + HIDE_FOR;
     w.setRuined(r.id, true);
@@ -326,7 +327,7 @@ export class Ruins {
   /** The fragments in the air: gravity, a bounce on the ground, then at rest where they lie (4.0 update). */
   update(dt: number): void {
     this.clock += dt;
-    for (let h = 0; h < HIDDEN; h++) if (this.hiddenUntil[h] > 0 && this.hiddenUntil[h] < this.clock) { this.hiddenUntil[h] = 0; hiddenU.array[h].set(0, 0, 0, -1); }
+    for (let h = 0; h < HIDDEN; h++) if (this.hiddenUntil[h] > 0 && this.hiddenUntil[h] < this.clock) { this.hiddenUntil[h] = 0; hiddenU.array[h].set(0, 0, 0, -1); hiddenCountU.value = Math.max(0, hiddenCountU.value - 1); }
     if (this.nFlying === 0) return;
     dt = Math.min(0.05, dt);
     const P = this.draw.poses, heights = this.host.world.heights;

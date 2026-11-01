@@ -32,5 +32,14 @@ export const MOVER_LAYER = 8;
 export const MOVER_SMALL_LAYER = 9;
 /** The mover layers' bits in a layer mask. */
 export const MOVER_BITS = (1 << MOVER_LAYER) | (1 << MOVER_SMALL_LAYER);
+/**
+ * Caster LOD: a caster is drawn at the detail its cascade's texel can resolve. The near cascade draws the cells' own
+ * meshes; the two far cascades draw the tile masses (the same 16 cells merged, one mesh each), whose error is under
+ * their texel. A cell is on CELL_CASTER_LAYER (view and the near cascade); a tile's shadow-only twin is on
+ * TILE_CASTER_LAYER (the far cascades). The tile mesh itself stays on layer 0 when it stands in for its cells, so it is
+ * not drawn twice.
+ */
+export const CELL_CASTER_LAYER = 10;
+export const TILE_CASTER_LAYER = 11;
 /** Height under which a prop is a small caster (m). */
 export const SMALL_CASTER = 1.2;

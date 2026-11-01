@@ -112,7 +112,7 @@ function createWindow() {
   // screenshot: show without taking focus (the keyboard stays with whoever is using the machine)
   if (shot) win.showInactive();
   if (shot) {
-    win.webContents.on('console-message', (e) => console.log(`[page] ${e.message}`));
+    win.webContents.on('console-message', (e) => console.log(`[page] ${e.message}${e.stack ? '\n[page] ' + e.stack : ''}`));
     win.webContents.once('did-finish-load', async () => {
       const t0 = Date.now();
       const limit = Number(process.env.ROADCRAFT_TIMEOUT ?? 240) * 1000;

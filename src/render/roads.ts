@@ -20,6 +20,7 @@ import { CellLayer, type LayerSource } from './cellLayer.ts';
 import { ASPHALT_TEX, ASPHALT_TILE } from './surfaceBake.ts';
 import { COOKED, loadCookedSurfaces } from './cookedSurfaces.ts';
 import { T, useCompactVertex, type Node, lodFadeMask } from './tsl.ts';
+import type { BuildingOccluders } from './visibility.ts';
 import type { NodeId, SegId } from '../core/ids.ts';
 
 const {
@@ -76,7 +77,7 @@ function hasBridge(net: RoadNetwork, heights: Float32Array, cells: number[]): bo
  * Roads by cells. The layer casts no shadow (a road on the ground would shadow only itself), except the cells and
  * tiles with a bridge or a viaduct when the heights are given.
  */
-export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, look: TrafficLook, heights?: Float32Array): CellLayer {
+export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, look: TrafficLook, heights?: Float32Array, occluders?: BuildingOccluders): CellLayer {
   const tileCells = (t: number) => {
     const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0, out: number[] = [];
     for (let j = 0; j < CELLS_PER_TILE; j++) for (let i = 0; i < CELLS_PER_TILE; i++) out.push(cellId(tx * CELLS_PER_TILE + i, tz * CELLS_PER_TILE + j));
@@ -103,7 +104,7 @@ export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, 
         (r) => done(r.mesh), { key: `roadtile:${t}`, priority, transfer: roadGraphTransfer(graph) });
     },
   };
-  return new CellLayer(src, dirty, Dirty.Roads, createRoadMaterial(look), { near: 1400, evict: 2200, margin: 80, shadows: false, far: 5500, detail: 600, budget: 192e6 }, true);
+  return new CellLayer(src, dirty, Dirty.Roads, createRoadMaterial(look), { near: 1400, evict: 2200, margin: 80, shadows: false, far: 5500, detail: 600, budget: 192e6, occluders }, true);
 }
 
 /** 1 with the zone tool: shows the zone strips beside the roads. */

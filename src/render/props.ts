@@ -10,29 +10,24 @@ import { CELL_COUNT, Dirty, cellOriginX, tileId, tileX, type DirtyReader } from 
 import { CELL_SIZE, MAP_CELLS, MAP_TILES, TILE_SIZE } from '../config.ts';
 import type { JobPool } from '../jobs/pool.ts';
 import { boxTransfer, roadGraphTransfer, type PropColumns } from '../shared/contracts/worker.ts';
-import type { PropsProbe } from './propsProbe.ts';
-import { PROP, PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
-import { PARTS_RANGE, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, VARIANT_TYPES } from '../jobs/parts40.ts';
+import { drawnTriangleCounts, type PropsProbe } from './propsProbe.ts';
+import { PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
+import { PARTS_RANGE, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
 import { PartSize } from './partSize.ts';
-import { signalLampLit } from './propSignals.ts';
-import { partCardOn, partThinTone } from './partCards.ts';
-import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propLayer, propStretch, buildSignAtlas, impostorSources, propKindTable, FACE_LAST, PMAT, SIGN_ATLAS, SIGN_FACES, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
-import { IMP_FRAME, IMP_G, IMP_TYPES, bakeImpostors, hemiOctDecodeNode, hemiOctEncodeNode, impostorFrames } from './impostor.ts';
+import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propLayer, propStretch, buildSignAtlas, impostorSources, propKindTable, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
+import { bakeImpostors, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
-import { nightU } from './scene.ts';
-import { PAINTS } from '../shared/vehiclePaints.ts';
-import { windDirU, windU } from './weather.ts';
-import { T, withPrevious, type Node } from './tsl.ts';
+import { T, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
+import { PropFallback } from './propFallback.ts';
+import { createPropMaterial, fadeJitter } from './propMaterial.ts';
 import { SHADOW_LENGTH, sunDirection } from './sun.ts';
 import type { SegId } from '../core/ids.ts';
 
 const {
-  Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float, int, vec3, vec4,
-  attribute, positionLocal, normalLocal, varyingProperty, transformNormalToView, normalize, cos, sin, min, select, length, dot,
-  time, interleavedGradientNoise, screenCoordinate, mix, step, abs, hash, sRGBTransferEOTF,
-  texture, vec2, cross, clamp, floor, uniformArray: uArr, cameraPosition, positionWorld: positionWorldP, cameraViewMatrix, max,
+  Fn, If, Loop, storage, uniform, uniformArray, instanceIndex, atomicAdd, atomicStore, atomicLoad, uint, float,
+  min, select, length, dot, step, texture, clamp, max,
 } = T;
 
 const CAP = 1 << 20;
@@ -43,11 +38,10 @@ const LODS = 3;
 /** Kinds drawn: the types, with the ones whose variants are different meshes split per variant. */
 const KINDS = propKindTable().count;
 const DRAWS = KINDS * LODS;
-const FADE_BAND = 0.12;
-/** Share of the ipês in flower. */
-const IPE_IN_FLOWER = 0.35;
-/** The leaf tones (treeMeshes.ts LEAF, linear) an ipê out of flower takes. */
-const LEAF_DARK = new THREE.Color(0x24401c), LEAF_LIT = new THREE.Color(0x4f7a34);
+/** A level switch dissolves for this long (ms), as Cesium's dithered LOD transitions (0.5 s); transient, not a band. */
+const LOD_FADE_MS = 450;
+/** The level changes only this far past its boundary (relative distance), so a camera at rest never flickers. */
+const LOD_HYSTERESIS = 0.06;
 
 export class PropRenderer {
   readonly group = new THREE.Group();
@@ -63,6 +57,14 @@ export class PropRenderer {
   /** Instances of each kind in held cells within that kind's reach (a kind with none nearby is not drawn). */
   private kindNear = new Uint32Array(KINDS);
   private kindNearDue = true;
+  /** LOD dissolve state per instance: (prop key, from | to << 4) and the dissolve start (ms). */
+  private readonly lodState = new Uint32Array(CAP * 2).fill(0xffffffff);
+  private readonly lodStart = new Float32Array(CAP);
+  private lodStateAttr!: THREE.StorageBufferAttribute;
+  private lodStartAttr!: THREE.StorageBufferAttribute;
+  private readonly lodClock = uniform(0);
+  /** Frames drawn: the dissolve's dither phase. */
+  private fadeFrame = 0;
   /** Instances per kind of each cell that holds props. */
   private cellKinds = new Map<number, Uint32Array>();
   /** Highest point any held prop of a cell reaches (rooftop equipment on towers), −∞ without props. */
@@ -123,10 +125,7 @@ export class PropRenderer {
   private slotMesh: Array<THREE.Mesh | null> = new Array(DRAWS).fill(null);
   private signalSent = 0;
   // compatibility mode (WebGL 2): instanced meshes per cell, only near the camera
-  private fallbackMat: THREE.MeshStandardNodeMaterial | null = null;
-  private cellMeshes: Array<THREE.Mesh[] | null> = new Array(CELL_COUNT).fill(null);
-  private fbFrustum = new THREE.Frustum();
-  private fbBox = new THREE.Box3();
+  private fallback: PropFallback | null = null;
   // impostor atlas (colour and normal); swapped for the photo at load
   private impColor = texture(new THREE.Texture());
   private impNormal = texture(new THREE.Texture());
@@ -152,6 +151,8 @@ export class PropRenderer {
     impostorFrames(impostorSources(this.defs));
     this.poolAttr = new THREE.StorageBufferAttribute(this.data, 4);
     this.extraAttr = new THREE.StorageBufferAttribute(this.extra, 1);
+    this.lodStateAttr = new THREE.StorageBufferAttribute(this.lodState, 1);
+    this.lodStartAttr = new THREE.StorageBufferAttribute(this.lodStart, 1);
     this.visAttr = new THREE.StorageBufferAttribute(new Uint32Array(VISIBLE), 1);
     this.offsetAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
     this.cursorAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
@@ -185,6 +186,9 @@ export class PropRenderer {
     const extraC = storage(this.extraAttr, 'uint', CAP).toReadOnly();
     const kindOfC = storage(this.kindOfAttr, 'uint', PROP_TYPES * VARIANTS).toReadOnly();
     const visW = storage(this.visAttr, 'uint', VISIBLE);
+    const lodStateW = storage(this.lodStateAttr, 'uint', CAP * 2);
+    const lodStartW = storage(this.lodStartAttr, 'float', CAP);
+    const nowU = this.lodClock;
     /** Culls instance i and calls `emit(slot, code)` for each level it is drawn in (one, or two while fading). */
     const classify = (emit: (slot: Node, code: Node) => void) => {
       const i = instanceIndex;
@@ -222,27 +226,62 @@ export class PropRenderer {
           }
           If(inView.add(inShadow).greaterThan(0.5), () => {
             const d = length(p.sub(this.camU)).toVar();
-            // a part's levels end where its size on the screen says, within its type's distance (render/partSize.ts)
+            // A part's levels end where its size on the screen says, within its type's distance (render/partSize.ts).
+            // The switch between levels is a short TIMED dissolve (Cesium's dithered LOD transitions: a threshold ramped
+            // over time, noise changing every frame, resolved by the TAA), not a permanent distance band: both levels
+            // are drawn only while the dissolve lasts, and a camera at rest draws one level per instance.
             const partEnd = this.partSize.ends(kind, s3, this.distU.element(kind.mul(LODS)));
-            for (let l = 0; l < LODS; l++) {
-              const slot = kind.mul(LODS).add(l);
-              const end = select(isPart, partEnd[l], this.distU.element(slot));
-              const start = l === 0 ? float(-1) : select(isPart, partEnd[l - 1], this.distU.element(slot.sub(1)));
-              // enters level l at the end of the previous one (fading), leaves at the end of its own
-              const bandIn = start.mul(1 - FADE_BAND);
-              // shadow-only instances go into the near level of the kinds that cast (the main pass culls them on screen)
-              const seen = l === 0 ? inView.greaterThan(0.5).or(this.castU.element(kind).greaterThan(0.5)) : inView.greaterThan(0.5);
-              If(seen.and(end.greaterThan(0)).and(d.lessThan(end)).and(d.greaterThanEqual(bandIn)), () => {
-                // fade out (near the end) and in (inside the previous one's band)
-                const outA = select(d.greaterThan(end.mul(1 - FADE_BAND)), end.sub(d).div(end.mul(FADE_BAND)), float(1));
-                const inA = select(d.lessThan(start), d.sub(bandIn).div(start.mul(FADE_BAND).max(0.001)), float(1));
-                const a = min(outA, inA);
-                // code: 8 bits of coverage; bit 31 = complementary mask (the incoming one)
-                const comp = select(d.lessThan(start), uint(1), uint(0));
-                const cov = uint(min(a, 1).mul(255));
-                emit(slot, i.bitOr(cov.shiftLeft(uint(22))).bitOr(comp.shiftLeft(uint(31))));
+            const ends: Node[] = [];
+            for (let l = 0; l < LODS; l++) ends.push(select(isPart, partEnd[l], this.distU.element(kind.mul(LODS).add(l))));
+            const endAt = (lvl: Node): Node => { let e: Node = float(0); for (let l = 0; l < LODS; l++) e = select(lvl.equal(uint(l)), ends[l], e); return e; };
+            // the level the distance asks for: the first whose end is farther than d
+            const target = uint(LODS).toVar();
+            for (let l = LODS - 1; l >= 0; l--) target.assign(select(ends[l].greaterThan(0).and(d.lessThan(ends[l])), uint(l), target));
+            // per-instance dissolve state: the prop key, the level it comes from and goes to, and when it began
+            const stKey = lodStateW.element(i.mul(2)).toVar();
+            const stPacked = lodStateW.element(i.mul(2).add(1)).toVar();
+            const stStart = lodStartW.element(i).toVar();
+            const from = stPacked.bitAnd(uint(15)).toVar();
+            const to = stPacked.shiftRight(uint(4)).bitAnd(uint(15)).toVar();
+            const start = stStart.toVar();
+            const key = extraC.element(i);
+            // a prop that took the pool slot (or the first frame): no dissolve, it appears at its level
+            If(stKey.notEqual(key), () => {
+              from.assign(target); to.assign(target); start.assign(nowU.sub(float(LOD_FADE_MS)));
+              lodStateW.element(i.mul(2)).assign(key);
+              lodStateW.element(i.mul(2).add(1)).assign(from.bitOr(to.shiftLeft(uint(4))));
+              lodStartW.element(i).assign(start);
+            });
+            // the level changes only past a hysteresis band, and the dissolve starts then
+            const high = endAt(to);
+            const low = select(to.greaterThan(uint(0)), endAt(to.sub(uint(1))), float(0));
+            const up = target.greaterThan(to).and(d.greaterThanEqual(high.mul(1 + LOD_HYSTERESIS)));
+            const down = target.lessThan(to).and(d.lessThan(low.mul(1 - LOD_HYSTERESIS)));
+            If(up.or(down), () => {
+              from.assign(to); to.assign(target); start.assign(nowU);
+              lodStateW.element(i.mul(2).add(1)).assign(from.bitOr(to.shiftLeft(uint(4))));
+              lodStartW.element(i).assign(start);
+            });
+            const a = clamp(nowU.sub(start).div(float(LOD_FADE_MS)), 0, 1).toVar();
+            // during the dissolve the outgoing level fades out and the incoming one fades in (complementary masks);
+            // afterwards only the target level is drawn (one level per instance, as before the band)
+            If(inView.greaterThan(0.5), () => {
+              If(a.lessThan(1).and(from.notEqual(to)).and(from.lessThan(uint(LODS))), () => {
+                emit(kind.mul(LODS).add(from), i.bitOr(uint(float(1).sub(a).mul(255)).shiftLeft(uint(22))));
               });
-            }
+              If(a.lessThan(1).and(from.notEqual(to)).and(to.lessThan(uint(LODS))), () => {
+                emit(kind.mul(LODS).add(to), i.bitOr(uint(a.mul(255)).shiftLeft(uint(22))).bitOr(uint(1).shiftLeft(uint(31))));
+              });
+              If(a.greaterThanEqual(1).or(from.equal(to)), () => {
+                If(to.lessThan(uint(LODS)), () => { emit(kind.mul(LODS).add(to), i.bitOr(uint(255).shiftLeft(uint(22)))); });
+              });
+            });
+            // a caster whose shadow reaches the view but whose own screen box does not: the near level casts it, and
+            // only while the near level is the one the distance would use (the old level band's reach)
+            If(inView.lessThan(0.5).and(inShadow.greaterThan(0.5)).and(this.castU.element(kind).greaterThan(0.5))
+              .and(d.lessThan(ends[0])), () => {
+              emit(kind.mul(LODS), i.bitOr(uint(255).shiftLeft(uint(22))));
+            });
           });
         });
       });
@@ -267,11 +306,9 @@ export class PropRenderer {
 
     // ---- desenho
     if (!this.enabled) {
-      this.fallbackMat = this.createMaterial('cpu');
-      // one hidden instance so the shader compiles at load
-      this.setCellFallback(0, { count: 1, data: new Float32Array([0, -5000, 0, 0]), extra: new Uint32Array([0]) });
-      for (const m of this.cellMeshes[0] ?? []) this.group.children.push(m);
-      this.cellMeshes[0] = null;
+      // WebGL 2: the fallback material, compiled at load with one hidden instance (render/propFallback.ts)
+      this.fallback = new PropFallback(this.group, this.defs, this.createMaterial('cpu'));
+      this.fallback.warm();
       return;
     }
     const material = this.createMaterial('gpu');
@@ -293,196 +330,13 @@ export class PropRenderer {
     }));
   }
 
-  /**
-   * One material. 'gpu': the instance comes from the compute's visible list (WebGPU);
-   * 'cpu': the instance comes from instanced attributes per cell (WebGL 2, near only).
-   */
+  /** The material itself lives in render/propMaterial.ts (its own responsibility). */
   private createMaterial(source: 'gpu' | 'cpu'): THREE.MeshStandardNodeMaterial {
-    const m = new THREE.MeshStandardNodeMaterial();
-    const gpu = source === 'gpu';
-    const slotU = gpu ? uniform(0, 'uint').onObjectUpdate(({ object }: { object: THREE.Object3D }) => object.userData.slot as number) : null;
-    const visR = gpu ? storage(this.visAttr, 'uint', VISIBLE).toReadOnly() : null;
-    const offsetR = gpu ? storage(this.offsetAttr, 'uint', DRAWS).toReadOnly() : null;
-    const poolR = gpu ? storage(this.poolAttr, 'vec4', CAP).toReadOnly() : null;
-    const extraR = gpu ? storage(this.extraAttr, 'uint', CAP).toReadOnly() : null;
-    const vN = varyingProperty('vec3', 'vPropN');
-    // varyings packed in vec4s (WebGPU caps the inter-stage variables; one float each ran out once the sign atlas
-    // came in): A = fade, complementary mask, variant, lit lamp; B = impostor uv, impostor yaw cos/sin;
-    // C = sign atlas uv, sign back face, flower
-    const vA = varyingProperty('vec4', 'vPropA');
-    const vB = varyingProperty('vec4', 'vPropB');
-    const vC = varyingProperty('vec4', 'vPropC');
-    // D = a building part's instance colour (linear), and whether it is one
-    const vD = varyingProperty('vec4', 'vPropD');
-    const vFade = vA.x, vComp = vA.y, vVar = vA.z, vLit = vA.w;
-    const vImpUV = vB.xy, vImpCS = vB.zw;
-    const vAtlasUV = vC.xy, vAtlasBack = vC.z, vFlower = vC.w;
-    let fadeN: Node = float(1), compN: Node = float(0), flowerN: Node = float(0), atlasUVN: Node = vec2(0, 0), backN: Node = float(0);
-    const pcol = attribute('pcol', 'vec4');
-    const sigTex = this.signalTex;
-
-    m.positionNode = Fn(() => {
-      let inst: Node, keyRaw: Node;
-      if (gpu) {
-        const code = visR.element(offsetR.element(slotU).add(instanceIndex)).toVar();
-        const idx = code.bitAnd(uint(0x3fffff));
-        fadeN = float(code.shiftRight(uint(22)).bitAnd(uint(255))).div(255);
-        compN = float(code.shiftRight(uint(31)));
-        inst = poolR.element(idx).toVar();
-        keyRaw = extraR.element(idx);
-      } else {
-        inst = attribute('ipose', 'vec4');
-        keyRaw = uint(attribute('ikey', 'float'));
-      }
-      const w = uint(inst.w);
-      const yaw = float(w.bitAnd(uint(4095))).mul(Math.PI * 2 / 4096);
-      // a 4.0 building part (jobs/parts40.ts): scale per axis in the key (log code), its colour in w over the turn,
-      // a variant on top of the key for the types that hold several parts
-      const ptype = float(keyRaw.bitAnd(uint(31)));
-      const isPart = step(float(PART_TYPES[0] - 0.5), ptype).mul(step(ptype, float(PART_TYPES[PART_TYPES.length - 1] + 0.5)));
-      let isVarT: Node = float(0);
-      for (const t of VARIANT_TYPES) isVarT = isVarT.add(step(abs(ptype.sub(t)), float(0.5)));
-      const pkey = keyRaw.shiftRight(uint(5));
-      const q9 = (k: number) => float(pkey.shiftRight(uint(k * 9)).bitAnd(uint(511))).div(511);
-      const q8 = (k: number) => float(pkey.shiftRight(uint(k * 8)).bitAnd(uint(255))).div(255);
-      const sc = (k: number) => T.exp2(mix(q9(k), q8(k), isVarT).mul(SCALE_OCTAVES)).mul(SCALE_MIN);
-      const scale3 = vec3(sc(0), sc(1), sc(2));
-      const partVariant = float(pkey.shiftRight(uint(24)).bitAnd(uint(7)));
-      const pc12 = w.shiftRight(uint(12));
-      const partRgb = vec3(float(pc12.shiftRight(uint(8)).bitAnd(uint(15))), float(pc12.shiftRight(uint(4)).bitAnd(uint(15))), float(pc12.bitAnd(uint(15)))).div(15);
-      vD.assign(vec4(sRGBTransferEOTF(partRgb), isPart));
-      const variant = mix(float(w.shiftRight(uint(12)).bitAnd(uint(15))), partVariant, isPart);
-      const scale = float(w.shiftRight(uint(16)).bitAnd(uint(63))).div(42).add(0.5);
-      // the ipê (tree or oak, variant 3) is a model of its own with its crown in flower; each one draws a number that
-      // says whether it is in flower (about a third are, as the season spreads them)
-      const typeF = float(keyRaw.bitAnd(uint(31)));
-      const isIpe = max(step(abs(typeF.sub(PROP.Tree)), float(0.5)), step(abs(typeF.sub(PROP.Oak)), float(0.5))).mul(step(abs(variant.sub(3)), float(0.5)));
-      flowerN = isIpe.mul(hash(floor(inst.x).add(floor(inst.z).mul(157))).mul(0.998).add(0.001));
-      const c = cos(yaw), s = sin(yaw);
-      // wire: scale = span length (m), variant = height difference; z goes from 0 to 1 along the span
-      const isWire = step(abs(pcol.w.mul(255).sub(PMAT.Wire)), float(0.5));
-      const span = float(w.shiftRight(uint(16)).bitAnd(uint(63)));
-      const dy = variant.sub(8).mul(0.5);
-      const lz = positionLocal.z;
-      const sag = lz.mul(float(1).sub(lz)).mul(4).mul(span.mul(0.018));
-      const wireP = vec3(positionLocal.x, positionLocal.y.add(dy.mul(lz)).sub(sag), lz.mul(span));
-      // sign: the faces of the other variants collapse
-      const mat0 = pcol.w.mul(255);
-      const isFace = step(float(PMAT.Sign0 - 0.5), mat0).mul(step(mat0, float(FACE_LAST + 0.5)));
-      const wrongFace = isFace.mul(step(float(0.5), abs(mat0.sub(PMAT.Sign0).sub(variant))));
-      // wall/fence: length in decimetres in the scale, height difference in the key
-      const isBarrier = step(abs(float(keyRaw.bitAnd(uint(31))).sub(PROP.Barrier)), float(0.5));
-      const bDy = float(keyRaw.shiftRight(uint(5))).sub(512).mul(0.05);
-      const barrierP = vec3(positionLocal.x, positionLocal.y.add(bDy.mul(lz)), lz.mul(span.mul(0.1)));
-      // sign face: one quad sized per variant (SIGN_FACES), its atlas cell by the variant or, for speed limits, by the
-      // speed in the key (km/h; 0 = 60)
-      const isAtlas = step(abs(mat0.sub(PMAT.Atlas)), float(0.5));
-      const face = uArr(SIGN_FACES.map(([hx, hy, cy, cellK]) => new THREE.Vector4(hx, hy, cy, cellK)), 'vec4').element(int(variant));
-      const atlasP = vec3(positionLocal.x.mul(face.x), face.z.add(positionLocal.y.mul(face.y)), positionLocal.z);
-      const kmh = float(keyRaw.shiftRight(uint(5)));
-      const speedCell = clamp(select(kmh.lessThan(5), float(60), kmh).div(10).round().sub(2), 0, 10);
-      const cellK = select(face.w.lessThan(-0.5), speedCell, face.w);
-      const back = step(normalLocal.z, float(0));
-      const lxA = mix(positionLocal.x, positionLocal.x.negate(), back);
-      atlasUVN = (vec2(T.mod(cellK, SIGN_ATLAS.COLS).add(lxA.mul(0.5).add(0.5)).div(SIGN_ATLAS.COLS),
-        float(1).sub(floor(cellK.div(SIGN_ATLAS.COLS)).add(float(0.5).sub(positionLocal.y.mul(0.5))).div(SIGN_ATLAS.ROWS))));
-      backN = back;
-      const local = mix(positionLocal, atlasP, isAtlas);
-      const p = mix(mix(mix(local.mul(scale), positionLocal.mul(scale3), isPart), wireP, isWire), barrierP, isBarrier).mul(float(1).sub(wrongFace)).toVar();
-      // foliage sways a little with the wind
-      const isCard = step(abs(pcol.w.mul(255).sub(PMAT.LeafCard)), float(0.5));
-      const leaf = max(step(abs(pcol.w.mul(255).sub(PMAT.Leaf)), float(0.5)), isCard);
-      // with strong wind: faster and wider sway, leaning with the wind
-      // along the wind, as much as the wind: none in still air (it used to sway 3 cm per metre of height with no
-      // wind, always along x)
-      const sway = sin(time.mul(windU.mul(2.2).add(1.3)).add(inst.x.mul(0.07)).add(inst.z.mul(0.05))).mul(windU.mul(0.09)).add(windU.mul(windU).mul(0.06)).mul(p.y).mul(leaf);
-      const wx = p.x.mul(c).add(p.z.mul(s)).add(sway.mul(windDirU.x));
-      const wz = p.x.negate().mul(s).add(p.z.mul(c)).add(sway.mul(windDirU.y));
-      const n = normalize(mix(normalLocal, normalLocal.div(scale3), isPart));
-      vN.assign(vec3(n.x.mul(c).add(n.z.mul(s)), n.y, n.x.negate().mul(s).add(n.z.mul(c))));
-      const mat = pcol.w.mul(255);
-      // traffic light: which lamp is lit (render/propSignals.ts)
-      vA.assign(vec4(fadeN, compN, variant, signalLampLit(keyRaw, sigTex, mat)));
-      // impostor: a square facing the camera with the photo of the nearest direction
-      const isImp = step(abs(mat.sub(PMAT.Impostor)), float(0.5));
-      const col = pcol.x.mul(255).add(0.5).floor();
-      const frame = uArr(IMP_FRAME.map((f) => new THREE.Vector2(f.cy, f.r)), 'vec2').element(int(col));
-      const centerW = inst.xyz.add(vec3(0, frame.x.mul(scale), 0));
-      const vw = normalize(cameraPosition.sub(centerW));
-      // into the tree's space (without the heading)
-      const vl = normalize(vec3(vw.x.mul(c).sub(vw.z.mul(s)), vw.y.max(0.02), vw.x.mul(s).add(vw.z.mul(c))));
-      const fuv = hemiOctEncodeNode(vl);
-      const cell = clamp(floor(fuv.mul(IMP_G)), 0, IMP_G - 1);
-      const dl = hemiOctDecodeNode(cell.add(0.5).div(IMP_G));
-      const dw = vec3(dl.x.mul(c).add(dl.z.mul(s)), dl.y, dl.x.negate().mul(s).add(dl.z.mul(c)));
-      const upRef = select(abs(dl.y).greaterThan(0.985), vec3(s, 0, c), vec3(0, 1, 0));
-      const right = normalize(cross(upRef, dw));
-      const upv = cross(dw, right);
-      const R = frame.y.mul(scale);
-      const impPos = centerW.add(right.mul(positionLocal.x.mul(R))).add(upv.mul(positionLocal.y.mul(R)));
-      const atlas = vec2(col.mul(IMP_G).add(cell.x).add(positionLocal.x.mul(0.5).add(0.5)).div(IMP_G * IMP_TYPES),
-        cell.y.add(positionLocal.y.mul(0.5).add(0.5)).div(IMP_G));
-      vB.assign(vec4(atlas, c, s));
-      vC.assign(vec4(select(isCard.greaterThan(0.5), attribute('pext', 'vec4').xy, atlasUVN), backN, flowerN));
-      // foliage cards face the camera (the shadow pass's camera too: leafy shadows); corner offset in metres
-      const pext = attribute('pext', 'vec4');
-      const camR = vec3(cameraViewMatrix.element(0).x, cameraViewMatrix.element(1).x, cameraViewMatrix.element(2).x);
-      const camU = vec3(cameraViewMatrix.element(0).y, cameraViewMatrix.element(1).y, cameraViewMatrix.element(2).y);
-      const card = camR.mul(pext.z).add(camU.mul(pext.w)).mul(scale).mul(isCard);
-      return mix(vec3(wx, p.y, wz).add(inst.xyz).add(card), impPos, isImp);
-    })();
-    withPrevious(m);
-    // impostor: the photo's normal (tree space) turned by the heading
-    const fmat = pcol.w.mul(255);
-    const isImpF = step(abs(fmat.sub(PMAT.Impostor)), float(0.5));
-    const impC = this.impColor.sample(vImpUV);
-    const impN = this.impNormal.sample(vImpUV).xyz.mul(2).sub(1);
-    const impNW = vec3(impN.x.mul(vImpCS.x).add(impN.z.mul(vImpCS.y)), impN.y, impN.x.negate().mul(vImpCS.y).add(impN.z.mul(vImpCS.x)));
-    m.normalNode = transformNormalToView(normalize(mix(vN, impNW, isImpF)));
-
-    const mat = pcol.w.mul(255);
-    const isCardF = step(abs(mat.sub(PMAT.LeafCard)), float(0.5));
-    const isLeaf = max(step(abs(mat.sub(PMAT.Leaf)), float(0.5)), isCardF);
-    const leafC = this.leafAtlas.sample(vAtlasUV);
-    const isGlass = step(abs(mat.sub(PMAT.Glass)), float(0.5));
-    const isBulb = step(float(2.5), mat).mul(step(mat, float(5.5)));
-    const isMetal = step(abs(mat.sub(PMAT.Metal)), float(0.5));
-    // foliage variation by variant
-    const tint = mix(vec3(1, 1, 1), mix(vec3(0.82, 1.05, 0.7), vec3(1.15, 1.0, 0.75), step(float(1.5), vVar)), step(float(0.5), vVar).mul(isLeaf));
-    // paint of the parked cars by variant
-    const isPaint = step(abs(mat.sub(PMAT.Paint)), float(0.5));
-    const paint = sRGBTransferEOTF(uArr(PAINTS.map((p) => new THREE.Color(p)), 'color').element(int(vVar.add(0.5))));
-    const isAtlasF = step(abs(mat.sub(PMAT.Atlas)), float(0.5));
-    const atlasC = this.signAtlas.sample(vAtlasUV);
-    const signFace = mix(atlasC.xyz, pcol.xyz, vAtlasBack);
-    // an ipê out of flower: its bloom (redder than green) takes the leaf tone of the same brightness
-    const bloomVert = step(pcol.y.mul(1.05), pcol.x).mul(isLeaf.max(isImpF));
-    const outOfFlower = step(float(0.0005), vFlower).mul(step(float(IPE_IN_FLOWER), vFlower)).mul(bloomVert);
-    const leafOf = mix(LEAF_DARK, LEAF_LIT, clamp(dot(pcol.xyz, vec3(0.2126, 0.7152, 0.0722)).mul(3), 0, 1));
-    const pc = mix(pcol.xyz, leafOf, outOfFlower);
-    const impBase = mix(impC.xyz, leafOf.mul(dot(impC.xyz, vec3(0.2126, 0.7152, 0.0722)).mul(4)), step(float(0.0005), vFlower).mul(step(float(IPE_IN_FLOWER), vFlower)).mul(step(impC.y.mul(1.05), impC.x)));
-    const base = mix(mix(mix(pc.mul(mix(vec3(1, 1, 1), leafC.xyz, isCardF)), paint, isPaint), signFace, isAtlasF), impBase, isImpF).mul(mix(tint, mix(vec3(1, 1, 1), tint, step(float(0.5), vVar)), isImpF));
-    const bulbOff = base.mul(0.12);
-    // foliage: each tree with its own tone (lighter, yellower or darker), the top of the crown lighter and the
-    // light that passes through the leaves (the shadow side does not go black)
-    const treeH = hash(floor(positionWorldP.xz.div(7)).dot(vec2(1, 57.3)));
-    const leafTone = mix(mix(vec3(0.82, 0.9, 0.8), vec3(1.12, 1.08, 0.82), step(float(0.55), treeH)), vec3(1.0, 1.12, 0.92), step(float(0.85), treeH));
-    // flower: multiplies the leaf colour (sRGB 0x6a9a45 in linear) up to the flower colour; the impostor trunk barely changes
-    const leafK = leafTone;
-    const leafBase = base.mul(mix(vec3(1, 1, 1), leafK, isLeaf.max(isImpF)));
-    const up = clamp(normalize(mix(vN, impNW, isImpF)).y, 0, 1);
-    const through = leafBase.mul(float(0.1).add(up.mul(0.1))).mul(float(1).sub(nightU.mul(0.9))).mul(isLeaf.max(isImpF));
-    // a thin part's bars against the tone behind them (render/partCards.ts)
-    m.colorNode = vec4(partThinTone(mix(leafBase, bulbOff, isBulb).mul(mix(vec3(1, 1, 1), vD.xyz, vD.w))), 1);
-    m.emissiveNode = through.add(pcol.xyz.mul(isBulb).mul(vLit).mul(mix(float(2.2), float(4), nightU)))
-      .add(sRGBTransferEOTF(vec3(1, 0.86, 0.6)).mul(isGlass).mul(nightU).mul(6));
-    m.roughnessNode = mix(mix(float(0.85), float(0.45), isMetal), float(0.95), isLeaf.max(isImpF));
-    m.metalnessNode = isMetal.mul(0.3);
-    // fading between levels
-    const noise = interleavedGradientNoise(screenCoordinate.xy);
-    const fadeOk = select(vComp.greaterThan(0.5), noise.greaterThanEqual(float(1).sub(vFade)), noise.lessThan(vFade.add(0.002)));
-    m.maskNode = partCardOn().and(fadeOk).and(isImpF.lessThan(0.5).or(impC.a.greaterThan(0.5))).and(isAtlasF.lessThan(0.5).or(atlasC.a.greaterThan(0.5))).and(isCardF.lessThan(0.5).or(leafC.a.greaterThan(0.5)));
-    return m;
+    return createPropMaterial({
+      gpu: source === 'gpu', cap: CAP, visible: VISIBLE, draws: DRAWS,
+      visAttr: this.visAttr, offsetAttr: this.offsetAttr, poolAttr: this.poolAttr, extraAttr: this.extraAttr,
+      signalTex: this.signalTex, impColor: this.impColor, impNormal: this.impNormal, leafAtlas: this.leafAtlas, signAtlas: this.signAtlas,
+    });
   }
 
   /** Photographs the trees for the impostors (at load). */
@@ -582,7 +436,7 @@ export class PropRenderer {
   private dropCell(c: number): void {
     this.clearBlocks(this.blocks.release(c));
     this.forgetKinds(c);
-    if (!this.enabled) this.setCellFallback(c, null);
+    if (!this.enabled) this.fallback?.setCell(c, null);
     this.cellHave[c] = -1;
     this.cellReq[c] = 0;
     this.retryDue ||= this.pending.size > 0;
@@ -650,7 +504,7 @@ export class PropRenderer {
     const d = this.cellDistance(c, this.residentAt);
     // the camera left while the job ran: not kept (asked again if it comes back)
     if (d > this.ranges().drop) { this.cellHave[c] = -1; this.cellReq[c] = 0; return; }
-    if (!this.enabled) { this.setCellFallback(c, p); this.cellHave[c] = v; return; }
+    if (!this.enabled) { this.fallback!.setCell(c, p); this.cellHave[c] = v; return; }
     const freed = this.blocks.release(c);
     this.clearBlocks(freed);
     this.forgetKinds(c);
@@ -691,81 +545,11 @@ export class PropRenderer {
   get pendingCells(): number { return this.pending.size; }
   get residentCells(): number { return this.blocks.resident.size; }
 
-  /** WebGL 2: one instanced mesh per kind in the cell (the middle level, or the only one there is). */
-  private setCellFallback(c: number, p: PropColumns | null): void {
-    const old = this.cellMeshes[c];
-    if (old) for (const m of old) m.geometry.dispose();
-    this.cellMeshes[c] = null;
-    if (!p || p.count === 0 || !this.fallbackMat) return;
-    const meshes: THREE.Mesh[] = [];
-    for (let t = 0; t < PROP_TYPES; t++) {
-      const def = this.defs[t];
-      // a part's level 1 is its far model
-      const base = PART_TYPES.includes(t) ? def.lods[0] : def.lods[1] ?? def.lods[0];
-      if (!base) continue;
-      let n = 0;
-      for (let i = 0; i < p.count; i++) if (propType(p.extra[i]) === t) n++;
-      if (n === 0) continue;
-      const pose = new Float32Array(n * 4), key = new Float32Array(n);
-      let k = 0;
-      for (let i = 0; i < p.count; i++) {
-        if (propType(p.extra[i]) !== t) continue;
-        pose.set(p.data.subarray(i * 4, i * 4 + 4), k * 4);
-        key[k] = p.extra[i];
-        k++;
-      }
-      const g = new THREE.InstancedBufferGeometry();
-      for (const name of ['position', 'normal', 'pcol', 'pext']) g.setAttribute(name, base.attributes[name]);
-      g.setAttribute('ipose', new THREE.InstancedBufferAttribute(pose, 4));
-      g.setAttribute('ikey', new THREE.InstancedBufferAttribute(key, 1));
-      g.instanceCount = n;
-      const mesh = new THREE.Mesh(g, this.fallbackMat);
-      mesh.frustumCulled = false;
-      (mesh as { parent: THREE.Object3D | null }).parent = this.group;
-      meshes.push(mesh);
-    }
-    this.cellMeshes[c] = meshes;
-  }
+  // The WebGL 2 fallback lives in render/propFallback.ts (its own responsibility; the props file-size gate).
 
-  /** WebGL 2: cells near and in view. */
-  private updateFallback(camera: THREE.Camera, camPos: THREE.Vector3): void {
-    this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    this.fbFrustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
-    const out = this.group.children;
-    out.length = 0;
-    const R = 420 * this.pixelScale;
-    const c0x = Math.floor((camPos.x - R + MAP_CELLS * 128) / 256), c1x = Math.floor((camPos.x + R + MAP_CELLS * 128) / 256);
-    const c0z = Math.floor((camPos.z - R + MAP_CELLS * 128) / 256), c1z = Math.floor((camPos.z + R + MAP_CELLS * 128) / 256);
-    for (let cz = Math.max(0, c0z); cz <= Math.min(MAP_CELLS - 1, c1z); cz++) {
-      for (let cx = Math.max(0, c0x); cx <= Math.min(MAP_CELLS - 1, c1x); cx++) {
-        const list = this.cellMeshes[cz * MAP_CELLS + cx];
-        if (!list) continue;
-        const x0 = cellOriginX(cx), z0 = cellOriginX(cz);
-        this.fbBox.min.set(x0 - 8, -100, z0 - 8);
-        this.fbBox.max.set(x0 + 264, 600, z0 + 264);
-        if (!this.fbFrustum.intersectsBox(this.fbBox)) continue;
-        for (const m of list) out.push(m);
-      }
-    }
-  }
-
-  /**
-   * The triangles the props drew in the last frame (D81). three counts an indirect draw as one instance (r186
-   * WebGPUBackend.js:2171, renderer.info): `counted` is that number, `drawn` the real one, each level's draws times the
-   * instance count the GPU cull wrote (the indirect arguments read back: vertices, instances).
-   */
+  /** The props' real drawn triangles (D81); the measurement lives with the probe (render/propsProbe.ts). */
   async drawnTriangles(renderer: THREE.WebGPURenderer): Promise<{ counted: number; drawn: number }> {
-    const draws = this.drawsThisFrame.slice();
-    if (!this.enabled) return { counted: 0, drawn: 0 };
-    const args = new Uint32Array(await renderer.getArrayBufferAsync(this.drawAttr));
-    let counted = 0, drawn = 0;
-    for (let k = 0; k < DRAWS; k++) {
-      if (!draws[k]) continue;
-      const tris = args[k * 5] / 3;
-      counted += draws[k] * tris;
-      drawn += draws[k] * tris * args[k * 5 + 1];
-    }
-    return { counted, drawn };
+    return drawnTriangleCounts(renderer, this.enabled, this.drawsThisFrame, this.drawAttr, DRAWS);
   }
 
   /**
@@ -789,7 +573,11 @@ export class PropRenderer {
   /** Before drawing: culling on the GPU (or choosing the cells, on WebGL 2). */
   update(renderer: THREE.WebGPURenderer, camera: THREE.Camera, camPos: THREE.Vector3, now: number): void {
     if (now - this.signalSent > 250) { this.signalSent = now; this.signalTex.needsUpdate = true; }
-    if (!this.enabled) { this.updateResidency(camPos); this.updateFallback(camera, camPos); return; }
+    (this.lodClock as { value: number }).value = now;
+    // two incommensurate golden-ratio walks: the dissolve's dither is never a fixed mask (the TRAA averages it)
+    this.fadeFrame++;
+    (fadeJitter.value as THREE.Vector2).set((this.fadeFrame * 0.6180339887498949 % 1) * 64, (this.fadeFrame * 0.7548776662466927 % 1) * 64);
+    if (!this.enabled) { this.updateResidency(camPos); this.fallback!.update(camera, camPos, this.pixelScale); return; }
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
@@ -825,11 +613,13 @@ export class PropRenderer {
   clear(): void {
     for (const c of [...this.blocks.resident]) { this.clearBlocks(this.blocks.release(c)); this.forgetKinds(c); }
     for (let c = 0; c < CELL_COUNT; c++) {
-      if (!this.enabled) this.setCellFallback(c, null);
+      if (!this.enabled) this.fallback?.setCell(c, null);
       this.cellVer[c]++; this.cellReq[c] = 0; this.cellHave[c] = -1;
     }
     this.pending.clear();
     this.residencyDue = true;
+    this.lodState.fill(0xffffffff); this.lodStart.fill(0);
+    this.lodStateAttr.needsUpdate = true; this.lodStartAttr.needsUpdate = true;
   }
 }
 

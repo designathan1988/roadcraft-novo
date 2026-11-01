@@ -122,6 +122,8 @@ test('salvamento versão 7: polígono, idade e desgaste vão e voltam; versão a
   w.advanceClock(20 * 1440);
   const cells = [...new Set(alive(w).map((i) => w.buildings.cols.cell[i]))];
   const boxes = w.gatherBoxes(cells);
+  // `id` is a per-session column (map ids back from the workers' answers), never persisted: decoded lots come with -1
+  boxes.id.fill(-1);
   const roads = { nodes: new Float32Array(0), segs: new Float32Array(0), items: new Float32Array(0) };
   const bytes = encodeTile(0, packTileHeights(w.heights, 0), boxes, roads);
   const dec = decodeTile(bytes);

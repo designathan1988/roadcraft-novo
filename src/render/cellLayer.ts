@@ -8,7 +8,8 @@ import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
 import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, tileX, type DirtyCells, type DirtyKind, type DirtyReader } from '../core/grid.ts';
 import type { PackedMesh } from '../shared/contracts/worker.ts';
-import { SHADOW_LENGTH, SHADOW_REACH, sunDirection } from './sun.ts';
+import { CELL_CASTER_LAYER, SHADOW_LENGTH, SHADOW_REACH, TILE_CASTER_LAYER, sunDirection } from './sun.ts';
+import { forgetOccluded, markOccluded, type BuildingOccluders, type WorldBox } from './visibility.ts';
 
 export interface LayerSource {
   /** Asks for a cell's mesh at level 0 (everything) or 1 (without small parts). */
@@ -56,11 +57,17 @@ export interface LayerOptions {
   publish?: Uint8Array;
   /** Distances count the eye's height over the ground too (a detail layer: from high above, its cells are far). */
   eyeHeight?: (x: number, z: number) => number;
+  /** The frame's building occluders (render/visibility.ts): a layer behind the buildings is hidden from the colour pass. */
+  occluders?: BuildingOccluders;
+  /** This layer builds the occluders from the cells it chose (the building layer); the others only read them. */
+  rebuildOccluders?: boolean;
+  /** Caster LOD (the buildings): the near cascade draws the cells, the far cascades the tile masses (sun.ts). */
+  lodCasters?: boolean;
 }
 
 /** One mesh of the layer: a cell, a tile or a plate (`size` metres from its origin corner). */
-interface Slot { mesh: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number; size: number; scope: SlotScope; id: number }
-const slot = (size: number, scope: SlotScope) => (_: unknown, id: number): Slot => ({ mesh: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size, scope, id });
+interface Slot { mesh: THREE.Mesh | null; /** the tile's shadow-only twin (far cascades, caster LOD) */ twin: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number; size: number; scope: SlotScope; id: number }
+const slot = (size: number, scope: SlotScope) => (_: unknown, id: number): Slot => ({ mesh: null, twin: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size, scope, id });
 
 const FADE = 0.35;
 /** Height over the ground that counts as level with the cell (roofs and bridges up to it). */
@@ -68,7 +75,7 @@ const DETAIL_HEADROOM = 60;
 const PLATE_COUNT = MAP_PLATES * MAP_PLATES;
 const TILES_PER_PLATE = PLATE_SIZE / TILE_SIZE;
 
-interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number; /** cell meshes: the cell and the level */ cell?: number; level?: number; /** a mesh of a publishing layer */ publisher?: boolean }
+interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number; /** cell meshes: the cell and the level */ cell?: number; level?: number; /** a mesh of a publishing layer */ publisher?: boolean; /** world box, for the occlusion test */ box?: WorldBox }
 
 /** Once the mesh is on the GPU the CPU copy is no longer needed: swap it for an empty one (count stays). */
 function freeCpuCopy(g: THREE.BufferGeometry): void {
@@ -93,6 +100,8 @@ export class CellLayer {
   /** The tile's cells are all ready this frame (it draws by cells). */
   private tileCellsReady = new Uint8Array(TILE_COUNT);
   private cellFine = new Uint8Array(CELL_COUNT);
+  /** Cells hidden from the colour pass by this frame's building walls (1 = only a shadow proxy is needed). */
+  private readonly cellBox: WorldBox = { x0: 0, y0: -200, z0: 0, x1: 0, y1: 1200, z1: 0 };
   private plateFar = new Uint8Array(PLATE_COUNT);
   /** None of the plate's tiles held anything when last visited. */
   private plateIdle = new Uint8Array(PLATE_COUNT);
@@ -121,6 +130,7 @@ export class CellLayer {
   private lastPV = new THREE.Matrix4();
   private lastScale = 0;
   private lastSun = new THREE.Vector3();
+  private lastVisible = true;
   private frame = 0;
   /** Ground height under a point (set by the game): the near level is chosen by the 3D distance. */
   groundAt: ((x: number, z: number) => number) | null = null;
@@ -234,8 +244,10 @@ export class CellLayer {
     this.events++;
     if (cell >= 0) this.src.installed?.(cell, level, m);
     const replacing = s.mesh !== null && m !== null;
+    if (s.twin) { (s.twin as unknown as { parent: THREE.Object3D | null }).parent = null; s.twin = null; }
     if (s.mesh) {
       (s.mesh.userData as FadeData).dead = true;
+      forgetOccluded(s.mesh);
       s.mesh.geometry.dispose();
       // three keeps a mesh's render objects (bindings, uniform buffers, one per pass and shadow cascade) until the
       // mesh itself or its material is disposed; the material is shared, so the mesh must be
@@ -273,8 +285,10 @@ export class CellLayer {
     mesh.frustumCulled = true;
     mesh.castShadow = (this.opt.shadows ?? true) || (this.src.castsShadow?.(s.scope, s.id) ?? false);
     mesh.receiveShadow = true;
+    if (this.opt.lodCasters && cell >= 0) mesh.layers.set(CELL_CASTER_LAYER);
     // a rebuild after an edit swaps at once (no fade hole)
     (mesh.userData as FadeData).instant = replacing;
+    (mesh.userData as FadeData).box = { x0: m.originX - e, x1: m.originX + s.size + e, y0: m.originY + m.minY, y1: m.originY + m.maxY, z0: m.originZ - e, z1: m.originZ + s.size + e };
     if (cell >= 0) { (mesh.userData as FadeData).cell = cell; (mesh.userData as FadeData).level = level; }
     if (this.opt.publish) (mesh.userData as FadeData).publisher = true;
     (mesh as { parent: THREE.Object3D | null }).parent = this.group;
@@ -283,6 +297,18 @@ export class CellLayer {
     s.maxY = m.originY + m.maxY;
     s.bytes = m.position.byteLength + m.normal.byteLength + m.color.byteLength + m.index.byteLength + (m.extra?.byteLength ?? 0) + (m.fac?.byteLength ?? 0) + (m.fuv?.byteLength ?? 0);
     this.gpuBytes += s.bytes;
+    // A tile's shadow-only twin: the far cascades draw the tile massing instead of the 16 cells' own meshes. It shares
+    // the geometry; the colour camera does not hold its layer (sun.ts TILE_CASTER_LAYER).
+    if (this.opt.lodCasters && s.scope === 'tile') {
+      const twin = new THREE.Mesh(g, this.material);
+      twin.position.copy(mesh.position); twin.scale.copy(mesh.scale);
+      twin.matrix.copy(mesh.matrix); twin.matrixWorld.copy(mesh.matrixWorld);
+      twin.matrixAutoUpdate = false; twin.matrixWorldAutoUpdate = false;
+      twin.frustumCulled = true; twin.castShadow = true; twin.receiveShadow = false;
+      twin.layers.set(TILE_CASTER_LAYER);
+      (twin as unknown as { parent: THREE.Object3D | null }).parent = this.group;
+      s.twin = twin;
+    }
   }
 
   /** Chooses what to draw. */
@@ -291,13 +317,27 @@ export class CellLayer {
     // nothing can have changed (same view, scale and sun, no mesh came or went, no fade running): the choice of the
     // last frame stands (visiting every plate and tile again each still frame cost with the map's size)
     if (this.pv.equals(this.lastPV) && this.pixelScale === this.lastScale && this.events === this.lastEvents
-      && this.fading.length === 0 && this.fadingIn === 0 && sunDirection.equals(this.lastSun)) { this.changed = false; return; }
-    this.lastPV.copy(this.pv); this.lastScale = this.pixelScale; this.lastEvents = this.events; this.lastSun.copy(sunDirection);
+      && this.fading.length === 0 && this.fadingIn === 0 && sunDirection.equals(this.lastSun) && this.group.visible === this.lastVisible) { this.changed = false; return; }
+    this.lastPV.copy(this.pv); this.lastScale = this.pixelScale; this.lastEvents = this.events; this.lastSun.copy(sunDirection); this.lastVisible = this.group.visible;
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.camPos.copy(camPos);
     const budget = this.opt.budget ?? Infinity;
     if (this.gpuBytes > budget) this.evictScale = Math.max(0, this.evictScale - 0.02);
     else if (this.gpuBytes < budget * 0.8) this.evictScale = Math.min(1, this.evictScale + 0.005);
+    // Occlusion: build this frame's walls from the cells drawn last frame (real geometry) with THIS frame's camera,
+    // before any cell chooses its level. A residency test must never use the previous frame's view: a camera turn
+    // would evict the cells that just became visible.
+    const occluders = this.opt.occluders;
+    if (occluders && this.opt.rebuildOccluders) {
+      if (this.group.visible) {
+        this.occluderMeshes.clear();
+        for (const mesh of this.shown) {
+          const u = mesh.userData as FadeData;
+          if (!u.dead && (u.fade ?? 1) >= 1) this.occluderMeshes.add(mesh);
+        }
+        occluders.build(camera, this.occluderMeshes);
+      } else occluders.reset();
+    }
     this.next.clear();
     // the tiles within the layer's reach (the farthest it asks for or evicts anything) plus those still holding a
     // mesh: the rest of the map is not visited (D40: a moving camera visited every tile of the map each frame)
@@ -306,8 +346,30 @@ export class CellLayer {
     this.rect[2] = tileX(this.camPos.x + r); this.rect[3] = tileX(this.camPos.z + r);
     this.visited = 0;
     for (let pz = 0; pz < MAP_PLATES; pz++) for (let px = 0; px < MAP_PLATES; px++) this.visitPlate(px, pz);
+    // Every layer behind the building layer hides the meshes whose world box is behind this frame's walls.
+    if (occluders) {
+      for (const mesh of this.next) {
+        const u = mesh.userData as FadeData;
+        const b = u.box;
+        const hide = !!b && u.drawnAt !== undefined && occluders.hidden(b);
+        // It was drawn at least once: its GPU copy exists, so the CPU copy can go now instead of being kept for a mesh
+        // that may never be visible again.
+        if (hide && !u.freed) { freeCpuCopy(mesh.geometry); u.freed = true; }
+        markOccluded(mesh, hide);
+      }
+      for (const f of this.fading) {
+        const u = f.mesh.userData as FadeData;
+        const b = u.box;
+        const hide = !!b && u.drawnAt !== undefined && occluders.hidden(b);
+        if (hide && !u.freed) { freeCpuCopy(f.mesh.geometry); u.freed = true; }
+        markOccluded(f.mesh, hide);
+      }
+    }
     this.applyFades();
   }
+
+  /** The cell meshes the occluder may be built from (reused; never allocated per frame). */
+  private readonly occluderMeshes = new Set<THREE.Mesh>();
 
   private visitPlate(px: number, pz: number): void {
     const p = pz * MAP_PLATES + px;
@@ -428,15 +490,29 @@ export class CellLayer {
           // parts were drawn 300 m below the camera, under a pixel)
           const up = this.groundAt ? Math.max(0, this.camPos.y - this.groundAt(cellOriginX(ci) + CELL_SIZE / 2, cellOriginX(cj) + CELL_SIZE / 2) - DETAIL_HEADROOM) : 0;
           const cd3 = Math.hypot(cd, up);
-          const fine = levels === 1 || (this.cellFine[c] ? cd3 < detail * 1.15 : cd3 < detail * 0.85);
+          // A hidden cell is not coloured at all. It keeps only the facade level (L1) as a shadow proxy while the
+          // shadows can reach it; farther, the tile massing is its proxy. Its detail (L0) is never asked for or kept.
+          this.cellBox.x0 = cellOriginX(ci); this.cellBox.x1 = this.cellBox.x0 + CELL_SIZE;
+          this.cellBox.z0 = cellOriginX(cj); this.cellBox.z1 = this.cellBox.z0 + CELL_SIZE;
+          const occluded = !!this.opt.occluders && this.opt.occluders.hidden(this.cellBox);
+          const proxy = occluded && !!this.opt.lodCasters;
+          const fine = !proxy && (levels === 1 || (this.cellFine[c] ? cd3 < detail * 1.15 : cd3 < detail * 0.85));
           this.cellFine[c] = fine ? 1 : 0;
-          const want = fine ? 0 : 1;
-          this.requestCell(c, want);
-          if (!this.opt.sparse && !this.cells[want][c].mesh && !(levels > 1 && this.cells[1 - want][c].mesh) && this.src.hasContent(c)) cellsReady = false;
-          // L0 far from the camera leaves the GPU (L1 covers it)
-          if (levels > 1 && cd3 > detail * 1.6) {
-            const s0 = this.cells[0][c];
-            if (s0.mesh || s0.requested) { this.setMesh(s0, null, 0, c, 0); s0.requested = 0; }
+          const inShadowReach = cd3 < SHADOW_REACH * this.pixelScale + CELL_SIZE;
+          const want = proxy ? (inShadowReach && levels > 1 ? 1 : -1) : (fine ? 0 : 1);
+          if (want >= 0) this.requestCell(c, want);
+          if (!this.opt.sparse && want >= 0 && !this.cells[want][c].mesh && !(levels > 1 && this.cells[1 - want][c].mesh) && this.src.hasContent(c)) cellsReady = false;
+          // A hidden cell with no proxy must leave the tile's massing standing as a fallback: if the occlusion was stale
+          // on a camera move, the tile covers the frame instead of a hole.
+          if (want < 0) cellsReady = false;
+          // L0 leaves the GPU when L1 covers it, when it is far or when the cell is hidden and its facade proxy exists.
+          if (levels > 1) {
+            const s0 = this.cells[0][c], s1 = this.cells[1][c];
+            const covered = (proxy && s1.mesh) || (!proxy && cd3 > detail * 1.6);
+            if (covered && (s0.mesh || s0.requested)) { this.setMesh(s0, null, 0, c, 0); s0.requested = 0; }
+            if (want < 0) {
+              for (const s of [s0, s1]) if (s.mesh || s.requested) { this.setMesh(s, null, 0, c, s === s1 ? 1 : 0); s.requested = 0; }
+            }
           }
         }
       }
@@ -513,8 +589,9 @@ export class CellLayer {
     this.fadingIn = 0;
     for (const mesh of this.next) {
       const u = mesh.userData as FadeData;
-      // already drawn in an earlier frame: the data is on the GPU
-      if (!u.freed && drawn) { if (u.drawnAt === undefined) u.drawnAt = this.frame; else if (this.frame - u.drawnAt >= 2) { freeCpuCopy(mesh.geometry); u.freed = true; } }
+      // already drawn in an earlier frame: the data is on the GPU (a mesh hidden from the colour pass has not been
+      // drawn and keeps its CPU copy until it is shown)
+      if (!u.freed && drawn && mesh.visible) { if (u.drawnAt === undefined) u.drawnAt = this.frame; else if (this.frame - u.drawnAt >= 2) { freeCpuCopy(mesh.geometry); u.freed = true; } }
       if (!this.shown.has(mesh)) {
         const i = this.fading.findIndex((f) => f.mesh === mesh);
         if (i >= 0) {
@@ -537,9 +614,21 @@ export class CellLayer {
       const f = this.fading[i];
       const a = (now - f.t0) / FADE;
       const u = f.mesh.userData as FadeData;
-      if (a >= 1 || u.dead) { this.fading[i] = this.fading[this.fading.length - 1]; this.fading.pop(); continue; }
+      if (a >= 1 || u.dead) { forgetOccluded(f.mesh); this.fading[i] = this.fading[this.fading.length - 1]; this.fading.pop(); continue; }
       u.fade = -Math.max(a, 1e-3);
       out.push(f.mesh);
+    }
+    // Caster LOD: a tile whose cells stand for it in the colour pass has no tile mesh in the scene; its shadow-only twin
+    // is what the far cascades draw (a massing within their texel). When the tile mesh itself is drawn, its layer 0
+    // already casts; the twin is left out.
+    if (this.opt.lodCasters) {
+      const reach = SHADOW_REACH * this.pixelScale + TILE_SIZE;
+      for (const s of this.tiles) {
+        if (!s.twin || !s.mesh || this.next.has(s.mesh) || this.shown.has(s.mesh)) continue;
+        const tx = s.id % MAP_TILES, tz = (s.id / MAP_TILES) | 0;
+        if (this.distTo(tileOriginX(tx), tileOriginX(tz), TILE_SIZE) > reach) continue;
+        out.push(s.twin);
+      }
     }
     const t = this.shown; this.shown = this.next; this.next = t;
     this.publishShown();
@@ -554,7 +643,7 @@ export class CellLayer {
     this.published.length = 0;
     for (const mesh of this.shown) {
       const u = mesh.userData as FadeData;
-      if (u.cell === undefined || u.level !== 0 || (u.fade ?? 0) < 1) continue;
+      if (u.cell === undefined || u.level !== 0 || (u.fade ?? 0) < 1 || !mesh.visible) continue;
       out[u.cell] = 1;
       this.published.push(u.cell);
     }
@@ -562,6 +651,7 @@ export class CellLayer {
 
   /** Forgets everything (when loading another city). */
   reset(): void {
+    if (this.opt.rebuildOccluders) this.opt.occluders?.reset();
     // a cell that held or asked for a mesh is uninstalled through the source (the seams clear their holes in the
     // terrain's paint, render/terrainSeams.ts): without it the next city kept the last one's holes (D53)
     this.cells.forEach((level, l) => level.forEach((s, c) => {

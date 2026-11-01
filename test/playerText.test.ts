@@ -23,7 +23,7 @@ const ts = createRequire(path.join(root, 'package.json'))('typescript');
 
 /** Portuguese that is world content, not interface text: street names, building lettering, the bus lane's paint, and
  *  the language's own name in the language list. Everything else in src reads its text from the language files. */
-const CONTENT = ['src/roads/streetNames.ts', 'src/r40/render/buildings/signature.ts', 'src/roads/markings.ts', 'src/shared/i18n/index.ts'];
+const CONTENT = ['src/roads/streetNames.ts', 'src/roads/markings.ts', 'src/shared/i18n/index.ts'];
 const MIGRATED: string[] = [];
 (function collect(d: string): void {
   for (const e of fs.readdirSync(path.join(root, d), { withFileTypes: true })) {

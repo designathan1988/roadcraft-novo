@@ -9,6 +9,8 @@
 //
 // The parts' vertices carry it in `pext` (zero on every other part): x the bar's width (m in the unit model), y the tone
 // behind, z the card's pattern (CARD; 0 on the full models). The patterns' bars are the unit models' (r40 kit.ts).
+// Tree and impostor cards carry a different payload in the same attribute (atlas uv and the billboard corner, metres);
+// their material passes `notThin`, so the thin-part reading is never applied to foliage.
 
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -75,7 +77,7 @@ const every = (x: Node, pitch: number, w: number, fw: Node) => step(abs(fract(x.
  * -0.5..0.5 across and 0..1 up for the railings). Every pattern is worked out and the right one picked, no branch: the
  * pixel's span (fwidth) needs the whole quad.
  */
-export function partCardOn(): Node {
+export function partCardOn(notThin: Node): Node {
   const ext = attribute('pext', 'vec4'), p = attribute('position', 'vec3');
   const kind = ext.z;
   const qx = select(kind.greaterThan(3.5), p.z, p.x), qy = p.y;
@@ -87,13 +89,13 @@ export function partCardOn(): Node {
   const front = max(max(bar(qy, 0.97, 0.06, fy), bar(qy, 0.12, 0.04, fy)), every(qx.add(0.5), 0.1, 0.015, fx));
   const side = max(max(bar(qy, 0.97, 0.06, fy), bar(qy, 0.12, 0.04, fy)), every(qx, 0.25, 0.015, fx));
   const on = select(kind.lessThan(1.5), frame, select(kind.lessThan(2.5), roof, select(kind.lessThan(3.5), front, side)));
-  return kind.lessThan(0.5).or(on.greaterThan(0.5));
+  return notThin.or(kind.lessThan(0.5).or(on.greaterThan(0.5)));
 }
 
 /** A thin part's colour mixed with the tone behind it by its bar's share of the pixel (4.0 thinTone; other props as they are). */
-export function partThinTone(colour: Node): Node {
+export function partThinTone(colour: Node, notThin: Node): Node {
   const ext = attribute('pext', 'vec4');
   const metresPerPixel = max(length(fwidth(positionWorld)).mul(0.7071), float(1e-4));
   const toned = mix(vec3(ext.y, ext.y, ext.y), colour, clamp(ext.x.div(metresPerPixel), 0, 1));
-  return select(ext.x.greaterThan(0), toned, colour);
+  return select(notThin, colour, select(ext.x.greaterThan(0), toned, colour));
 }

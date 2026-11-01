@@ -125,6 +125,8 @@ test('salvamento: lotes editados (vazio, dividido) voltam iguais', async () => {
   deleteLot(w, lotAt(w, 10, 10) >= 0 ? lotAt(w, 10, 10) : [...Array(w.buildings.end).keys()].find((i) => w.buildings.alive[i])!);
   const cells = [...new Set([...Array(w.buildings.end).keys()].filter((i) => w.buildings.alive[i]).map((i) => w.buildings.cols.cell[i]))];
   const boxes = w.gatherBoxes(cells);
+  // `id` is a per-session column (map ids back from the workers' answers), never persisted: decoded lots come with -1
+  boxes.id.fill(-1);
   const roads = { nodes: new Float32Array(0), segs: new Float32Array(0), items: new Float32Array(0) };
   const dec = decodeTile(encodeTile(0, packTileHeights(w.heights, 0), boxes, roads));
   assert.deepEqual(dec.boxes, boxes);

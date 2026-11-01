@@ -246,7 +246,14 @@ function moduleWorker(i: number): Worker {
 }
 
 /** Pool workers: cores − 2, or ?workers=N (photos and tests that must not hog the machine). */
+/** Background meshing must not starve the page, the simulation and the GPU: more workers than this turn a camera
+ *  movement into a wall of jobs that keeps every core busy while the GPU waits (measured 2026-11-01: CPU 100 %, GPU
+ *  48 %). `?workers=N` still overrides it for a measurement or a machine of few cores. */
+const MAX_WORKERS = 4;
+
 function workerCount(): number {
   const asked = Number(new URLSearchParams(globalThis.location?.search ?? '').get('workers'));
-  return asked > 0 ? Math.floor(asked) : Math.max(1, (navigator.hardwareConcurrency || 4) - 2);
+  if (asked > 0) return Math.floor(asked);
+  const cores = navigator.hardwareConcurrency || 4;
+  return Math.max(1, Math.min(MAX_WORKERS, cores - 2));
 }

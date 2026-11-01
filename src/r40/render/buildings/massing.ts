@@ -39,8 +39,9 @@ export interface MassDetail {
   readonly boxes: boolean;
 }
 export const CELL_DETAIL: MassDetail = { drop: 0, boxes: false };
-/** A tile's: under 3 m (a machine room, `MACHINE_ROOM_H`; a parapet; an arcade's set-back, `ARCADE`). */
-export const TILE_DETAIL: MassDetail = { drop: m(3), boxes: false };
+/** A tile's: under 1.4 m (4.0's `TILE_DETAIL`, massing.ts:40) - a parapet, an arcade's set-back; a machine room (3 m)
+ *  and a mast (3.5 m) stand over it and are kept, or the tile's measured error passes its own drop. */
+export const TILE_DETAIL: MassDetail = { drop: m(1.4), boxes: false };
 /** A plate's: under 8 m, the pitched roofs of houses and low blocks flattened too. */
 export const PLATE_DETAIL: MassDetail = { drop: m(8), boxes: true };
 
@@ -559,8 +560,10 @@ function box(w: MassWriter, x0: number, y0: number, x1: number, y1: number, z0: 
   w.face([w.P(x0, y0, z1), w.P(x1, y0, z1), w.P(x1, y1, z1), w.P(x0, y1, z1)], w.N(0, 0, 1), top);
 }
 
-/** The roof plant drawn from afar (`emitRoofPlant`): the rest is under a metre across. */
-const DRAWN_PLANT: ReadonlySet<string> = new Set(['liftRoom', 'tankBox', 'airHandler', 'skylight', 'solar', 'tank', 'chimney']);
+/** The roof plant drawn from afar (`emitRoofPlant`): the rest is under the tile's drop (a condenser 0.85 m, a dish 1.2 m,
+ *  a vent 0.9 m, a hatch 0.45 m). The mast is drawn too: 8 cm thick but it.h (3.5 m) tall, its omission read as 3.5 m
+ *  of error at the tile level (test/lodLevels.test.ts). */
+const DRAWN_PLANT: ReadonlySet<string> = new Set(['liftRoom', 'tankBox', 'airHandler', 'skylight', 'solar', 'tank', 'chimney', 'mast']);
 
 /** The plant on a flat roof a metre or more across (`roofPlan.ts`, the plan the detailed roof draws) */
 function emitRoofPlant(w: MassWriter, b: Building, v: Volume, z: number, rgb: (spec: MaterialSpec) => Rgb): void {
@@ -585,6 +588,14 @@ function emitRoofPlant(w: MassWriter, b: Building, v: Volume, z: number, rgb: (s
         break;
       }
       case 'chimney': { const r = half * 0.9 * Math.sqrt(Math.PI) / 2, c = rgbOf(ROOF_COLOURS.chimney); box(w, cx - r, cy - r, cx + r, cy + r, z, z + it.h, c, c); break; }
+      case 'mast': {
+        // The mast as the detailed roof draws it: its shaft and its arms (`roofMesh.ts`).
+        const dark = rgbOf(0x2d3033);
+        box(w, cx - m(0.04), cy - m(0.04), cx + m(0.04), cy + m(0.04), z, z + it.h, dark, dark);
+        box(w, cx - m(0.6), cy - m(0.02), cx + m(0.6), cy + m(0.02), z + it.h - m(0.4), z + it.h - m(0.36), dark, dark);
+        if (it.variant % 2 === 1) box(w, cx - m(0.02), cy - m(0.45), cx + m(0.02), cy + m(0.45), z + it.h - m(0.9), z + it.h - m(0.86), dark, dark);
+        break;
+      }
       default: break;
     }
   }
