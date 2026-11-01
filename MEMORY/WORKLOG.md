@@ -161,3 +161,17 @@ QUAL DOIS CLAUDES?
 - REMAINING (each with its mechanism): the kept-frame store->map copy (mover map + max sampling in the shadow
   filters), the cloud-shadow map for overcast days, vehicles/people colour-pass occlusion (their frustum-only cull
   stands; the props' pyramid covers the heavy pool), the budget city/map architecture (tile fidelity cost).
+
+---
+## 2026-11-01 (9th) | the cloud-shadow map — commit (git log)
+- The cloud factor is baked once a frame into 256x256 cells over the whole map (the exact per-pixel formula, per
+  cell) and the composite samples it bilinearly by world position - 65k evaluations a frame instead of one per
+  screen pixel, clear or overcast. 4.0's cloudShadowStamp mechanism, its ground-plane parallax the accepted look.
+- LESSON (the first photo round caught it): the roads' mask-free variant was WRONG - the mask's zone term does
+  real work (zone-painted pixels are discarded whenever the zone tool is off, pixel by pixel); the paint showed
+  through as stripes. Reverted; the roads keep their masked material. The buildings' variant stands (its plainFor
+  excludes every mesh whose discard can fire).
+- Photo: cloudmap-city2.png (clean), cloudmap-city.png (the striped bug, kept as the record).
+- REMAINING: the kept-frame store->map copy (the mover map + max sampling rewrites every material's shadow
+  filter - the last deep piece), vehicles/people colour-pass occlusion (their CPU frustum cull stands).
+- Budget city/map rows: the tile fidelity cost stands until the architecture pass (per-pass attribution first).
