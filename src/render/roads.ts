@@ -104,7 +104,11 @@ export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, 
         (r) => done(r.mesh), { key: `roadtile:${t}`, priority, transfer: roadGraphTransfer(graph) });
     },
   };
-  return new CellLayer(src, dirty, Dirty.Roads, createRoadMaterial(look), { near: 1400, evict: 2200, margin: 80, shadows: false, far: 5500, detail: 600, budget: 192e6, occluders }, true);
+  // the mask-free variant: a mesh drawing whole (fade at rest, the zone tool off) draws the plain material
+  const masked = createRoadMaterial(look);
+  const plain = createRoadMaterial(look, true);
+  return new CellLayer(src, dirty, Dirty.Roads, masked, { near: 1400, evict: 2200, margin: 80, shadows: false, far: 5500, detail: 600, budget: 192e6, occluders,
+    materials: { masked, plain, plainFor: (u) => (u.fade === undefined || u.fade >= 1) && zoneOverlayU.value === 0 } }, true);
 }
 
 /** 1 with the zone tool: shows the zone strips beside the roads. */
@@ -139,7 +143,7 @@ const MANHOLE_STEP = 47;
 /** The profiles' asphalt colour (sRGB) the 4.0 map stands for: other tones tint it. */
 const PROFILE_ASPHALT = [0x3a / 255, 0x3c / 255, 0x40 / 255];
 
-export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMaterial {
+export function createRoadMaterial(look: TrafficLook, plain = false): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
   const nW = useCompactVertex(m, 'vRoadNormal');
   loadCookedSurfaces();
@@ -491,7 +495,10 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   // zone strip: only with the tool, half transparent by dithering
   const isZone = step(abs(matId.sub(RMAT.Zone)), float(0.1));
   const zoneShow = zoneOverlayU.mul(step(T.interleavedGradientNoise(T.screenCoordinate.xy), float(0.7)));
-  m.maskNode = lodFadeMask().and(isZone.lessThan(0.5).or(zoneShow.greaterThan(0.5)));
+  // The plain variant is the same shader without the discards: it draws meshes whose fade is at rest while the
+  // zone tool is off (nothing would ever be discarded on them - early-Z back); fading meshes or zone overlays
+  // draw the masked one (materials, cellLayer).
+  if (!plain) m.maskNode = lodFadeMask().and(isZone.lessThan(0.5).or(zoneShow.greaterThan(0.5)));
   // at night: the lamps' pools of light (same step and sides as the props in jobs/props.ts)
   const lt = textureLoad(table, ivec2(int(MAX_LINES * 2), int(profile)));
   const kf = v.sub(LAMP_FIRST).div(LAMP_STEP);

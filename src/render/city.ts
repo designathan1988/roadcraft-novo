@@ -12,6 +12,7 @@ import { heightAt } from '../world/heights.ts';
 import { CellLayer, type LayerSource } from './cellLayer.ts';
 import { FINE_PIXELS, NEAR_PIXELS, distanceForError } from './viewError.ts';
 import { FLAT_DEPTH } from '../r40/render/buildings/meshCore.ts';
+import { insideCutOpen } from './inside.ts';
 import { PLATE_DETAIL, TILE_DETAIL } from '../r40/render/buildings/massing.ts';
 import { m } from '../r40/world/units.ts';
 import { T, lodFadeMask, useCompactVertex, withPrevious, type Node } from './tsl.ts';
@@ -134,7 +135,11 @@ export function createCity(world: World, pool: JobPool, occluders?: BuildingOccl
   const near = distanceForError(Math.max(farError, TILE_DETAIL.drop), NEAR_PIXELS);
   const detail = distanceForError(FLAT_DEPTH, FINE_PIXELS);
   const plate = distanceForError(PLATE_DETAIL.drop, NEAR_PIXELS);
-  return new CellLayer(src, world.dirty, Dirty.Buildings, createBuildingMaterial(), { near, evict: near * 1.43, margin: 40, detail, plate, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z), occluders, rebuildOccluders: true, lodCasters: true }, false, true);
+  // the mask-free variant: a mesh drawing whole (fade at rest, no cut, no window hole) draws the plain material
+  const masked = createBuildingMaterial();
+  const plainBld = createBuildingMaterial(undefined, true);
+  return new CellLayer(src, world.dirty, Dirty.Buildings, masked, { near, evict: near * 1.43, margin: 40, detail, plate, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z), occluders, rebuildOccluders: true, lodCasters: true,
+    materials: { masked, plain: plainBld, plainFor: (u) => (u.fade === undefined || u.fade >= 1) && !insideCutOpen() && !(u.level === 0 && u.cell !== undefined && DETAIL_SHOWN[u.cell]) } }, false, true);
 }
 
 
@@ -193,7 +198,7 @@ const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a
  */
 export interface BuildingPlacement { place: (rest: Node) => Node; turn: (n: Node) => Node; surface: Node; prev: Node }
 
-export function createBuildingMaterial(moved?: BuildingPlacement): THREE.MeshStandardNodeMaterial {
+export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = false): THREE.MeshStandardNodeMaterial {
   // its depth laid before the colour: its pixels are the frame's dearest (render/depthPrepass.ts)
   const m = layDepthFirst(new THREE.MeshStandardNodeMaterial());
   const n = useCompactVertex(m, 'vBldNormal', moved?.place);
@@ -287,9 +292,14 @@ export function createBuildingMaterial(moved?: BuildingPlacement): THREE.MeshSta
   const eu = float(0.01).div(colW), ey = float(0.01).div(fh);
   const hardWin = step(ww.add(eu), fx).mul(step(fx, float(1).sub(ww).sub(eu))).mul(step(wLow.add(ey), fy)).mul(step(fy, wHigh.sub(ey)));
   const hole = opened.mul(openBit).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy)).mul(hardWin);
-  m.maskNode = lodFadeMask().and(cutMask()).and(hole.lessThan(0.5));
-  // the shadow keeps the wall whole: the sun through an opening lights the room, not the street behind the building
-  m.maskShadowNode = lodFadeMask().and(cutMask());
+  // The plain variant is the same shader without the discards: it draws only meshes whose fade is at rest, with no
+  // cut open and no window hole (their cells never meet the detail layer) - so the pixels it covers would never be
+  // discarded and the material takes early-Z. Fading, cut or hole meshes draw the masked one (materials, cellLayer).
+  if (!plainMask) {
+    m.maskNode = lodFadeMask().and(cutMask()).and(hole.lessThan(0.5));
+    // the shadow keeps the wall whole: the sun through an opening lights the room, not the street behind the building
+    m.maskShadowNode = lodFadeMask().and(cutMask());
+  }
   const signMask = sign.mul(inShop).mul(hasWin).mul(step(float(0.35), rnd2));
 
   // fake interior: the camera ray inside a room the size of the window

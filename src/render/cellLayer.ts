@@ -42,6 +42,9 @@ export interface LayerOptions {
   evict: number;
   /** Horizontal slack of the boxes (meshes that reach past the cell's edge). */
   margin: number;
+  /** The mask-free variant: meshes whose `plainFor` says whole draw the plain material (no discard: early-Z back);
+   *  fading, cut or hole meshes draw the masked one. The same shader without the discard - the image cannot differ. */
+  materials?: { masked: THREE.Material; plain: THREE.Material; plainFor: (u: FadeData) => boolean };
   /** Beyond this not even the tile is drawn (0 = no limit). */
   far?: number;
   /** Up to here the cell uses L0; beyond, L1 (0 = L0 only). */
@@ -75,7 +78,7 @@ const DETAIL_HEADROOM = 60;
 const PLATE_COUNT = MAP_PLATES * MAP_PLATES;
 const TILES_PER_PLATE = PLATE_SIZE / TILE_SIZE;
 
-interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number; /** cell meshes: the cell and the level */ cell?: number; level?: number; /** a mesh of a publishing layer */ publisher?: boolean; /** world box, for the occlusion test */ box?: WorldBox }
+interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number; /** cell meshes: the cell and the level */ cell?: number; level?: number; /** a mesh of a publishing layer */ publisher?: boolean; /** world box, for the occlusion test */ box?: WorldBox; /** the tile's shadow-only twin (lodCasters) */ twin?: THREE.Mesh }
 
 /** Once the mesh is on the GPU the CPU copy is no longer needed: swap it for an empty one (count stays). */
 function freeCpuCopy(g: THREE.BufferGeometry): void {
@@ -307,6 +310,7 @@ export class CellLayer {
       twin.frustumCulled = true; twin.castShadow = true; twin.receiveShadow = false;
       twin.layers.set(TILE_CASTER_LAYER);
       (twin as unknown as { parent: THREE.Object3D | null }).parent = this.group;
+      (mesh.userData as FadeData).twin = twin;
       s.twin = twin;
     }
   }
@@ -628,6 +632,18 @@ export class CellLayer {
         const tx = s.id % MAP_TILES, tz = (s.id / MAP_TILES) | 0;
         if (this.distTo(tileOriginX(tx), tileOriginX(tz), TILE_SIZE) > reach) continue;
         out.push(s.twin);
+      }
+    }
+    // The mask-free variant: a mesh drawing whole (its fade at rest, no cut, no hole) draws the plain material -
+    // the same shader without the discard, so its pixels take early-Z; fading, cut or hole meshes draw the masked
+    // one. The frame cannot differ: the plain is the masked shader with a never-taken discard removed.
+    const mats = this.opt.materials;
+    if (mats) {
+      for (const mesh of out) {
+        const u = mesh.userData as FadeData;
+        const plain = mats.plainFor(u);
+        (mesh as THREE.Mesh).material = plain ? mats.plain : mats.masked;
+        if (u.twin) u.twin.material = plain ? mats.plain : mats.masked;
       }
     }
     const t = this.shown; this.shown = this.next; this.next = t;

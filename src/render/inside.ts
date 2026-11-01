@@ -20,6 +20,9 @@ export const cutTagU = T.uniform(0);
 
 const { Fn } = T;
 
+/** Whether the inside view's cut is open (its uniforms live): the buildings' mask-free variant never applies then. */
+export function insideCutOpen(): boolean { return cutYU.value < 1e8; }
+
 /** Buildings not drawn by the cell layers, at most HIDDEN at once: tag, centre x, z, radius² (radius² < 0: free). */
 export const HIDDEN = 16;
 export const hiddenU = T.uniformArray(Array.from({ length: HIDDEN }, () => new THREE.Vector4(0, 0, 0, -1)), 'vec4');
