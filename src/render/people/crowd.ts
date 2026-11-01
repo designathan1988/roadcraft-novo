@@ -50,6 +50,9 @@ export class PeopleRenderer {
   private geos: THREE.InstancedBufferGeometry[] = [];
   private attrs: Array<{ pos: THREE.InstancedBufferAttribute; prev: THREE.InstancedBufferAttribute; info: THREE.InstancedBufferAttribute; anim: THREE.InstancedBufferAttribute }> = [];
   private counts = [0, 0, 0];
+  private snap: Array<{ n: number; pos: Float32Array; prev: Float32Array; info: Float32Array; anim: Float32Array } | null> = [];
+  private cascadeFrustum = new THREE.Frustum();
+  private cascadePv = new THREE.Matrix4();
   /** px of height per metre at distance 1. */
   private pxScale = 1000;
   private readonly look: LookChoice = { variation: 0, clip: 0, rate: 1, phase: 0, hash: 0 };
@@ -357,6 +360,56 @@ export class PeopleRenderer {
       this.drawn[lod] = n;
       const a = this.attrs[lod];
       for (const at of [a.pos, a.prev, a.info, a.anim]) { at.clearUpdateRanges(); at.addUpdateRange(0, n * 4); at.needsUpdate = true; }
+      // the colour list snapshotted: each shadow cascade draws a compacted subset of it (prepareCascade)
+      const s = this.snap[lod] ??= {
+        pos: new Float32Array((a.pos.array as Float32Array).length),
+        prev: new Float32Array((a.prev.array as Float32Array).length),
+        info: new Float32Array((a.info.array as Float32Array).length),
+        anim: new Float32Array((a.anim.array as Float32Array).length),
+        n: 0,
+      };
+      s.n = n;
+      if (n) { s.pos.set((a.pos.array as Float32Array).subarray(0, n * 4)); s.prev.set((a.prev.array as Float32Array).subarray(0, n * 4)); s.info.set((a.info.array as Float32Array).subarray(0, n * 4)); s.anim.set((a.anim.array as Float32Array).subarray(0, n * 4)); }
+    }
+  }
+
+  /** One shadow cascade's cull: only the people its frustum sweeps (post.ts renderShadow, between passes). */
+  prepareCascade(camera: THREE.Camera): void {
+    if (!this.ready) return;
+    this.cascadePv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.cascadeFrustum.setFromProjectionMatrix(this.cascadePv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
+    for (let lod = 0; lod < this.geos.length; lod++) {
+      const s = this.snap[lod];
+      if (!s) continue;
+      const a = this.attrs[lod];
+      const P = a.pos.array as Float32Array, Q = a.prev.array as Float32Array, I = a.info.array as Float32Array, A = a.anim.array as Float32Array;
+      let w = 0;
+      for (let i = 0; i < s.n; i++) {
+        const o = i * 4;
+        this.sphere.center.set(s.pos[o]!, s.pos[o + 1]! + 1, s.pos[o + 2]!);
+        this.sphere.radius = 0.6;
+        if (!this.cascadeFrustum.intersectsSphere(this.sphere)) continue;
+        for (let v = 0; v < 4; v++) { P[w * 4 + v] = s.pos[o + v]!; Q[w * 4 + v] = s.prev[o + v]!; I[w * 4 + v] = s.info[o + v]!; A[w * 4 + v] = s.anim[o + v]!; }
+        w++;
+      }
+      this.counts[lod] = w;
+      this.geos[lod].instanceCount = w;
+      for (const at of [a.pos, a.prev, a.info, a.anim]) { at.clearUpdateRanges(); at.addUpdateRange(0, w * 4); at.needsUpdate = true; }
+    }
+  }
+
+  /** The colour pass's lists restored (post.ts, after the last cascade). */
+  prepareMain(): void {
+    if (!this.ready) return;
+    for (let lod = 0; lod < this.geos.length; lod++) {
+      const s = this.snap[lod];
+      if (!s) continue;
+      const a = this.attrs[lod];
+      const P = a.pos.array as Float32Array, Q = a.prev.array as Float32Array, I = a.info.array as Float32Array, A = a.anim.array as Float32Array;
+      if (s.n) { P.set(s.pos.subarray(0, s.n * 4)); Q.set(s.prev.subarray(0, s.n * 4)); I.set(s.info.subarray(0, s.n * 4)); A.set(s.anim.subarray(0, s.n * 4)); }
+      this.counts[lod] = s.n;
+      this.geos[lod].instanceCount = s.n;
+      for (const at of [a.pos, a.prev, a.info, a.anim]) { at.clearUpdateRanges(); at.addUpdateRange(0, s.n * 4); at.needsUpdate = true; }
     }
   }
 

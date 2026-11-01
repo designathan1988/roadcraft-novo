@@ -1125,10 +1125,18 @@ export class Game {
     renderer.shadowMap.enabled = false;
     if (want) {
       this.post = new Post(renderer, scene, this.rig.persp, this.parts.sun, { shadows: s.shadows, ao: s.ao, bloom: s.bloom });
-      // the shadow cascades cull their own casters (props.prepareCascade) and restore the colour cull after the last
+      // the shadow cascades cull their own casters (props/vehicles/people) and restore the colour cull after the last
       if (this.props) this.post.setShadowHooks({
-        cascade: (cam) => this.props.prepareCascade(renderer, cam),
-        main: () => this.props.prepareMain(renderer),
+        cascade: (cam) => {
+          this.props.prepareCascade(renderer, cam);
+          this.vehicles.prepareCascade(cam);
+          this.vehicles.people.prepareCascade(cam);
+        },
+        main: () => {
+          this.props.prepareMain(renderer);
+          this.vehicles.prepareMain();
+          this.vehicles.people.prepareMain();
+        },
       });
       // the frame's depth feeds the pools' occlusion pyramid (the next frame's cull reads it)
       if (this.props) this.post.frameEnd = (depth) => this.props.occl?.build(renderer, depth);

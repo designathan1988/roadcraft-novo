@@ -38,6 +38,10 @@ class Batch {
   private geo: THREE.InstancedBufferGeometry;
   count = 0;
   readonly cap: number;
+  private snapPos: Float32Array | null = null;
+  private snapInfo: Float32Array | null = null;
+  private snapPrev: Float32Array | null = null;
+  private snapCount = 0;
 
   /** `inside`: the body's inner side is drawn too (a near vehicle, seen into through its glass: `vehicleMaterial`). */
   constructor(base: THREE.BufferGeometry, cap: number, scaled: boolean, shadows = true, animated = false, glass = false, inside = false) {
@@ -86,6 +90,44 @@ class Batch {
     this.posAttr.clearUpdateRanges(); this.posAttr.addUpdateRange(0, this.count * 4); this.posAttr.needsUpdate = true;
     this.infoAttr.clearUpdateRanges(); this.infoAttr.addUpdateRange(0, this.count * 4); this.infoAttr.needsUpdate = true;
     this.prevAttr.clearUpdateRanges(); this.prevAttr.addUpdateRange(0, this.count * 4); this.prevAttr.needsUpdate = true;
+  }
+
+  /** The colour pass's list, snapshotted: each shadow cascade draws a compacted subset of it (prepareCascade). */
+  snapshot(): void {
+    this.snapPos ??= new Float32Array(this.pos.length);
+    this.snapInfo ??= new Float32Array(this.info.length);
+    this.snapPrev ??= new Float32Array(this.prev.length);
+    this.snapPos.set(this.pos.subarray(0, this.count * 4));
+    this.snapInfo.set(this.info.subarray(0, this.count * 4));
+    this.snapPrev.set(this.prev.subarray(0, this.count * 4));
+    this.snapCount = this.count;
+  }
+
+  /** Restores the colour pass's list (post's after-the-last-cascade hook). */
+  restore(): void {
+    if (!this.snapPos || this.snapCount === 0) return;
+    this.pos.set(this.snapPos.subarray(0, this.snapCount * 4));
+    this.info.set(this.snapInfo!.subarray(0, this.snapCount * 4));
+    this.prev.set(this.snapPrev!.subarray(0, this.snapCount * 4));
+    this.count = this.snapCount;
+    this.commit();
+  }
+
+  /** Keeps only the instances one shadow cascade's frustum sweeps, compacted in place, and uploads them. */
+  compactFor(frustum: THREE.Frustum, sphere: THREE.Sphere): void {
+    if (this.snapCount === 0 || !this.snapPos || !this.snapInfo || !this.snapPrev) { this.count = 0; this.geo.instanceCount = 0; return; }
+    let w = 0;
+    for (let i = 0; i < this.snapCount; i++) {
+      const o = i * 4, k = this.snapInfo[o + 2]!;
+      sphere.center.set(this.snapPos[o]!, this.snapPos[o + 1]! + 1, this.snapPos[o + 2]!);
+      sphere.radius = k <= 2 ? 12 : 7; // the wider bound: nothing visible is culled by a guess (the pose's own flag is lost here)
+      if (!frustum.intersectsSphere(sphere)) continue;
+      const t = w * 4;
+      for (let v = 0; v < 4; v++) { this.pos[t + v] = this.snapPos[o + v]!; this.info[t + v] = this.snapInfo[o + v]!; this.prev[t + v] = this.snapPrev[o + v]!; }
+      w++;
+    }
+    this.count = w;
+    this.commit();
   }
 }
 
@@ -270,6 +312,8 @@ export class VehicleRenderer {
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   private sphere = new THREE.Sphere(new THREE.Vector3(), 7);
+  private cascadeFrustum = new THREE.Frustum();
+  private cascadePv = new THREE.Matrix4();
   private tileBox = new THREE.Box3();
   /** Cooked pedestrians and cyclists (src/render/people); until they load, the simple figures. */
   readonly people = new PeopleRenderer();
@@ -464,6 +508,24 @@ export class VehicleRenderer {
     for (const b of this.nearFar) b.commit();
     this.mid.commit();
     for (const b of this.midCars) b.commit();
+    // the colour lists snapshotted: each shadow cascade draws a compacted subset of them (prepareCascade)
+    for (const b of this.allBatches()) b.snapshot();
+  }
+
+  private allBatches(): Batch[] {
+    return [...this.near, ...this.nearGlass.filter((b): b is Batch => !!b), ...this.nearFar, this.mid, ...this.midCars];
+  }
+
+  /** One shadow cascade's cull: only the instances its frustum sweeps (post.ts renderShadow, between passes). */
+  prepareCascade(camera: THREE.Camera): void {
+    this.cascadePv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.cascadeFrustum.setFromProjectionMatrix(this.cascadePv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
+    for (const b of this.allBatches()) b.compactFor(this.cascadeFrustum, this.sphere);
+  }
+
+  /** The colour pass's lists restored (post.ts, after the last cascade). */
+  prepareMain(): void {
+    for (const b of this.allBatches()) b.restore();
   }
 
   /** Updates the followed vehicle after the frame: out of sight for half a second, let go. */
