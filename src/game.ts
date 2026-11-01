@@ -15,6 +15,7 @@ import { createCity, createCityDetail } from './render/city.ts';
 import { viewScale } from './render/viewError.ts';
 import { sunDirection } from './render/sun.ts';
 import { buildCloudMap } from './render/cloudShadow.ts';
+import { buildSeaGeometry } from './render/seaGeometry.ts';
 import { BuildingOccluders } from './render/visibility.ts';
 import { createRoads, createTrafficLook, type TrafficLook } from './render/roads.ts';
 import type { CellLayer } from './render/cellLayer.ts';
@@ -567,7 +568,7 @@ export class Game {
     // the sea gets the terrain's water; its geometry is the water table's own sea (no masked plane, audit F8)
     this.parts.water.material = this.terrain.createSeaMaterial();
     this.parts.water.geometry.dispose();
-    this.parts.water.geometry = this.terrain.buildSeaGeometry();
+    this.parts.water.geometry = buildSeaGeometry(this.world);
     this.parts.water.frustumCulled = true;
     for (const l of this.layers) scene.add(l.group);
     scene.add(this.preview.mesh, this.preview.marker, this.preview.circle);
@@ -857,8 +858,10 @@ export class Game {
     this.growth.tick(dt, this.clock.running);
     const T2 = pf ? performance.now() : 0;
     pr?.lap(PART.growth, T2);
+    // the water table edited: the sea's geometry ends where it says - rebuilt before the frame draws
+    const waterWasDirty = this.world.waterDirty.size > 0;
     this.terrain.uploadDirtyLayers();
-    if (this.terrain.seaStale) { this.terrain.seaStale = false; this.parts.water.geometry.dispose(); this.parts.water.geometry = this.terrain.buildSeaGeometry(); }
+    if (waterWasDirty) { this.parts.water.geometry.dispose(); this.parts.water.geometry = buildSeaGeometry(this.world); }
     this.terrain.update(cam, this.rig.eye, this.parts.renderer);
     pr?.lap(PART.terrain, performance.now());
     this.updatePixelScale(); // the ortho's zoom and the camera's mode change the view's pixels per metre per frame
