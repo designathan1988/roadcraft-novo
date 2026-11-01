@@ -366,6 +366,10 @@ export class CameraRig {
     // never below the ground: at least at eye height
     const g = heightAt(this.heights, this.eye.x, this.eye.z) + EYE;
     if (this.eye.y < g) this.eye.y = g;
+    // The eye never leaves the map: past the skirt the world is the void, and everything standing inside would
+    // read as floating in it (the owner, 2026-11-01). The look target stays; the camera slides to the boundary.
+    this.eye.x = THREE.MathUtils.clamp(this.eye.x, -MAP_HALF, MAP_HALF);
+    this.eye.z = THREE.MathUtils.clamp(this.eye.z, -MAP_HALF, MAP_HALF);
     const look = this.look.set(tx, ty + Math.min(EYE, dist * 0.3), tz);
 
     const p = this.persp;
