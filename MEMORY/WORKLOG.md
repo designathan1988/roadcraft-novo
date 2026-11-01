@@ -119,3 +119,18 @@ QUAL DOIS CLAUDES?
 - Still open from the five causes: the kept-frame store copy (48 MiB/frame - needs the mover-map sampled with max),
   occlusion for props/vehicles/people (depth pyramid), depth prepass + mask-free variants, vehicles/people
   per-cascade lists (small), the cloud-shadow MAP, the budget city/map architecture (tile fidelity cost).
+
+---
+## 2026-11-01 (6th) | the pools' occlusion — commit 93a768c
+- Cause 2 of the GPU-100% list, fixed for the props pool (the heaviest): src/render/depthOcclusion.ts - a
+  hierarchical depth pyramid (the farthest stored depth per cell, conservative) reduced from the previous frame's
+  scene depth at post's frame end, tested in the props' cull compute (colour emit only; the shadow sweep keeps
+  casters behind buildings). The instance's nearest point is pulled 1 m toward the camera and projected by the same
+  matrices the frame renders with - no convention mismatch; one frame late, the standard scheme.
+- Budget, before -> after: city DRAWS 191 -> 174 (back within the 179 limit), city drawn 7,104,467 -> 6,661,253,
+  night 13,320,181 -> 12,451,699, street ~unchanged (a canyon), map unchanged (nothing occluded from above).
+  Photo: occl-street.png (dense canyon, no holes, deeper blocks through the gaps as they are).
+- Day total on the drawn loads: street 16.21M -> 15.36M, city 7.10M -> 6.66M, night 13.40M -> 12.45M.
+- Still open: the kept-frame store copy (mover map + max sampling), depth prepass + mask-free variants for
+  props/roads/terrain, vehicles/people per-cascade lists, the cloud-shadow map, the budget's city/map
+  architecture (the tile fidelity cost stands until then).
