@@ -24,6 +24,12 @@ optimization reference — its code is NOT assumed correct; every technique is v
   draw the same image (SSIM 0.974 vs after-850; rest is sim motion).
 - Report: `reports/lod-error-and-sse-2026-11-01.md`.
 
+5. **The void is never seen (the owner's photo).** The camera's eye was not clamped to the map - only
+   the target was - so at an edge target with distance the camera flew outside and the edge hills' trees and
+   the camera-locked grass read as floating in the void. The eye now clamps to the map (cameraRig.syncCamera);
+   the grass tufts past the edge never grow (material + GPU cull). Commits on port/roadcraft-features-dev:
+   814c4fd (levels + SSE + GPU floors), badb328 + 7797f30 (memory, eye clamp).
+
 ## Open
 - Budget city/map rows still above the limit; the audit's remaining items (shadows per cascade/scroll, cloud-shadow
   map, water early-out, draw-slot batching, 24 km arrays, per-pass attribution, memory budget), `?webgl`, the
