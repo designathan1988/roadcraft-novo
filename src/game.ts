@@ -1123,7 +1123,14 @@ export class Game {
     if (this.post) { this.post.dispose(); this.post = null; }
     this.parts.sun.castShadow = false;
     renderer.shadowMap.enabled = false;
-    if (want) this.post = new Post(renderer, scene, this.rig.persp, this.parts.sun, { shadows: s.shadows, ao: s.ao, bloom: s.bloom });
+    if (want) {
+      this.post = new Post(renderer, scene, this.rig.persp, this.parts.sun, { shadows: s.shadows, ao: s.ao, bloom: s.bloom });
+      // the shadow cascades cull their own casters (props.prepareCascade) and restore the colour cull after the last
+      if (this.props) this.post.setShadowHooks({
+        cascade: (cam) => this.props.prepareCascade(renderer, cam),
+        main: () => this.props.prepareMain(renderer),
+      });
+    }
     if (compile) {
       this.hud.showLoading(t('game.loading.options'));
       // the explosion's pieces: shadows switched on are 3 more pipelines for them (compiled here, not at the next bomb)

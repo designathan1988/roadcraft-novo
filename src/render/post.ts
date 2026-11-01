@@ -51,6 +51,10 @@ const SAFETY_STAGGER = 10;
  * three maps every frame, the whole near city, for a wind that moved only the trees (Unity HDRP mixed cached shadows,
  * Unreal virtual shadow maps' cached pages, Acton "CSM Scrolling", SIGGRAPH 2012).
  */
+/** What the shadow phase asks the page for, per cascade: the movers' cull runs between passes, with the cascade's
+ *  own frustum, before its render; after the last one the colour arguments are restored (`props.prepareMain`). */
+export interface ShadowHooks { cascade(cam: THREE.Camera): void; main(): void }
+
 class CachedShadowNode extends THREE.ShadowNode {
   private store: THREE.DepthTexture | null = null;
   private readonly view = new THREE.Matrix4();
@@ -58,10 +62,12 @@ class CachedShadowNode extends THREE.ShadowNode {
   private age: number;
   private readonly stale: boolean[];
   private readonly index: number;
-  constructor(light: THREE.Light, shadow: THREE.LightShadow, stale: boolean[], index: number) {
+  private readonly hooks: () => ShadowHooks | null;
+  constructor(light: THREE.Light, shadow: THREE.LightShadow, stale: boolean[], index: number, hooks: () => ShadowHooks | null) {
     super(light as THREE.DirectionalLight, shadow);
     this.stale = stale;
     this.index = index;
+    this.hooks = hooks;
     this.age = index * SAFETY_STAGGER;
   }
 
@@ -74,6 +80,10 @@ class CachedShadowNode extends THREE.ShadowNode {
     shadowMap.setSize(shadow.mapSize.width, shadow.mapSize.height, shadowMap.depth);
     const cam = shadow.camera, mask = cam.layers.mask, depth = shadowMap.depthTexture!;
     const w = shadow.mapSize.width, h = shadow.mapSize.height;
+    // this cascade's own casters, culled with its own frustum: the movers' vertex work was drawn three times
+    // whole, once per cascade, whatever slice each one covers (the hooks read null until the page wires them)
+    const hooks = this.hooks();
+    if (hooks) hooks.cascade(cam);
     if (this.store && (this.store.image.width !== w || this.store.image.height !== h)) { this.store.dispose(); this.store = null; }
     const kept = this.store !== null && !this.stale[this.index] && ++this.age < SAFETY_FRAMES && this.view.equals(cam.matrixWorld) && this.proj.equals(cam.projectionMatrix);
     const name = scene.name;
@@ -103,6 +113,8 @@ class CachedShadowNode extends THREE.ShadowNode {
     }
     cam.layers.mask = mask;
     scene.name = name;
+    // the last cascade is done: the colour pass's cull is restored before the scene renders
+    if (hooks && this.index === 2) hooks.main();
   }
 
   override dispose(): void {
@@ -115,12 +127,14 @@ class CachedShadowNode extends THREE.ShadowNode {
 class FadingCSM extends CSMShadowNode {
   /** Per cascade: its still casters must be drawn again (Post.invalidateShadows). */
   readonly stale = [true, true, true];
+  /** The page's per-cascade cull (props.prepareCascade / prepareMain), read at each cascade's render. */
+  shadowHooks: ShadowHooks | null = null;
   private reachU = T.uniform(PERSP_SHADOW_FAR);
   /** The cascades' shadows as cached ones (three's CSM makes plain ShadowNodes in `_init`). */
   _init(builder: unknown): void {
     (CSMShadowNode.prototype as unknown as { _init(b: unknown): void })._init.call(this, builder);
     const self = this as unknown as { lights: Array<THREE.Light & { shadow: THREE.LightShadow }>; _shadowNodes: Node[] };
-    self._shadowNodes = self.lights.map((l, i) => T.nodeObject(new CachedShadowNode(l, l.shadow, this.stale, i)));
+    self._shadowNodes = self.lights.map((l, i) => T.nodeObject(new CachedShadowNode(l, l.shadow, this.stale, i, () => this.shadowHooks)));
   }
   setup(builder: unknown): Node {
     const shadowed = (super.setup as (b: unknown) => Node)(builder);
@@ -157,6 +171,9 @@ export class Post {
   private scenePass: Node;
   private renderer: THREE.WebGPURenderer;
   readonly csm: CSMShadowNode | null = null;
+  /** The page's per-cascade cull (props.prepareCascade / prepareMain): handed to the cascades each frame. */
+  shadowHooks: ShadowHooks | null = null;
+  setShadowHooks(hooks: ShadowHooks | null): void { this.shadowHooks = hooks; }
   opts: PostOptions;
 
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, sun: THREE.DirectionalLight, opts: PostOptions) {
@@ -411,6 +428,7 @@ export class Post {
   prepareShadows(moving: boolean): void {
     const csm = this.csm as (CSMShadowNode & { lights: Array<{ shadow: THREE.LightShadow }> }) | null;
     if (!csm || csm.lights.length === 0) return;
+    (csm as unknown as FadingCSM).shadowHooks = this.shadowHooks;
     const cam = this.camera;
     const still = !moving && !this.shadowDirty && this.shadowView.equals(cam.matrixWorld) && this.shadowProj.equals(cam.projectionMatrix) && this.shadowSun.equals(this.sun.position);
     this.shadowView.copy(cam.matrixWorld);

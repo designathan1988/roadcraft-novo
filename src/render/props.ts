@@ -114,6 +114,13 @@ export class PropRenderer {
   private count: Node;
   private prefix: Node;
   private cull: Node;
+  /** The shadow cascades' own frustum and fill: casters per cascade, run between passes (post.ts renderShadow). */
+  private readonly shadowPlanes: THREE.Vector4[] = Array.from({ length: 6 }, () => new THREE.Vector4());
+  private shadowPlanesU: Node;
+  private shFrustum = new THREE.Frustum();
+  private shPv = new THREE.Matrix4();
+  private shCount: Node;
+  private shCull: Node;
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   /** Traffic light state texture (node → 1 + arm * 4 + state). */
@@ -299,6 +306,55 @@ export class PropRenderer {
     const offsetC = storage(this.offsetAttr, 'uint', DRAWS).toReadOnly();
     this.cull = Fn(() => {
       classify((slot, code) => {
+        const n = atomicAdd(cursorA.element(slot), uint(1));
+        visW.element(offsetC.element(slot).add(n)).assign(code);
+      });
+    })().compute(CAP, [64]);
+
+    // The shadow cascades' fill: the casters alone, level 0, no dissolve state - each cascade's own frustum with
+    // the same sweep toward the sun the main cull tests. prepareCascade runs it between passes, before that
+    // cascade's render, so the draws' indirect arguments hold the cascade's own casters (up to two thirds of the
+    // shadow vertices were instances whose slice another cascade covers).
+    this.shadowPlanesU = uniformArray(this.shadowPlanes, 'vec4');
+    const shadowPlanesU = this.shadowPlanesU;
+    const shadowClassify = (emit: (slot: Node, code: Node) => void) => {
+      const i = instanceIndex;
+      If(i.lessThan(this.usedU), () => {
+        const type = extraC.element(i).bitAnd(uint(31)).toVar();
+        If(type.lessThan(uint(PROP_FREE)), () => {
+          const pose = poolC.element(i).toVar();
+          const p = pose.xyz;
+          let isVar = uint(0).toVar();
+          for (const t of VARIANT_TYPES) isVar = select(type.equal(uint(t)), uint(1), isVar);
+          const variant = select(isVar.equal(uint(1)), extraC.element(i).shiftRight(uint(29)).bitAnd(uint(7)), uint(pose.w).shiftRight(uint(12)).bitAnd(uint(15)));
+          const kind = kindOfC.element(type.mul(VARIANTS).add(variant)).toVar();
+          const isPart = this.partSize.isPart(kind);
+          const s3 = this.partSize.scale(extraC.element(i), select(isVar.equal(uint(1)), float(1), float(0))).toVar();
+          const rk = this.radiusU.element(kind);
+          const bits = float(uint(pose.w).shiftRight(uint(16)).bitAnd(uint(63)));
+          const mode = this.stretchU.element(kind);
+          const rProp = select(mode.lessThan(0.5), rk.mul(bits.div(42).add(0.5)), rk.add(bits.mul(select(mode.lessThan(1.5), float(1), float(0.1)))));
+          const r = select(isPart, this.partSize.radius(kind, s3), rProp).toVar();
+          const sun = this.sunU;
+          const len = select(sun.y.greaterThan(0.02), min(r.div(sun.y.max(0.02)), float(SHADOW_LENGTH)), float(0));
+          let inShadow: Node = float(1);
+          for (let k = 0; k < 6; k++) {
+            const pl = shadowPlanesU.element(k);
+            const s0 = dot(pl.xyz, p).add(pl.w);
+            inShadow = inShadow.mul(step(r.negate(), s0.add(max(dot(pl.xyz, sun.xyz.negate()).mul(len), float(0)))));
+          }
+          const d = length(p.sub(this.camU)).toVar();
+          If(inShadow.greaterThan(0.5).and(this.castU.element(kind).greaterThan(0.5)).and(d.lessThan(this.distU.element(kind.mul(LODS)))), () => {
+            emit(kind.mul(LODS), i.bitOr(uint(255).shiftLeft(uint(22))));
+          });
+        });
+      });
+    };
+    this.shCount = Fn(() => {
+      shadowClassify((slot) => { atomicAdd(drawsA.element(slot.mul(5).add(1)), uint(1)); });
+    })().compute(CAP, [64]);
+    this.shCull = Fn(() => {
+      shadowClassify((slot, code) => {
         const n = atomicAdd(cursorA.element(slot), uint(1));
         visW.element(offsetC.element(slot).add(n)).assign(code);
       });
@@ -603,6 +659,32 @@ export class PropRenderer {
     const nearest = Math.min(TILE_SIZE, camPos.y - top);
     for (let k = 0; k < DRAWS; k++) { const m = this.slotMesh[k]; if (m) m.visible = this.distArr[k] > nearest; }
     this.usedU.value = this.blocks.highBlock * BLOCK;
+    renderer.compute(this.reset);
+    renderer.compute(this.count);
+    renderer.compute(this.prefix);
+    renderer.compute(this.cull);
+  }
+
+  /**
+   * One shadow cascade's cull: the casters its own frustum sweeps (post.ts renderShadow calls this between passes,
+   * before the cascade's render - the draws' indirect arguments then hold that cascade's casters alone). The
+   * distance bands still read the main camera (`camU`, untouched): the level a caster casts with is the one the
+   * view chose.
+   */
+  prepareCascade(renderer: THREE.WebGPURenderer, camera: THREE.Camera): void {
+    if (!this.enabled) return;
+    this.shPv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.shFrustum.setFromProjectionMatrix(this.shPv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
+    this.shFrustum.planes.forEach((p, k) => this.shadowPlanes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
+    renderer.compute(this.reset);
+    renderer.compute(this.shCount);
+    renderer.compute(this.prefix);
+    renderer.compute(this.shCull);
+  }
+
+  /** The colour pass's cull again: the cascades' fills overwrote the indirect arguments (post.ts, after the last). */
+  prepareMain(renderer: THREE.WebGPURenderer): void {
+    if (!this.enabled) return;
     renderer.compute(this.reset);
     renderer.compute(this.count);
     renderer.compute(this.prefix);
