@@ -21,6 +21,7 @@ import { buildLeafAtlas } from './treeMeshes.ts';
 import { T, type Node } from './tsl.ts';
 import { PropBlocks } from './propBlocks.ts';
 import { PropFallback } from './propFallback.ts';
+import { DepthOcclusion } from './depthOcclusion.ts';
 import { createPropMaterial, fadeJitter } from './propMaterial.ts';
 import { SHADOW_LENGTH, sunDirection } from './sun.ts';
 import type { SegId } from '../core/ids.ts';
@@ -121,6 +122,12 @@ export class PropRenderer {
   private shPv = new THREE.Matrix4();
   private shCount: Node;
   private shCull: Node;
+  /** The pools' occlusion: the previous frame's depth pyramid, tested in the cull (WebGPU only). */
+  private occlusion: DepthOcclusion | null = null;
+  private camFU = uniform(new THREE.Vector3(0, 0, -1));
+  private projU = uniform(new THREE.Matrix4());
+  private viewU = uniform(new THREE.Matrix4());
+  private focalU = uniform(1304);
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   /** Traffic light state texture (node → 1 + arm * 4 + state). */
@@ -148,6 +155,7 @@ export class PropRenderer {
     this.pool = pool;
     this.dirty = world.dirty.reader(Dirty.Props);
     this.enabled = isWebGPU; // compute culling: WebGPU only (on WebGL 2 the props are left out for now)
+    if (this.enabled) this.occlusion = new DepthOcclusion(); // the cull tests the previous frame's depth pyramid
     this.partModels = buildingPartModels();
     this.defs = buildPropDefs(this.partModels);
     const built = buildPropKinds(this.defs);
@@ -231,6 +239,9 @@ export class PropRenderer {
             inView = inView.mul(step(r.negate(), s0));
             inShadow = inShadow.mul(step(r.negate(), s0.add(max(dot(pl.xyz, sun.xyz.negate()).mul(len), float(0)))));
           }
+          // the previous frame's depth pyramid: an instance hidden behind the frame's occluders does not draw
+          // (the shadow sweep keeps its casters - a tree behind a building still shadows the street)
+          if (this.occlusion) inView = inView.mul(this.occlusion.test(p, r, this.camFU, this.projU, this.viewU, this.focalU));
           If(inView.add(inShadow).greaterThan(0.5), () => {
             const d = length(p.sub(this.camU)).toVar();
             // A part's levels end where its size on the screen says, within its type's distance (render/partSize.ts).
@@ -638,6 +649,11 @@ export class PropRenderer {
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
+    // the occlusion test projects with the same matrices the frame renders with, and its focal in pixels
+    (this.projU.value as THREE.Matrix4).copy(camera.projectionMatrix);
+    (this.viewU.value as THREE.Matrix4).copy(camera.matrixWorldInverse);
+    camera.getWorldDirection(this.camFU.value as THREE.Vector3);
+    this.focalU.value = (renderer.domElement.height || 1080) / (2 * Math.tan((((camera as THREE.PerspectiveCamera).fov ?? 45) / 2) * Math.PI / 180));
     (this.sunU.value as THREE.Vector3).copy(sunDirection);
     // a new scale moves every distance: the cascades' casters changed
     if (this.partSize.setView(camera, this.pixelScale)) this.changed = true;
@@ -691,8 +707,10 @@ export class PropRenderer {
     renderer.compute(this.cull);
   }
 
-  /** Forgets everything (another city): results still on their way are ignored by version. */
-  clear(): void {
+  /** The pools' occlusion pyramid (null on WebGL 2): post.frameEnd feeds it the scene depth. */
+  get occl(): DepthOcclusion | null { return this.enabled ? this.occlusion : null; }
+
+  /** Forgets everything (another city): results still on their way are ignored by version. */  clear(): void {
     for (const c of [...this.blocks.resident]) { this.clearBlocks(this.blocks.release(c)); this.forgetKinds(c); }
     for (let c = 0; c < CELL_COUNT; c++) {
       if (!this.enabled) this.fallback?.setCell(c, null);

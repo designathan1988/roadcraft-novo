@@ -1130,6 +1130,8 @@ export class Game {
         cascade: (cam) => this.props.prepareCascade(renderer, cam),
         main: () => this.props.prepareMain(renderer),
       });
+      // the frame's depth feeds the pools' occlusion pyramid (the next frame's cull reads it)
+      if (this.props) this.post.frameEnd = (depth) => this.props.occl?.build(renderer, depth);
     }
     if (compile) {
       this.hud.showLoading(t('game.loading.options'));

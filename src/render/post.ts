@@ -174,6 +174,8 @@ export class Post {
   /** The page's per-cascade cull (props.prepareCascade / prepareMain): handed to the cascades each frame. */
   shadowHooks: ShadowHooks | null = null;
   setShadowHooks(hooks: ShadowHooks | null): void { this.shadowHooks = hooks; }
+  /** The frame's end: the scene depth is complete (the pools' occlusion pyramid reduces it for the next cull). */
+  frameEnd: ((depth: THREE.DepthTexture) => void) | null = null;
   opts: PostOptions;
 
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, sun: THREE.DirectionalLight, opts: PostOptions) {
@@ -461,6 +463,11 @@ export class Post {
     this.selectOutput();
     updateVelocityCamera(this.camera);
     this.pipeline.render();
+    // the scene depth is complete: the pools' occlusion pyramid reduces it for the next frame's cull
+    if (this.frameEnd && this.scenePass) {
+      const depth = (this.scenePass as unknown as { getTextureNode(name: string): { texture: THREE.DepthTexture } }).getTextureNode('depth').texture;
+      if (depth) this.frameEnd(depth);
+    }
   }
 
   /**
