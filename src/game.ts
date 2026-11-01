@@ -13,6 +13,8 @@ import { roadGraphTransfer } from './shared/contracts/worker.ts';
 import { CameraRig } from './render/cameraRig.ts';
 import { createCity, createCityDetail } from './render/city.ts';
 import { viewScale } from './render/viewError.ts';
+import { sunDirection } from './render/sun.ts';
+import { buildCloudMap } from './render/cloudShadow.ts';
 import { BuildingOccluders } from './render/visibility.ts';
 import { createRoads, createTrafficLook, type TrafficLook } from './render/roads.ts';
 import type { CellLayer } from './render/cellLayer.ts';
@@ -1138,8 +1140,12 @@ export class Game {
           this.vehicles.people.prepareMain();
         },
       });
-      // the frame's depth feeds the pools' occlusion pyramid (the next frame's cull reads it)
-      if (this.props) this.post.frameEnd = (depth) => this.props.occl?.build(renderer, depth);
+      // the frame's depth feeds the pools' occlusion pyramid (the next frame's cull reads it); the cloud-shadow
+      // map is baked for the next composite (the clouds drift every frame)
+      if (this.props) this.post.frameEnd = (depth) => {
+        this.props.occl?.build(renderer, depth);
+        buildCloudMap(renderer, sunDirection);
+      };
     }
     if (compile) {
       this.hud.showLoading(t('game.loading.options'));
