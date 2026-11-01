@@ -99,3 +99,11 @@ QUAL DOIS CLAUDES?
   lab worktree and cannot be touched from here). electron/main.mjs logs the page console's stack now.
 - Open (the big GPU items): per-cascade mover lists, the kept-frame store copy, occlusion for props/vehicles/people,
   depth prepass + mask-free variants for props/roads/terrain, budget city/map architecture.
+
+---
+## 2026-11-01 (4th) | the void never seen — commit 7797f30
+- The owner's photo showed trees and grass "in the empty space" past the map's edge. Root cause: the camera's eye
+  was not clamped - the target was, the eye was not, so at an edge target with distance the camera flew outside
+  and everything inside read as floating in the void. Fixed in cameraRig.syncCamera (the eye clamps to the map;
+  the look target stays). The grass tufts past the edge never grow (material + GPU cull) - the field ends with the
+  terrain. Photo: edge-clamped.png (the frame is all world), grass-edge-fixed.png.
