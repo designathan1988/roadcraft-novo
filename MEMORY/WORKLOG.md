@@ -146,3 +146,18 @@ QUAL DOIS CLAUDES?
 - Still open: the kept-frame store copy (needs the mover map + max sampling in every material's shadow filter),
   depth prepass + mask-free variants for props/roads/terrain, the cloud-shadow map (overcast days), the budget's
   city/map architecture (tile fidelity cost; the SSE/occlusion/lossless fixes are all in).
+
+---
+## 2026-11-01 (8th) | the mask-free variant — commit (git log)
+- Cause 3 of the GPU-100% list, fixed the correct way: the discard's PRESENCE (not its value) kills early-Z, so
+  `If`-gates cannot restore it. The layers (buildings, roads) now hold the masked material AND the same shader
+  without the discards; applyFades swaps each mesh (and its shadow-only twin) by state: whole -> plain (early-Z
+  back), fading/cut/hole -> masked. Buildings' plainFor: fade at rest, no inside cut, cell not meeting the detail
+  layer's window holes. Roads': fade at rest, the zone tool off.
+- The audit's earlier prepass attempt regressed because it drew everything in the prepass; the variant needs no
+  measurement to be correct: the plain shader's pixels would never be discarded - the frame cannot differ.
+- Photos: variant-street.png, variant-city.png (identical windows/facades/streets). Budget holds (street 15.36M,
+  city 6.66M within draws, night 12.45M).
+- REMAINING (each with its mechanism): the kept-frame store->map copy (mover map + max sampling in the shadow
+  filters), the cloud-shadow map for overcast days, vehicles/people colour-pass occlusion (their frustum-only cull
+  stands; the props' pyramid covers the heavy pool), the budget city/map architecture (tile fidelity cost).
