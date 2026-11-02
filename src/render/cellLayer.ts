@@ -285,7 +285,9 @@ export class CellLayer {
     const replacing = s.mesh !== null && m !== null;
     // a level standing in for this one casts its shadow; an edit (a version), or a slot nothing covered, changes it
     const covered = cell >= 0 && this.cells.length > 1 && !!this.cells[1 - level]?.[cell]?.mesh;
-    if ((version !== 0 && s.built !== 0 && s.mesh && (this.opt.shadows ?? true)) || (m && !covered && (this.opt.shadows ?? true))) {
+    // (a road casts only as a bridge)
+    const casts = (this.opt.shadows ?? true) || (this.src.castsShadow?.(s.scope, s.id) ?? false);
+    if ((version !== 0 && s.built !== 0 && s.mesh && casts) || (m && !covered && casts)) {
       const e = this.opt.margin, x0 = m ? m.originX : (s.mesh!.userData as FadeData).box!.x0 + e, z0 = m ? m.originZ : (s.mesh!.userData as FadeData).box!.z0 + e;
       this.casterBoxes.push(new THREE.Box3(new THREE.Vector3(x0 - e, -200, z0 - e), new THREE.Vector3(x0 + s.size + e, 1400, z0 + s.size + e)));
     }
@@ -671,8 +673,8 @@ export class CellLayer {
       for (const mesh of out) {
         const u = mesh.userData as FadeData;
         const plain = mats.plainFor(u);
-        // a tile or a plate holds no cell
-        const near = u.cell !== undefined || !mats.farMasked;
+        // a tile, a plate or a cell's far level (from `detail` on a window is two pixels): the far material
+        const near = (u.cell !== undefined && u.level === 0) || !mats.farMasked;
         const chosen = (plain ? (near ? mats.plain : mats.farPlain) : (near ? mats.masked : mats.farMasked)) as THREE.Material;
         (mesh as THREE.Mesh).material = chosen;
         if (u.twin) u.twin.material = chosen;

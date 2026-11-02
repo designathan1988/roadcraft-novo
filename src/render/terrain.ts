@@ -504,7 +504,7 @@ export class TerrainRenderer {
       const p = positionWorld;
       const slope = float(1).sub(n.y);
       const fade = clamp(float(1).sub(fwidth(p.x).div(0.8)), 0, 1).mul(smoothstep(0.08, 0.3, slope)).toVar();
-      // three octaves of noise where the relief shows: near, on a slope. A branch, not a mix: every flat or far pixel paid them
+      // the noise only where the relief shows: near, on a slope
       const eroded = n.toVar();
       If(fade.greaterThan(0), () => {
         const q = p.xz.mul(0.45).add(vec2(p.y.mul(0.3), 0));
@@ -531,16 +531,14 @@ export class TerrainRenderer {
     const color = Fn(() => {
       const n = normalize(vNormal);
       const p = positionWorld;
-      const slope = float(1).sub(n.y);
-      // a 180 m wave, per vertex: the coarsest grid still samples it a few times a period; per pixel it cost a noise each
+      // a 180 m wave: per vertex, the coarsest grid still samples it
       const big = broad.mul(0.5).add(0.5);
       // fades with distance before it turns into noise (fwidth > period)
       const fadeMid = clamp(float(1).sub(fwidth(p.xz.x).div(6)), 0, 1).toVar();
-      // the 23 m one only where it shows (a branch: a mix ran the noise at every far pixel)
+      // the 23 m one only where it shows
       const mid = float(0).toVar();
       If(fadeMid.greaterThan(0), () => { mid.assign(mx_noise_float(p.xz.mul(1 / 23))); });
       const grassA = sRGBTransferEOTF(this.grassA);
-      const grassB = sRGBTransferEOTF(this.grassB);
       const dirt = sRGBTransferEOTF(vec3(0.52, 0.45, 0.36));
       // Roadcraft 4.0's grass texture as it is (its own tones: tufts, soil in the gaps, dry patches), the large patches
       // from a wide octave (macro × 0.7..1.3 at 0.35), the biome's hue over the default biome's, and a little less
@@ -552,9 +550,7 @@ export class TerrainRenderer {
       const biome = grassA.div(sRGBTransferEOTF(vec3(0x46 / 255, 0x64 / 255, 0x2f / 255)));
       let c: N = gNear.mul(mix(float(1), macro, 0.35)).mul(biome);
       c = mix(vec3(dot(c, lumaW)), c, 0.82).mul(mix(float(0.92), float(1.06), clamp(big.add(mid.mul(0.22).mul(fadeMid)), 0, 1)));
-      void grassB;
       const speck = clamp(dot(gNear, lumaW).div(GRASS_MEAN).mul(0.5), 0, 1);
-      void slope;
       // the 4.0's dirt (terrain-land layer 8, 13.6 m), the soil of the rock it weathered from; the painted geology's
       // rock in its beds (terrainRock.ts); scree at the rock's fringe
       const geo = this.geologyAt(p);

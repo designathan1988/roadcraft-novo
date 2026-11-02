@@ -48,7 +48,7 @@ const mapCell = Fn(() => {
     const layer = float(0).toVar();
     If(cloudsU.greaterThan(0), () => {
       const tl = float(CLOUD_Y).sub(world.y).div(up);
-      layer.assign(layerCover(world.xz.add(toSun.xz.mul(tl))).mul(step(world.y, float(CLOUD_Y))));
+      layer.assign(layerCover(world.xz.add(toSun.xz.mul(tl)), true).mul(step(world.y, float(CLOUD_Y))));
     });
     const through = float(0).toVar();
     If(cloudCountU.greaterThan(0), () => {

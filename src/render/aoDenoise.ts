@@ -96,7 +96,8 @@ class AoDenoiseNode extends DenoiseNode {
 
 				} );
 
-				If( totalWeight.greaterThan( 0 ), () => denoised.divAssign( totalWeight ) );
+				// in a block: an arrow returning the node is a return to TSL, which comments it out in an inline Fn (the sum went undivided)
+				If( totalWeight.greaterThan( 0 ), () => { denoised.divAssign( totalWeight ); } );
 				result.assign( vec4( denoised, texel.a ) );
 
 			} );

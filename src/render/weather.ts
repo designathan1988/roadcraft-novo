@@ -5,10 +5,11 @@
 import * as THREE from 'three/webgpu';
 import { T, type Node } from './tsl.ts';
 import { nightU } from './scene.ts';
+import { TERRAIN_NOISE } from './surfaceBake.ts';
 import { colorOnly } from './tsl.ts';
 
 const {
-  uniform, vec3, vec4, float, mix, smoothstep, clamp, positionWorld, positionLocal, time, mx_fractal_noise_float,
+  uniform, vec2, vec3, vec4, float, mix, smoothstep, clamp, positionWorld, positionLocal, time, texture,
   instanceIndex, hash, fract, cameraPosition, normalize, cross, sRGBTransferEOTF, attribute, sin, step, cameraProjectionMatrix,
 } = T;
 
@@ -28,9 +29,15 @@ export const flashU = uniform(0);
 export const cloudDriftU = uniform(new THREE.Vector2(0, 0));
 
 /** Cover of the weather's cloud layer over a point of its plane (0..1): the noise its material draws. */
-export function layerCover(xz: Node): Node {
+export function layerCover(xz: Node, compute = false): Node {
   const p = xz.add(cloudDriftU).div(2600);
-  const n = mx_fractal_noise_float(vec3(p.x, p.y, time.mul(0.002)), 4, 2, 0.5).mul(0.5).add(0.5);
+  // four octaves already baked, one per channel (surfaceRecipes bakeTerrainNoise: periods 4, 8, 16, 32 a tile): one read for
+  // what cost four noises a pixel of sky. Two reads, turned and drifting apart, are the old third axis: the shapes evolve
+  // and the tile does not repeat; the factor brings the mean of two back to the spread of one
+  const read = (uv: Node) => { const t = texture(TERRAIN_NOISE, uv); const s = compute ? t.level(0) : t; return s.r.mul(8).add(s.g.mul(4)).add(s.b.mul(2)).add(s.a).div(15); };
+  const a = read(p.div(4));
+  const b = read(vec2(p.x.mul(0.8).sub(p.y.mul(0.6)), p.x.mul(0.6).add(p.y.mul(0.8))).add(time.mul(0.002)).div(5.3).add(0.37));
+  const n = a.add(b).mul(0.5).sub(0.5).mul(1.37).add(0.5);
   const cover = cloudsU.mul(0.9);
   return smoothstep(float(1).sub(cover), float(1.15).sub(cover.mul(0.6)), n);
 }
