@@ -29,6 +29,8 @@ const env = {
 };
 delete env.ELECTRON_RUN_AS_NODE;
 const p = spawn(exe, ['.'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+// stopped from outside, it never leaves the game running
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { p.kill(); process.exit(130); });
 const keep = /\[page\]|state:|photo:|script|error|Error|diff:|userData:/;
 const skip = /Security|unsafe-eval|electronjs|once the app|experimental on this/;
 for (const s of [p.stdout, p.stderr]) {
