@@ -109,7 +109,7 @@ export class Growth {
    * 3×3 cells around it; when none is left there, a lot anywhere. Bounded work per frame (`budget` tries).
    */
   step(dt: number, budget = 8): void {
-    if (this.cells.length === 0 || this.rate <= 0) return;
+    if (this.filling || this.cells.length === 0 || this.rate <= 0) return;
     this.acc = Math.min(this.acc + dt * this.rate, 50);
     let tries = budget;
     while (this.acc >= 1 && tries-- > 0) {
@@ -308,7 +308,9 @@ export class Growth {
   /** Fills every free lot at once (generated and test city): a grown-up town, aged over a tenth of the decay. */
   fillAll(): number {
     let n = 0;
-    for (const c of this.cells) {
+    // in the cells' own order: `cells` holds the order the workers answered in, and a lot taken first takes its neighbour's
+    // ground, so the same seed drew a different city each time
+    for (const c of [...this.cells].sort((a, b) => a - b)) {
       const l = this.lots.get(c)!;
       for (let i = 0; i < l.count; i++) if (!this.occupied(l, i)) {
         const rec = this.recordFor(l, i);
@@ -317,6 +319,19 @@ export class Growth {
       }
     }
     return n;
+  }
+
+  /** A whole city's lots are being asked and filled: nothing grows by the clock in between (it took lots by the frame). */
+  private filling = false;
+
+  /** Asks every dirty cell's lots, waits for them all, fills them. */
+  async growAll(): Promise<number> {
+    this.filling = true;
+    try {
+      this.processDirty();
+      await this.pool.whenIdle();
+      return this.fillAll();
+    } finally { this.filling = false; }
   }
 
   get pendingCells(): number { return this.world.dirty.pending(Dirty.Lots); }

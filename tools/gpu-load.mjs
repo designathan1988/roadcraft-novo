@@ -44,7 +44,7 @@ const exe = path.join(root, 'node_modules', 'electron', 'dist', process.platform
 const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-load-'));
 const port = 9800 + Math.floor(Math.random() * 150);
 // a window on the screen (ROADCRAFT_SHOW): off screen the compositor does not present as it does for a player
-const env = { ...process.env, ROADCRAFT_SHOT: path.join(own, 'shot.png'), ROADCRAFT_QUERY: query, ROADCRAFT_SCRIPT: '1', ROADCRAFT_SETTLE: '7200', ROADCRAFT_USER_DATA: own, ROADCRAFT_W: W, ROADCRAFT_H: H, ROADCRAFT_SHOW: 'screen', ROADCRAFT_PLAYER: '1' };
+const env = { ...process.env, ROADCRAFT_SHOT: path.join(own, 'shot.png'), ROADCRAFT_QUERY: query, ROADCRAFT_SCRIPT: '1', ROADCRAFT_SETTLE: '7200', ROADCRAFT_USER_DATA: own, ROADCRAFT_W: W, ROADCRAFT_H: H, ROADCRAFT_PLAYER: '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.ROADCRAFT_NOVSYNC;
 const child = spawn(exe, ['.', `--remote-debugging-port=${port}`], { cwd: root, env, stdio: 'ignore' });

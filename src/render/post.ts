@@ -542,6 +542,12 @@ export class Post {
     this.pipeline.needsUpdate = true;
     const t = this.traas[want === this.nightOut && this.traas.length > 1 ? 1 : 0] as unknown as { restartHistory: boolean };
     t.restartHistory = true;
+    // the image out of use gives its history back (two full-size colour targets and a depth): its own starts over anyway
+    for (const o of this.traas as unknown as Array<{ restartHistory: boolean; _historyRenderTarget: THREE.RenderTarget; _resolveRenderTarget: THREE.RenderTarget }>) {
+      if (o === t) continue;
+      o._historyRenderTarget.dispose();
+      o._resolveRenderTarget.dispose();
+    }
   }
 
   /** `moving`: casters that move this frame (see prepareShadows). */

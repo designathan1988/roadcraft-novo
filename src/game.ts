@@ -277,7 +277,7 @@ export class Game {
       clearPage: () => gs.clearPage(),
       forgetSlot: () => { gs.saving.slotBase = null; },
       generateTerrain: () => gs.generateTerrain(),
-      grow: async () => { gs.growth.processDirty(); await gs.pool.whenIdle(); return gs.growth.fillAll(); },
+      grow: () => gs.growth.growAll(),
       endRebuild: (err, what) => gs.endRebuild(err, what),
     });
     this.water = new WaterControl(this.world.look, () => { this.unsaved = true; });

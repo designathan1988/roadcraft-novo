@@ -91,9 +91,11 @@ const exe = path.join(root, 'node_modules', 'electron', 'dist', process.platform
 const own = fs.mkdtempSync(path.join(os.tmpdir(), 'roadcraft-flicker-'));
 const port = 9700 + Math.floor(Math.random() * 90);
 const query = `?city${flag('map', '4') === '4' ? '&medium' : ''}&map=${flag('map', '4')}&clear&hour=${(VIEWS.find((v) => v.name === name) ?? VIEWS[0]).hour}&perf${extra ? '&' + extra : ''}`;
-const env = { ...process.env, ROADCRAFT_SHOT: path.join(own, 'shot.png'), ROADCRAFT_QUERY: query, ROADCRAFT_SCRIPT: '1', ROADCRAFT_SETTLE: '7200', ROADCRAFT_USER_DATA: own, ROADCRAFT_W: flag('w', '1600'), ROADCRAFT_H: flag('h', '900'), ROADCRAFT_SHOW: 'screen' };
+const env = { ...process.env, ROADCRAFT_SHOT: path.join(own, 'shot.png'), ROADCRAFT_QUERY: query, ROADCRAFT_SCRIPT: '1', ROADCRAFT_SETTLE: '7200', ROADCRAFT_USER_DATA: own, ROADCRAFT_W: flag('w', '1600'), ROADCRAFT_H: flag('h', '900'), ROADCRAFT_NOVSYNC: '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 const child = spawn(exe, ['.', `--remote-debugging-port=${port}`], { cwd: root, env, stdio: 'ignore' });
+// stopped from outside, it never leaves the game running
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { child.kill(); process.exit(130); });
 let code = 0;
 try {
   const target = await findPage(port, (u) => u.startsWith('app://'), { tries: 240, every: 500 });
@@ -104,6 +106,8 @@ try {
   const v = VIEWS.find((x) => x.name === name);
   await Promise.race([tab.evaluate(`(async () => { await ${viewScript(v, { after: `await R.frames.settle(20); R.ui.speed(${flag('speed', 0)});` })}; return 1; })()`), sleep(120000)]);
   await sleep(1500);
+  // only the scene: a toast fading or a tooltip under the mouse is not the render
+  await tab.evaluate("document.getElementById('hud').style.display = 'none'");
   const pose = await tab.evaluate('window.__roadcraft.camera.pose()');
   console.log('pose', JSON.stringify(pose));
   const rate = await tab.evaluate(`new Promise((r) => { let n = 0; const t0 = performance.now(); const f = () => { if (++n < 30) requestAnimationFrame(f); else r(30000 / (performance.now() - t0)); }; requestAnimationFrame(f); })`);
@@ -112,10 +116,19 @@ try {
   const yaw0 = pose.yaw ?? 0, dist0 = pose.dist ?? 0;
   const frames = [];
   let found = 0, totalBlink = 0;
+  // what no blink test sees: a surface that never settles. With the camera still, each pixel's change between frames adds up
+  let heat = null, noisy = 0, pairs = 0, last = null;
   const report = [];
   for (let k = 0; k <= steps; k++) {
     await tab.evaluate(`new Promise((r) => { window.__roadcraft.camera.place({ yaw: ${yaw0 + k * yawStep}${distStep ? `, dist: ${dist0 + k * distStep}` : ''} }); requestAnimationFrame(() => requestAnimationFrame(r)); })`);
     frames.push(await shot());
+    const fresh = frames[frames.length - 1];
+    if (last) {
+      heat ??= new Float32Array(fresh.w * fresh.h);
+      pairs++;
+      for (let i = 0; i < heat.length; i++) { const o = i * 3, d = Math.abs(fresh.px[o] - last.px[o]) + Math.abs(fresh.px[o + 1] - last.px[o + 1]) + Math.abs(fresh.px[o + 2] - last.px[o + 2]); heat[i] += d; if (d > 24) noisy++; }
+    }
+    last = fresh;
     if (frames.length < 3) continue;
     if (frames.length > 3) frames.shift();
     const [a, b, c] = frames, r = blinks(a, b, c);
@@ -130,6 +143,13 @@ try {
     }
   }
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 1));
+  if (heat) {
+    const hw = last.w, hh = last.h, rgb = new Uint8Array(hw * hh * 3);
+    for (let i = 0; i < hw * hh; i++) { const v = Math.min(255, heat[i] / pairs * 4); rgb[i * 3] = v; rgb[i * 3 + 1] = v; rgb[i * 3 + 2] = v; }
+    fs.writeFileSync(path.join(out, 'heat.png'), encodePng(hw, hh, rgb));
+    fs.writeFileSync(path.join(out, 'last.png'), encodePng(hw, hh, last.px));
+    console.log(`noise: ${(noisy / pairs).toFixed(0)} pixels changed a frame pair, of ${hw * hh}`);
+  }
   console.log(`view ${name}: ${report.length} of ${steps - 1} steps blink, ${totalBlink} pixels, ${found} crops in ${path.relative(root, out)}`);
   tab.close();
 } catch (err) {

@@ -193,8 +193,11 @@ export function createRoadMaterial(look: TrafficLook, far = false): THREE.MeshSt
   const used = textureLoad(look.occupancy, ivec2(segId.mod(int(512)), segId.div(int(512)))).z.mul(roadUV);
 
   // separate derivatives: lines along the road depend on u, dashes on v
-  const fu = max(fwidth(u), float(0.003));
-  const fv = max(fwidth(v), float(0.003));
+  // far, a line is under a pixel: filtered over one pixel its coverage swings with the anti-aliasing's jitter and the
+  // line pulses; over two it holds still
+  const widen = far ? 2 : 1;
+  const fu = max(fwidth(u).mul(widen), float(0.003));
+  const fv = max(fwidth(v).mul(widen), float(0.003));
   /** Exact coverage (box filter) of a band of width w round 0. */
   const band = (d: Node, w: Node, f: Node) =>
     clamp(min(d.add(f.mul(0.5)), w.mul(0.5)).sub(max(d.sub(f.mul(0.5)), w.mul(-0.5))).div(f), 0, 1);
@@ -483,9 +486,9 @@ export function createRoadMaterial(look: TrafficLook, far = false): THREE.MeshSt
     const along = v.mul(ldir).sub(time.mul(speed)).div(spacing).add(float(k).mul(0.37));
     const cell = floor(along);
     const jitter = fract(sin(cell.mul(12.9898).add(segId.toFloat().mul(78.233))).mul(43758.5453));
-    // Under a pixel a car is its lane's mean, not a pattern: `cell` and its hash change inside one pixel and with the
+    // Under a few pixels a car is its lane's mean, not a pattern (its length on the screen decides, not the gap to the next): `cell` and its hash change inside one pixel and with the
     // time, and each pixel drew a car of its own, a noise of white, black and red running over the far roads.
-    const sharp = clamp(float(2).sub(fv.div(spacing).mul(6)), 0, 1);
+    const sharp = smoothstep(5, 9, float(4.3).div(fv));
     const pattern = square(along.add(jitter.mul(0.3)), 4.3 / 7.5, fv.div(spacing));
     const car = mix(float(4.3).div(spacing), pattern, sharp).mul(step(float(0.01), o)).mul(band(u.sub(lu), lw.mul(0.55), fu)).mul(step(float(0.1), lw));
     carMask = max(carMask, car);

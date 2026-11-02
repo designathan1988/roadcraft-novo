@@ -72,7 +72,6 @@ export class PropRenderer {
   private kindNear = new Uint32Array(KINDS);
   private kindNearDue = true;
   /** LOD dissolve state per instance: (prop key, from | to << 4) and the dissolve start (ms). */
-  private readonly lodState = new Uint32Array(CAP * LOD_WORDS).fill(0xffffffff);
   private lodStateAttr!: THREE.StorageBufferAttribute;
   private readonly lodClock = uniform(0);
   /** Frames drawn: the dissolve's dither phase. */
@@ -192,7 +191,7 @@ export class PropRenderer {
     impostorFrames(impostorSources(this.defs));
     this.poolAttr = new THREE.StorageBufferAttribute(this.data, 4);
     this.extraAttr = new THREE.StorageBufferAttribute(this.extra, 1);
-    this.lodStateAttr = new THREE.StorageBufferAttribute(this.lodState, 1);
+    this.lodStateAttr = new THREE.StorageBufferAttribute(new Uint32Array(CAP * LOD_WORDS).fill(0xffffffff), 1);
     this.visAttr = new THREE.StorageBufferAttribute(new Uint32Array(VISIBLE), 1);
     this.offsetAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
     this.cursorAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
@@ -730,7 +729,17 @@ export class PropRenderer {
     renderer.compute(this.count);
     renderer.compute(this.prefix);
     renderer.compute(this.cull);
+    this.dropGpuOnlyCopies();
   }
+
+  /** Written and read by the GPU alone: their CPU arrays only filled the buffers once. */
+  private dropGpuOnlyCopies(): void {
+    if (this.copiesDropped) return;
+    this.copiesDropped = true;
+    (this.visAttr as unknown as { array: Uint32Array }).array = new Uint32Array(0);
+    (this.lodStateAttr as unknown as { array: Uint32Array }).array = new Uint32Array(0);
+  }
+  private copiesDropped = false;
 
   /**
    * One shadow cascade's cull: the casters its own frustum sweeps (post.ts renderShadow calls this between passes,
@@ -769,8 +778,7 @@ export class PropRenderer {
     }
     this.pending.clear();
     this.residencyDue = true;
-    this.lodState.fill(0xffffffff);
-    this.lodStateAttr.needsUpdate = true;
+    // (the dissolve state needs no reset: an instance whose key changed starts over, stKey above)
   }
 }
 

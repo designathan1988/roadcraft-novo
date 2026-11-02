@@ -116,7 +116,7 @@ export function createScriptApi(h: ScriptApiHost) {
       const c = l && h.transit.setBuses(l.id, vehicles);
       if (c) h.commands.run(c);
     },
-    grow: async () => { h.growth.processDirty(); await h.pool.whenIdle(); return h.growth.fillAll(); },
+    grow: () => h.growth.growAll(),
     /** Road edits at the point (x, z): split, reverse, duplicate, join (node) and move node to (tx, tz). */
     edit: (what: 'split' | 'reverse' | 'duplicate' | 'join' | 'move', x: number, z: number, tx = 0, tz = 0) => {
       const net = w.roads;

@@ -103,6 +103,8 @@ export class DepthOcclusion {
       renderer.compute(this.buildK, this.levels[k].w * this.levels[k].h);
     }
     this.readyU.value = 1;
+    // the GPU alone writes and reads the levels
+    (this.buffer as unknown as { array: Float32Array }).array = new Float32Array(0);
   }
 
   /** The levels' offsets and dimensions for this frame size (the storage holds room for the maximum already). */
