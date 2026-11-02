@@ -29,6 +29,8 @@ export interface CityFlowHost {
   /** The city on screen is not the one the save slot holds any more. */
   forgetSlot(): void;
   generateTerrain(): Promise<void>;
+  /** The terrain is to be generated again whatever seed it holds (another city). */
+  forgetTerrain(): void;
   /** Lots in the workers, then a building on every free lot; the buildings made. */
   grow(): Promise<number>;
   endRebuild(err: unknown, what: string): void;
@@ -61,6 +63,7 @@ export class CityFlows {
     w.tileInSave.fill(0);
     this.h.forgetSlot();
     w.gameId = (Math.random() * 2 ** 32) >>> 0;
+    w.owned = false;
   }
 
   /** The whole city from the seed: terrain again, roads in a worker, terrain conformed per tile in parallel, lots and buildings. */
@@ -140,6 +143,7 @@ export class CityFlows {
     h.hud.toast(t('game.toast.testCity'));
     try {
       this.reset();
+      h.forgetTerrain();
       const nodes: Float32Array[] = [], segs: Int32Array[] = [];
       await Promise.all(Array.from({ length: TILE_COUNT }, async (_, tile) => {
         const r = await h.pool.run('debugTile', { seed: w.seed, tile }, { priority: 1 });

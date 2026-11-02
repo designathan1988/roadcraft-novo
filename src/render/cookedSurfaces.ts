@@ -53,7 +53,7 @@ export const LAND = { GrassDetail: 0, SoilDetail: 1, GraniteFace: 2, GraniteTop:
 
 let started = false;
 /** Surfaces filled so far (the stats and the checks read it). */
-export const cookedLoaded = { count: 0, failed: [] as string[] };
+export const cookedLoaded = { count: 0, compressed: 0, failed: [] as string[] };
 
 /** Starts reading the files (once): each texture is filled and sent to the GPU again as its file arrives. */
 export function loadCookedSurfaces(): void {
@@ -63,11 +63,11 @@ export function loadCookedSurfaces(): void {
   const w =new Worker(new URL('./cookedWorker.ts', import.meta.url), { type: 'module', name: 'cooked' });
   w.onmessage = (e: MessageEvent<{ file?: string; width?: number; layers?: number; data?: Uint8Array; compressed?: boolean; error?: string; done?: boolean }>) => {
     const m = e.data;
-    if (m.done) { w.terminate(); console.info(`cooked surfaces: ${cookedLoaded.count} read, ${cookedLoaded.failed.length} failed`); return; }
+    if (m.done) { w.terminate(); console.info(`cooked surfaces: ${cookedLoaded.count} read, ${cookedLoaded.compressed} in BC7, ${cookedLoaded.failed.length} failed`); return; }
     const name = m.file!.replace(/\.ktx2$/, '') as CookedName;
     const t = COOKED[name];
     if (m.error || !m.data || !t) { cookedLoaded.failed.push(`${m.file}: ${m.error ?? 'unknown'}`); console.error('cooked surface', m.file, m.error); return; }
-    if (m.compressed) { becomeBc7(t, m.data, m.width!, m.layers ?? 1); cookedLoaded.count++; return; }
+    if (m.compressed) { becomeBc7(t, m.data, m.width!, m.layers ?? 1); cookedLoaded.count++; cookedLoaded.compressed++; return; }
     const dst = t.image.data as Uint8Array;
     if (m.data.length !== dst.length) { cookedLoaded.failed.push(`${m.file}: ${m.data.length} bytes, expected ${dst.length}`); return; }
     // the worker's array becomes the texture's data (checked above: the same size): no copy on the main thread
@@ -75,5 +75,5 @@ export function loadCookedSurfaces(): void {
     dropAfterUpload(t);
     cookedLoaded.count++;
   };
-  w.postMessage({ bc7: bc7.on ? new URL('cooked/bc7/', document.baseURI).href : undefined, base: new URL('cooked/surfaces/', document.baseURI).href, files: Object.keys(COOKED).map((k) => `${k}.ktx2`) });
+  void bc7.ready.then((on) => w.postMessage({ bc7: on ? new URL('cooked/bc7/', document.baseURI).href : undefined, base: new URL('cooked/surfaces/', document.baseURI).href, files: Object.keys(COOKED).map((k) => `${k}.ktx2`) }));
 }

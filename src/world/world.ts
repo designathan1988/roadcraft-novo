@@ -62,6 +62,9 @@ export const START_MONEY = ROAD_TUNING.economy.startingFunds;
 export class World {
   seed = 1;
   gameId = 0;
+  /** The player's city: opened from the save, or touched by them. A city generated at the start is not, until they
+   *  touch it: the autosave and the close wrote every one over the slot, and three openings threw the player's away. */
+  owned = false;
   /** Cash on hand (R$). Roads cost by width, length and structure. */
   money: number = START_MONEY;
   /** Sandbox mode: nothing is charged. */

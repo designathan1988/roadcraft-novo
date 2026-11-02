@@ -14,7 +14,7 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from '../shared/contracts/worker.ts';
-import { PART_PROP, POOL_PARTS, partDrawEnd, partKey, partW, poolTint } from './parts40.ts';
+import { PART_PROP, POOL_PARTS, partKey, partSize1, partW, poolTint } from './parts40.ts';
 import { inFootprints, lotParking, buildBuildingParts, type LotGround40 } from './buildingGen.ts';
 import { inPolygon, lotFit, lotPolygon } from './buildingGen/polygon.ts';
 import { insideOutline } from '../core/outline.ts';
@@ -70,10 +70,15 @@ class Out {
     this.data.push(x, y, z, yq + (variant & 15) * 4096 + sq * 65536);
     this.extra.push(((type & 31) | ((key & 0x07ffffff) << 5)) >>> 0);
   }
-  /** A 4.0 building part (jobs/parts40.ts): w and key packed by partW and partKey; the building's, kept past the cell edge. */
-  addPart(type: number, x: number, y: number, z: number, w: number, key: number): void {
-    this.data.push(x, y, z, w);
-    this.extra.push(((type & 31) | ((key & 0x07ffffff) << 5)) >>> 0);
+  /** The 4.0 building parts apart (jobs/parts40.ts): w and key packed by partW and partKey, the building's, kept past the
+   *  cell edge; sorted by their size rule at the end, after the other props. */
+  partData: number[] = [];
+  partExtra: number[] = [];
+  partSize: number[] = [];
+  addPart(type: number, x: number, y: number, z: number, w: number, key: number, size1: number): void {
+    this.partData.push(x, y, z, w);
+    this.partExtra.push(((type & 31) | ((key & 0x07ffffff) << 5)) >>> 0);
+    this.partSize.push(size1);
   }
   /** Raw scale (6 bits), for props that use the field as a length (wires). */
   addRaw(type: number, x: number, y: number, z: number, yaw: number, variant: number, scale6: number, key: number): void {
@@ -165,7 +170,7 @@ const BIOME_TREES: Array<[number, number, number, number, number]> = [
 ];
 
 /** What the ground tells the props: paint/forest, water and biome. */
-export interface PropEnv { ground?: Uint32Array; water?: Float32Array; biome?: number; /** the cell is near: its 4.0 buildings' parts too */ parts40?: boolean; /** the parts' rules, the view's pixels a metre and the nearest the camera has come: a part drawn no farther than that is left out */ partRules?: Float32Array; partPx?: number; partAt?: number; /** the next cells' lots reaching this one (World.lotsNear) */ lots?: Float32Array }
+export interface PropEnv { ground?: Uint32Array; water?: Float32Array; biome?: number; /** the cell is near: its 4.0 buildings' parts too */ parts40?: boolean; /** the parts' size rules (render/partSize.ts): the parts come back sorted by their size rule, largest first */ partRules?: Float32Array; /** the next cells' lots reaching this one (World.lotsNear) */ lots?: Float32Array }
 
 export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, cell: number, items?: Float32Array, env?: PropEnv): PropColumns {
   const out = new Out(cell);
@@ -447,8 +452,8 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     env?.parts40 ? (kind, x, y, z, yaw, sx, sy, sz, rgb) => {
       const tv = POOL_PARTS[kind];
       if (!tv) return;
-      if (env.partRules && env.partPx && env.partAt && partDrawEnd(env.partRules, tv[0], tv[1], Math.abs(sx), Math.abs(sy), Math.abs(sz), env.partPx) < env.partAt) return;
-      out.addPart(tv[0], x, y, z, partW(yaw, poolTint(kind, rgb)), partKey(tv[0], sx, sy, sz, tv[1]));
+      const size1 = env.partRules ? partSize1(env.partRules, tv[0], tv[1], Math.abs(sx), Math.abs(sy), Math.abs(sz)) : Infinity;
+      out.addPart(tv[0], x, y, z, partW(yaw, poolTint(kind, rgb)), partKey(tv[0], sx, sy, sz, tv[1]), size1);
     } : undefined);
   lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot, grounds40);
 
@@ -566,8 +571,18 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   }
 
 
-  const count = out.extra.length;
-  return { count, data: new Float32Array(out.data), extra: new Uint32Array(out.extra) };
+  // the props, then the parts largest rule first: the page draws the prefix the camera's distance allows
+  const n0 = out.extra.length, np = out.partSize.length;
+  const byRule = Array.from({ length: np }, (_, i) => i).sort((a, b) => out.partSize[b] - out.partSize[a]);
+  const data = new Float32Array((n0 + np) * 4), extra = new Uint32Array(n0 + np), partSizes = new Float32Array(np);
+  data.set(out.data); extra.set(out.extra);
+  byRule.forEach((src, k) => {
+    const d = (n0 + k) * 4, s4 = src * 4;
+    data[d] = out.partData[s4]; data[d + 1] = out.partData[s4 + 1]; data[d + 2] = out.partData[s4 + 2]; data[d + 3] = out.partData[s4 + 3];
+    extra[n0 + k] = out.partExtra[src];
+    partSizes[k] = out.partSize[src];
+  });
+  return { count: n0 + np, data, extra, partStart: n0, partSize1: partSizes };
 }
 
 /**

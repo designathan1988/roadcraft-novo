@@ -190,7 +190,10 @@ function buildSegment(mb: MeshBuilder, heights: Float32Array, g: RoadGraph, s: n
   // code: segment id * 16 * DASH_STEPS + phase * 16 + bits; the profile goes in position.w
   mb.curTag = packRoadTag(info.id, g.srule[s] & 7, (g.srule[s] >> 3) & 7);
   const phase = Math.round((((dashPhase + s0) % DASH_PERIOD) / DASH_PERIOD) * DASH_STEPS) % DASH_STEPS;
-  const code = g.sid[s] * 16 * DASH_STEPS + phase * 16 + (crossA ? RoadCode.CrossA : 0) + (crossB ? RoadCode.CrossB : 0) + (info.oneWay ? RoadCode.OneWay : 0) + (ring ? RoadCode.Ring : 0);
+  // the id's low 16 bits here (a float32 attribute is exact to 2^24: whole ids lost bits past 65,536 segments, and the
+  // 16 km map has more), the high 14 in the normal's spare bytes
+  mb.curAux = g.sid[s] >>> 16;
+  const code = (g.sid[s] & 0xffff) * 16 * DASH_STEPS + phase * 16 + (crossA ? RoadCode.CrossA : 0) + (crossB ? RoadCode.CrossB : 0) + (info.oneWay ? RoadCode.OneWay : 0) + (ring ? RoadCode.Ring : 0);
 
   // sample positions: a regular step + the dropped kerb's points
   const step = lod === 0 ? 3 : 10;

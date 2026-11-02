@@ -71,8 +71,8 @@ export interface LayerOptions {
 }
 
 /** One mesh of the layer: a cell, a tile or a plate (`size` metres from its origin corner). */
-interface Slot { mesh: THREE.Mesh | null; /** the tile's shadow-only twin (far cascades, caster LOD) */ twin: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number; size: number; scope: SlotScope; id: number }
-const slot = (size: number, scope: SlotScope) => (_: unknown, id: number): Slot => ({ mesh: null, twin: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size, scope, id });
+interface Slot { mesh: THREE.Mesh | null; /** the tile's shadow-only twin (far cascades, caster LOD) */ twin: THREE.Mesh | null; built: number; requested: number; minY: number; maxY: number; bytes: number; size: number; scope: SlotScope; id: number; /** it casts (decided when asked for: the roads' bridge test walks every segment) */ casts: boolean }
+const slot = (size: number, scope: SlotScope) => (_: unknown, id: number): Slot => ({ mesh: null, twin: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size, scope, id, casts: false });
 
 const FADE = 0.35;
 /** A cell gives its detail back only after being hidden this long (s): hidden for a moment, as a turning camera hides
@@ -252,6 +252,7 @@ export class CellLayer {
     const v = this.cellVer[c];
     if (s.requested === v) return;
     s.requested = v;
+    s.casts = this.castsOf(s);
     this.held.add(tileOfCell(c));
     if (!this.src.hasContent(c)) { this.setMesh(s, null, v, c, level); return; }
     const cx = c % MAP_CELLS, cz = (c / MAP_CELLS) | 0;
@@ -263,6 +264,7 @@ export class CellLayer {
     const s = this.tiles[t];
     const v = this.tileVer[t];
     s.requested = v;
+    s.casts = this.castsOf(s);
     this.held.add(t);
     const tx = t % MAP_TILES, tz = (t / MAP_TILES) | 0;
     const pr = 2000 + this.distTo(tileOriginX(tx), tileOriginX(tz), TILE_SIZE);
@@ -274,10 +276,13 @@ export class CellLayer {
     const v = this.plateVer[p];
     if (s.requested === v || !this.src.buildPlate) return;
     s.requested = v;
+    s.casts = this.castsOf(s);
     const x = tileOriginX((p % MAP_PLATES) * TILES_PER_PLATE), z = tileOriginX(((p / MAP_PLATES) | 0) * TILES_PER_PLATE);
     const pr = 4000 + this.distTo(x, z, PLATE_SIZE);
     this.src.buildPlate(p, pr, (m) => { if (s.requested === v) this.setMesh(s, m, v); });
   }
+
+  private castsOf(s: Slot): boolean { return (this.opt.shadows ?? true) || (this.src.castsShadow?.(s.scope, s.id) ?? false); }
 
   private setMesh(s: Slot, m: PackedMesh | null, version: number, cell = -1, level = -1): void {
     this.events++;
@@ -286,7 +291,7 @@ export class CellLayer {
     // a level standing in for this one casts its shadow; an edit (a version), or a slot nothing covered, changes it
     const covered = cell >= 0 && this.cells.length > 1 && !!this.cells[1 - level]?.[cell]?.mesh;
     // (a road casts only as a bridge)
-    const casts = (this.opt.shadows ?? true) || (this.src.castsShadow?.(s.scope, s.id) ?? false);
+    const casts = s.casts;
     if ((version !== 0 && s.built !== 0 && s.mesh && casts) || (m && !covered && casts)) {
       const e = this.opt.margin, x0 = m ? m.originX : (s.mesh!.userData as FadeData).box!.x0 + e, z0 = m ? m.originZ : (s.mesh!.userData as FadeData).box!.z0 + e;
       this.casterBoxes.push(new THREE.Box3(new THREE.Vector3(x0 - e, -200, z0 - e), new THREE.Vector3(x0 + s.size + e, 1400, z0 + s.size + e)));
@@ -332,7 +337,7 @@ export class CellLayer {
     // three culls it per camera with the bounds above: each shadow cascade draws only the meshes inside it (without
     // this every mesh the layer chose went into all 3 cascades, plates 4-10 km away included)
     mesh.frustumCulled = true;
-    mesh.castShadow = (this.opt.shadows ?? true) || (this.src.castsShadow?.(s.scope, s.id) ?? false);
+    mesh.castShadow = s.casts;
     mesh.receiveShadow = true;
     if (this.opt.lodCasters && cell >= 0) mesh.layers.set(CELL_CASTER_LAYER);
     // a rebuild after an edit swaps at once (no fade hole)

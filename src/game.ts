@@ -1,6 +1,7 @@
 // Ties everything together: world, workers, camera, rendering, tools, saving and loading.
 // The page only does input, interface, choosing what to draw, and drawing.
 
+import { FLAT_BIT } from './jobs/terrainGen.ts';
 import { createTerrainSeams } from './render/terrainSeams.ts';
 import * as THREE from 'three/webgpu';
 import { MAP_SIZE, MAP_SIZES, MAP_TAG, MAP_TILES, TILE_SIZE } from './config.ts';
@@ -243,7 +244,7 @@ export class Game {
   readonly life: Lifecycle;
   /** Something changed since the last save (autosave every 2 min): a change to the world, or the world just made or opened (false). */
   private get unsaved(): boolean { return this.life.unsaved; }
-  private set unsaved(v: boolean) { if (v) this.life.changed(); else this.life.clean(); }
+  private set unsaved(v: boolean) { if (v) { this.life.changed(); this.world.owned = true; } else this.life.clean(); }
   private autosaveAt = 0;
   /** Pause and speed of the simulation and the time of day (app/clock.ts). */
   readonly clock = new Clock();
@@ -260,7 +261,7 @@ export class Game {
       get hud() { return gs.hud; },
       life,
       get hour() { return gs.hour; },
-      clearForOpen: () => gs.clearPage(),
+      clearForOpen: () => { gs.clearPage(); gs.terrainSeed = NaN; },
       applyExtra: (ex) => gs.applyExtra(ex),
       setHour: (h) => gs.world.setHour(h),
       setBiome: (b) => gs.setBiome(b),
@@ -276,7 +277,7 @@ export class Game {
       life,
       clearPage: () => gs.clearPage(),
       forgetSlot: () => { gs.saving.slotBase = null; },
-      generateTerrain: () => gs.generateTerrain(),
+      generateTerrain: () => gs.generateTerrain(), forgetTerrain: () => { gs.terrainSeed = NaN; },
       grow: () => gs.growth.growAll(),
       endRebuild: (err, what) => gs.endRebuild(err, what),
     });
@@ -523,6 +524,7 @@ export class Game {
       const sound = l.split('.')[1];
       this.ambient.sfx(sound === 'demolish' || sound === 'build' ? sound : 'place');
     };
+    this.commands.onCleared = () => { this.hud.setHistory(false, false); this.inspector.refresh(); };
     this.commands.onChange = () => {
       this.unsaved = true; this.hud.setHistory(this.commands.canUndo, this.commands.canRedo); this.inspector.refresh();
       // the building panel shows the building as it is now (or none, once undo took it away)
@@ -537,7 +539,7 @@ export class Game {
     // closing: in the desktop game the window waits for the save; in the browser the page asks before leaving
     const app = (window as { roadcraftApp?: { onClosing(fn: () => void): void; canClose(): void } }).roadcraftApp;
     if (app) app.onClosing(() => void this.saving.saveBeforeClose().finally(() => app.canClose()));
-    else window.addEventListener('beforeunload', (e) => { if (this.unsaved || this.world.saveDirty.includes(1)) { e.preventDefault(); e.returnValue = ''; } });
+    else window.addEventListener('beforeunload', (e) => { if (this.world.owned && (this.unsaved || this.world.saveDirty.includes(1))) { e.preventDefault(); e.returnValue = ''; } });
     this.hud.setHistory(false, false);
     this.setTool('camera');
   }
@@ -596,6 +598,10 @@ export class Game {
       if (street && chain.length) this.hud.toast(t('game.toast.streetNamed', { name: text }));
     };
 
+    // the terrain of the city the start goes into: generated once here, not again when the flow begins (the whole map's
+    // relief was computed twice at every opening)
+    const toTown = !params.has('test') && !params.has('open') && !params.has('start') && (params.has('city') || (!params.has('cam') && !params.has('empty')));
+    if (toTown) { const medium = params.has('medium') || !params.has('city'); this.world.seed = (medium ? this.world.seed | FLAT_BIT : this.world.seed & ~FLAT_BIT) >>> 0; }
     this.hud.showLoading(t('game.loading.terrain'));
     await this.generateTerrain();
 
@@ -690,6 +696,7 @@ export class Game {
       memMB: mb(mem.total), attrsMB: mb(mem.attributesSize), indexMB: mb(mem.indexAttributesSize),
       texMB: mb(mem.texturesSize), rt: mem.renderTargets ?? 0, progMB: mb(mem.programsSize),
       storMB: mb(mem.storageAttributesSize), uniMB: mb(mem.uniformBuffersSize),
+      propCells: this.props.residentCells, propPending: this.props.pendingCells, propPlaced: this.props.placedInstances, owned: this.world.owned ? 1 : 0,
       ...(this.simStats?.type === 'stats' ? { cars: this.simStats.cars, micro: this.simStats.micro, peds: this.simStats.peds } : {}),
     };
   }
@@ -719,7 +726,11 @@ export class Game {
 
   /** Generates the base terrain from the seed, one tile per job. */
   /** Terrain of every tile from the seed, in the workers; rejects if any tile fails. */
+  /** The seed the terrain was last generated for (NaN: none). */
+  private terrainSeed = NaN;
   private async generateTerrain(): Promise<void> {
+    if (this.terrainSeed === this.world.seed) return;
+    this.terrainSeed = this.world.seed;
     await Promise.all(Array.from({ length: TILE_COUNT }, async (_, t) => {
       const r = await this.pool.run('terrainGen', { seed: this.world.seed, tile: t }, { key: `terrain:${t}`, priority: 0 });
       this.world.tileMin[r.tile] = r.min;
@@ -779,7 +790,7 @@ export class Game {
     const light = this.skyMode === 'day' ? DAY_LIGHT : this.skyMode === 'night' ? NIGHT_LIGHT : this.hour;
     // city clock in minutes (building decay); the sky mode only fixes the light
     if (!this.clock.paused) this.world.advanceClock(dt * this.clock.daySpeed);
-    if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if ((this.unsaved || this.world.saveDirty.includes(1)) && this.life.editable) void this.saving.save(true); }
+    if (now > this.autosaveAt) { this.autosaveAt = now + 120000; if (this.world.owned && (this.unsaved || this.world.saveDirty.includes(1)) && this.life.editable) void this.saving.save(true); }
     const groundY = heightAt(this.world.heights, this.rig.eye.x, this.rig.eye.z);
     this.weather.viewAngle = Math.atan2(this.rig.target.z - this.rig.eye.z, this.rig.target.x - this.rig.eye.x);
     // the rain box round the eye; isometric: round what is looked at (round the perspective eye it was a block of rain)

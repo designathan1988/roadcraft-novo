@@ -83,7 +83,7 @@ export interface JobPayloads {
   terrainSeams: { graph: RoadGraph; originX: number; originZ: number };
   roadPaint: { graph: RoadGraph; tile: number };
   lots: { graph: RoadGraph; cell: number };
-  props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number; parts40?: boolean; partRules?: Float32Array; partPx?: number; partAt?: number; lots?: Float32Array };
+  props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number; parts40?: boolean; partRules?: Float32Array; lots?: Float32Array };
   cityGen: { seed: number; medium?: boolean };
   conform: { tile: number; segs: Float32Array };
   /**
@@ -181,10 +181,14 @@ export interface PropColumns {
   count: number;
   data: Float32Array;
   extra: Uint32Array;
+  /** From here on the 4.0 building parts, sorted by their size rule (jobs/parts40.ts partSize1) largest first. */
+  partStart?: number;
+  /** The parts' size rules, in that order: the page draws the prefix the camera's distance allows. */
+  partSize1?: Float32Array;
 }
 
 export function propTransfer(p: PropColumns): ArrayBuffer[] {
-  return [p.data.buffer as ArrayBuffer, p.extra.buffer as ArrayBuffer];
+  return p.partSize1 ? [p.data.buffer as ArrayBuffer, p.extra.buffer as ArrayBuffer, p.partSize1.buffer as ArrayBuffer] : [p.data.buffer as ArrayBuffer, p.extra.buffer as ArrayBuffer];
 }
 
 export function meshTransfer(m: PackedMesh): ArrayBuffer[] {

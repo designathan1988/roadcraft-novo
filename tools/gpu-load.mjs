@@ -112,7 +112,7 @@ try {
       Object.assign(r, { rafHz: +(f.dts.length / seconds).toFixed(1), drawnHz: +(f.drawn / seconds).toFixed(1), frameP50: q(0.5), frameP99: q(0.99), hidden: f.hidden, vis: f.vis,
         cpuDrawMs: f.t ? +(f.t.draw / Math.max(1, f.t.frames ?? f.dts.length)).toFixed(2) : null,
         gpuRenderMs: f.gpu && +f.gpu.totalMs.toFixed(2), gpuComputeMs: f.gpu && +f.gpu.computeMs.toFixed(2),
-        perCall: f.gpu?.perCallMs.map((x, i) => [f.gpu.names[i] ?? '?', +x.toFixed(2)]), perCompute: f.gpu?.perComputeMs.map((x) => +x.toFixed(2)), stats: f.stats });
+        perCall: f.gpu?.perCallMs.map((x, i) => [f.gpu.names[i] ?? '?', +x.toFixed(2)]), perCompute: f.gpu?.perComputeMs.map((x, i) => [f.gpu.computeNames?.[i] ?? '?', +x.toFixed(2)]), stats: f.stats });
     } else r.note = 'no animation frame in the window';
     results.push(r);
     console.log(JSON.stringify(r));

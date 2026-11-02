@@ -71,6 +71,8 @@ export class PartSize {
 
   /** The pixels a metre spans at a metre's distance (0: the isometric view, where no part is left out by distance). */
   get pxPerMetre(): number { return this.pxU.value as number; }
+  /** The pixels a metre spans in the isometric view (0 in the perspective). */
+  get orthoPxPerMetre(): number { return this.orthoPxU.value as number; }
 
   /** Whether kind `kind` is a 4.0 building part. */
   isPart(kind: Node): Node {

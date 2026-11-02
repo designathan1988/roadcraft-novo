@@ -50,8 +50,8 @@ const LOD_WORDS = 3;
 const LOT_REACH = 16;
 /** How far the eye goes before the casters are chosen again (m). */
 const CASTER_STEP = 48;
-/** Cells this near hold all their parts. */
-const PART_ALL = 64;
+/** Most bytes of columns kept for the prefix to follow the camera without a job. */
+const COLS_BYTES = 192e6;
 /** Cells of the queue asked again at a time. */
 const RETRY_CELLS = 12;
 /** The level changes only this far past its boundary (relative distance), so a camera at rest never flickers. */
@@ -98,8 +98,13 @@ export class PropRenderer {
   private cellHave = new Int32Array(CELL_COUNT);
   /** Whether a cell's props were asked with its 4.0 buildings' parts (near cells only, jobs/parts40.ts PARTS_RANGE). */
   private cellParts = new Uint8Array(CELL_COUNT);
-  /** The distance each cell's parts were chosen for: nearer than this, they were left out and it is asked again. */
-  private cellPartAt = new Float32Array(CELL_COUNT);
+  /** A resident cell's props as the job gave them (the parts sorted by their size rule), so the prefix the pool holds
+   *  follows the camera without a job; bounded in bytes, farthest cells forgotten first. */
+  private readonly cols = new Map<number, PropColumns>();
+  private colBytes = 0;
+  /** Instances of each cell in the pool (a prefix of its column). */
+  private readonly placed = new Int32Array(CELL_COUNT);
+  private readonly eye = new THREE.Vector3();
   private partRuleTable!: Float32Array;
   /** Cells whose props did not fit in the pool: asked again when blocks are freed. */
   private pending = new Set<number>();
@@ -221,7 +226,7 @@ export class PropRenderer {
     this.reset = Fn(() => {
       atomicStore(drawsA.element(instanceIndex.mul(5).add(1)), uint(0));
       atomicStore(cursorA.element(instanceIndex), uint(0));
-    })().compute(DRAWS);
+    })().compute(DRAWS).setName('props.reset');
     const poolC = storage(this.poolAttr, 'vec4', CAP).toReadOnly();
     const extraC = storage(this.extraAttr, 'uint', CAP).toReadOnly();
     const kindOfC = storage(this.kindOfAttr, 'uint', PROP_TYPES * VARIANTS).toReadOnly();
@@ -330,21 +335,21 @@ export class PropRenderer {
     };
     this.count = Fn(() => {
       classify((slot) => { atomicAdd(drawsA.element(slot.mul(5).add(1)), uint(1)); });
-    })().compute(CAP, [64]);
+    })().compute(CAP, [64]).setName('props.count');
     this.prefix = Fn(() => {
       const sum = uint(0).toVar();
       Loop(DRAWS, ({ i }: { i: Node }) => {
         offsetW.element(i).assign(sum);
         sum.addAssign(atomicLoad(drawsA.element(uint(i).mul(5).add(1))));
       });
-    })().compute(1);
+    })().compute(1).setName('props.prefix');
     const offsetC = storage(this.offsetAttr, 'uint', DRAWS).toReadOnly();
     this.cull = Fn(() => {
       classify((slot, code) => {
         const n = atomicAdd(cursorA.element(slot), uint(1));
         visW.element(offsetC.element(slot).add(n)).assign(code);
       });
-    })().compute(CAP, [64]);
+    })().compute(CAP, [64]).setName('props.cull');
 
     // The shadow cascades' fill: the casters alone, level 0, no dissolve state - each cascade's own frustum with
     // the same sweep toward the sun the main cull tests. prepareCascade runs it between passes, before that
@@ -387,13 +392,13 @@ export class PropRenderer {
     };
     this.shCount = Fn(() => {
       shadowClassify((slot) => { atomicAdd(drawsA.element(slot.mul(5).add(1)), uint(1)); });
-    })().compute(CAP, [64]);
+    })().compute(CAP, [64]).setName('props.shadowCount');
     this.shCull = Fn(() => {
       shadowClassify((slot, code) => {
         const n = atomicAdd(cursorA.element(slot), uint(1));
         visW.element(offsetC.element(slot).add(n)).assign(code);
       });
-    })().compute(CAP, [64]);
+    })().compute(CAP, [64]).setName('props.shadowCull');
 
     // ---- desenho
     if (!this.enabled) {
@@ -446,6 +451,64 @@ export class PropRenderer {
     if (cells.length) this.residencyDue = true;
   }
 
+  /** Distance from the eye to a cell, its height counted: from high above, the cell under the camera is far (its parts
+   *  would be under a pixel). The horizontal distance alone put every part of the cells under a high camera in the pool. */
+  private cellDistance3(c: number, cam: THREE.Vector3): number {
+    const d = this.cellDistance(c, cam);
+    const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
+    const top = Math.max(this.world.tileMax[tileId(tileX(x0 + CELL_SIZE / 2), tileX(z0 + CELL_SIZE / 2))], this.cellTop[c]);
+    return Math.hypot(d, Math.max(0, cam.y - top));
+  }
+
+  /**
+   * How many of a cell's instances the pool holds: every prop, and the parts whose size rule draws them from where the
+   * eye is (perspective: size1 x pixels a metre > distance; isometric: size1 x pixels a metre >= 1 px).
+   */
+  private need(c: number, p: PropColumns): number {
+    if (p.partStart === undefined || !p.partSize1) return p.count;
+    const s = p.partSize1, ortho = this.partSize.orthoPxPerMetre, px = this.partSize.pxPerMetre;
+    const d = ortho > 0 ? 0 : this.cellDistance3(c, this.eye);
+    let lo = 0, hi = s.length;
+    while (lo < hi) {
+      const m = (lo + hi) >> 1;
+      const drawn = ortho > 0 ? s[m] * ortho >= 1 : s[m] * px > d;
+      if (drawn) lo = m + 1; else hi = m;
+    }
+    return p.partStart + lo;
+  }
+
+  /** Keeps a cell's column for the prefix to follow the camera; past the byte bound, the farthest cells are forgotten. */
+  private remember(c: number, p: PropColumns): void {
+    const old = this.cols.get(c);
+    if (old) this.colBytes -= old.count * 20 + (old.partSize1?.byteLength ?? 0);
+    this.cols.set(c, p);
+    this.colBytes += p.count * 20 + (p.partSize1?.byteLength ?? 0);
+    while (this.colBytes > COLS_BYTES && this.cols.size > 1) {
+      let far = -1, farD = -1;
+      for (const k of this.cols.keys()) { if (k === c) continue; const d = this.cellDistance(k, this.eye); if (d > farD) { farD = d; far = k; } }
+      if (far < 0) break;
+      this.forgetColumn(far);
+    }
+  }
+
+  private forgetColumn(c: number): void {
+    const p = this.cols.get(c);
+    if (!p) return;
+    this.cols.delete(c);
+    this.colBytes -= p.count * 20 + (p.partSize1?.byteLength ?? 0);
+  }
+
+  /** The pool's prefix of a resident cell follows the camera: re-placed from the kept column when the need moved past a
+   *  margin (nothing missing when it grows; a tenth of slack when it shrinks), without a job. */
+  private reslice(c: number): void {
+    const p = this.cols.get(c);
+    if (!p || this.cellHave[c] !== this.cellVer[c]) return;
+    const n = this.need(c, p), have = this.placed[c];
+    if (n <= have && n >= have * 0.85 - 16) return;
+    if (n === have) return;
+    this.place(c, p, n, this.cellHave[c]);
+  }
+
   /** Horizontal distance from the camera to a cell. */
   private cellDistance(c: number, cam: THREE.Vector3): number {
     const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
@@ -453,15 +516,12 @@ export class PropRenderer {
     return Math.hypot(dx, dz);
   }
 
-  /** Asks the workers for a cell's props, nearest first. */
-  private requestCell(c: number, distance: number): void {
+  /** Asks the workers for a cell's props, nearest first (`distance` horizontal, for the queue; `d3` from the eye, for the parts). */
+  private requestCell(c: number, distance: number, d3 = distance): void {
     const v = this.cellVer[c];
     this.cellReq[c] = v;
-    const parts40 = this.wantParts(c, distance);
+    const parts40 = this.wantParts(c, d3);
     this.cellParts[c] = parts40 ? 1 : 0;
-    // a quarter of the way in: the camera then comes that much nearer before the cell has to be asked again
-    const partAt = distance > PART_ALL ? distance * 0.75 : 0;
-    this.cellPartAt[c] = partAt;
     const w = this.world, net = w.roads;
     const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
     const segs: SegId[] = [];
@@ -470,7 +530,7 @@ export class PropRenderer {
     const graph = net.gather(segs, []);
     const items = w.items.gather(c, MAP_CELLS);
     const lots = w.lotsNear(x0 - LOT_REACH, z0 - LOT_REACH, x0 + CELL_SIZE + LOT_REACH, z0 + CELL_SIZE + LOT_REACH, c);
-    this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome, parts40, partRules: this.partRuleTable, partPx: this.partSize.pxPerMetre, partAt, lots }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {
+    this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome, parts40, partRules: this.partRuleTable, lots }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {
       key: `props:${c}`, priority: distance + 100, transfer: [...roadGraphTransfer(graph), ...boxTransfer(boxes), items.buffer as ArrayBuffer, lots.buffer as ArrayBuffer],
     });
   }
@@ -500,17 +560,19 @@ export class PropRenderer {
     this.residentAt.copy(cam);
     this.residencyDue = false;
     this.kindNearDue = true;
+    const dropped: number[] = [];
     for (const c of [...this.blocks.resident]) {
       const d = this.cellDistance(c, cam);
-      if (d > drop) this.dropCell(c);
+      if (d > drop) dropped.push(c);
       else {
         this.blocks.setDistance(c, d);
-        // came near (or went far): asked again with (without) its buildings' parts
-        // (a near cell holds all its parts, `at` 0: it is never asked again for coming or going)
-        const parts = this.cellParts[c] === 1, at = this.cellPartAt[c];
-        if ((this.wantParts(c, d) !== parts || (parts && at > 0 && (d < at || d > at * 2.4))) && this.cellReq[c] === this.cellHave[c]) this.requestCell(c, d);
+        // came near (or went far): asked again with (without) its buildings' parts; within, the pool's prefix follows
+        const d3 = this.cellDistance3(c, cam);
+        if (this.wantParts(c, d3) !== (this.cellParts[c] === 1) && this.cellReq[c] === this.cellHave[c]) this.requestCell(c, d, d3);
+        else this.reslice(c);
       }
     }
+    for (const c of dropped) this.dropCell(c);
     for (const c of [...this.pending]) if (this.cellDistance(c, cam) > drop) { this.pending.delete(c); this.cellHave[c] = -1; this.cellReq[c] = 0; }
     if (this.retryDue) {
       this.retryDue = false;
@@ -528,13 +590,15 @@ export class PropRenderer {
         const c = cz * MAP_CELLS + cx;
         if (this.cellHave[c] === this.cellVer[c] || this.cellReq[c] === this.cellVer[c] || this.pending.has(c)) continue;
         const d = this.cellDistance(c, cam);
-        if (d <= keep) this.requestCell(c, d);
+        if (d <= keep) this.requestCell(c, d, this.cellDistance3(c, cam));
       }
     }
   }
 
   /** A cell out of range gives its blocks back; it is asked again if it comes back. */
   private dropCell(c: number): void {
+    this.forgetColumn(c);
+    this.placed[c] = 0;
     this.clearBlocks(this.blocks.release(c));
     this.forgetKinds(c);
     if (!this.enabled) this.fallback?.setCell(c, null);
@@ -551,12 +615,12 @@ export class PropRenderer {
   }
 
   /** Counts a placed cell's instances per kind (kinds with none in the held cells are not drawn). */
-  private countKinds(c: number, p: PropColumns): void {
+  private countKinds(c: number, p: PropColumns, count: number): void {
     this.forgetKinds(c);
     this.changedCells.add(c);
     const n = new Uint32Array(KINDS);
     let top = -Infinity;
-    for (let i = 0; i < p.count; i++) {
+    for (let i = 0; i < count; i++) {
       const type = propType(p.extra[i]);
       if (type >= PROP_TYPES) continue;
       const k = this.kindOf[type * VARIANTS + propVariant(type, p.data[i * 4 + 3], p.extra[i])];
@@ -606,13 +670,21 @@ export class PropRenderer {
     // the camera left while the job ran: not kept (asked again if it comes back)
     if (d > this.ranges().drop) { this.cellHave[c] = -1; this.cellReq[c] = 0; return; }
     if (!this.enabled) { this.fallback!.setCell(c, p); this.cellHave[c] = v; return; }
+    if (p && p.partSize1 && p.partSize1.length) this.remember(c, p); else this.forgetColumn(c);
+    this.place(c, p, p ? this.need(c, p) : 0, v);
+  }
+
+  /** The first `n` instances of a cell's column into the pool (its blocks given back first). */
+  private place(c: number, p: PropColumns | null, n: number, v: number): void {
+    const d = this.cellDistance(c, this.residentAt);
     const freed = this.blocks.release(c);
     this.clearBlocks(freed);
     this.forgetKinds(c);
     if (freed.length) this.retryDue ||= this.pending.size > 0;
     this.pending.delete(c);
-    if (!p || p.count === 0) { this.cellHave[c] = v; return; }
-    const placed = this.blocks.place(c, p.count, BLOCK, d);
+    this.placed[c] = 0;
+    if (!p || n === 0) { this.cellHave[c] = v; return; }
+    const placed = this.blocks.place(c, n, BLOCK, d);
     if (!placed) {
       // no room even after farther cells gave way: it waits, counted, and is asked again when blocks are freed
       this.pending.add(c);
@@ -628,17 +700,18 @@ export class PropRenderer {
     let i = 0;
     for (const b of placed.blocks) {
       const s0 = b * BLOCK;
-      const n = Math.min(BLOCK, p.count - i);
-      this.data.set(p.data.subarray(i * 4, (i + n) * 4), s0 * 4);
-      this.extra.set(p.extra.subarray(i, i + n), s0);
-      if (n < BLOCK) this.extra.fill(PROP_FREE, s0 + n, s0 + BLOCK);
+      const k = Math.min(BLOCK, n - i);
+      this.data.set(p.data.subarray(i * 4, (i + k) * 4), s0 * 4);
+      this.extra.set(p.extra.subarray(i, i + k), s0);
+      if (k < BLOCK) this.extra.fill(PROP_FREE, s0 + k, s0 + BLOCK);
       this.poolAttr.addUpdateRange(s0 * 4, BLOCK * 4);
       this.extraAttr.addUpdateRange(s0, BLOCK);
-      i += n;
+      i += k;
     }
     this.poolAttr.needsUpdate = true;
     this.extraAttr.needsUpdate = true;
-    this.countKinds(c, p);
+    this.placed[c] = n;
+    this.countKinds(c, p, n);
     this.cellHave[c] = v;
   }
 
@@ -656,6 +729,8 @@ export class PropRenderer {
   /** Cells waiting for room in the pool, and cells holding props. */
   get pendingCells(): number { return this.pending.size; }
   get residentCells(): number { return this.blocks.resident.size; }
+  /** Instances the pool holds (the cells' prefixes). */
+  get placedInstances(): number { let n = 0; for (const c of this.blocks.resident) n += this.placed[c]; return n; }
 
   // The WebGL 2 fallback lives in render/propFallback.ts (its own responsibility; the props file-size gate).
 
@@ -706,8 +781,9 @@ export class PropRenderer {
     camera.getWorldDirection(this.nextFwd);
     this.nextFocal = (renderer.domElement.height || 1080) / (2 * Math.tan((((camera as THREE.PerspectiveCamera).fov ?? 45) / 2) * Math.PI / 180));
     (this.sunU.value as THREE.Vector3).copy(sunDirection);
-    // a new scale moves every distance: the cascades' casters changed
-    if (this.partSize.setView(camera, this.pixelScale)) this.changed = true;
+    this.eye.copy(camPos);
+    // a new scale moves every distance: the pool's prefixes follow (residency) and the cascades' casters changed
+    if (this.partSize.setView(camera, this.pixelScale)) { this.changed = true; this.residencyDue = true; }
     for (let k = 0; k < KINDS; k++) {
       const d = this.kinds[k];
       for (let l = 0; l < LODS; l++) this.distArr[k * LODS + l] = d.lods[l] && this.kindNear[k] > 0 ? d.dist[l] * this.pixelScale : 0;
@@ -787,6 +863,7 @@ export class PropRenderer {
       this.cellVer[c]++; this.cellReq[c] = 0; this.cellHave[c] = -1;
     }
     this.pending.clear();
+    this.cols.clear(); this.colBytes = 0; this.placed.fill(0);
     this.residencyDue = true;
     // (the dissolve state needs no reset: an instance whose key changed starts over, stKey above)
   }

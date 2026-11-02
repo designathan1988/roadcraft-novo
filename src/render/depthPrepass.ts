@@ -25,10 +25,26 @@ const twins = new WeakMap<THREE.Material, THREE.NodeMaterial | null>();
  * (the props' instances 429 k triangles for 0.09 of a screen): the depth pass cost 2.88 ms for 2.5 ms saved in the colour
  * pass, the frame 10.64 -> 11.03 ms (same view, 2026-10-31).
  */
-const laidFirst = new WeakSet<THREE.Material>();
+const laidFirst = new Set<THREE.Material>();
+let attached = false;
 export function layDepthFirst<M extends THREE.Material>(m: M): M {
   laidFirst.add(m);
+  if (attached) { m.depthWrite = false; m.needsUpdate = true; }
   return m;
+}
+
+/**
+ * The materials write no depth of their own only while a prepass draws it for them: the Post that holds the prepass turns it
+ * on and off. Written once into the shared material at the twin's creation, the state outlived the Post: the Low preset
+ * (no shadows, AO or bloom) drew the plain scene with every laid material writing no depth, the far painted over the near.
+ */
+export function attachPrepass(): void {
+  attached = true;
+  for (const m of laidFirst) { m.depthWrite = false; m.needsUpdate = true; }
+}
+export function detachPrepass(): void {
+  attached = false;
+  for (const m of laidFirst) { m.depthWrite = true; m.needsUpdate = true; }
 }
 
 /** The twin of `m`, made once: its position and mask (the same nodes, the same vertex program), writing depth only. From
@@ -37,7 +53,7 @@ export function depthTwin(m: THREE.Material): THREE.NodeMaterial | null {
   let t = twins.get(m);
   if (t !== undefined) return t;
   const src = m as AnyMaterial;
-  if (!laidFirst.has(m) || !(m as THREE.NodeMaterial).isNodeMaterial || m.transparent || !m.depthWrite || !m.depthTest) {
+  if (!laidFirst.has(m) || !(m as THREE.NodeMaterial).isNodeMaterial || m.transparent || !m.depthTest) {
     twins.set(m, null);
     return null;
   }
@@ -59,8 +75,6 @@ export function depthTwin(m: THREE.Material): THREE.NodeMaterial | null {
   t.fog = false;
   t.lights = false;
   twins.set(m, t);
-  m.depthWrite = false;
-  m.needsUpdate = true;
   return t;
 }
 

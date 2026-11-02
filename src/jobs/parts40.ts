@@ -37,21 +37,21 @@ export function setPartRule(rules: Float32Array, type: number, variant: number, 
   pieces.slice(0, 3).forEach((p, k) => rules.set(p, o + 4 + k * 3));
 }
 /**
- * How far a part is drawn (m): the distance render/partSize.ts `ends` gives it, here where the instance is made. A part
- * that cannot be drawn from where the camera stands never takes a slot of the pool: 300 thousand window frames a few
- * cells away filled it, and the trees past them waited in a queue that was asked again whole at each free block.
+ * A part's size rule at one pixel a metre (render/partSize.ts `ends`, without the type's reach): metres from the eye up to
+ * which it is drawn, per pixel a metre of the view. A solid part is drawn until its diagonal is a pixel, a part of bars
+ * until its widest bar is BAR_PIXELS. The job sorts a cell's parts by it, so the page takes the prefix the camera's distance
+ * can draw and nothing else enters the pool; the camera moving changes the prefix, not the job (A08-002).
  */
-export function partDrawEnd(rules: Float32Array, type: number, variant: number, sx: number, sy: number, sz: number, pxPerMetre: number): number {
+export function partSize1(rules: Float32Array, type: number, variant: number, sx: number, sy: number, sz: number): number {
   const o = ruleAt(type, VARIANT_TYPES.has(type) ? variant : 0), kind = rules[o];
   if (kind === 0) return Infinity;
-  const reach = (PART_DIST[type] ?? Infinity) * pxPerMetre / 1303.8;
-  if (kind === 1) return Math.min(reach, Math.hypot(rules[o + 1] * sx, rules[o + 2] * sy, rules[o + 3] * sz) * pxPerMetre);
+  if (kind === 1) return Math.hypot(rules[o + 1] * sx, rules[o + 2] * sy, rules[o + 3] * sz);
   let widest = 0;
   for (let k = 0; k < 3; k++) {
     const a = rules[o + 4 + k * 3] * sx, b = rules[o + 5 + k * 3] * sy, c = rules[o + 6 + k * 3] * sz;
     widest = Math.max(widest, Math.max(Math.min(a, b), Math.min(Math.max(a, b), c)));
   }
-  return Math.min(reach, widest * pxPerMetre / BAR_PIXELS);
+  return widest / BAR_PIXELS;
 }
 /** A bar under this many pixels leaves the drawing (4.0 partCells.ts BAR_PIXELS). */
 const BAR_PIXELS = 0.5;

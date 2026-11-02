@@ -22,6 +22,9 @@ export class MeshBuilder {
   curFac = [0, 0, 0, 0];
   curBase = 0;
   curU = 0;
+  /** 14 bits a vertex, whole, in the normal's spare bytes (`curAux` at the time of the vertex). */
+  aux = new Uint16Array(4096);
+  curAux = 0;
   idx = new Uint32Array(6 * 4096);
   v = 0;
   t = 0;
@@ -41,7 +44,7 @@ export class MeshBuilder {
     const g = <T extends Float32Array | Uint32Array | Uint16Array | Uint8Array>(a: T, k: number): T => {
       const b = new (a.constructor as new (n: number) => T)(cap * k); b.set(a); return b;
     };
-    this.pos = g(this.pos, 3); this.nrm = g(this.nrm, 3); this.col = g(this.col, 1); this.mat = g(this.mat, 1); this.tag = g(this.tag, 1);
+    this.pos = g(this.pos, 3); this.nrm = g(this.nrm, 3); this.col = g(this.col, 1); this.mat = g(this.mat, 1); this.tag = g(this.tag, 1); this.aux = g(this.aux, 1);
     if (this.extra) this.extra = g(this.extra, 4);
     if (this.fac) this.fac = g(this.fac, 4);
     if (this.fuv) this.fuv = g(this.fuv, 2);

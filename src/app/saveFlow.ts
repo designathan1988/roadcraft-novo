@@ -90,6 +90,8 @@ export class SaveFlow {
    * save leaves them set and the next save tries again. True when the save completed.
    */
   async save(auto = false): Promise<boolean> {
+    // asked for by the player: this city is theirs from now on
+    if (!auto) this.h.world.owned = true;
     const f = this, h = this.h;
     const host: SaveHost = {
       world: h.world, pool: h.pool, hud: h.hud, rig: h.rig, transit: h.transit, hour: h.hour,
@@ -226,6 +228,7 @@ export class SaveFlow {
     this.h.rig.restore(meta.camera);
     this.h.hud.viewChanged();
     this.slotGame = meta.gameId;
+    this.h.world.owned = true;
     this.slotBase = g;
     return { missing, damaged: unreadable.length - missing, repaired, cut };
   }
@@ -340,6 +343,6 @@ export class SaveFlow {
   async saveBeforeClose(): Promise<void> {
     // the operation under way ends (an opening or a save); a half-built world (Failed) is never written
     await this.h.life.whenIdle(20000);
-    if ((this.h.life.unsaved || this.h.world.saveDirty.includes(1)) && !this.h.life.failed) await this.save(true);
+    if (this.h.world.owned && (this.h.life.unsaved || this.h.world.saveDirty.includes(1)) && !this.h.life.failed) await this.save(true);
   }
 }

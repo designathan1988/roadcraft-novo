@@ -64,7 +64,7 @@ const mapCell = Fn(() => {
     });
     mapStore.element(i).assign(float(1).sub(exp(layer.add(through.mul(0.8)).mul(-3))));
   });
-})().compute(BAKE_ROWS * CLOUD_MAP_RES, [64]);
+})().compute(BAKE_ROWS * CLOUD_MAP_RES, [64]).setName('cloudShadow.bake');
 
 /** The sky was empty for a whole bake: the map holds zeros and stays as it is while the sky stays empty. */
 let bakedEmpty = false;

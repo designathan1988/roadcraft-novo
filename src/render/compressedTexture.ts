@@ -4,8 +4,11 @@
 
 import * as THREE from 'three/webgpu';
 
-/** The adapter reads BC textures (set once, by the scene, before anything loads). */
-export const bc7 = { on: false };
+/** The adapter reads BC textures: decided by the scene once the device exists (`decideBc7`); the loaders wait for it. The
+ *  surfaces are asked for in the game's constructor, before the scene: asked at once they went for the RGBA files every time. */
+let decide: (on: boolean) => void = () => {};
+export const bc7 = { on: false, ready: new Promise<boolean>((r) => { decide = r; }) };
+export function decideBc7(on: boolean): void { bc7.on = on; decide(on); }
 
 /** Three u32 before the zstd: size, layers, raw bytes. */
 export const BC7_HEAD = 12;

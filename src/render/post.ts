@@ -7,7 +7,7 @@ import * as THREE from 'three/webgpu';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import GTAONode from 'three/addons/tsl/display/GTAONode.js';
 import { aoDenoise } from './aoDenoise.ts';
-import { PrepassPassNode } from './depthPrepass.ts';
+import { PrepassPassNode, attachPrepass, detachPrepass } from './depthPrepass.ts';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa as traaNode, traaDebug } from './traa.ts';
 import { T, type Node } from './tsl.ts';
@@ -291,6 +291,7 @@ export class Post {
     this.pipeline = new THREE.RenderPipeline(renderer);
     // no MSAA: anti-aliasing is temporal (TRAA), which also cleans the occlusion's noise
     // the opaque depth laid first, each material then runs once per covered pixel (render/depthPrepass.ts)
+    attachPrepass();
     const prepass = new PrepassPassNode(scene, camera, { samples: 0 });
     prepass.depthLaid = (depth) => this.occludersLaid?.(depth);
     const scenePass = T.nodeObject(prepass) as Node;
@@ -575,6 +576,7 @@ export class Post {
    * three cascade shadow maps stayed, 100-200 MB per change.
    */
   dispose(): void {
+    detachPrepass();
     for (const n of this.owned) n.dispose();
     this.owned.length = 0;
     if (this.csm) {

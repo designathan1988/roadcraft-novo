@@ -65,7 +65,7 @@ export class DepthOcclusion {
         const off = this.offsetsU.element(1).x;
         this.store.element(off.add(y.mul(dims.x).add(x))).assign(min(min(a, c), min(d2, e)));
       });
-    })().computeKernel([GROUP]);
+    })().computeKernel([GROUP]).setName('occlusion.level1');
 
     // level k > 1: the farthest of the four texels of level k-1 (dispatched once per level, levelU selects it)
     this.buildK = Fn(() => {
@@ -83,7 +83,7 @@ export class DepthOcclusion {
         const e = this.store.element(pOff.add(ny.mul(prev.x).add(nx)));
         this.store.element(off.add(y.mul(dims.x).add(x))).assign(min(min(a, c), min(d2, e)));
       });
-    })().computeKernel([GROUP]);
+    })().computeKernel([GROUP]).setName('occlusion.levelK');
   }
 
   /**

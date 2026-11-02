@@ -22,6 +22,8 @@ export class CommandStack {
   private open: Command | null = null;
   readonly limit: number;
   onChange: () => void = () => {};
+  /** The history was emptied (another city): the buttons follow, nothing was changed by the player. */
+  onCleared: () => void = () => {};
   /** A new command was added (not called on merge, undo or redo). */
   onPush: (cmd: Command) => void = () => {};
   /**
@@ -99,5 +101,5 @@ export class CommandStack {
   get canUndo(): boolean { return this.done.length > 0; }
   get canRedo(): boolean { return this.undone.length > 0; }
 
-  clear(): void { this.done.length = 0; this.undone.length = 0; this.open = null; this.held = 0; this.onChange(); }
+  clear(): void { this.done.length = 0; this.undone.length = 0; this.open = null; this.held = 0; this.onCleared(); }
 }

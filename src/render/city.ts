@@ -59,12 +59,12 @@ function bakeFinishesOnce(): void {
   w.onmessage = (e: MessageEvent<{ albedo: Uint8Array; normal: Uint8Array; size?: number; layers?: number } | { error: string }>) => {
     w.terminate();
     if ('error' in e.data) { console.warn('building finishes not loaded:', e.data.error); return; }
-    if (e.data.size) { becomeBc7(FINISH_ALBEDO, e.data.albedo, e.data.size, e.data.layers!); becomeBc7(FINISH_NORMAL, e.data.normal, e.data.size, e.data.layers!); return; }
+    if (e.data.size) { becomeBc7(FINISH_ALBEDO, e.data.albedo, e.data.size, e.data.layers!); becomeBc7(FINISH_NORMAL, e.data.normal, e.data.size, e.data.layers!); console.info(`building finishes: ${e.data.layers} layers in BC7`); return; }
     // the worker's arrays become the textures' data (the same size and format): no 13.6 MB copy on the main thread
     FINISH_ALBEDO.image.data = e.data.albedo; dropAfterUpload(FINISH_ALBEDO);
     FINISH_NORMAL.image.data = e.data.normal; dropAfterUpload(FINISH_NORMAL);
   };
-  w.postMessage({ bc7: bc7.on ? new URL('cooked/bc7/', document.baseURI).href : undefined, base: new URL('cooked/surfaces/', document.baseURI).href });
+  void bc7.ready.then((on) => w.postMessage({ bc7: on ? new URL('cooked/bc7/', document.baseURI).href : undefined, base: new URL('cooked/surfaces/', document.baseURI).href }));
 }
 /** Per finish (4.0 LOOKS): (1 / metres a repeat / repeats in its layer, normal strength, metalness, metal by the map). */
 const FINISH_LOOK = T.uniformArray(FINISH_LOOKS.map((l, k) => new THREE.Vector4(k ? 1 / l.worldSize / l.tiles : 0, l.normalScale, l.metalness, l.metallic ? 1 : 0)), 'vec4');

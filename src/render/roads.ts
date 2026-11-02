@@ -177,7 +177,9 @@ export function createRoadMaterial(look: TrafficLook, far = false): THREE.MeshSt
   // (any road built in a large city: ids ~20,000) came out ±1 fragment by fragment (float32 steps 0.5 there), its flag
   // bits flipped and the zebra, the stop line and other segments' wear showed through as specks.
   const code = floor(varying(road.w).setInterpolation('flat', 'either').add(0.5));
-  const segId = int(floor(code.div(16 * DASH_STEPS)));
+  const auxN = attribute('nrm', 'vec4');
+  const high = varying(floor(auxN.z.mul(127).add(0.5)).add(floor(auxN.w.mul(127).add(0.5)).mul(128))).setInterpolation('flat', 'either');
+  const segId = int(floor(code.div(16 * DASH_STEPS)).add(high.mul(65536)));
   const dashPhase = mod(floor(code.div(16)), float(DASH_STEPS)).mul(DASH_PERIOD / DASH_STEPS);
   const tag = floor(attribute('position', 'vec4').w.mul(32767).add(0.5));
   const profile = mod(tag, TAG_RULE);

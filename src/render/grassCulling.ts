@@ -73,7 +73,7 @@ export class GrassCulling {
     const visW = storage(this.vis, 'uint', TUFTS);
     this.reset = Fn(() => {
       atomicStore(drawsA.element(uint(1)), uint(0));
-    })().compute(1);
+    })().compute(1).setName('grass.reset');
     const range = this.rangeU;
     const planesU = this.planesU;
     this.cullPass = Fn(() => {
@@ -96,7 +96,7 @@ export class GrassCulling {
         const n = atomicAdd(drawsA.element(uint(1)), uint(1));
         visW.element(n).assign(instanceIndex);
       });
-    })().compute(TUFTS, [64]);
+    })().compute(TUFTS, [64]).setName('grass.cull');
   }
 
   /** The visible ids, read by the grass material. */
