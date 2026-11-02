@@ -4,6 +4,7 @@
 // regional crossings) is analytic here, from the road coordinates (u across, v along) and the profile table.
 
 import * as THREE from 'three/webgpu';
+import { layDepthFirst } from './depthPrepass.ts';
 import { CELLS_PER_TILE, MAP_CELLS, MAP_TILES } from '../config.ts';
 import { Dirty, cellId, cellOriginX, tileOriginX, type DirtyCells } from '../core/grid.ts';
 import type { JobPool } from '../jobs/pool.ts';
@@ -106,7 +107,7 @@ export function createRoads(net: RoadNetwork, pool: JobPool, dirty: DirtyCells, 
   };
   // NO mask-free variant here: the mask's zone term does real work - zone-painted pixels are discarded whenever
   // the zone tool is off (the paint lives in the mesh, pixel by pixel; no mesh-level predicate can spare them).
-  return new CellLayer(src, dirty, Dirty.Roads, createRoadMaterial(look), { near: 1400, evict: 2200, margin: 80, shadows: false, far: 5500, detail: 600, budget: 192e6, occluders }, true);
+  return new CellLayer(src, dirty, Dirty.Roads, createRoadMaterial(look), { farMaterial: createRoadMaterial(look, true), near: 1400, evict: 2200, margin: 80, shadows: false, far: 5500, detail: 600, budget: 192e6, occluders }, true);
 }
 
 /** 1 with the zone tool: shows the zone strips beside the roads. */
@@ -141,8 +142,12 @@ const MANHOLE_STEP = 47;
 /** The profiles' asphalt colour (sRGB) the 4.0 map stands for: other tones tint it. */
 const PROFILE_ASPHALT = [0x3a / 255, 0x3c / 255, 0x40 / 255];
 
-export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMaterial {
+/** `far`: the tiles', past the cells' reach. Lids, drains, kerb stones, tactile paving, rails and arrows are under a pixel
+ *  there and the road pays none of them; the lines, the surfaces and the cars by density stay. */
+export function createRoadMaterial(look: TrafficLook, far = false): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial();
+  // the road's depth first: the terrain under it, and what stands behind it, are never shaded
+  layDepthFirst(m);
   const nW = useCompactVertex(m, 'vRoadNormal');
   loadCookedSurfaces();
   // reversed depth: a positive offset pulls toward the camera
@@ -295,7 +300,7 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   let dArrow: Node = select(hasS.greaterThan(0.5), min(segD(0, 0, 0, 3.4, 0.14), headD(0, 5, 0, 1, 1.6, 0.55)), segD(0, 0, 0, 2.6, 0.14));
   dArrow = min(dArrow, select(hasL.greaterThan(0.5), min(segD(0, 2.0, -0.7, 2.75, 0.14), headD(-1.45, 3.45, -1, 0.9, 1.1, 0.5)), float(BIG)));
   dArrow = min(dArrow, select(hasR.greaterThan(0.5), min(segD(0, 2.0, 0.7, 2.75, 0.14), headD(1.45, 3.45, 1, 0.9, 1.1, 0.5)), float(BIG)));
-  const arrow = clamp(float(0.5).sub(dArrow.div(max(fu, fv))), 0, 1).mul(showArrow);
+  const arrow = far ? float(0) : clamp(float(0.5).sub(dArrow.div(max(fu, fv))), 0, 1).mul(showArrow);
 
   const isAsphalt = step(abs(matId.sub(RMAT.Asphalt)), float(0.1));
   const isPlain = step(abs(matId.sub(RMAT.Plain)), float(0.1));
@@ -312,16 +317,16 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   const tw = T.exp(lc.sub(0.85).div(0.3).pow(2).negate()).mul(inLane);
 
   // paint wears where the wheels run and where the asphalt is old (chipped by the grain), never to nothing
-  const paintWear = float(1).sub(tw.mul(used).mul(0.55)).sub(smoothstep(float(0.62).sub(used.mul(0.2)), float(0.75).sub(used.mul(0.2)), asph).mul(0.35));
+  const paintWear = far ? float(1) : float(1).sub(tw.mul(used).mul(0.55)).sub(smoothstep(float(0.62).sub(used.mul(0.2)), float(0.75).sub(used.mul(0.2)), asph).mul(0.35));
   white = max(max(white, arrow.mul(off)), crossPaint).mul(clamp(paintWear, 0.35, 1));
   yellow = yellow.mul(clamp(paintWear, 0.35, 1));
 
   // gutter: concrete channel along the curb, in slabs of 1 m, with a drain grate before each crossing and every 40 m
   const dEdge = min(u.sub(curbR), curbL.sub(u));
-  const gutter = isAsphalt.mul(roadUV).mul(float(1).sub(railProfile)).mul(windowAt(dEdge, -0.05, GUTTER, fu));
+  const gutter = far ? float(0) : isAsphalt.mul(roadUV).mul(float(1).sub(railProfile)).mul(windowAt(dEdge, -0.05, GUTTER, fu));
   const drainAt = max(max(crossA.mul(windowAt(v, 5.2, 6.1, fv)), crossB.mul(windowAt(toEnd, 5.2, 6.1, fv))),
     windowAt(fract(v.div(40).add(0.5)).sub(0.5).mul(40), -0.45, 0.45, fv).mul(step(float(8), v)).mul(step(float(8), toEnd)));
-  const drain = gutter.mul(drainAt).mul(windowAt(dEdge, 0.04, GUTTER - 0.04, fu));
+  const drain = far ? float(0) : gutter.mul(drainAt).mul(windowAt(dEdge, 0.04, GUTTER - 0.04, fu));
   const slats = mix(float(0.55), square(v.mul(9), 0.45, fv.mul(9)), clamp(float(1).sub(pix.mul(10)), 0, 1));
   const gutterJoint = band(fract(v.add(0.5)).sub(0.5), float(0.015), fv);
 
@@ -330,13 +335,13 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   const mHash = fract(sin(mk.mul(17.31).add(segId.toFloat().mul(3.17)).add(selU.mul(5.3))).mul(43758.5));
   const mAlong = v.sub(mk.add(0.3).add(mHash.mul(0.4)).mul(MANHOLE_STEP));
   const mDist = length(vec2(mAlong, u.sub(selU)));
-  const manhole = isAsphalt.mul(inLane).mul(float(1).sub(isRail)).mul(step(mHash, float(0.65))).mul(step(float(8), v)).mul(step(float(8), toEnd))
+  const manhole = far ? float(0) : isAsphalt.mul(inLane).mul(float(1).sub(isRail)).mul(step(mHash, float(0.65))).mul(step(float(8), v)).mul(step(float(8), toEnd))
     .mul(clamp(float(0.34).sub(mDist).div(max(pix, float(0.002))).add(0.5), 0, 1));
   const lidRim = smoothstep(0.24, 0.3, mDist);
   const lidGrid = mix(float(0.5), max(square(u.mul(8), 0.3, fu.mul(8)), square(v.mul(8), 0.3, fv.mul(8))), clamp(float(1).sub(pix.mul(12)), 0, 1));
 
   // base colour with broad variation (asphalt and grass blotches)
-  const blotch = mx_noise_float(p.xz.mul(0.08)).mul(0.06);
+  const blotch = far ? float(0) : mx_noise_float(p.xz.mul(0.08)).mul(0.06);
   let c: Node = sRGBTransferEOTF(col.xyz).mul(float(1).add(blotch));
   // Roadcraft 4.0's surfaces (cooked/surfaces): asphalt every 10.4 m across (u) and along (v) the road, the footway's
   // pavers every 7.2 m, the kerb every 3.2 m (on its face, along and up), the verge's grass every 8.8 m; junction fans
@@ -365,8 +370,8 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   const stone = floor(v);
   const stoneTone = fract(sin(stone.mul(78.23).add(segId.toFloat().mul(11.7)).add(u.mul(3.1).floor())).mul(43758.5)).mul(0.1).sub(0.05);
   const stoneJoint = band(fract(v.add(0.5)).sub(0.5), float(0.012), fv);
-  c = c.mul(float(1).add(isCurb.mul(stoneTone.sub(stoneJoint.mul(0.35)))));
-  {
+  if (!far) c = c.mul(float(1).add(isCurb.mul(stoneTone.sub(stoneJoint.mul(0.35)))));
+  if (!far) {
     const face = step(abs(nW.y), float(0.5));
     const kerbUV = vec2(v, mix(u, p.y, face));
     const kerb = sRGBTransferEOTF(texture(COOKED['kerb.map'], tile(3.2, kerbUV)).xyz);
@@ -406,7 +411,7 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
     .mul(max(crossA.mul(windowAt(v, 0.9, 3.4, fv)), crossB.mul(windowAt(toEnd, 0.9, 3.4, fv))));
   const studs = step(length(fract(sw.mul(14)).sub(0.5)), float(0.28));
   const studShade = mix(float(1), mix(float(0.86), float(1.12), studs), clamp(float(1).sub(pix.mul(25)), 0, 1));
-  c = mix(c, sRGBTransferEOTF(vec3(0.86, 0.66, 0.14)).mul(studShade), tactile);
+  if (!far) c = mix(c, sRGBTransferEOTF(vec3(0.86, 0.66, 0.14)).mul(studShade), tactile);
 
   const isGrass = step(abs(matId.sub(RMAT.Grass)), float(0.1));
   c = mix(c, sRGBTransferEOTF(texture(COOKED['verge.map'], tile(8.8, p.xz)).xyz), isGrass);
@@ -439,7 +444,7 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
     });
     return shade;
   })();
-  c = c.mul(stones);
+  if (!far) c = c.mul(stones);
   // Portuguese stone: black waves on cream (promenade)
   const wave = step(float(0.62), sin(p.x.mul(0.55).add(sin(p.z.mul(0.42)).mul(1.8))).mul(0.5).add(0.5));
   c = mix(c, c.mul(0.18), isStone.mul(wave).mul(float(1).sub(tactile)));
@@ -450,10 +455,12 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   const railLine = max(band(abs(ru).sub(0.75), float(0.09), fu), float(0));
   const railFine = clamp(float(1).sub(pix.mul(4)), 0, 1);
   const rails = isRail.mul(isAsphalt);
-  c = mix(c, sRGBTransferEOTF(vec3(0.42, 0.36, 0.3)), sleeper.mul(rails).mul(mix(float(0.35), float(1), railFine)));
-  c = mix(c, sRGBTransferEOTF(vec3(0.62, 0.62, 0.64)), railLine.mul(rails).mul(mix(float(0.5), float(1), railFine)));
-  // ballast: fine gravel
-  c = c.mul(float(1).add(railProfile.mul(isAsphalt).mul(mx_noise_float(p.xz.mul(6)).mul(0.18)).mul(clamp(float(1).sub(pix.mul(3)), 0, 1))));
+  if (!far) {
+    c = mix(c, sRGBTransferEOTF(vec3(0.42, 0.36, 0.3)), sleeper.mul(rails).mul(mix(float(0.35), float(1), railFine)));
+    c = mix(c, sRGBTransferEOTF(vec3(0.62, 0.62, 0.64)), railLine.mul(rails).mul(mix(float(0.5), float(1), railFine)));
+    // ballast: fine gravel
+    c = c.mul(float(1).add(railProfile.mul(isAsphalt).mul(mx_noise_float(p.xz.mul(6)).mul(0.18)).mul(clamp(float(1).sub(pix.mul(3)), 0, 1))));
+  }
   // bus lane: reddish asphalt
   c = mix(c, sRGBTransferEOTF(vec3(0.42, 0.16, 0.13)), isBus.mul(isAsphalt).mul(0.8));
   const paintMask = isAsphalt.mul(float(1).sub(drain)).mul(float(1).sub(manhole));
@@ -465,8 +472,8 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
   // density cars: away from the micro window, each lane shows cars moving by the segment's occupancy (0 to 1 =
   // bumper to bumper)
   const occ = textureLoad(look.occupancy, ivec2(segId.mod(int(512)), segId.div(int(512))));
-  const far = smoothstep(1250, 1650, length(p.xz.sub(look.center)));
-  let carMask: Node = float(0), carTint: Node = float(0);
+  const farCars = smoothstep(1250, 1650, length(p.xz.sub(look.center)));
+  let carMask: Node = float(0), carTint: Node = float(0), carSharp: Node = float(0);
   for (let k = 0; k < 4; k++) {
     const e = textureLoad(table, ivec2(int(k + MAX_LINES), int(profile)));
     const lu = e.x, ldir = e.y, lw = e.z;
@@ -476,12 +483,19 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
     const along = v.mul(ldir).sub(time.mul(speed)).div(spacing).add(float(k).mul(0.37));
     const cell = floor(along);
     const jitter = fract(sin(cell.mul(12.9898).add(segId.toFloat().mul(78.233))).mul(43758.5453));
-    const car = square(along.add(jitter.mul(0.3)), 4.3 / 7.5, fv.div(spacing)).mul(step(float(0.01), o)).mul(band(u.sub(lu), lw.mul(0.55), fu)).mul(step(float(0.1), lw));
+    // Under a pixel a car is its lane's mean, not a pattern: `cell` and its hash change inside one pixel and with the
+    // time, and each pixel drew a car of its own, a noise of white, black and red running over the far roads.
+    const sharp = clamp(float(2).sub(fv.div(spacing).mul(6)), 0, 1);
+    const pattern = square(along.add(jitter.mul(0.3)), 4.3 / 7.5, fv.div(spacing));
+    const car = mix(float(4.3).div(spacing), pattern, sharp).mul(step(float(0.01), o)).mul(band(u.sub(lu), lw.mul(0.55), fu)).mul(step(float(0.1), lw));
     carMask = max(carMask, car);
     carTint = select(car.greaterThan(carMask.sub(0.001)), jitter, carTint);
+    carSharp = max(carSharp, sharp);
   }
   const carColor = mix(sRGBTransferEOTF(vec3(0.85, 0.85, 0.83)), sRGBTransferEOTF(vec3(0.1, 0.1, 0.12)), step(float(0.5), carTint));
-  c = mix(c, mix(carColor, sRGBTransferEOTF(vec3(0.6, 0.12, 0.1)), step(float(0.85), carTint)), carMask.mul(far).mul(isAsphalt).mul(float(1).sub(railProfile)));
+  // the fleet's mean colour under a pixel (half dark, a third light, the rest red)
+  const carMean = sRGBTransferEOTF(vec3(0.5, 0.47, 0.47));
+  c = mix(c, mix(carMean, mix(carColor, sRGBTransferEOTF(vec3(0.6, 0.12, 0.1)), step(float(0.85), carTint)), carSharp), carMask.mul(farCars).mul(isAsphalt).mul(float(1).sub(railProfile)));
 
   // traffic view: each direction's colour by occupancy (u < 0 is the a → b side)
   const sideOcc = select(oneWay.greaterThan(0.5).or(u.lessThan(0)), occ.x, occ.y);
@@ -514,7 +528,8 @@ export function createRoadMaterial(look: TrafficLook): THREE.MeshStandardNodeMat
 
   // roughness: paint and the iron lids are smoother than the asphalt; concrete in between
   const baseRough = select(carriage.greaterThan(0.5), mix(float(0.92), float(0.6), clamp(paintW.add(paintY), 0, 1)), float(0.85));
-  {
+  if (far) m.normalNode = transformNormalToView(nW);
+  else {
     const an = texture(COOKED['asphalt.normal'], tile(10.4, asphUV)).xyz.mul(2).sub(1).mul(asphaltSurf);
     const fn = texture(COOKED['footway.normal'], footUV).xyz.mul(2).sub(1).mul(isSidewalk);
     const k = clamp(float(1).sub(pix.mul(2)), 0, 1).mul(step(float(0.5), nW.y));

@@ -6,6 +6,12 @@ import * as THREE from 'three/webgpu';
 import { ASPHALT_SIZE, GRASS_SIZE, NOISE_SIZE, WATER_SIZE } from './surfaceRecipes.ts';
 import type { BakedSurface } from './surfaceBakeWorker.ts';
 
+/** The texture's CPU copy leaves once it is on the GPU: for a texture filled once, kept for good it only doubled the memory. */
+export function dropAfterUpload(t: THREE.DataTexture | THREE.DataArrayTexture): void {
+  t.onUpdate = () => { t.onUpdate = null; (t.image as { data: Uint8Array }).data = new Uint8Array(0); };
+  t.needsUpdate = true;
+}
+
 function texture(size: number, r: number, g: number, b: number, a: number): THREE.DataTexture {
   const data = new Uint8Array(size * size * 4);
   new Uint32Array(data.buffer).fill(((a << 24) | (b << 16) | (g << 8) | r) >>> 0);
@@ -42,7 +48,7 @@ export function bakeSurfaces(): void {
     const t = BY_NAME[e.data.name];
     // the worker's array becomes the texture's data (the same size): no copy on the main thread
     t.image.data = e.data.data;
-    t.needsUpdate = true;
+    dropAfterUpload(t);
   };
   w.postMessage(null);
 }

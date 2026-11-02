@@ -70,7 +70,7 @@ const handlers: { [K in JobKind]: Handler<K> } = {
     return [{ cell: p.cell, lots }, lotTransfer(lots)];
   },
   props: (p) => {
-    const props = buildProps(H(), p.graph, p.boxes, p.cell, p.items, { ground: ground ?? undefined, water: water ?? undefined, biome: p.biome, parts40: p.parts40 });
+    const props = buildProps(H(), p.graph, p.boxes, p.cell, p.items, { ground: ground ?? undefined, water: water ?? undefined, biome: p.biome, parts40: p.parts40, partRules: p.partRules, partPx: p.partPx, partAt: p.partAt, lots: p.lots });
     return [{ cell: p.cell, props }, propTransfer(props)];
   },
   cityGen: (p) => {

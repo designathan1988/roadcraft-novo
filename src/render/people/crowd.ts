@@ -9,6 +9,7 @@
 // nothing below. Shadows only from level 0 (within ~40 m at 1080p, inside the vehicles' 90 m), cast with the cheaper
 // level-1 mesh: each level-0 person also gets a shadow-only level-1 instance (its own shadow position node).
 
+import type { MoverHidden } from '../visibility.ts';
 import * as THREE from 'three/webgpu';
 import { T, withPrevious, type Node } from '../tsl.ts';
 import { rainU } from '../weather.ts';
@@ -399,17 +400,24 @@ export class PeopleRenderer {
   }
 
   /** The colour pass's lists restored (post.ts, after the last cascade). */
-  prepareMain(): void {
+  prepareMain(hidden: MoverHidden | null = null): void {
     if (!this.ready) return;
     for (let lod = 0; lod < this.geos.length; lod++) {
       const s = this.snap[lod];
       if (!s) continue;
       const a = this.attrs[lod];
       const P = a.pos.array as Float32Array, Q = a.prev.array as Float32Array, I = a.info.array as Float32Array, A = a.anim.array as Float32Array;
-      if (s.n) { P.set(s.pos.subarray(0, s.n * 4)); Q.set(s.prev.subarray(0, s.n * 4)); I.set(s.info.subarray(0, s.n * 4)); A.set(s.anim.subarray(0, s.n * 4)); }
-      this.counts[lod] = s.n;
-      this.geos[lod].instanceCount = s.n;
-      for (const at of [a.pos, a.prev, a.info, a.anim]) { at.clearUpdateRanges(); at.addUpdateRange(0, s.n * 4); at.needsUpdate = true; }
+      // who stands hidden behind the walls leaves the colour pass; the cascades read the whole snapshot
+      let w = 0;
+      for (let i = 0; i < s.n; i++) {
+        const o = i * 4;
+        if (hidden?.(s.pos[o]!, s.pos[o + 1]! + 1, s.pos[o + 2]!, 1.2)) continue;
+        for (let v = 0; v < 4; v++) { P[w * 4 + v] = s.pos[o + v]!; Q[w * 4 + v] = s.prev[o + v]!; I[w * 4 + v] = s.info[o + v]!; A[w * 4 + v] = s.anim[o + v]!; }
+        w++;
+      }
+      this.counts[lod] = w;
+      this.geos[lod].instanceCount = w;
+      for (const at of [a.pos, a.prev, a.info, a.anim]) { at.clearUpdateRanges(); at.addUpdateRange(0, w * 4); at.needsUpdate = true; }
     }
   }
 

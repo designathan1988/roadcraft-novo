@@ -14,9 +14,10 @@ import { Zone, baseZone } from '../roads/zones.ts';
 import { heightAt } from '../world/heights.ts';
 import { WATER_MAP_RES, waterAt, waterCoord, waterIndex } from '../world/ground.ts';
 import type { BoxColumns, PropColumns, RoadGraph } from '../shared/contracts/worker.ts';
-import { PART_PROP, POOL_PARTS, partKey, partW, poolTint } from './parts40.ts';
+import { PART_PROP, POOL_PARTS, partDrawEnd, partKey, partW, poolTint } from './parts40.ts';
 import { inFootprints, lotParking, buildBuildingParts, type LotGround40 } from './buildingGen.ts';
 import { inPolygon, lotFit, lotPolygon } from './buildingGen/polygon.ts';
+import { insideOutline } from '../core/outline.ts';
 
 /** A prop's type from its `extra` word (5 bits; the rest is its key): the one decoder of that format. */
 export const propType = (extra: number): number => extra & 31;
@@ -164,7 +165,7 @@ const BIOME_TREES: Array<[number, number, number, number, number]> = [
 ];
 
 /** What the ground tells the props: paint/forest, water and biome. */
-export interface PropEnv { ground?: Uint32Array; water?: Float32Array; biome?: number; /** the cell is near: its 4.0 buildings' parts too */ parts40?: boolean }
+export interface PropEnv { ground?: Uint32Array; water?: Float32Array; biome?: number; /** the cell is near: its 4.0 buildings' parts too */ parts40?: boolean; /** the parts' rules, the view's pixels a metre and the nearest the camera has come: a part drawn no farther than that is left out */ partRules?: Float32Array; partPx?: number; partAt?: number; /** the next cells' lots reaching this one (World.lotsNear) */ lots?: Float32Array }
 
 export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, cell: number, items?: Float32Array, env?: PropEnv): PropColumns {
   const out = new Out(cell);
@@ -445,7 +446,9 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
   const grounds40 = buildBuildingParts(heights, b, (v, x, y, z, yaw, s, kind) => out.addOwn(kind ?? PROP.Furniture, x, y, z, yaw, v, s, kind === undefined ? 0 : hash2(Math.round(x * 8), Math.round(z * 8), 61)), foot,
     env?.parts40 ? (kind, x, y, z, yaw, sx, sy, sz, rgb) => {
       const tv = POOL_PARTS[kind];
-      if (tv) out.addPart(tv[0], x, y, z, partW(yaw, poolTint(kind, rgb)), partKey(tv[0], sx, sy, sz, tv[1]));
+      if (!tv) return;
+      if (env.partRules && env.partPx && env.partAt && partDrawEnd(env.partRules, tv[0], tv[1], Math.abs(sx), Math.abs(sy), Math.abs(sz), env.partPx) < env.partAt) return;
+      out.addPart(tv[0], x, y, z, partW(yaw, poolTint(kind, rgb)), partKey(tv[0], sx, sy, sz, tv[1]));
     } : undefined);
   lotYardProps(heights, b, (k, x, y, z, yaw, v, sc, key) => out.addOwn(k, x, y, z, yaw, v, sc, key), foot, grounds40);
 
@@ -503,14 +506,27 @@ export function buildProps(heights: Float32Array, g: RoadGraph, b: BoxColumns, c
     const plant = (kind: number, x: number, y: number, z: number, yaw: number, variant: number, scale: number, key: number) => {
       if (wildGrade(heights, x, z) <= WILD_MAX_GRADE && crownClear(x, z, CROWN_R[kind] * scale)) out.add(kind, x, y, z, yaw, variant, scale, key);
     };
+    /** Ground a lot takes: no trunk on it and no wild crown over it (`crownClear` reads the same grid as the road's). */
+    const taken = (x: number, z: number) => { mark(x, z, 1); markRoad(x, z, 1); };
     for (let i = 0; i < b.count; i++) {
       // the whole lot is taken (building, yard, walls); a polygon lot only inside its outline
       const c = Math.cos(b.rot[i]), sn = Math.sin(b.rot[i]);
       const W2 = b.w[i] / 2 + 0.5, D2 = b.d[i] / 2 + 0.5, poly = lotPolygon(b, i);
       for (let a = -W2; a <= W2; a += RES) for (let d = -D2; d <= D2; d += RES) {
         if (poly && !inPolygon(poly, a, d, 0.5)) continue;
-        mark(b.x[i] + a * c + d * sn, b.z[i] - a * sn + d * c, 1);
+        taken(b.x[i] + a * c + d * sn, b.z[i] - a * sn + d * c);
       }
+    }
+    // the lots of the next cells on this one's ground
+    const lots = env?.lots;
+    if (lots) for (let o = 0; o < lots.length;) {
+      const x = lots[o], z = lots[o + 1], c = Math.cos(lots[o + 2]), sn = Math.sin(lots[o + 2]), n = lots[o + 3], at = o + 4;
+      let hw = 0, hd = 0;
+      for (let k = 0; k < n; k++) { hw = Math.max(hw, Math.abs(lots[at + k * 2])); hd = Math.max(hd, Math.abs(lots[at + k * 2 + 1])); }
+      for (let a = -hw; a <= hw; a += RES) for (let d = -hd; d <= hd; d += RES) {
+        if (insideOutline(lots, at, n, a, d)) taken(x + a * c + d * sn, z - a * sn + d * c);
+      }
+      o = at + n * 2;
     }
     const rng = new Rng(hash2(Math.round(x0), Math.round(z0), 5151));
     const free = (x: number, z: number) => {

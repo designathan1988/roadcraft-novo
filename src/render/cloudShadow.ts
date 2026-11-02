@@ -1,9 +1,9 @@
 // Shadows of the clouds on the ground, as Roadcraft 4.0's (`postprocess.ts` with `cloudShadowStamp.ts`): the
-// shadow factor is BAKED once a frame into a map of the whole ground (a cell every ~40 m on the 10 km map) and the
-// final image samples it bilinearly by world position - the same formula the old per-pixel path evaluated, two
-// million times a screen instead of sixty-five thousand times a map. The clouds drift, so the map is rebuilt every
-// frame; the factor on a pixel far above the ground reads the ground's cell (4.0's own map is a ground plane: the
-// parallax inside a cloud's softness was the accepted look).
+// shadow factor is BAKED into a map of the whole ground (a cell every ~40 m on the 10 km map) and the final image
+// samples it bilinearly by world position - the same formula the old per-pixel path evaluated, two million times a
+// screen. The clouds take seconds to cross a cell, so a few rows are baked each frame (the whole map in BAKE_FRAMES
+// frames, a tenth of a second), and with no cloud in the sky none are; the factor on a pixel far above the ground reads
+// the ground's cell (4.0's own map is a ground plane: the parallax inside a cloud's softness was the accepted look).
 
 import * as THREE from 'three/webgpu';
 import { T, type Node } from './tsl.ts';
@@ -30,11 +30,16 @@ export const CLOUD_MAP_RES = 256;
 const CLOUD_MAP = new THREE.StorageBufferAttribute(CLOUD_MAP_RES * CLOUD_MAP_RES, 1);
 const mapStore = storage(CLOUD_MAP, 'float', CLOUD_MAP_RES * CLOUD_MAP_RES);
 const mapSunU = uniform(new THREE.Vector3(0, 1, 0));
+/** Frames a whole bake is spread over, and the rows each one takes. */
+const BAKE_FRAMES = 8;
+const BAKE_ROWS = CLOUD_MAP_RES / BAKE_FRAMES;
+/** The first row of this frame's slice. */
+const rowU = uniform(0, 'uint');
 
 /** The factor a world ground point reads: the weather's layer and each player cloud along the sun - the exact
  *  formula the per-pixel path evaluated, now per map cell. */
 const mapCell = Fn(() => {
-  const i = instanceIndex;
+  const i = instanceIndex.add(rowU.mul(uint(CLOUD_MAP_RES)));
   If(i.lessThan(uint(CLOUD_MAP_RES * CLOUD_MAP_RES)), () => {
     const gx = i.mod(uint(CLOUD_MAP_RES)), gy = i.div(uint(CLOUD_MAP_RES));
     const world = vec3(gx.div(float(CLOUD_MAP_RES)).sub(0.5).mul(float(MAP_SIZE)), float(0), gy.div(float(CLOUD_MAP_RES)).sub(0.5).mul(float(MAP_SIZE)));
@@ -59,12 +64,23 @@ const mapCell = Fn(() => {
     });
     mapStore.element(i).assign(float(1).sub(exp(layer.add(through.mul(0.8)).mul(-3))));
   });
-})().compute(Math.ceil((CLOUD_MAP_RES * CLOUD_MAP_RES) / 64), [64]);
+})().compute(BAKE_ROWS * CLOUD_MAP_RES, [64]);
 
-/** Bakes the map (post's frame end, once a frame: the clouds drift and the sun moves). */
+/** The sky was empty for a whole bake: the map holds zeros and stays as it is while the sky stays empty. */
+let bakedEmpty = false;
+let bakeRow = 0;
+let emptyRows = 0;
+
+/** One slice of the bake (post's frame end: the clouds drift and the sun moves). The count is in invocations. */
 export function buildCloudMap(renderer: THREE.WebGPURenderer, sun: THREE.Vector3): void {
+  const empty = (cloudsU.value as number) <= 0 && (cloudCountU.value as number) <= 0;
+  if (empty && bakedEmpty) return;
   (mapSunU.value as THREE.Vector3).copy(sun);
+  rowU.value = bakeRow;
   renderer.compute(mapCell);
+  bakeRow = (bakeRow + BAKE_ROWS) % CLOUD_MAP_RES;
+  emptyRows = empty ? emptyRows + BAKE_ROWS : 0;
+  bakedEmpty = emptyRows >= CLOUD_MAP_RES;
 }
 
 /** Bilinear read of the baked factor at a world ground position. */

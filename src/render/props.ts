@@ -14,7 +14,7 @@ import { drawnTriangleCounts, type PropsProbe } from './propsProbe.ts';
 import { PROP_FREE, PROP_TYPES, propType } from '../jobs/props.ts';
 import { PARTS_RANGE, VARIANT_TYPES } from '../jobs/parts40.ts';
 import type { World } from '../world/world.ts';
-import { PartSize } from './partSize.ts';
+import { PartSize, partRules } from './partSize.ts';
 import { buildPropDefs, buildPropKinds, buildingPartModels, propKindCasts, propCullRadius, propLayer, propStretch, buildSignAtlas, impostorSources, propKindTable, VARIANTS, type PropDef, type PropKind } from './propMeshes.ts';
 import { bakeImpostors, impostorFrames } from './impostor.ts';
 import { buildLeafAtlas } from './treeMeshes.ts';
@@ -41,6 +41,19 @@ const KINDS = propKindTable().count;
 const DRAWS = KINDS * LODS;
 /** A level switch dissolves for this long (ms), as Cesium's dithered LOD transitions (0.5 s); transient, not a band. */
 const LOD_FADE_MS = 450;
+/** Words of an instance's dissolve state: its prop key, its levels, the dissolve's start (ms). One buffer on purpose: the
+ *  fill pass binds 8 storage buffers, WebGPU's guaranteed limit for a stage. A ninth (the start kept apart) made the
+ *  pipeline invalid: the colour cull never ran and the draws read the last shadow cascade's list as their own, each mesh
+ *  drawn at another kind's instances. */
+const LOD_WORDS = 3;
+/** How far past a cell a next cell's lot matters to its wild trees (m): the widest crown. */
+const LOT_REACH = 16;
+/** How far the eye goes before the casters are chosen again (m). */
+const CASTER_STEP = 48;
+/** Cells this near hold all their parts. */
+const PART_ALL = 64;
+/** Cells of the queue asked again at a time. */
+const RETRY_CELLS = 12;
 /** The level changes only this far past its boundary (relative distance), so a camera at rest never flickers. */
 const LOD_HYSTERESIS = 0.06;
 
@@ -59,10 +72,8 @@ export class PropRenderer {
   private kindNear = new Uint32Array(KINDS);
   private kindNearDue = true;
   /** LOD dissolve state per instance: (prop key, from | to << 4) and the dissolve start (ms). */
-  private readonly lodState = new Uint32Array(CAP * 2).fill(0xffffffff);
-  private readonly lodStart = new Float32Array(CAP);
+  private readonly lodState = new Uint32Array(CAP * LOD_WORDS).fill(0xffffffff);
   private lodStateAttr!: THREE.StorageBufferAttribute;
-  private lodStartAttr!: THREE.StorageBufferAttribute;
   private readonly lodClock = uniform(0);
   /** Frames drawn: the dissolve's dither phase. */
   private fadeFrame = 0;
@@ -88,6 +99,9 @@ export class PropRenderer {
   private cellHave = new Int32Array(CELL_COUNT);
   /** Whether a cell's props were asked with its 4.0 buildings' parts (near cells only, jobs/parts40.ts PARTS_RANGE). */
   private cellParts = new Uint8Array(CELL_COUNT);
+  /** The distance each cell's parts were chosen for: nearer than this, they were left out and it is asked again. */
+  private cellPartAt = new Float32Array(CELL_COUNT);
+  private partRuleTable!: Float32Array;
   /** Cells whose props did not fit in the pool: asked again when blocks are freed. */
   private pending = new Set<number>();
   private residentAt = new THREE.Vector3(Infinity, 0, Infinity);
@@ -95,6 +109,11 @@ export class PropRenderer {
   private retryDue = false;
   private usedU = uniform(0, 'uint');
   private camU = uniform(new THREE.Vector3());
+  /** Where the cascades' casters are chosen from: it follows the eye in steps. Chosen from the eye itself, what casts
+   *  changed with every orbit and a kept or scrolled map went without the parts now near it. */
+  private casterEyeU = uniform(new THREE.Vector3(Infinity, 0, 0));
+  /** The caster set moved with the eye: the near cascades, which hold those parts, are drawn again. */
+  casterMoved = false;
   private planes: THREE.Vector4[] = Array.from({ length: 6 }, () => new THREE.Vector4());
   private planesU: Node;
   private distArr: number[] = new Array(DRAWS).fill(0);
@@ -124,10 +143,15 @@ export class PropRenderer {
   private shCull: Node;
   /** The pools' occlusion: the previous frame's depth pyramid, tested in the cull (WebGPU only). */
   private occlusion: DepthOcclusion | null = null;
+  /** The frame the pyramid holds: its forward, matrices and focal (the test asks whether it hid the instance). */
   private camFU = uniform(new THREE.Vector3(0, 0, -1));
   private projU = uniform(new THREE.Matrix4());
   private viewU = uniform(new THREE.Matrix4());
   private focalU = uniform(1304);
+  private readonly nextFwd = new THREE.Vector3(0, 0, -1);
+  private readonly nextProj = new THREE.Matrix4();
+  private readonly nextView = new THREE.Matrix4();
+  private nextFocal = 1304;
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   /** Traffic light state texture (node → 1 + arm * 4 + state). */
@@ -135,6 +159,8 @@ export class PropRenderer {
   pixelScale = 1;
   /** Props were placed or dropped since the last `update` (the shadow cascades are redrawn). */
   changed = true;
+  /** Cells whose props came or left since the shadows last looked: their cascades redraw, not all of them. */
+  private readonly changedCells = new Set<number>();
   /** Mesh of each type × level (null: no level): levels nothing can reach this frame are not drawn. */
   private slotMesh: Array<THREE.Mesh | null> = new Array(DRAWS).fill(null);
   private signalSent = 0;
@@ -167,7 +193,6 @@ export class PropRenderer {
     this.poolAttr = new THREE.StorageBufferAttribute(this.data, 4);
     this.extraAttr = new THREE.StorageBufferAttribute(this.extra, 1);
     this.lodStateAttr = new THREE.StorageBufferAttribute(this.lodState, 1);
-    this.lodStartAttr = new THREE.StorageBufferAttribute(this.lodStart, 1);
     this.visAttr = new THREE.StorageBufferAttribute(new Uint32Array(VISIBLE), 1);
     this.offsetAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
     this.cursorAttr = new THREE.StorageBufferAttribute(new Uint32Array(DRAWS), 1);
@@ -186,6 +211,7 @@ export class PropRenderer {
     this.stretchU = uniformArray(this.kinds.map((d) => propStretch(d)), 'float');
     this.castU = uniformArray(this.kinds.map((d) => (propKindCasts(d) ? 1 : 0)), 'float');
     this.partSize = new PartSize(this.kinds);
+    this.partRuleTable = partRules(this.kinds, this.kindOf, VARIANTS);
 
     // ---- compute. The visible list is compact: each draw's instances in one run, the runs back to back. Count (how
     // many each draw gets), prefix (where each run starts), fill. No draw has a cap of its own: a forest of 250,000
@@ -201,8 +227,7 @@ export class PropRenderer {
     const extraC = storage(this.extraAttr, 'uint', CAP).toReadOnly();
     const kindOfC = storage(this.kindOfAttr, 'uint', PROP_TYPES * VARIANTS).toReadOnly();
     const visW = storage(this.visAttr, 'uint', VISIBLE);
-    const lodStateW = storage(this.lodStateAttr, 'uint', CAP * 2);
-    const lodStartW = storage(this.lodStartAttr, 'float', CAP);
+    const lodStateW = storage(this.lodStateAttr, 'uint', CAP * LOD_WORDS);
     const nowU = this.lodClock;
     /** Culls instance i and calls `emit(slot, code)` for each level it is drawn in (one, or two while fading). */
     const classify = (emit: (slot: Node, code: Node) => void) => {
@@ -256,9 +281,9 @@ export class PropRenderer {
             const target = uint(LODS).toVar();
             for (let l = LODS - 1; l >= 0; l--) target.assign(select(ends[l].greaterThan(0).and(d.lessThan(ends[l])), uint(l), target));
             // per-instance dissolve state: the prop key, the level it comes from and goes to, and when it began
-            const stKey = lodStateW.element(i.mul(2)).toVar();
-            const stPacked = lodStateW.element(i.mul(2).add(1)).toVar();
-            const stStart = lodStartW.element(i).toVar();
+            const stKey = lodStateW.element(i.mul(LOD_WORDS)).toVar();
+            const stPacked = lodStateW.element(i.mul(LOD_WORDS).add(1)).toVar();
+            const stStart = float(lodStateW.element(i.mul(LOD_WORDS).add(2))).toVar();
             const from = stPacked.bitAnd(uint(15)).toVar();
             const to = stPacked.shiftRight(uint(4)).bitAnd(uint(15)).toVar();
             const start = stStart.toVar();
@@ -266,9 +291,9 @@ export class PropRenderer {
             // a prop that took the pool slot (or the first frame): no dissolve, it appears at its level
             If(stKey.notEqual(key), () => {
               from.assign(target); to.assign(target); start.assign(nowU.sub(float(LOD_FADE_MS)));
-              lodStateW.element(i.mul(2)).assign(key);
-              lodStateW.element(i.mul(2).add(1)).assign(from.bitOr(to.shiftLeft(uint(4))));
-              lodStartW.element(i).assign(start);
+              lodStateW.element(i.mul(LOD_WORDS)).assign(key);
+              lodStateW.element(i.mul(LOD_WORDS).add(1)).assign(from.bitOr(to.shiftLeft(uint(4))));
+              lodStateW.element(i.mul(LOD_WORDS).add(2)).assign(uint(max(start, float(0))));
             });
             // the level changes only past a hysteresis band, and the dissolve starts then
             const high = endAt(to);
@@ -277,8 +302,8 @@ export class PropRenderer {
             const down = target.lessThan(to).and(d.lessThan(low.mul(1 - LOD_HYSTERESIS)));
             If(up.or(down), () => {
               from.assign(to); to.assign(target); start.assign(nowU);
-              lodStateW.element(i.mul(2).add(1)).assign(from.bitOr(to.shiftLeft(uint(4))));
-              lodStartW.element(i).assign(start);
+              lodStateW.element(i.mul(LOD_WORDS).add(1)).assign(from.bitOr(to.shiftLeft(uint(4))));
+              lodStateW.element(i.mul(LOD_WORDS).add(2)).assign(uint(max(start, float(0))));
             });
             const a = clamp(nowU.sub(start).div(float(LOD_FADE_MS)), 0, 1).toVar();
             // during the dissolve the outgoing level fades out and the incoming one fades in (complementary masks);
@@ -354,7 +379,7 @@ export class PropRenderer {
             const s0 = dot(pl.xyz, p).add(pl.w);
             inShadow = inShadow.mul(step(r.negate(), s0.add(max(dot(pl.xyz, sun.xyz.negate()).mul(len), float(0)))));
           }
-          const d = length(p.sub(this.camU)).toVar();
+          const d = length(p.sub(this.casterEyeU)).toVar();
           If(inShadow.greaterThan(0.5).and(this.castU.element(kind).greaterThan(0.5)).and(d.lessThan(this.distU.element(kind.mul(LODS)))), () => {
             emit(kind.mul(LODS), i.bitOr(uint(255).shiftLeft(uint(22))));
           });
@@ -435,6 +460,9 @@ export class PropRenderer {
     this.cellReq[c] = v;
     const parts40 = this.wantParts(c, distance);
     this.cellParts[c] = parts40 ? 1 : 0;
+    // a quarter of the way in: the camera then comes that much nearer before the cell has to be asked again
+    const partAt = distance > PART_ALL ? distance * 0.75 : 0;
+    this.cellPartAt[c] = partAt;
     const w = this.world, net = w.roads;
     const x0 = cellOriginX(c % MAP_CELLS), z0 = cellOriginX((c / MAP_CELLS) | 0);
     const segs: SegId[] = [];
@@ -442,8 +470,9 @@ export class PropRenderer {
     const boxes = w.gatherBoxes([c], true);
     const graph = net.gather(segs, []);
     const items = w.items.gather(c, MAP_CELLS);
-    this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome, parts40 }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {
-      key: `props:${c}`, priority: distance + 100, transfer: [...roadGraphTransfer(graph), ...boxTransfer(boxes), items.buffer as ArrayBuffer],
+    const lots = w.lotsNear(x0 - LOT_REACH, z0 - LOT_REACH, x0 + CELL_SIZE + LOT_REACH, z0 + CELL_SIZE + LOT_REACH, c);
+    this.pool.submit('props', { graph, boxes, cell: c, items, biome: w.biome, parts40, partRules: this.partRuleTable, partPx: this.partSize.pxPerMetre, partAt, lots }, (r) => { if (this.cellReq[r.cell] === v) this.setCell(r.cell, r.props, v); }, {
+      key: `props:${c}`, priority: distance + 100, transfer: [...roadGraphTransfer(graph), ...boxTransfer(boxes), items.buffer as ArrayBuffer, lots.buffer as ArrayBuffer],
     });
   }
 
@@ -478,14 +507,19 @@ export class PropRenderer {
       else {
         this.blocks.setDistance(c, d);
         // came near (or went far): asked again with (without) its buildings' parts
-        if (this.wantParts(c, d) !== (this.cellParts[c] === 1) && this.cellReq[c] === this.cellHave[c]) this.requestCell(c, d);
+        const parts = this.cellParts[c] === 1, at = this.cellPartAt[c];
+        if ((this.wantParts(c, d) !== parts || (parts && (d < at || d > at * 2.4))) && this.cellReq[c] === this.cellHave[c]) this.requestCell(c, d);
       }
     }
     for (const c of [...this.pending]) if (this.cellDistance(c, cam) > drop) { this.pending.delete(c); this.cellHave[c] = -1; this.cellReq[c] = 0; }
     if (this.retryDue) {
       this.retryDue = false;
+      // nearest first and only what the room can take: a whole queue asked again at one free block held the main thread
+      // gathering its roads and buildings, and most of it came back to the queue
       const wait = [...this.pending].map((c) => [c, this.cellDistance(c, cam)] as const).sort((a, b) => a[1] - b[1]);
-      for (const [c, d] of wait) { this.pending.delete(c); this.requestCell(c, d); }
+      const take = Math.min(wait.length, RETRY_CELLS, this.blocks.free > 0 ? RETRY_CELLS : 0);
+      for (let k = 0; k < take; k++) { const [c, d] = wait[k]; this.pending.delete(c); this.requestCell(c, d); }
+      this.retryDue = wait.length > take && this.blocks.free > 0;
     }
     const span = Math.ceil(keep / CELL_SIZE);
     const ccx = Math.floor((cam.x + MAP_CELLS * CELL_SIZE / 2) / CELL_SIZE), ccz = Math.floor((cam.z + MAP_CELLS * CELL_SIZE / 2) / CELL_SIZE);
@@ -519,7 +553,7 @@ export class PropRenderer {
   /** Counts a placed cell's instances per kind (kinds with none in the held cells are not drawn). */
   private countKinds(c: number, p: PropColumns): void {
     this.forgetKinds(c);
-    this.changed = true;
+    this.changedCells.add(c);
     const n = new Uint32Array(KINDS);
     let top = -Infinity;
     for (let i = 0; i < p.count; i++) {
@@ -552,7 +586,7 @@ export class PropRenderer {
     const n = this.cellKinds.get(c);
     if (!n) return;
     this.cellKinds.delete(c);
-    this.changed = true;
+    this.changedCells.add(c);
     this.cellTop[c] = -Infinity;
     this.kindNearDue = true;
   }
@@ -608,6 +642,17 @@ export class PropRenderer {
     this.cellHave[c] = v;
   }
 
+  /** The ground boxes of the cells whose props changed, once. */
+  takeChangedBoxes(): THREE.Box3[] {
+    const out: THREE.Box3[] = [];
+    for (const c of this.changedCells) {
+      const x = cellOriginX(c % MAP_CELLS), z = cellOriginX((c / MAP_CELLS) | 0);
+      out.push(new THREE.Box3(new THREE.Vector3(x - 16, -200, z - 16), new THREE.Vector3(x + CELL_SIZE + 16, 1400, z + CELL_SIZE + 16)));
+    }
+    this.changedCells.clear();
+    return out;
+  }
+
   /** Cells waiting for room in the pool, and cells holding props. */
   get pendingCells(): number { return this.pending.size; }
   get residentCells(): number { return this.blocks.resident.size; }
@@ -649,11 +694,17 @@ export class PropRenderer {
     this.frustum.setFromProjectionMatrix(this.pv, camera.coordinateSystem, (camera as THREE.PerspectiveCamera).reversedDepth);
     this.frustum.planes.forEach((p, k) => this.planes[k].set(p.normal.x, p.normal.y, p.normal.z, p.constant));
     this.camU.value.copy(camPos);
-    // the occlusion test projects with the same matrices the frame renders with, and its focal in pixels
-    (this.projU.value as THREE.Matrix4).copy(camera.projectionMatrix);
-    (this.viewU.value as THREE.Matrix4).copy(camera.matrixWorldInverse);
-    camera.getWorldDirection(this.camFU.value as THREE.Vector3);
-    this.focalU.value = (renderer.domElement.height || 1080) / (2 * Math.tan((((camera as THREE.PerspectiveCamera).fov ?? 45) / 2) * Math.PI / 180));
+    if ((this.casterEyeU.value as THREE.Vector3).distanceTo(camPos) > CASTER_STEP) { (this.casterEyeU.value as THREE.Vector3).copy(camPos); this.casterMoved = true; }
+    // the occlusion test projects with the matrices of the frame the pyramid was reduced from, the last one drawn;
+    // this frame's are kept for the next
+    (this.projU.value as THREE.Matrix4).copy(this.nextProj);
+    (this.viewU.value as THREE.Matrix4).copy(this.nextView);
+    (this.camFU.value as THREE.Vector3).copy(this.nextFwd);
+    this.focalU.value = this.nextFocal;
+    this.nextProj.copy(camera.projectionMatrix);
+    this.nextView.copy(camera.matrixWorldInverse);
+    camera.getWorldDirection(this.nextFwd);
+    this.nextFocal = (renderer.domElement.height || 1080) / (2 * Math.tan((((camera as THREE.PerspectiveCamera).fov ?? 45) / 2) * Math.PI / 180));
     (this.sunU.value as THREE.Vector3).copy(sunDirection);
     // a new scale moves every distance: the cascades' casters changed
     if (this.partSize.setView(camera, this.pixelScale)) this.changed = true;
@@ -718,8 +769,8 @@ export class PropRenderer {
     }
     this.pending.clear();
     this.residencyDue = true;
-    this.lodState.fill(0xffffffff); this.lodStart.fill(0);
-    this.lodStateAttr.needsUpdate = true; this.lodStartAttr.needsUpdate = true;
+    this.lodState.fill(0xffffffff);
+    this.lodStateAttr.needsUpdate = true;
   }
 }
 

@@ -8,7 +8,7 @@ import * as THREE from 'three/webgpu';
 import { CELL_SIZE, CELLS_PER_TILE, MAP_CELLS, MAP_PLATES, MAP_TILES, PLATE_SIZE, TILE_SIZE } from '../config.ts';
 import { CELL_COUNT, TILE_COUNT, cellId, cellOriginX, tileId, tileOfCell, tileOriginX, tileX, type DirtyCells, type DirtyKind, type DirtyReader } from '../core/grid.ts';
 import type { PackedMesh } from '../shared/contracts/worker.ts';
-import { CELL_CASTER_LAYER, SHADOW_LENGTH, SHADOW_REACH, TILE_CASTER_LAYER, sunDirection } from './sun.ts';
+import { CELL_CASTER_LAYER, SHADOW_REACH, TILE_CASTER_LAYER, sunDirection } from './sun.ts';
 import { forgetOccluded, markOccluded, type BuildingOccluders, type WorldBox } from './visibility.ts';
 
 export interface LayerSource {
@@ -44,7 +44,9 @@ export interface LayerOptions {
   margin: number;
   /** The mask-free variant: meshes whose `plainFor` says whole draw the plain material (no discard: early-Z back);
    *  fading, cut or hole meshes draw the masked one. The same shader without the discard - the image cannot differ. */
-  materials?: { masked: THREE.Material; plain: THREE.Material; plainFor: (u: FadeData) => boolean };
+  materials?: { masked: THREE.Material; plain: THREE.Material; /** tiles' and plates' own, without what is under a pixel there */ farMasked?: THREE.Material; farPlain?: THREE.Material; plainFor: (u: FadeData) => boolean };
+  /** The far meshes' material, for a layer with no variants. */
+  farMaterial?: THREE.Material;
   /** Beyond this not even the tile is drawn (0 = no limit). */
   far?: number;
   /** Up to here the cell uses L0; beyond, L1 (0 = L0 only). */
@@ -73,12 +75,32 @@ interface Slot { mesh: THREE.Mesh | null; /** the tile's shadow-only twin (far c
 const slot = (size: number, scope: SlotScope) => (_: unknown, id: number): Slot => ({ mesh: null, twin: null, built: 0, requested: 0, minY: 0, maxY: 0, bytes: 0, size, scope, id });
 
 const FADE = 0.35;
+/** A cell gives its detail back only after being hidden this long (s): hidden for a moment, as a turning camera hides
+ *  and shows whole blocks, it stays. Visibility decides what is drawn; it must not decide what is held, or every turn
+ *  drops meshes, asks the workers for them again and redraws the shadows of what arrives. */
+const HIDDEN_HOLD = 8;
 /** Height over the ground that counts as level with the cell (roofs and bridges up to it). */
 const DETAIL_HEADROOM = 60;
 const PLATE_COUNT = MAP_PLATES * MAP_PLATES;
 const TILES_PER_PLATE = PLATE_SIZE / TILE_SIZE;
 
-interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; freed?: boolean; drawnAt?: number; /** cell meshes: the cell and the level */ cell?: number; level?: number; /** a mesh of a publishing layer */ publisher?: boolean; /** world box, for the occlusion test */ box?: WorldBox; /** the tile's shadow-only twin (lodCasters) */ twin?: THREE.Mesh }
+interface FadeData { fade?: number; since?: number; instant?: boolean; dead?: boolean; /** cell meshes: the cell and the level */ cell?: number; level?: number; /** a mesh of a publishing layer */ publisher?: boolean; /** world box, for the occlusion test */ box?: WorldBox; /** the tile's shadow-only twin (lodCasters) */ twin?: THREE.Mesh }
+
+/**
+ * A mesh's buffers go to the GPU when it arrives, and its CPU copy leaves at once: uploaded at its first draw, every mesh held
+ * but not yet seen kept both ends of the job's result in the page. three has no public call for this: `_attributes` is the
+ * manager its renderer uses at the first draw (r186 Attributes.update; 1 vertex, 2 index), and a mesh dropped before any
+ * draw is released here, since three's own dispose listener is only added at the first draw.
+ */
+export interface MeshUploader { up(g: THREE.BufferGeometry): void; down(g: THREE.BufferGeometry): void }
+export function meshUploader(renderer: THREE.Renderer): MeshUploader {
+  const a = (renderer as unknown as { _attributes: { update(at: THREE.BufferAttribute, type: number): void; delete(at: THREE.BufferAttribute): unknown } })._attributes;
+  const each = (g: THREE.BufferGeometry, fn: (at: THREE.BufferAttribute, type: number) => void) => {
+    for (const k of Object.keys(g.attributes)) fn(g.attributes[k] as THREE.BufferAttribute, 1);
+    if (g.index) fn(g.index, 2);
+  };
+  return { up: (g) => each(g, (at, type) => a.update(at, type)), down: (g) => each(g, (at) => a.delete(at)) };
+}
 
 /** Once the mesh is on the GPU the CPU copy is no longer needed: swap it for an empty one (count stays). */
 function freeCpuCopy(g: THREE.BufferGeometry): void {
@@ -103,6 +125,8 @@ export class CellLayer {
   /** The tile's cells are all ready this frame (it draws by cells). */
   private tileCellsReady = new Uint8Array(TILE_COUNT);
   private cellFine = new Uint8Array(CELL_COUNT);
+  /** When each cell was last not hidden (s). */
+  private cellSeen = new Float64Array(CELL_COUNT);
   /** Cells hidden from the colour pass by this frame's building walls (1 = only a shadow proxy is needed). */
   private readonly cellBox: WorldBox = { x0: 0, y0: -200, z0: 0, x1: 0, y1: 1200, z1: 0 };
   private plateFar = new Uint8Array(PLATE_COUNT);
@@ -134,7 +158,6 @@ export class CellLayer {
   private lastScale = 0;
   private lastSun = new THREE.Vector3();
   private lastVisible = true;
-  private frame = 0;
   /** Ground height under a point (set by the game): the near level is chosen by the 3D distance. */
   groundAt: ((x: number, z: number) => number) | null = null;
   /** What the layer draws changed in the last `update` (the shadow cascades are redrawn). */
@@ -142,6 +165,11 @@ export class CellLayer {
   /** Distance scale by resolution (1 = 1080p, 45°). */
   pixelScale = 1;
   gpuBytes = 0;
+  /** Sends a mesh to the GPU as it arrives (set by the game: it holds the renderer). */
+  uploader: MeshUploader | null = null;
+  /** What casts a shadow and came, left or changed: only these reach the cascades. A level swap, a fade, a mesh entering the
+   *  view are not here: they drew all three cascades again at every turn of the camera. */
+  casterBoxes: THREE.Box3[] = [];
   /** Shrinks the eviction radius when memory passes the ceiling. */
   private evictScale = 1;
 
@@ -172,6 +200,14 @@ export class CellLayer {
     g.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2]), 1));
     const m = new THREE.Mesh(g, this.material);
     m.frustumCulled = false;
+    // every material a mesh of the layer can draw: none compiles in play
+    const o = this.opt.materials;
+    for (const other of [o?.plain, o?.farMasked, o?.farPlain, this.opt.farMaterial]) {
+      if (!other) continue;
+      const w = new THREE.Mesh(g, other);
+      w.frustumCulled = false;
+      m.add(w);
+    }
     return m;
   }
 
@@ -247,11 +283,18 @@ export class CellLayer {
     this.events++;
     if (cell >= 0) this.src.installed?.(cell, level, m);
     const replacing = s.mesh !== null && m !== null;
+    // a level standing in for this one casts its shadow; an edit (a version), or a slot nothing covered, changes it
+    const covered = cell >= 0 && this.cells.length > 1 && !!this.cells[1 - level]?.[cell]?.mesh;
+    if ((version !== 0 && s.built !== 0 && s.mesh && (this.opt.shadows ?? true)) || (m && !covered && (this.opt.shadows ?? true))) {
+      const e = this.opt.margin, x0 = m ? m.originX : (s.mesh!.userData as FadeData).box!.x0 + e, z0 = m ? m.originZ : (s.mesh!.userData as FadeData).box!.z0 + e;
+      this.casterBoxes.push(new THREE.Box3(new THREE.Vector3(x0 - e, -200, z0 - e), new THREE.Vector3(x0 + s.size + e, 1400, z0 + s.size + e)));
+    }
     if (s.twin) { (s.twin as unknown as { parent: THREE.Object3D | null }).parent = null; s.twin = null; }
     if (s.mesh) {
       (s.mesh.userData as FadeData).dead = true;
       forgetOccluded(s.mesh);
       s.mesh.geometry.dispose();
+      this.uploader?.down(s.mesh.geometry);
       // three keeps a mesh's render objects (bindings, uniform buffers, one per pass and shadow cascade) until the
       // mesh itself or its material is disposed; the material is shared, so the mesh must be
       s.mesh.dispose();
@@ -276,7 +319,8 @@ export class CellLayer {
     const k = 1 / m.scale, e = this.opt.margin;
     g.boundingBox = new THREE.Box3(new THREE.Vector3(-e * k, m.minY * k, -e * k), new THREE.Vector3((s.size + e) * k, m.maxY * k, (s.size + e) * k));
     g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
-    const mesh = new THREE.Mesh(g, this.material);
+    if (this.uploader) { this.uploader.up(g); freeCpuCopy(g); }
+    const mesh = new THREE.Mesh(g, cell < 0 ? this.opt.farMaterial ?? this.material : this.material);
     mesh.position.set(m.originX, m.originY, m.originZ);
     mesh.scale.setScalar(m.scale);
     mesh.updateMatrix();
@@ -355,18 +399,12 @@ export class CellLayer {
       for (const mesh of this.next) {
         const u = mesh.userData as FadeData;
         const b = u.box;
-        const hide = !!b && u.drawnAt !== undefined && occluders.hidden(b);
-        // It was drawn at least once: its GPU copy exists, so the CPU copy can go now instead of being kept for a mesh
-        // that may never be visible again.
-        if (hide && !u.freed) { freeCpuCopy(mesh.geometry); u.freed = true; }
-        markOccluded(mesh, hide);
+        markOccluded(mesh, !!b && occluders.hidden(b));
       }
       for (const f of this.fading) {
         const u = f.mesh.userData as FadeData;
         const b = u.box;
-        const hide = !!b && u.drawnAt !== undefined && occluders.hidden(b);
-        if (hide && !u.freed) { freeCpuCopy(f.mesh.geometry); u.freed = true; }
-        markOccluded(f.mesh, hide);
+        markOccluded(f.mesh, !!b && occluders.hidden(b));
       }
     }
     this.applyFades();
@@ -414,7 +452,8 @@ export class CellLayer {
     // the camera came close and the tiles cover the plate: it leaves the GPU (it used to stay for the whole session,
     // pushing the memory ceiling down onto the near cells)
     if (!far && tilesCover && (ps.mesh || ps.requested) && dist < limit * 0.8) { this.setMesh(ps, null, 0); ps.requested = 0; }
-    if (!visible) return;
+    // casters are chosen by the shadows' reach, not the view: a turn must not change them
+    if (!visible && dist >= SHADOW_REACH * this.pixelScale) return;
     // never a hole: the plate stands in while its tiles are not all ready (the camera came closer), the tiles while
     // the plate is not ready
     if (ps.mesh && (far || !tilesCover)) { this.draw(ps.mesh, x, z, PLATE_SIZE, ps); return; }
@@ -450,17 +489,10 @@ export class CellLayer {
     this.box.min.set(x - m, s.minY, z - m);
     this.box.max.set(x + size + m, s.maxY, z + size + m);
     if (this.frustum.intersectsBox(this.box)) { this.next.add(mesh); return; }
-    // outside the view but within the shadows' reach: its shadow may fall into the view. The box is stretched along
-    // the shadow (away from the sun, as long as its height casts it); three culls the mesh out of the main pass and
-    // draws it only into the cascades it reaches
-    const sun = sunDirection;
-    if (mesh.castShadow && sun.y > 0.02 && this.distTo(x, z, size) < SHADOW_REACH * this.pixelScale) {
-      const len = Math.min(SHADOW_LENGTH, (s.maxY - s.minY) / sun.y);
-      const dx = -sun.x * len, dz = -sun.z * len;
-      this.box.min.set(Math.min(this.box.min.x, this.box.min.x + dx), s.minY - (s.maxY - s.minY), Math.min(this.box.min.z, this.box.min.z + dz));
-      this.box.max.set(Math.max(this.box.max.x, this.box.max.x + dx), s.maxY, Math.max(this.box.max.z, this.box.max.z + dz));
-      if (this.frustum.intersectsBox(this.box)) this.next.add(mesh);
-    }
+    // outside the view but within the shadows' reach: a caster whichever way the camera looks (three culls it out of
+    // the main pass and draws it only into the cascades it reaches). Chosen by what the view sees, each turn changed the
+    // casters, and a cascade scrolled into a place kept without them
+    if (mesh.castShadow && this.distTo(x, z, size) < SHADOW_REACH * this.pixelScale) this.next.add(mesh);
   }
 
   /**
@@ -499,7 +531,9 @@ export class CellLayer {
           this.cellBox.x0 = cellOriginX(ci); this.cellBox.x1 = this.cellBox.x0 + CELL_SIZE;
           this.cellBox.z0 = cellOriginX(cj); this.cellBox.z1 = this.cellBox.z0 + CELL_SIZE;
           const occluded = !!this.opt.occluders && this.opt.occluders.hidden(this.cellBox);
-          const proxy = occluded && !!this.opt.lodCasters;
+          const clock = performance.now() / 1000;
+          if (!occluded) this.cellSeen[c] = clock;
+          const proxy = occluded && !!this.opt.lodCasters && clock - this.cellSeen[c] > HIDDEN_HOLD;
           const fine = !proxy && (levels === 1 || (this.cellFine[c] ? cd3 < detail * 1.15 : cd3 < detail * 0.85));
           this.cellFine[c] = fine ? 1 : 0;
           const inShadowReach = cd3 < SHADOW_REACH * this.pixelScale + CELL_SIZE;
@@ -512,7 +546,8 @@ export class CellLayer {
           // L0 leaves the GPU when L1 covers it, when it is far or when the cell is hidden and its facade proxy exists.
           if (levels > 1) {
             const s0 = this.cells[0][c], s1 = this.cells[1][c];
-            const covered = (proxy && s1.mesh) || (!proxy && cd3 > detail * 1.6);
+            // past the hysteresis of `fine` (1.15): at 1.6 the detail was held over 2.5 times the area it is drawn in
+            const covered = (proxy && s1.mesh) || (!proxy && cd3 > detail * 1.3);
             if (covered && (s0.mesh || s0.requested)) { this.setMesh(s0, null, 0, c, 0); s0.requested = 0; }
             if (want < 0) {
               for (const s of [s0, s1]) if (s.mesh || s.requested) { this.setMesh(s, null, 0, c, s === s1 ? 1 : 0); s.requested = 0; }
@@ -579,7 +614,6 @@ export class CellLayer {
     const now = performance.now() / 1000;
     const out = this.group.children;
     out.length = 0;
-    this.frame++;
     // what is drawn changed this frame (a mesh came, left, was swapped or is fading): the shadow maps must follow
     this.changed = this.fading.length > 0 || this.fadingIn > 0 || this.next.size !== this.shown.size;
     if (!this.changed) for (const m of this.next) if (!this.shown.has(m)) { this.changed = true; break; }
@@ -588,14 +622,9 @@ export class CellLayer {
     let lostOutgoing = false;
     for (const f of this.fading) if ((f.mesh.userData as FadeData).dead) lostOutgoing = true;
     for (const m of this.shown) if (!this.next.has(m) && (m.userData as FadeData).dead) lostOutgoing = true;
-    // a hidden layer (?semdetalhe) draws nothing: its meshes' data must stay until they really reach the GPU
-    const drawn = this.group.visible;
     this.fadingIn = 0;
     for (const mesh of this.next) {
       const u = mesh.userData as FadeData;
-      // already drawn in an earlier frame: the data is on the GPU (a mesh hidden from the colour pass has not been
-      // drawn and keeps its CPU copy until it is shown)
-      if (!u.freed && drawn && mesh.visible) { if (u.drawnAt === undefined) u.drawnAt = this.frame; else if (this.frame - u.drawnAt >= 2) { freeCpuCopy(mesh.geometry); u.freed = true; } }
       if (!this.shown.has(mesh)) {
         const i = this.fading.findIndex((f) => f.mesh === mesh);
         if (i >= 0) {
@@ -642,8 +671,11 @@ export class CellLayer {
       for (const mesh of out) {
         const u = mesh.userData as FadeData;
         const plain = mats.plainFor(u);
-        (mesh as THREE.Mesh).material = plain ? mats.plain : mats.masked;
-        if (u.twin) u.twin.material = plain ? mats.plain : mats.masked;
+        // a tile or a plate holds no cell
+        const near = u.cell !== undefined || !mats.farMasked;
+        const chosen = (plain ? (near ? mats.plain : mats.farPlain) : (near ? mats.masked : mats.farMasked)) as THREE.Material;
+        (mesh as THREE.Mesh).material = chosen;
+        if (u.twin) u.twin.material = chosen;
       }
     }
     const t = this.shown; this.shown = this.next; this.next = t;

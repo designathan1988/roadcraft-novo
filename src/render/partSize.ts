@@ -6,12 +6,22 @@
 import * as THREE from 'three/webgpu';
 import { T, type Node } from './tsl.ts';
 import { BAR_PIXELS, PART_ERROR_PX, type PropKind } from './propMeshes.ts';
-import { SCALE_MIN, SCALE_OCTAVES } from '../jobs/parts40.ts';
+import { PART_RULE, PART_RULE_SLOTS, PART_TYPES, SCALE_MIN, SCALE_OCTAVES, setPartRule } from '../jobs/parts40.ts';
 
 const { uniform, uniformArray, float, uint, vec3, mix, select, min, max, length } = T;
 
 /** vec4s per kind in `rulesU`: flags, the model's box, its reach, three bars, its card's error (w = 1 where it has one). */
 const RULE = { flags: 0, extent: 1, reach: 2, piece: 3, card: 6, stride: 7 } as const;
+
+/** The kinds' rules for the props job (it leaves out what cannot be drawn from where the camera stands). */
+export function partRules(kinds: readonly PropKind[], kindOf: Uint32Array, variants: number): Float32Array {
+  const rules = new Float32Array(PART_RULE_SLOTS * PART_RULE);
+  for (const t of PART_TYPES) for (let v = 0; v < Math.min(8, variants); v++) {
+    const p = kinds[kindOf[t * variants + v]]?.part;
+    if (p) setPartRule(rules, t, v, p.pieces.length > 0, p.extent, p.pieces);
+  }
+  return rules;
+}
 
 export class PartSize {
   /**
@@ -58,6 +68,9 @@ export class PartSize {
     this.scaleSet = pixelScale;
     return changed;
   }
+
+  /** The pixels a metre spans at a metre's distance (0: the isometric view, where no part is left out by distance). */
+  get pxPerMetre(): number { return this.pxU.value as number; }
 
   /** Whether kind `kind` is a 4.0 building part. */
   isPart(kind: Node): Node {

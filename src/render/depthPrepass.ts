@@ -20,7 +20,8 @@ const twins = new WeakMap<THREE.Material, THREE.NodeMaterial | null>();
 
 /**
  * Materials whose depth is laid first. Only where a pixel costs far more than a vertex: the buildings' (one draw shaded
- * 1.26 screens of pixels with 7.3 k triangles). Laying every opaque material first drew the scene's 6.2 M triangles twice
+ * 1.26 screens of pixels with 7.3 k triangles), the roads' and the ground's (the ground was shaded under every road, then
+ * the road over it). Laying every opaque material first drew the scene's 6.2 M triangles twice
  * (the props' instances 429 k triangles for 0.09 of a screen): the depth pass cost 2.88 ms for 2.5 ms saved in the colour
  * pass, the frame 10.64 -> 11.03 ms (same view, 2026-10-31).
  */
@@ -51,6 +52,9 @@ export function depthTwin(m: THREE.Material): THREE.NodeMaterial | null {
   t.side = m.side;
   t.depthFunc = m.depthFunc;
   t.alphaTest = m.alphaTest;
+  t.polygonOffset = m.polygonOffset;
+  t.polygonOffsetFactor = m.polygonOffsetFactor;
+  t.polygonOffsetUnits = m.polygonOffsetUnits;
   t.colorWrite = false;
   t.fog = false;
   t.lights = false;
@@ -68,6 +72,8 @@ export class PrepassPassNode extends THREE.PassNode {
     if (t) (this.drawer as unknown as { renderObject(...a: unknown[]): void }).renderObject(object, scene, camera, geometry, t, group, lightsNode, clipping, 'depthPrepass');
   };
   private drawer: THREE.Renderer | null = null;
+  /** Called between the two passes with the occluders' depth. */
+  depthLaid: ((depth: THREE.DepthTexture) => void) | null = null;
 
   constructor(scene: THREE.Scene, camera: THREE.Camera, options?: Record<string, unknown>) {
     super(THREE.PassNode.COLOR, scene, camera, options);
@@ -83,6 +89,9 @@ export class PrepassPassNode extends THREE.PassNode {
     r.setRenderObjectFunction(this.depthOnly);
     self.transparent = false;
     try { super.updateBefore(frame); } finally { r.setRenderObjectFunction(own); self.transparent = transparent; }
+    // the depth holds the laid materials alone: what may hide others, never what is tested against it
+    const laid = (this as unknown as { getTexture(name: string): THREE.Texture | undefined }).getTexture('depth');
+    if (this.depthLaid && laid) this.depthLaid(laid as THREE.DepthTexture);
     // 2. the colour over it, the depth kept
     self.autoClearDepth = false;
     try { return super.updateBefore(frame); } finally { self.autoClearDepth = clearDepth; }

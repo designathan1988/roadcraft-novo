@@ -4,7 +4,7 @@
 // makes the mipmaps. Colour maps hold sRGB texels: the shaders convert (sRGBTransferEOTF).
 
 import * as THREE from 'three/webgpu';
-import { bakeSurfaces } from './surfaceBake.ts';
+import { bakeSurfaces, dropAfterUpload } from './surfaceBake.ts';
 
 type Fill = [number, number, number, number];
 
@@ -70,7 +70,7 @@ export function loadCookedSurfaces(): void {
     if (m.data.length !== dst.length) { cookedLoaded.failed.push(`${m.file}: ${m.data.length} bytes, expected ${dst.length}`); return; }
     // the worker's array becomes the texture's data (checked above: the same size): no copy on the main thread
     t.image.data = m.data;
-    t.needsUpdate = true;
+    dropAfterUpload(t);
     cookedLoaded.count++;
   };
   w.postMessage({ base: new URL('cooked/surfaces/', document.baseURI).href, files: Object.keys(COOKED).map((k) => `${k}.ktx2`) });

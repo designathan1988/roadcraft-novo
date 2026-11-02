@@ -30,9 +30,8 @@ optimization reference — its code is NOT assumed correct; every technique is v
    the grass tufts past the edge never grow (material + GPU cull). Commits on port/roadcraft-features-dev:
    814c4fd (levels + SSE + GPU floors), badb328 + 7797f30 (memory, eye clamp).
 
-## Open
-- Budget city/map rows still above the limit; the audit's remaining items (shadows per cascade/scroll, cloud-shadow
-  map, water early-out, draw-slot batching, 24 km arrays, per-pass attribution, memory budget), `?webgl`, the
-  occlusion turn sequence, the pre-existing verificar failure.
-- The committed `lodLevels.test.ts` pins the skyline contract (cheap); the exact feature metric proved the fix but
-  is too slow for the suite — a fast exact version (BVH) is future work.
+## Open (2026-11-02)
+- The colour cull was invalid from 93a768c to 2026-11-02 (9 storage buffers): every number recorded in that window for props is void.
+- Far-road shimmer: the fix (density cars to their mean under a pixel) is not confirmed in motion on the big map.
+- Second TRAA history held for the night image; props/pyramid CPU mirrors (about 30 MB); uncompressed RGBA8 textures.
+- Nothing committed. See MEMORY/WORKLOG.md (2026-11-02 entries) for the causes fixed and their proofs.

@@ -26,6 +26,9 @@ const GROUND_FLOOR = 8;
 /** A world-space axis-aligned box used by the cell layers (metres). */
 export interface WorldBox { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number }
 
+/** A mover's bound hidden from the colour pass? (x, y, z, radius) */
+export type MoverHidden = (x: number, y: number, z: number, r: number) => boolean;
+
 export interface OcclusionStats { occluders: number; texels: number; tested: number; hidden: number; buildMs: number }
 
 /**
@@ -356,6 +359,14 @@ export class BuildingOccluders {
   private cellCount = 0;
   private readonly scratch: number[] = [];
   private readonly cache = new Map<number, CellBoxes>();
+
+  /** Whether a mover's bound (a cube round its centre) is hidden behind this frame's walls: this frame's camera, no lag. */
+  sphereHidden = (x: number, y: number, z: number, r: number): boolean => {
+    const b = this.moverBox;
+    b.x0 = x - r; b.x1 = x + r; b.y0 = y - r; b.y1 = y + r; b.z0 = z - r; b.z1 = z + r;
+    return this.hidden(b);
+  };
+  private readonly moverBox: WorldBox = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
 
   /** Whether the world box is hidden behind this frame's building walls. */
   hidden(box: WorldBox): boolean {

@@ -1,7 +1,8 @@
 // World state that lives on the page: heights (shared with the workers),
 // typed tables, spatial index and dirty marking.
 
-import { StreetItems } from './items.ts';
+import { insideOutline } from '../core/outline.ts';
+import { Item, StreetItems, isBarrier } from './items.ts';
 import { NO_WATER, createGroundBuffers } from './ground.ts';
 import { CELL_COUNT, DirtyCells, Dirty, SpatialIndex, TILE_COUNT, cellX, cellId, tileOfCell, tileX, tileId } from '../core/grid.ts';
 import { Table } from '../core/table.ts';
@@ -162,6 +163,45 @@ export class World {
     if (c.shapeN[id]) return this.lotPolygon(id);
     const w = c.w[id] / 2, d = c.d[id] / 2;
     return [-w, -d, w, -d, w, d, -w, d];
+  }
+
+  /**
+   * The lots reaching a rectangle, other than `cell`'s own: x, z, turn, corners, then the outline in the lot's frame. A
+   * cell's wild trees must know them: a lot belongs to the cell of its centre and may stand on the next one's ground.
+   */
+  lotsNear(x0: number, z0: number, x1: number, z1: number, cell: number): Float32Array {
+    const c = this.buildings.cols, out: number[] = [], seen = new Set<number>();
+    this.buildingIndex.query(x0, z0, x1, z1, (id) => {
+      if (seen.has(id) || !this.buildings.alive[id] || c.cell[id] === cell) return;
+      seen.add(id);
+      const o = this.lotOutline(id);
+      out.push(c.x[id], c.z[id], c.rot[id], o.length / 2, ...o);
+    });
+    return new Float32Array(out);
+  }
+
+  /** The items standing on lot `id`: building on the ground clears it, as a road's construction limits do. */
+  itemsOnLot(id: number): number[] {
+    const c = this.buildings.cols, o = this.lotOutline(id), x = c.x[id], z = c.z[id], cs = Math.cos(c.rot[id]), sn = Math.sin(c.rot[id]);
+    let r = 0;
+    for (let k = 0; k < o.length; k += 2) r = Math.max(r, Math.hypot(o[k], o[k + 1]));
+    const on = (px: number, pz: number) => {
+      const dx = px - x, dz = pz - z;
+      return insideOutline(o, 0, o.length / 2, dx * cs - dz * sn, dx * sn + dz * cs);
+    };
+    const ic = this.items.t.cols, found = new Set<number>();
+    this.items.index.query(x - r, z - r, x + r, z + r, (i) => {
+      if (found.has(i)) return;
+      // a run by its metres, a power line by its two poles, anything else by its point (its x1/z1 are no place)
+      const run = isBarrier(ic.type[i]), pole = ic.type[i] === Item.PoleLine;
+      const x1 = run || pole ? ic.x1[i] : ic.x0[i], z1 = run || pole ? ic.z1[i] : ic.z0[i];
+      const steps = pole ? 1 : Math.ceil(Math.hypot(x1 - ic.x0[i], z1 - ic.z0[i]));
+      for (let k = 0; k <= steps; k++) {
+        const f = steps ? k / steps : 0;
+        if (on(ic.x0[i] + (x1 - ic.x0[i]) * f, ic.z0[i] + (z1 - ic.z0[i]) * f)) { found.add(i); return; }
+      }
+    });
+    return [...found];
   }
 
   /**

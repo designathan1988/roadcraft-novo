@@ -235,6 +235,8 @@ export class RoadJournal implements Command {
   addBuilding(rec: BuildingRec): number {
     const id = this.world.addBuilding(rec);
     this.ops.push({ t: 'addBld', rec: this.world.buildingRec(id) });
+    // what stood on the ground is cleared, in this journal: undo puts it back
+    for (const item of this.world.itemsOnLot(id)) this.removeItem(item);
     return id;
   }
   removeBuilding(id: number): void {

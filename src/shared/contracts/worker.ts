@@ -83,7 +83,7 @@ export interface JobPayloads {
   terrainSeams: { graph: RoadGraph; originX: number; originZ: number };
   roadPaint: { graph: RoadGraph; tile: number };
   lots: { graph: RoadGraph; cell: number };
-  props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number; parts40?: boolean };
+  props: { graph: RoadGraph; boxes: BoxColumns; cell: number; items?: Float32Array; biome?: number; parts40?: boolean; partRules?: Float32Array; partPx?: number; partAt?: number; lots?: Float32Array };
   cityGen: { seed: number; medium?: boolean };
   conform: { tile: number; segs: Float32Array };
   /**

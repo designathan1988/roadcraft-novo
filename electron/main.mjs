@@ -20,7 +20,9 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-unsafe-webgpu');
   app.commandLine.appendSwitch('enable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan');
 }
-if (shot) {
+// ROADCRAFT_PLAYER: a measured run keeps the player's window rules (tools/gpu-load.mjs)
+const unthrottled = shot && !process.env.ROADCRAFT_PLAYER;
+if (unthrottled) {
   // hidden screenshot window: without this Chromium throttles frames (2 per second) and the scene runs slowly
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-background-timer-throttling');
@@ -78,7 +80,10 @@ function createWindow() {
     autoHideMenuBar: true,
     title: 'Roadcraft',
     icon: path.join(here, 'icon.png'),
-    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, offscreen: false, preload: path.join(here, 'preload.cjs') },
+    // throttling stays on for the player: off, the page is never told it cannot be seen (document.hidden stays false,
+    // electron's backgroundThrottling also governs the Page Visibility API) and a minimized or covered window drew at
+    // the display's rate, the GPU at 62 %, for nobody (2026-11-02). Only a screenshot run needs it off.
+    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: !unthrottled, offscreen: false, preload: path.join(here, 'preload.cjs') },
   });
   win.loadURL(devUrl ?? `app://roadcraft/index.html${query}`);
   // The window's own keys (there is no menu, so none of Electron's default shortcuts: reload, which would throw away
@@ -112,7 +117,12 @@ function createWindow() {
   // screenshot: show without taking focus (the keyboard stays with whoever is using the machine)
   if (shot) win.showInactive();
   if (shot) {
-    win.webContents.on('console-message', (e) => console.log(`[page] ${e.message}${e.stack ? '\n[page] ' + e.stack : ''}`));
+    win.webContents.on('console-message', (e) => {
+      console.log(`[page] ${e.message}${e.stack ? '\n[page] ' + e.stack : ''}`);
+      // a GPU validation error fails the run: an invalid pipeline does not stop the game, it silently stops doing its work
+      // (the props' cull ran for days with 9 storage buffers against a limit of 8, every check green)
+      if (/GPUValidationError|GPUOutOfMemoryError/.test(e.message)) { console.log(`error: GPU validation failed: ${e.message.slice(0, 300)}`); app.exit(3); }
+    });
     win.webContents.once('did-finish-load', async () => {
       const t0 = Date.now();
       const limit = Number(process.env.ROADCRAFT_TIMEOUT ?? 240) * 1000;

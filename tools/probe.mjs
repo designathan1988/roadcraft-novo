@@ -52,6 +52,8 @@ const SETUP = {
   maxTraffic: viewScript({ ...view.district, dist: 250, pitch: 30 }, { before: "R.ui.simulation({ traffic: 2, people: 2, demand: 'peak' });", after: 'await new Promise((r) => setTimeout(r, 20000));' }),
   bomb: viewScript({ ...view.district, dist: 250, pitch: 30 }, { after: 'await R.frames.settle(10); R.ui.bombForce(20); R.actions.bomb(0, 0);' }),
   editing: viewScript({ ...view.district, pitch: 40, dist: 400 }, { after: "await R.frames.settle(10); window.__ed = 0; const ed = () => { if (window.__ed++ < 400) { R.actions.terrain('raise', (window.__ed % 20) * 8 - 80, 120, 40, 0.4); requestAnimationFrame(ed); } }; requestAnimationFrame(ed);" }),
+  // the camera turns every frame: the cell layers rebuild their visibility (the occlusion buffer, the LOD choice)
+  turn: `await (async () => { const R = window.__roadcraft; await R.camera.view(0, 0, 35, 30, 300, 11); await R.frames.settle(10); let k = 0; const f = () => { R.camera.place({ yaw: (35 + Math.sin(k * 0.025) * 35) * Math.PI / 180 }); k++; requestAnimationFrame(f); }; requestAnimationFrame(f); })()`,
 };
 
 const exe = path.join(root, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron');

@@ -4,15 +4,16 @@
 // covers does not draw. The pyramid keeps, per cell, the FARTHEST stored depth (the smallest reversed-Z value), so
 // the claim is conservative: if even the farthest occluder of each cell is nearer than the instance's nearest
 // point, nothing of it can be seen. Depth convention-agnostic: the instance's nearest point is projected by the
-// same camera matrices the game renders with, so both sides compare in the stored convention; the safety margin
-// pulls the instance's test point a metre toward the camera.
+// matrices of the frame the pyramid was built from (the question is "was it hidden last frame"), so both sides compare
+// in the stored convention; the safety margin pulls the instance's test point a metre toward the camera. What that
+// frame's view did not hold is never hidden: an instance coming into the screen draws at once.
 // (Greene, Kass & Miller, Hierarchical Z-buffer visibility, SIGGRAPH 1993; the GPU-driven pipelines' prior-frame
 // depth test, SIGGRAPH 2015.)
 
 import * as THREE from 'three/webgpu';
 import { T, type Node } from './tsl.ts';
 
-const { Fn, If, storage, uniform, uniformArray, instanceIndex, uint, int, float, ivec2, textureLoad, min, max, floor, log2, clamp, abs, step, vec4, exp2 } = T;
+const { Fn, If, storage, uniform, uniformArray, instanceIndex, uint, int, float, vec2, ivec2, textureLoad, min, max, floor, ceil, log2, clamp, abs, step, vec4, exp2 } = T;
 
 /** The pyramid is sized once for this frame size: bigger canvases rebuild nothing (the levels read the actual
  *  dimensions from uniforms). */
@@ -25,8 +26,11 @@ export class DepthOcclusion {
   private readonly depth: THREE.DepthTexture = new THREE.DepthTexture(4, 4);
   private depthNode: Node;
   /** One float per texel, levels 1..L appended; the test reads it directly. */
-  readonly buffer = new THREE.StorageBufferAttribute(Math.floor((MAX_W * MAX_H) / 3), 1);
+  readonly buffer = new THREE.StorageBufferAttribute(Math.ceil(MAX_W * MAX_H * 0.34), 1);
   private store: any;
+  /** The levels' offsets and sizes: the node reads these (its own `value` turns into a typed array once it is set up). */
+  private readonly offsets = Array.from({ length: MAX_LEVELS + 1 }, () => new THREE.Vector2());
+  private readonly dimsOf = Array.from({ length: MAX_LEVELS + 1 }, () => new THREE.Vector2());
   private readonly offsetsU: Node;
   private readonly dimsU: Node;
   private readonly levelU = uniform(new THREE.Vector2(1, 0));
@@ -40,8 +44,8 @@ export class DepthOcclusion {
 
   constructor() {
     this.depthNode = T.texture(this.depth);
-    this.offsetsU = uniformArray(Array.from({ length: MAX_LEVELS + 1 }, () => new THREE.Vector2()), 'vec2');
-    this.dimsU = uniformArray(Array.from({ length: MAX_LEVELS + 1 }, () => new THREE.Vector2()), 'vec2');
+    this.offsetsU = uniformArray(this.offsets, 'vec2');
+    this.dimsU = uniformArray(this.dimsOf, 'vec2');
     this.store = storage(this.buffer, 'float', this.buffer.count);
 
     // level 1: each texel keeps the farthest (smallest reversed-Z) of the four depth texels under it
@@ -61,7 +65,7 @@ export class DepthOcclusion {
         const off = this.offsetsU.element(1).x;
         this.store.element(off.add(y.mul(dims.x).add(x))).assign(min(min(a, c), min(d2, e)));
       });
-    })().compute(Math.ceil(((MAX_W / 2) * (MAX_H / 2)) / GROUP), [GROUP]);
+    })().computeKernel([GROUP]);
 
     // level k > 1: the farthest of the four texels of level k-1 (dispatched once per level, levelU selects it)
     this.buildK = Fn(() => {
@@ -79,7 +83,7 @@ export class DepthOcclusion {
         const e = this.store.element(pOff.add(ny.mul(prev.x).add(nx)));
         this.store.element(off.add(y.mul(dims.x).add(x))).assign(min(min(a, c), min(d2, e)));
       });
-    })().compute(Math.ceil(((MAX_W / 4) * (MAX_H / 4)) / GROUP), [GROUP]);
+    })().computeKernel([GROUP]);
   }
 
   /**
@@ -91,10 +95,12 @@ export class DepthOcclusion {
     if (w > MAX_W || h > MAX_H || !w || !h) return;
     this.depthNode.value = depth;
     if (this.dims.x !== w || this.dims.y !== h) this.layout(w, h);
-    renderer.compute(this.build1);
+    // the invocations each level has (three's count is in invocations and it divides by the workgroup itself: the
+    // kernels were given a count already divided, and only the first 64th of each level was written)
+    renderer.compute(this.build1, this.levels[1].w * this.levels[1].h);
     for (let k = 2; k < this.levels.length; k++) {
       (this.levelU.value as THREE.Vector2).set(k, 0);
-      renderer.compute(this.buildK);
+      renderer.compute(this.buildK, this.levels[k].w * this.levels[k].h);
     }
     this.readyU.value = 1;
   }
@@ -105,36 +111,40 @@ export class DepthOcclusion {
     this.levels.length = 0;
     this.levels.push({ offset: 0, w, h }); // slot 0: the depth texture itself
     let offset = 0, lw = w, lh = h;
-    const offsets = this.offsetsU.value as THREE.Vector2[];
-    const dimsArr = this.dimsU.value as THREE.Vector2[];
     for (let k = 1; k <= MAX_LEVELS && (lw > 1 || lh > 1); k++) {
-      lw = Math.max(1, lw >> 1); lh = Math.max(1, lh >> 1);
+      // rounded up: rounded down, the last row of an odd size had no cell and the clamp read its neighbour's depth
+      lw = (lw + 1) >> 1; lh = (lh + 1) >> 1;
       this.levels.push({ offset, w: lw, h: lh });
-      offsets[k]?.set(offset, 0); dimsArr[k]?.set(lw, lh);
+      this.offsets[k].set(offset, 0); this.dimsOf[k].set(lw, lh);
       offset += lw * lh;
     }
     (this.baseU.value as THREE.Vector3).set(w, h, this.levels.length - 1);
   }
 
   /**
-   * The screen-occlusion test for one instance (world centre `p`, radius `r`, the camera's forward `fwd`, the
-   * camera's projection and view matrices as the game renders with them, the frame's focal length in pixels):
-   * 0 when every pyramid cell under its screen square holds an occluder nearer than its nearest point (pulled a
-   * metre out for safety), 1 otherwise - 1 whenever the pyramid is cold or the instance leaves the depth's reach.
+   * The screen-occlusion test for one instance (world centre `p`, radius `r`, the forward, projection and view of the
+   * frame the pyramid holds, that frame's focal length in pixels): 0 when every pyramid cell under its screen square
+   * holds an occluder nearer than its nearest point (pulled a metre out for safety), 1 otherwise - 1 whenever the
+   * pyramid is cold, or that frame did not see the instance whole in front of the camera and inside the screen.
    */
   test(p: Node, r: Node, fwd: Node, proj: Node, view: Node, focal: Node): Node {
     const viewP = view.mul(vec4(p, 1));
     const clip = proj.mul(viewP);
-    const clipW = clip.w;
+    const clipW = clip.w.toVar();
     const ndc = clip.xyz.div(clipW);
     const near = proj.mul(view.mul(vec4(p.sub(fwd.mul(r.add(1))), 1)));
-    const nearZ = near.z.div(near.w);
+    const nearW = near.w.toVar();
+    const nearZ = near.z.div(nearW);
     const b = this.baseU;
-    const px = ndc.xy.mul(0.5).add(0.5).mul(b.xy);
+    // the texture's first row is the top of the screen; NDC y grows upward
+    const px = vec2(ndc.x.mul(0.5).add(0.5), ndc.y.mul(-0.5).add(0.5)).mul(b.xy);
     const rPx = clamp(r.mul(focal).div(max(viewP.z.negate(), 0.1)), float(2), float(256));
-    const lv = clamp(int(log2(rPx)), int(1), int(b.z));
-    const dims = this.dimsU.element(lv), offs = this.offsetsU.element(lv).x;
+    // the level whose cell is at least the square's side: the square then meets at most 2 x 2 cells, all four read
+    // (a side of up to 4 cells, the level this took before, left the cells between the corners unread)
+    const lv = min(int(ceil(log2(rPx.mul(2)))), int(b.z));
     const half = exp2(lv.toFloat());
+    const whole = step(rPx.mul(2), half);
+    const dims = this.dimsU.element(lv), offs = this.offsetsU.element(lv).x;
     const x0 = clamp(floor(px.x.sub(rPx).div(half)), float(0), dims.x.sub(1));
     const x1 = clamp(floor(px.x.add(rPx).div(half)), float(0), dims.x.sub(1));
     const y0 = clamp(floor(px.y.sub(rPx).div(half)), float(0), dims.y.sub(1));
@@ -145,7 +155,10 @@ export class DepthOcclusion {
     const e = this.store.element(offs.add(y1.mul(dims.x).add(x1)));
     // occluded when all four cells' farthest occluder is at least as near as the instance's pulled-back point
     const hits = step(nearZ, a).add(step(nearZ, c)).add(step(nearZ, d2)).add(step(nearZ, e));
-    // on screen (|ndc.z| <= 1, clip.w > 0), the pyramid cold or warm, the margin built into nearZ
-    return step(hits, float(3.5)).mul(step(abs(ndc.z), float(1))).mul(step(float(0.001), clipW)).mul(this.readyU);
+    const all = step(float(3.5), hits);
+    // only what that frame had whole on its screen and in front of its camera can be claimed hidden
+    const onScreen = step(float(0), px.x.sub(rPx)).mul(step(px.x.add(rPx), b.x)).mul(step(float(0), px.y.sub(rPx))).mul(step(px.y.add(rPx), b.y));
+    const inFront = step(float(0.1), clipW).mul(step(float(0.1), nearW)).mul(step(abs(ndc.z), float(1)));
+    return float(1).sub(all.mul(whole).mul(onScreen).mul(inFront).mul(this.readyU));
   }
 }

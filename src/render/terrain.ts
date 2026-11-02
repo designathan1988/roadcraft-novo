@@ -4,6 +4,7 @@
 // mesh on a camera-locked grid (a child of the terrain mesh), drawn only when the camera is near the ground.
 
 import * as THREE from 'three/webgpu';
+import { layDepthFirst } from './depthPrepass.ts';
 import { currentU, foamU, waterEnv, waveU } from './scene.ts';
 import { windDirU, windU } from './weather.ts';
 import { T, withPrevious, type Node } from './tsl.ts';
@@ -35,7 +36,7 @@ export const SEAM_REACH = 440;
 
 
 const {
-  Fn, attribute, clamp, float, floor, fract, int, ivec2, max, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot,
+  Fn, If, attribute, clamp, float, floor, fract, int, ivec2, max, mix, normalize, smoothstep, textureLoad, cameraPosition, pow, dot,
   transformNormalToView, uniform, varyingProperty, vec2, vec3, vec4, length, abs, sRGBTransferEOTF,
   positionWorld, fwidth, mx_noise_float, select, texture, instanceIndex, hash, sin, cos, time, positionLocal, step, modelWorldMatrix,
   storage,
@@ -472,6 +473,8 @@ export class TerrainRenderer {
     });
 
     const m = new THREE.MeshStandardNodeMaterial();
+    // the ground's depth first: its material runs only where the ground is what is seen
+    layDepthFirst(m);
     m.positionNode = seam ? seamPosition() : position();
     withPrevious(m);
     // the 4 m cells the seams hold, within SEAM_REACH: not drawn here (the road covers them, or the seam draws the part
@@ -500,13 +503,18 @@ export class TerrainRenderer {
       const n = normalize(vNormal);
       const p = positionWorld;
       const slope = float(1).sub(n.y);
-      const fade = clamp(float(1).sub(fwidth(p.x).div(0.8)), 0, 1).mul(smoothstep(0.08, 0.3, slope));
-      const q = p.xz.mul(0.45).add(vec2(p.y.mul(0.3), 0));
-      const e = 0.35;
-      const h = (o: N) => abs(mx_noise_float(q.add(o)));
-      const h0 = h(vec2(0, 0));
-      const dx = h(vec2(e, 0)).sub(h0), dz = h(vec2(0, e)).sub(h0);
-      let soil: N = normalize(n.add(vec3(dx, 0, dz).mul(-2.2).mul(fade)));
+      const fade = clamp(float(1).sub(fwidth(p.x).div(0.8)), 0, 1).mul(smoothstep(0.08, 0.3, slope)).toVar();
+      // three octaves of noise where the relief shows: near, on a slope. A branch, not a mix: every flat or far pixel paid them
+      const eroded = n.toVar();
+      If(fade.greaterThan(0), () => {
+        const q = p.xz.mul(0.45).add(vec2(p.y.mul(0.3), 0));
+        const e = 0.35;
+        const h = (o: N) => abs(mx_noise_float(q.add(o)));
+        const h0 = h(vec2(0, 0)).toVar();
+        const dx = h(vec2(e, 0)).sub(h0), dz = h(vec2(0, e)).sub(h0);
+        eroded.assign(normalize(n.add(vec3(dx, 0, dz).mul(-2.2).mul(fade))));
+      });
+      let soil: N = eroded;
       // the grass's own relief (tufts), on the gentle ground, near
       const gn = noTile(COOKED['terrain-grass.normal'], grassUv(p)).xyz.mul(2).sub(1);
       const gFade = clamp(float(1).sub(fwidth(p.x).div(0.6)), 0, 1).mul(float(1).sub(blend.rockW)).mul(float(1).sub(blend.dirtW));

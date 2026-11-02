@@ -17,7 +17,7 @@ const out = path.resolve(outArg ?? path.join(root, 'test-results', 'photos', nam
 // Electron cannot write a photo into a folder that does not exist
 fs.mkdirSync(out, { recursive: true });
 const query = set.queryFor ? set.queryFor(shots.map(([n]) => n)) : set.query;
-const env = { ...process.env, ROADCRAFT_W: '1920', ROADCRAFT_H: '1080', ...(set.env ?? {}), ROADCRAFT_SEQ: JSON.stringify(shots.slice(1).map(([n, s]) => [path.join(out, `${n}.png`), s])) };
+const env = { ...process.env, ROADCRAFT_W: process.env.ROADCRAFT_W ?? '1920', ROADCRAFT_H: process.env.ROADCRAFT_H ?? '1080', ...(set.env ?? {}), ROADCRAFT_SEQ: JSON.stringify(shots.slice(1).map(([n, s]) => [path.join(out, `${n}.png`), s])) };
 delete env.ELECTRON_RUN_AS_NODE;
 const p = spawn(process.execPath, [path.join(root, 'tools', 'shot.mjs'), path.join(out, `${shots[0][0]}.png`), query, shots[0][1]], { cwd: root, env, stdio: 'inherit' });
 p.on('exit', (code) => process.exit(code ?? 0));

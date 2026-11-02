@@ -16,6 +16,7 @@ import { CASCADE_LAYER, CELL_CASTER_LAYER, MOVER_BITS, MOVER_LAYER, MOVER_SMALL_
 import { cloudShadowAt, cloudShadowStrength } from './cloudShadow.ts';
 import { stableVelocity, updateVelocityCamera } from './velocity.ts';
 import { showOccludedForShadows } from './visibility.ts';
+import { ShadowScroll, cascadeShift } from './shadowScroll.ts';
 
 const traa = traaNode as unknown as (color: Node, depth: Node, velocity: Node, camera: THREE.Camera) => Node;
 const {
@@ -42,6 +43,8 @@ export interface PostOptions { shadows: boolean; ao: boolean; bloom: boolean }
  *  sunCascades.ts SAFETY_FRAMES, SAFETY_STAGGER). */
 const SAFETY_FRAMES = 600;
 const SAFETY_STAGGER = 10;
+/** The cascades stand on planes this far apart along the sun (m): a move inside one keeps their depth, so they can scroll. */
+const DEPTH_STEP = 128;
 
 /**
  * A cascade drawn as Roadcraft 4.0's static shadow cache (sunCascades.ts): the still casters' depth kept in a store of the
@@ -63,9 +66,14 @@ class CachedShadowNode extends THREE.ShadowNode {
   private readonly stale: boolean[];
   private readonly index: number;
   private readonly hooks: () => ShadowHooks | null;
-  constructor(light: THREE.Light, shadow: THREE.LightShadow, stale: boolean[], index: number, hooks: () => ShadowHooks | null) {
+  private readonly changed: THREE.Box3[];
+  private readonly scroll = new ShadowScroll();
+  private readonly frustum = new THREE.Frustum();
+  private readonly pv = new THREE.Matrix4();
+  constructor(light: THREE.Light, shadow: THREE.LightShadow, stale: boolean[], index: number, hooks: () => ShadowHooks | null, changed: THREE.Box3[]) {
     super(light as THREE.DirectionalLight, shadow);
     this.stale = stale;
+    this.changed = changed;
     this.index = index;
     this.hooks = hooks;
     this.age = index * SAFETY_STAGGER;
@@ -78,18 +86,29 @@ class CachedShadowNode extends THREE.ShadowNode {
     const { renderer, scene } = frame;
     shadow.updateMatrices(light);
     shadowMap.setSize(shadow.mapSize.width, shadow.mapSize.height, shadowMap.depth);
-    const cam = shadow.camera, mask = cam.layers.mask, depth = shadowMap.depthTexture!;
+    const cam = shadow.camera as THREE.OrthographicCamera, mask = cam.layers.mask, depth = shadowMap.depthTexture!;
     const w = shadow.mapSize.width, h = shadow.mapSize.height;
     // this cascade's own casters, culled with its own frustum: the movers' vertex work was drawn three times
     // whole, once per cascade, whatever slice each one covers (the hooks read null until the page wires them)
     const hooks = this.hooks();
-    if (hooks) hooks.cascade(cam);
     if (this.store && (this.store.image.width !== w || this.store.image.height !== h)) { this.store.dispose(); this.store = null; }
-    const kept = this.store !== null && !this.stale[this.index] && ++this.age < SAFETY_FRAMES && this.view.equals(cam.matrixWorld) && this.proj.equals(cam.projectionMatrix);
+    // what changed in the city concerns the cascades that see it, not all of them
+    if (this.changed.length && !this.stale[this.index]) {
+      this.frustum.setFromProjectionMatrix(this.pv.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse), cam.coordinateSystem, cam.reversedDepth);
+      if (this.changed.some((b) => this.frustum.intersectsBox(b))) this.stale[this.index] = true;
+    }
+    const usable = this.store !== null && !this.stale[this.index] && ++this.age < SAFETY_FRAMES && this.proj.equals(cam.projectionMatrix);
+    const kept = usable && this.view.equals(cam.matrixWorld);
+    const shift = usable && !kept ? cascadeShift(this.view, cam.matrixWorld, (cam.right - cam.left) / w, (cam.top - cam.bottom) / h, w, h) : null;
     const name = scene.name;
     scene.name = `Shadow Map [ ${light.name || 'ID: ' + light.id} ]`;
-    if (!kept) {
+    if (shift) {
+      this.scrolled(renderer, scene, cam, shadowMap, shift.dx, shift.dy, w, h, mask, hooks);
+      renderer.copyTextureToTexture(depth, this.store!);
+      this.view.copy(cam.matrixWorld);
+    } else if (!kept) {
       // the still casters into the map (cleared), then kept; a caster hidden from the colour pass still casts
+      if (hooks) hooks.cascade(cam);
       cam.layers.mask = mask & ~MOVER_BITS;
       showOccludedForShadows(true);
       try { renderer.render(scene, cam); } finally { showOccludedForShadows(false); }
@@ -105,6 +124,8 @@ class CachedShadowNode extends THREE.ShadowNode {
     // the movers over them, the depth kept
     const movers = mask & MOVER_BITS;
     if (movers !== 0) {
+      // the movers' list: this cascade's whole frustum (a scroll left the last strip's in the draws)
+      if (hooks && (kept || shift)) hooks.cascade(cam);
       cam.layers.mask = movers;
       const auto = renderer.autoClear;
       renderer.autoClear = false;
@@ -114,7 +135,39 @@ class CachedShadowNode extends THREE.ShadowNode {
     cam.layers.mask = mask;
     scene.name = name;
     // the last cascade is done: the colour pass's cull is restored before the scene renders
-    if (hooks && this.index === 2) hooks.main();
+    if (this.index === 2) { if (hooks) hooks.main(); this.changed.length = 0; }
+  }
+
+  /** The kept depth laid shifted by (dx, dy) texels, and the casters drawn in the strips it left empty alone. */
+  private scrolled(renderer: THREE.WebGPURenderer, scene: THREE.Scene, cam: THREE.OrthographicCamera, map: THREE.RenderTarget, dx: number, dy: number, w: number, h: number, mask: number, hooks: ShadowHooks | null): void {
+    // the camera moved dx along its right and dy along its up: a point stands dx further left and dy further down in
+    // the map (its rows count from the top)
+    this.scroll.lay(renderer, this.store!, dx, -dy);
+    const auto = renderer.autoClear;
+    const { left, right, top, bottom } = cam;
+    const tw = (right - left) / w, th = (top - bottom) / h;
+    const strip = (x: number, y: number, sw: number, sh: number) => {
+      if (sw <= 0 || sh <= 0) return;
+      cam.left = left + x * tw; cam.right = left + (x + sw) * tw;
+      cam.top = top - y * th; cam.bottom = top - (y + sh) * th;
+      cam.updateProjectionMatrix();
+      map.viewport.set(x, y, sw, sh);
+      if (hooks) hooks.cascade(cam);
+      showOccludedForShadows(true);
+      try { renderer.render(scene, cam); } finally { showOccludedForShadows(false); }
+    };
+    cam.layers.mask = mask & ~MOVER_BITS;
+    renderer.autoClear = false;
+    try {
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      strip(dx > 0 ? w - ax : 0, 0, ax, h);
+      strip(dx > 0 ? 0 : ax, dy > 0 ? 0 : h - ay, w - ax, ay);
+    } finally {
+      renderer.autoClear = auto;
+      map.viewport.set(0, 0, w, h);
+      cam.left = left; cam.right = right; cam.top = top; cam.bottom = bottom;
+      cam.updateProjectionMatrix();
+    }
   }
 
   override dispose(): void {
@@ -129,12 +182,14 @@ class FadingCSM extends CSMShadowNode {
   readonly stale = [true, true, true];
   /** The page's per-cascade cull (props.prepareCascade / prepareMain), read at each cascade's render. */
   shadowHooks: ShadowHooks | null = null;
+  /** What changed in the city since the cascades last drew: each one that sees a box redraws (Post.invalidateBox). */
+  readonly changed: THREE.Box3[] = [];
   private reachU = T.uniform(PERSP_SHADOW_FAR);
   /** The cascades' shadows as cached ones (three's CSM makes plain ShadowNodes in `_init`). */
   _init(builder: unknown): void {
     (CSMShadowNode.prototype as unknown as { _init(b: unknown): void })._init.call(this, builder);
     const self = this as unknown as { lights: Array<THREE.Light & { shadow: THREE.LightShadow }>; _shadowNodes: Node[] };
-    self._shadowNodes = self.lights.map((l, i) => T.nodeObject(new CachedShadowNode(l, l.shadow, this.stale, i, () => this.shadowHooks)));
+    self._shadowNodes = self.lights.map((l, i) => T.nodeObject(new CachedShadowNode(l, l.shadow, this.stale, i, () => this.shadowHooks, this.changed)));
   }
   setup(builder: unknown): Node {
     const shadowed = (super.setup as (b: unknown) => Node)(builder);
@@ -143,6 +198,27 @@ class FadingCSM extends CSMShadowNode {
     const fade = smoothstep(this.reachU.mul(0.7), this.reachU, depth);
     return mix(shadowed, vec4(1, 1, 1, 1), fade);
   }
+  /**
+   * three puts each cascade a fixed margin behind its slice, a distance that changes with the view: every turn changed the
+   * depth stored in the map. On planes DEPTH_STEP apart, toward the sun, the depth holds while the view moves and only a
+   * crossing redraws.
+   */
+  updateBefore(frame: THREE.NodeFrame): boolean | undefined {
+    const done = super.updateBefore(frame);
+    const sun = this.light as THREE.DirectionalLight;
+    this.toSun.subVectors(sun.position, sun.target.position).normalize();
+    for (const l of (this as unknown as { lights: Array<THREE.DirectionalLight> }).lights) {
+      const along = l.position.dot(this.toSun);
+      const lift = Math.ceil(along / DEPTH_STEP) * DEPTH_STEP - along;
+      l.position.addScaledVector(this.toSun, lift);
+      l.target.position.addScaledVector(this.toSun, lift);
+      l.updateMatrixWorld();
+      l.target.updateMatrixWorld();
+    }
+    return done;
+  }
+  private readonly toSun = new THREE.Vector3();
+
   /** Keeps the fade's reach with the cascades' (`fitCascades` changes maxFar). */
   updateFrustums(): void {
     super.updateFrustums();
@@ -174,8 +250,11 @@ export class Post {
   /** The page's per-cascade cull (props.prepareCascade / prepareMain): handed to the cascades each frame. */
   shadowHooks: ShadowHooks | null = null;
   setShadowHooks(hooks: ShadowHooks | null): void { this.shadowHooks = hooks; }
-  /** The frame's end: the scene depth is complete (the pools' occlusion pyramid reduces it for the next cull). */
-  frameEnd: ((depth: THREE.DepthTexture) => void) | null = null;
+  /** The occluders' depth is laid (the pools' occlusion pyramid reduces it for the next cull). It must be the prepass's:
+   *  the whole scene's depth holds the tested instances themselves, each one then hid itself on the next frame. */
+  occludersLaid: ((depth: THREE.DepthTexture) => void) | null = null;
+  /** The frame's end. */
+  frameEnd: (() => void) | null = null;
   opts: PostOptions;
 
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, sun: THREE.DirectionalLight, opts: PostOptions) {
@@ -192,7 +271,7 @@ export class Post {
       sun.castShadow = true;
       sun.shadow.mapSize.set(2048, 2048);
       sun.shadow.camera.near = 1;
-      sun.shadow.camera.far = 4000;
+      sun.shadow.camera.far = 4000 + DEPTH_STEP;
       sun.shadow.bias = -0.0004;
       sun.shadow.normalBias = 0.4;
       const csm = new FadingCSM(sun, { cascades: 3, maxFar: PERSP_SHADOW_FAR, mode: 'practical', lightMargin: 300 });
@@ -204,7 +283,9 @@ export class Post {
     this.pipeline = new THREE.RenderPipeline(renderer);
     // no MSAA: anti-aliasing is temporal (TRAA), which also cleans the occlusion's noise
     // the opaque depth laid first, each material then runs once per covered pixel (render/depthPrepass.ts)
-    const scenePass = T.nodeObject(new PrepassPassNode(scene, camera, { samples: 0 })) as Node;
+    const prepass = new PrepassPassNode(scene, camera, { samples: 0 });
+    prepass.depthLaid = (depth) => this.occludersLaid?.(depth);
+    const scenePass = T.nodeObject(prepass) as Node;
     this.scenePass = scenePass;
     this.owned.push(scenePass);
     // velocity blends by material: opaque overwrites, colorOnly's transparent leaves it
@@ -422,6 +503,12 @@ export class Post {
   /** Something that casts changed (a mesh came, left or was rebuilt): the cascades are redrawn next frame. */
   invalidateShadows(): void { this.shadowDirty = true; }
 
+  /** The small casters follow the eye: the two near cascades, the ones that hold them, are drawn again. */
+  invalidateNear(): void { const s = (this.csm as unknown as FadingCSM | null)?.stale; if (s) { s[0] = true; s[1] = true; } }
+
+  /** Something casting changed in `box`: the cascades that see it are redrawn next frame. */
+  invalidateBox(box: THREE.Box3): void { (this.csm as unknown as FadingCSM | null)?.changed.push(box); }
+
   /**
    * The 3 cascades are drawn only when something in them can have changed: the camera or its projection (the cascades
    * follow the view), the sun, the city (`invalidateShadows`), or casters that move (`moving`: traffic and people
@@ -432,7 +519,7 @@ export class Post {
     if (!csm || csm.lights.length === 0) return;
     (csm as unknown as FadingCSM).shadowHooks = this.shadowHooks;
     const cam = this.camera;
-    const still = !moving && !this.shadowDirty && this.shadowView.equals(cam.matrixWorld) && this.shadowProj.equals(cam.projectionMatrix) && this.shadowSun.equals(this.sun.position);
+    const still = !moving && !this.shadowDirty && (csm as unknown as FadingCSM).changed.length === 0 && this.shadowView.equals(cam.matrixWorld) && this.shadowProj.equals(cam.projectionMatrix) && this.shadowSun.equals(this.sun.position);
     this.shadowView.copy(cam.matrixWorld);
     this.shadowProj.copy(cam.projectionMatrix);
     this.shadowSun.copy(this.sun.position);
@@ -463,11 +550,7 @@ export class Post {
     this.selectOutput();
     updateVelocityCamera(this.camera);
     this.pipeline.render();
-    // the scene depth is complete: the pools' occlusion pyramid reduces it for the next frame's cull
-    if (this.frameEnd && this.scenePass) {
-      const depth = (this.scenePass as unknown as { getTextureNode(name: string): { texture: THREE.DepthTexture } }).getTextureNode('depth').texture;
-      if (depth) this.frameEnd(depth);
-    }
+    this.frameEnd?.();
   }
 
   /**

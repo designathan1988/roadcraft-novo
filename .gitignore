@@ -4,3 +4,4 @@ out/
 *.log
 build/
 test-results/
+.claude/worktrees/

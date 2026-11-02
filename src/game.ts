@@ -18,7 +18,7 @@ import { buildCloudMap } from './render/cloudShadow.ts';
 import { buildSeaGeometry } from './render/seaGeometry.ts';
 import { BuildingOccluders } from './render/visibility.ts';
 import { createRoads, createTrafficLook, type TrafficLook } from './render/roads.ts';
-import type { CellLayer } from './render/cellLayer.ts';
+import { meshUploader, type CellLayer } from './render/cellLayer.ts';
 import { createScene, setTimeOfDay, type SceneParts } from './render/scene.ts';
 import { GpuTiming } from './render/gpuTiming.ts';
 import { TerrainRenderer } from './render/terrain.ts';
@@ -570,7 +570,8 @@ export class Game {
     this.parts.water.geometry.dispose();
     this.parts.water.geometry = buildSeaGeometry(this.world);
     this.parts.water.frustumCulled = true;
-    for (const l of this.layers) scene.add(l.group);
+    const uploader = meshUploader(renderer);
+    for (const l of this.layers) { l.uploader = uploader; scene.add(l.group); }
     scene.add(this.preview.mesh, this.preview.marker, this.preview.circle);
     scene.add(this.vehicles.group);
     this.props = new PropRenderer(this.world, this.pool, this.signalsSab, this.parts.isWebGPU);
@@ -887,7 +888,10 @@ export class Game {
       // transit stops, a collapse's pieces moving, the inside view's cut (render/post.ts CachedShadowNode; the movers are
       // drawn each frame)
       const demolished = this.demolition.drawnVersion();
-      if (this.props.changed || this.layers.some((l) => l.changed) || this.transitView.changed || demolished !== this.shadowDemolition || this.viewState.insideId >= 0) this.post.invalidateShadows();
+      if (this.props.changed || this.transitView.changed || demolished !== this.shadowDemolition || this.viewState.insideId >= 0) this.post.invalidateShadows();
+      for (const l of this.layers) { for (const b of l.casterBoxes) this.post.invalidateBox(b); l.casterBoxes.length = 0; }
+      for (const b of this.props.takeChangedBoxes()) this.post.invalidateBox(b);
+      if (this.props.casterMoved) { this.post.invalidateNear(); this.props.casterMoved = false; }
       this.shadowDemolition = demolished;
       this.props.changed = false;
       this.transitView.changed = false;
@@ -1139,16 +1143,14 @@ export class Game {
         },
         main: () => {
           this.props.prepareMain(renderer);
-          this.vehicles.prepareMain();
-          this.vehicles.people.prepareMain();
+          this.vehicles.prepareMain(this.occluders.sphereHidden);
+          this.vehicles.people.prepareMain(this.occluders.sphereHidden);
         },
       });
       // the frame's depth feeds the pools' occlusion pyramid (the next frame's cull reads it); the cloud-shadow
       // map is baked for the next composite (the clouds drift every frame)
-      if (this.props) this.post.frameEnd = (depth) => {
-        this.props.occl?.build(renderer, depth);
-        buildCloudMap(renderer, sunDirection);
-      };
+      if (this.props) this.post.occludersLaid = (depth) => this.props.occl?.build(renderer, depth);
+      this.post.frameEnd = () => buildCloudMap(renderer, sunDirection);
     }
     if (compile) {
       this.hud.showLoading(t('game.loading.options'));

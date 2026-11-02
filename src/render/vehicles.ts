@@ -3,6 +3,7 @@
 // "density cars" painted in the roads' shader (see roads.ts).
 // Four draw calls for the whole fleet.
 
+import type { MoverHidden } from './visibility.ts';
 import * as THREE from 'three/webgpu';
 import { POSE_STRIDE, TILE, TILE_GRID, TILES, type PoseReader } from '../shared/contracts/poses.ts';
 import { PAINTS } from '../shared/vehiclePaints.ts';
@@ -103,13 +104,19 @@ class Batch {
     this.snapCount = this.count;
   }
 
-  /** Restores the colour pass's list (post's after-the-last-cascade hook). */
-  restore(): void {
-    if (!this.snapPos || this.snapCount === 0) return;
-    this.pos.set(this.snapPos.subarray(0, this.snapCount * 4));
-    this.info.set(this.snapInfo!.subarray(0, this.snapCount * 4));
-    this.prev.set(this.snapPrev!.subarray(0, this.snapCount * 4));
-    this.count = this.snapCount;
+  /** Restores the colour pass's list (post's after-the-last-cascade hook), without what stands hidden behind the walls;
+   *  the cascades read the whole snapshot: a van behind a block still shades the street. */
+  restore(hidden: MoverHidden | null): void {
+    if (!this.snapPos || !this.snapInfo || !this.snapPrev || this.snapCount === 0) return;
+    let w = 0;
+    for (let i = 0; i < this.snapCount; i++) {
+      const o = i * 4;
+      if (hidden?.(this.snapPos[o]!, this.snapPos[o + 1]! + 1, this.snapPos[o + 2]!, this.snapInfo[o + 2]! <= 2 ? 4 : 8)) continue;
+      const t = w * 4;
+      for (let v = 0; v < 4; v++) { this.pos[t + v] = this.snapPos[o + v]!; this.info[t + v] = this.snapInfo[o + v]!; this.prev[t + v] = this.snapPrev[o + v]!; }
+      w++;
+    }
+    this.count = w;
     this.commit();
   }
 
@@ -524,8 +531,8 @@ export class VehicleRenderer {
   }
 
   /** The colour pass's lists restored (post.ts, after the last cascade). */
-  prepareMain(): void {
-    for (const b of this.allBatches()) b.restore();
+  prepareMain(hidden: MoverHidden | null = null): void {
+    for (const b of this.allBatches()) b.restore(hidden);
   }
 
   /** Updates the followed vehicle after the frame: out of sight for half a second, let go. */

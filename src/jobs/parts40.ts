@@ -25,6 +25,37 @@ export const VARIANT_TYPES = new Set<number>([PROP.BMisc, PROP.BPropA, PROP.BPro
 export const PART_DIST: Readonly<Record<number, number>> = {
   [PROP.BFrame]: 400, [PROP.BBox]: 600, [PROP.BRail]: 300, [PROP.BMisc]: 400, [PROP.BPropA]: 250, [PROP.BPropB]: 150, [PROP.BLot]: 800,
 };
+/** A record per (type, variant) of `partRules`: 0 none, 1 solid, 2 bars; the model's box; its three bars. */
+export const PART_RULE = 13;
+const ruleAt = (type: number, variant: number): number => (type * 8 + (variant & 7)) * PART_RULE;
+export const PART_RULE_SLOTS = 32 * 8;
+/** Writes a part kind's rule. */
+export function setPartRule(rules: Float32Array, type: number, variant: number, bars: boolean, extent: readonly number[], pieces: ReadonlyArray<readonly number[]>): void {
+  const o = ruleAt(type, variant);
+  rules[o] = bars ? 2 : 1;
+  rules.set(extent, o + 1);
+  pieces.slice(0, 3).forEach((p, k) => rules.set(p, o + 4 + k * 3));
+}
+/**
+ * How far a part is drawn (m): the distance render/partSize.ts `ends` gives it, here where the instance is made. A part
+ * that cannot be drawn from where the camera stands never takes a slot of the pool: 300 thousand window frames a few
+ * cells away filled it, and the trees past them waited in a queue that was asked again whole at each free block.
+ */
+export function partDrawEnd(rules: Float32Array, type: number, variant: number, sx: number, sy: number, sz: number, pxPerMetre: number): number {
+  const o = ruleAt(type, VARIANT_TYPES.has(type) ? variant : 0), kind = rules[o];
+  if (kind === 0) return Infinity;
+  const reach = (PART_DIST[type] ?? Infinity) * pxPerMetre / 1303.8;
+  if (kind === 1) return Math.min(reach, Math.hypot(rules[o + 1] * sx, rules[o + 2] * sy, rules[o + 3] * sz) * pxPerMetre);
+  let widest = 0;
+  for (let k = 0; k < 3; k++) {
+    const a = rules[o + 4 + k * 3] * sx, b = rules[o + 5 + k * 3] * sy, c = rules[o + 6 + k * 3] * sz;
+    widest = Math.max(widest, Math.max(Math.min(a, b), Math.min(Math.max(a, b), c)));
+  }
+  return Math.min(reach, widest * pxPerMetre / BAR_PIXELS);
+}
+/** A bar under this many pixels leaves the drawing (4.0 partCells.ts BAR_PIXELS). */
+const BAR_PIXELS = 0.5;
+
 /** How far from the camera a cell asks for its building parts (the farthest type, and a cell's reach). */
 export const PARTS_RANGE = 800 + 128;
 

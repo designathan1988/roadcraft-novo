@@ -20,7 +20,7 @@ import { nightU } from './scene.ts';
 import { ARCHES, ARCH_COUNT, facadeWindowTable } from '../world/arch.ts';
 import { cutMask } from './inside.ts';
 import { layDepthFirst } from './depthPrepass.ts';
-import { GRASS_TEX, GRASS_TILE } from './surfaceBake.ts';
+import { GRASS_TEX, GRASS_TILE, dropAfterUpload } from './surfaceBake.ts';
 import { FINISH_BY_MAT, FINISH_COUNT, FINISH_LOOKS, FINISH_SIZE } from '../jobs/buildingFinishes.ts';
 import { WIN_REVEAL_SHADE } from '../jobs/buildingGen.ts';
 import type { BuildingOccluders } from './visibility.ts';
@@ -58,8 +58,8 @@ function bakeFinishesOnce(): void {
     w.terminate();
     if ('error' in e.data) { console.warn('building finishes not loaded:', e.data.error); return; }
     // the worker's arrays become the textures' data (the same size and format): no 13.6 MB copy on the main thread
-    FINISH_ALBEDO.image.data = e.data.albedo; FINISH_ALBEDO.needsUpdate = true;
-    FINISH_NORMAL.image.data = e.data.normal; FINISH_NORMAL.needsUpdate = true;
+    FINISH_ALBEDO.image.data = e.data.albedo; dropAfterUpload(FINISH_ALBEDO);
+    FINISH_NORMAL.image.data = e.data.normal; dropAfterUpload(FINISH_NORMAL);
   };
   w.postMessage({ base: new URL('cooked/surfaces/', document.baseURI).href });
 }
@@ -138,8 +138,10 @@ export function createCity(world: World, pool: JobPool, occluders?: BuildingOccl
   // the mask-free variant: a mesh drawing whole (fade at rest, no cut, no window hole) draws the plain material
   const masked = createBuildingMaterial();
   const plainBld = createBuildingMaterial(undefined, true);
+  const farMasked = createBuildingMaterial(undefined, false, true);
+  const farPlain = createBuildingMaterial(undefined, true, true);
   return new CellLayer(src, world.dirty, Dirty.Buildings, masked, { near, evict: near * 1.43, margin: 40, detail, plate, budget: 256e6, eyeHeight: (x, z) => heightAt(world.heights, x, z), occluders, rebuildOccluders: true, lodCasters: true,
-    materials: { masked, plain: plainBld, plainFor: (u) => (u.fade === undefined || u.fade >= 1) && !insideCutOpen() && !(u.level === 0 && u.cell !== undefined && DETAIL_SHOWN[u.cell]) } }, false, true);
+    materials: { masked, plain: plainBld, farMasked, farPlain, plainFor: (u) => (u.fade === undefined || u.fade >= 1) && !insideCutOpen() && !(u.level === 0 && u.cell !== undefined && DETAIL_SHOWN[u.cell]) } }, false, true);
 }
 
 
@@ -198,7 +200,12 @@ const ARCH_TRIM = T.uniformArray(ARCHES.map((a) => { const c = new THREE.Color(a
  */
 export interface BuildingPlacement { place: (rest: Node) => Node; turn: (n: Node) => Node; surface: Node; prev: Node }
 
-export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = false): THREE.MeshStandardNodeMaterial {
+/**
+ * `far`: the material of a tile's or a plate's masses, seen from past the cells' reach. A window there is a few pixels: its
+ * room, blind, roller, reveal, frame, sill and streak, and the finish's relief, are all under one. The same program ran them
+ * for every pixel of the city view. Left out here, they are not in the shader at all (a node nothing reads is not built).
+ */
+export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = false, far = false): THREE.MeshStandardNodeMaterial {
   // its depth laid before the colour: its pixels are the frame's dearest (render/depthPrepass.ts)
   const m = layDepthFirst(new THREE.MeshStandardNodeMaterial());
   const n = useCompactVertex(m, 'vBldNormal', moved?.place);
@@ -296,7 +303,7 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   // cut open and no window hole (their cells never meet the detail layer) - so the pixels it covers would never be
   // discarded and the material takes early-Z. Fading, cut or hole meshes draw the masked one (materials, cellLayer).
   if (!plainMask) {
-    m.maskNode = lodFadeMask().and(cutMask()).and(hole.lessThan(0.5));
+    m.maskNode = far ? lodFadeMask().and(cutMask()) : lodFadeMask().and(cutMask()).and(hole.lessThan(0.5));
     // the shadow keeps the wall whole: the sun through an opening lights the room, not the street behind the building
     m.maskShadowNode = lodFadeMask().and(cutMask());
   }
@@ -370,7 +377,9 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   // a pane 1.8 m or wider is the 4.0 wide window or ribbon: dark one in five, no roller
   const widePane = step(float(1.8), float(1).sub(ww.mul(2)).mul(colW));
   const darkPane = step(pick, mix(float(4.5), float(3.5), widePane)).mul(plainWin);
-  const inside = insideLit.mul(mix(float(1), float(0.3), darkPane));
+  // far: the room's mean, lit or not at night (a lit window still reads window by window)
+  const roomMean = wallTone.mul(0.62).mul(select(inShop.greaterThan(0.5), float(0.26), float(0.11)));
+  const inside = far ? mix(roomMean, wallTone.mul(lamp).mul(lit).mul(0.9), night).mul(mix(float(1), float(0.3), darkPane)) : insideLit.mul(mix(float(1), float(0.3), darkPane));
   // the roller shutter: down from the head a quarter to 70 % of the pane, slats every 5 cm, 5 cm in front of the glass
   const rollDown = pick.sub(9).mul(0.15).add(0.25);
   const roller = step(float(8.5), pick).mul(step(pick, float(12.5))).mul(plainWin).mul(float(1).sub(widePane)).mul(step(float(1).sub(rollDown), ly));
@@ -435,7 +444,7 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   const darkMean = select(abs(finE.sub(8)).lessThan(0.5), float(0.081), select(abs(finE.sub(13)).lessThan(0.5), float(0.226), float(1)));
   const finTone = mix(vec3(1, 1, 1), finA.xyz.div(darkMean).min(2), hasFinE);
   const wn = texture(WALL_NOISE, vec2(P.x.add(P.z), P.y).mul(0.11));
-  const grain = wn.r.mul(2).sub(1);
+  const grain = far ? float(0) : wn.r.mul(2).sub(1);
   const isFacade = hasWin.max(vertical.mul(isWall));
   const plain = float(1).sub(isCurtain).mul(float(1).sub(hasFin));
   const winCol = band(ww, float(1).sub(ww), fx, wu).mul(hasWin).mul(bayOn).mul(float(1).sub(inShop)).mul(step(float(0), yy));
@@ -454,14 +463,14 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   const sillShadow = sillW.mul(band(wLow.sub(float(0.12)), wLow.sub(float(0.06)), fy, wy));
   const pm = vec2(dot(P, tAx), dot(P, bAx));
   const nr = (k: number) => texture(WALL_NOISE, pm.mul(k)).r;
-  const macro = nr(0.0056).mul(0.55).add(nr(0.021).mul(0.3)).add(nr(0.075).mul(0.15));
+  const macro = far ? nr(0.0056).mul(0.55).add(0.225) : nr(0.0056).mul(0.55).add(nr(0.021).mul(0.3)).add(nr(0.075).mul(0.15));
   const glassy = max(max(isCurtain, isGlass), step(abs(fin.sub(7)), float(0.5)).max(step(abs(fin.sub(8)), float(0.5))));
   const stainStreak = smoothstep(float(0.55), float(0.85), texture(WALL_NOISE, vec2(pm.x.mul(0.1375), P.y.mul(0.02))).g);
   const grimeN = nr(0.0275).mul(0.5).add(0.5);
   const stain = float(0.3).mul(float(0.18).add(grimeN.mul(0.12)).add(select(vertical.greaterThan(0.5), stainStreak.mul(0.28), float(0.1)))).mul(float(1).sub(glassy));
   const weather = macro.mul(0.2).add(0.9).mul(float(1).sub(stain));
-  const wallK = float(1).add(grain.mul(0.11).mul(plain)).sub(streak).sub(sillShadow.mul(0.3));
-  const sillAmt = sill.mul(isFacade).mul(detail).mul(float(1).sub(isCurtain));
+  const wallK = far ? float(1) : float(1).add(grain.mul(0.11).mul(plain)).sub(streak).sub(sillShadow.mul(0.3));
+  const sillAmt = far ? float(0) : sill.mul(isFacade).mul(detail).mul(float(1).sub(isCurtain));
   wallFinal = mix(wallFinal.mul(wallK).mul(finTone).mul(weather), mix(trimC, vec3(0.86, 0.84, 0.8), 0.5), sillAmt);
   // the recess by the view angle: the glass sits ~22 cm in; where the opening (in the wall) does not show the
   // glass, the opening's side shows (in shade), opposite the eye
@@ -471,7 +480,7 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   const offY = V.y.div(inward).mul(recess).div(fh);
   const glassSeen = band(ww, float(1).sub(ww), fx.add(offU), wu).mul(band(wLow, wHigh, fy.add(offY), wy));
   const deepWin = step(kind, float(0.5)).max(step(float(1.5), kind)).mul(float(1).sub(inShop));
-  const reveal = clamp(punched.sub(glassSeen), 0, 1).mul(winCol).mul(deepWin).mul(detail).mul(float(1).sub(isGlass));
+  const reveal = far ? float(0) : clamp(punched.sub(glassSeen), 0, 1).mul(winCol).mul(deepWin).mul(detail).mul(float(1).sub(isGlass));
   // which face: a jamb (normal ±tangent) where the ray leaves the opening sideways, else the head (down) or the sill (up)
   const gx = fx.add(offU), gy = fy.add(offY);
   const outX = max(ww.sub(gx), gx.sub(float(1).sub(ww))).mul(colW), outY = max(wLow.sub(gy), gy.sub(wHigh)).mul(fh);
@@ -481,9 +490,9 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   // the 4.0 reveal: trim x 0.68 in its own shade, lifted where the sun reaches it (relative to the wall's own light)
   const litFace = clamp(dot(faceN, SUN_DIR), 0, 1), litWall = clamp(dot(n, SUN_DIR), 0, 1);
   const revealK = float(WIN_REVEAL_SHADE).mul(float(0.45).add(litFace.mul(0.55)).div(float(0.45).add(litWall.mul(0.55))));
-  const glassC = mix(glassTint.add(skyRefl.mul(refl)), wallC.mul(revealK.mul(float(1).sub(night.mul(0.6)))), reveal);
+  const glassC = far ? glassTint.add(skyRefl.mul(refl)) : mix(glassTint.add(skyRefl.mul(refl)), wallC.mul(revealK.mul(float(1).sub(night.mul(0.6)))), reveal);
   // the roller over the pane where it is down (near and mid; far it is in the average)
-  const rollAmt = roller.mul(win).mul(detail).mul(float(1).sub(reveal));
+  const rollAmt = far ? float(0) : roller.mul(win).mul(detail).mul(float(1).sub(reveal));
   // the 4.0 frame (kit.ts:239-257) painted where the detail layer does not stand it: the border 4.5 % of the opening,
   // a mullion in the middle and a transom at 68 %, in the trim; seen at the pane's depth (the recess's parallax)
   const px = select(isGlass.greaterThan(0.5), fx, gx), py = select(isGlass.greaterThan(0.5), fy, gy);
@@ -496,9 +505,10 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   const shopBars = float(1).sub(band(float(0.03), float(0.97), sxw, sax).mul(band(float(0.04), float(0.96), syw, say)))
     .max(band(float(0.488), float(0.512), sxw, sax)).max(band(float(0.665), float(0.69), syw, say));
   // (not on a pane of the detail layer or of a 4.0 building: its frame stands there in relief)
-  const paneFrame = max(max(edgeBar, crossBar).mul(plainWin), shopBars.mul(inShop)).mul(win).mul(float(1).sub(isGlass)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt))
+  const paneFrame = far ? float(0) : max(max(edgeBar, crossBar).mul(plainWin), shopBars.mul(inShop)).mul(win).mul(float(1).sub(isGlass)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt))
     .mul(clamp(float(1.6).sub(max(ax2, ay2).mul(12)), 0, 1));
-  const albedo = mix(mix(mix(mix(wallFinal, glassC.mul(mix(float(1), float(0.6), darkPane)), winAmt), rollerC, rollAmt), trimC, paneFrame), signC, signMask.mul(detail));
+  const glazed = mix(wallFinal, glassC.mul(mix(float(1), float(0.6), darkPane)), winAmt);
+  const albedo = far ? mix(glazed, signC, signMask.mul(detail)) : mix(mix(mix(glazed, rollerC, rollAmt), trimC, paneFrame), signC, signMask.mul(detail));
   m.colorNode = vec4(albedo, 1);
   m.emissiveNode = insideAmt.mul(winAmt).mul(float(1).sub(refl)).mul(float(1).sub(reveal)).mul(float(1).sub(rollAmt)).mul(float(1).sub(paneFrame)).add(signC.mul(signMask).mul(detail).mul(night).mul(1.8));
 
@@ -507,12 +517,12 @@ export function createBuildingMaterial(moved?: BuildingPlacement, plainMask = fa
   const rough0 = select(mat.equal(7), float(0.95), select(mat.equal(5), float(0.45), select(mat.equal(2), float(0.7), float(0.86))));
   const rough = mix(rough0, finA.w, hasFinE);
   m.roughnessNode = mix(mix(rough, float(0.12), winAmt.mul(float(1).sub(reveal))), float(0.6), max(rollAmt, paneFrame));
-  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), look.z.mul(mix(float(1), finN.w, look.w)).mul(hasFinE)).mul(float(1).sub(winAmt)).mul(float(1).sub(rollAmt));
+  m.metalnessNode = max(select(mat.equal(5), float(0.35), float(0)), look.z.mul(far ? float(1) : mix(float(1), finN.w, look.w)).mul(hasFinE)).mul(float(1).sub(winAmt)).mul(float(1).sub(rollAmt));
   // the finish's relief (off the glass), in the face's frame
   const nm = finN.xyz.mul(2).sub(1);
   const nk = look.y.mul(hasFinE).mul(float(1).sub(winAmt)).mul(float(1).sub(sillAmt));
   const nW = normalize(tAx.mul(nm.x.mul(nk)).add(bAx.mul(nm.y.mul(nk))).add(n.mul(nm.z)));
-  m.normalNode = transformNormalToView(moved ? moved.turn(nW) : nW);
+  m.normalNode = transformNormalToView(far ? n : moved ? moved.turn(nW) : nW);
   if (moved) withPrevious(m, moved.prev);
   return m;
 }
