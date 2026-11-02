@@ -1,11 +1,12 @@
 # Último turno do assistente
 
-Atualizado: 2026-11-02 02:11:47
+Atualizado: 2026-11-02 02:21:00
 
-A24 terminou com 26 achados, e todos vão para o registro com correção. Os principais, ainda sem conferência minha:
-- O cull de props despacha 1 milhão de invocações de 10 a 22 vezes por quadro, e parte desse trabalho é descartada.
-- Cada passagem é um render completo do three, de 47 a 80 `queue.submit` por quadro pela conta dele. A orientação citada é de 1 a 5.
-- O cull usa a pirâmide de um quadro com as matrizes de outro. A ordem está provada; o efeito visível, não.
-- Na versão Steam, a ponte do overlay liga opções que nunca entraram nas medições.
+O fiscal está funcionando: já vejo agentes com até 26,7% da lista lida, e alguns ainda nem abriram o primeiro arquivo da própria lista, porque acabaram de começar.
 
-A23, de memória, é o último que falta. Depois dele começo a revisão crítica e a conferência no código.
+**Como vou coordenar:**
+1. A cada entrega, rodo o fiscal naquele agente. Se faltar uma linha, ele volta com a lista exata do que falta.
+2. Leio cada relatório antes de aceitar. Vereditos sem a leitura dos trechos citados são devolvidos.
+3. No fim, comparo tudo com o que a outra sessão já achou, confiro eu mesmo os principais achados e faço o registro único.
+
+Os 19 agentes estão rodando, todos só com código e dados do jogo.

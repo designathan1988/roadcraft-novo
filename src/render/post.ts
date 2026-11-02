@@ -527,6 +527,8 @@ export class Post {
     if (this.shadowDirty) (csm as unknown as FadingCSM).stale.fill(true);
     this.shadowDirty = false;
     for (const l of csm.lights) { l.shadow.autoUpdate = false; l.shadow.needsUpdate = !still; }
+    // no cascade draws this frame: the colour lists are made here, not after the last one
+    if (still) this.shadowHooks?.main();
   }
 
   /**

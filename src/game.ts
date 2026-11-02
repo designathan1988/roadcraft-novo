@@ -883,6 +883,12 @@ export class Game {
     const T5 = pf ? performance.now() : 0;
     pr?.lap(PART.props, T5);
 
+    // the scene's matrices once a frame: three walks the whole graph at each render of the scene, the view's, its depth's
+    // and each cascade's, and nothing moves between them
+    scene.matrixWorldAutoUpdate = true;
+    scene.updateMatrixWorld();
+    scene.matrixWorldAutoUpdate = false;
+
     if (this.post) {
       // the cascades' still casters are drawn again only when something casting changed: the city's meshes or props, the
       // transit stops, a collapse's pieces moving, the inside view's cut (render/post.ts CachedShadowNode; the movers are
@@ -1152,6 +1158,7 @@ export class Game {
       if (this.props) this.post.occludersLaid = (depth) => this.props.occl?.build(renderer, depth);
       this.post.frameEnd = () => buildCloudMap(renderer, sunDirection);
     }
+    if (this.props) this.props.cullInCascades = !!this.post?.csm;
     if (compile) {
       this.hud.showLoading(t('game.loading.options'));
       // the explosion's pieces: shadows switched on are 3 more pipelines for them (compiled here, not at the next bomb)

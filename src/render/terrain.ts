@@ -527,14 +527,18 @@ export class TerrainRenderer {
     m.normalNode = transformNormalToView(relief);
 
     // colour: grass, dirt, rock, sand, by slope and height, with broad variation
+    const broad = T.varying(mx_noise_float(positionWorld.xz.mul(1 / 180)));
     const color = Fn(() => {
       const n = normalize(vNormal);
       const p = positionWorld;
       const slope = float(1).sub(n.y);
-      const big = mx_noise_float(p.xz.mul(1 / 180)).mul(0.5).add(0.5);
-      const mid = mx_noise_float(p.xz.mul(1 / 23));
+      // a 180 m wave, per vertex: the coarsest grid still samples it a few times a period; per pixel it cost a noise each
+      const big = broad.mul(0.5).add(0.5);
       // fades with distance before it turns into noise (fwidth > period)
-      const fadeMid = clamp(float(1).sub(fwidth(p.xz.x).div(6)), 0, 1);
+      const fadeMid = clamp(float(1).sub(fwidth(p.xz.x).div(6)), 0, 1).toVar();
+      // the 23 m one only where it shows (a branch: a mix ran the noise at every far pixel)
+      const mid = float(0).toVar();
+      If(fadeMid.greaterThan(0), () => { mid.assign(mx_noise_float(p.xz.mul(1 / 23))); });
       const grassA = sRGBTransferEOTF(this.grassA);
       const grassB = sRGBTransferEOTF(this.grassB);
       const dirt = sRGBTransferEOTF(vec3(0.52, 0.45, 0.36));

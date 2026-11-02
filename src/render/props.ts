@@ -506,8 +506,9 @@ export class PropRenderer {
       else {
         this.blocks.setDistance(c, d);
         // came near (or went far): asked again with (without) its buildings' parts
+        // (a near cell holds all its parts, `at` 0: it is never asked again for coming or going)
         const parts = this.cellParts[c] === 1, at = this.cellPartAt[c];
-        if ((this.wantParts(c, d) !== parts || (parts && (d < at || d > at * 2.4))) && this.cellReq[c] === this.cellHave[c]) this.requestCell(c, d);
+        if ((this.wantParts(c, d) !== parts || (parts && at > 0 && (d < at || d > at * 2.4))) && this.cellReq[c] === this.cellHave[c]) this.requestCell(c, d);
       }
     }
     for (const c of [...this.pending]) if (this.cellDistance(c, cam) > drop) { this.pending.delete(c); this.cellHave[c] = -1; this.cellReq[c] = 0; }
@@ -707,7 +708,10 @@ export class PropRenderer {
     (this.sunU.value as THREE.Vector3).copy(sunDirection);
     // a new scale moves every distance: the cascades' casters changed
     if (this.partSize.setView(camera, this.pixelScale)) this.changed = true;
-    this.kinds.forEach((d, k) => d.dist.forEach((x, l) => { this.distArr[k * LODS + l] = d.lods[l] && this.kindNear[k] > 0 ? x * this.pixelScale : 0; }));
+    for (let k = 0; k < KINDS; k++) {
+      const d = this.kinds[k];
+      for (let l = 0; l < LODS; l++) this.distArr[k * LODS + l] = d.lods[l] && this.kindNear[k] > 0 ? d.dist[l] * this.pixelScale : 0;
+    }
     this.updateResidency(camPos);
     if (this.kindNearDue) this.countKindsNear(camPos);
     // An indirect draw costs a call (and one per shadow cascade) even when the cull leaves it empty: a level whose
@@ -725,6 +729,9 @@ export class PropRenderer {
     const nearest = Math.min(TILE_SIZE, camPos.y - top);
     for (let k = 0; k < DRAWS; k++) { const m = this.slotMesh[k]; if (m) m.visible = this.distArr[k] > nearest; }
     this.usedU.value = this.blocks.highBlock * BLOCK;
+    // with shadows the cascades' fills overwrite these lists and `prepareMain` makes them again after the last one: two
+    // whole passes over the pool here were thrown away every frame
+    if (this.cullInCascades) return;
     renderer.compute(this.reset);
     renderer.compute(this.count);
     renderer.compute(this.prefix);
@@ -740,6 +747,8 @@ export class PropRenderer {
     (this.lodStateAttr as unknown as { array: Uint32Array }).array = new Uint32Array(0);
   }
   private copiesDropped = false;
+  /** The colour lists are made after the shadow cascades (the game sets it: true with shadows on). */
+  cullInCascades = false;
 
   /**
    * One shadow cascade's cull: the casters its own frustum sweeps (post.ts renderShadow calls this between passes,
@@ -765,6 +774,7 @@ export class PropRenderer {
     renderer.compute(this.count);
     renderer.compute(this.prefix);
     renderer.compute(this.cull);
+    this.dropGpuOnlyCopies();
   }
 
   /** The pools' occlusion pyramid (null on WebGL 2): post.frameEnd feeds it the scene depth. */

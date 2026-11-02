@@ -519,8 +519,10 @@ export class VehicleRenderer {
     for (const b of this.allBatches()) b.snapshot();
   }
 
+  /** Every batch, made once: the list was built again five times a frame. */
+  private batches: Batch[] | null = null;
   private allBatches(): Batch[] {
-    return [...this.near, ...this.nearGlass.filter((b): b is Batch => !!b), ...this.nearFar, this.mid, ...this.midCars];
+    return this.batches ??= [...this.near, ...this.nearGlass.filter((b): b is Batch => !!b), ...this.nearFar, this.mid, ...this.midCars];
   }
 
   /** One shadow cascade's cull: only the instances its frustum sweeps (post.ts renderShadow, between passes). */
