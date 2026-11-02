@@ -5,6 +5,7 @@
 
 import * as THREE from 'three/webgpu';
 import { bakeSurfaces, dropAfterUpload } from './surfaceBake.ts';
+import { becomeBc7, bc7 } from './compressedTexture.ts';
 
 type Fill = [number, number, number, number];
 
@@ -60,12 +61,13 @@ export function loadCookedSurfaces(): void {
   started = true;
   bakeSurfaces();
   const w =new Worker(new URL('./cookedWorker.ts', import.meta.url), { type: 'module', name: 'cooked' });
-  w.onmessage = (e: MessageEvent<{ file?: string; width?: number; layers?: number; data?: Uint8Array; error?: string; done?: boolean }>) => {
+  w.onmessage = (e: MessageEvent<{ file?: string; width?: number; layers?: number; data?: Uint8Array; compressed?: boolean; error?: string; done?: boolean }>) => {
     const m = e.data;
     if (m.done) { w.terminate(); console.info(`cooked surfaces: ${cookedLoaded.count} read, ${cookedLoaded.failed.length} failed`); return; }
     const name = m.file!.replace(/\.ktx2$/, '') as CookedName;
     const t = COOKED[name];
     if (m.error || !m.data || !t) { cookedLoaded.failed.push(`${m.file}: ${m.error ?? 'unknown'}`); console.error('cooked surface', m.file, m.error); return; }
+    if (m.compressed) { becomeBc7(t, m.data, m.width!, m.layers ?? 1); cookedLoaded.count++; return; }
     const dst = t.image.data as Uint8Array;
     if (m.data.length !== dst.length) { cookedLoaded.failed.push(`${m.file}: ${m.data.length} bytes, expected ${dst.length}`); return; }
     // the worker's array becomes the texture's data (checked above: the same size): no copy on the main thread
@@ -73,5 +75,5 @@ export function loadCookedSurfaces(): void {
     dropAfterUpload(t);
     cookedLoaded.count++;
   };
-  w.postMessage({ base: new URL('cooked/surfaces/', document.baseURI).href, files: Object.keys(COOKED).map((k) => `${k}.ktx2`) });
+  w.postMessage({ bc7: bc7.on ? new URL('cooked/bc7/', document.baseURI).href : undefined, base: new URL('cooked/surfaces/', document.baseURI).href, files: Object.keys(COOKED).map((k) => `${k}.ktx2`) });
 }

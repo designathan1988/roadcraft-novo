@@ -79,6 +79,14 @@ class CachedShadowNode extends THREE.ShadowNode {
     this.age = index * SAFETY_STAGGER;
   }
 
+  /** The map's colour is never read (the filter reads the depth): one channel, not four of 2048². */
+  setupRenderTarget(shadow: THREE.LightShadow, builder: unknown): { shadowMap: THREE.RenderTarget; depthTexture: THREE.DepthTexture } {
+    const base = (THREE.ShadowNode.prototype as unknown as { setupRenderTarget(s: THREE.LightShadow, b: unknown): { shadowMap: THREE.RenderTarget; depthTexture: THREE.DepthTexture } }).setupRenderTarget;
+    const made = base.call(this, shadow, builder);
+    made.shadowMap.texture.format = THREE.RedFormat;
+    return made;
+  }
+
   /** three's ShadowNode.renderShadow (the shadow map and its override material already bound by updateShadow), cached. */
   renderShadow(frame: { renderer: THREE.WebGPURenderer; scene: THREE.Scene }): void {
     const self = this as unknown as { shadow: THREE.LightShadow; shadowMap: THREE.RenderTarget; light: THREE.Light };

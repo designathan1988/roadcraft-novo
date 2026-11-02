@@ -31,7 +31,8 @@
     "icon": "node tools/make-icon.mjs",
     "package:web": "vite build && node tools/package-web.mjs",
     "photos:package": "node tools/photos/package.mjs",
-    "photos:browser": "node tools/photos/package.mjs --browser"
+    "photos:browser": "node tools/photos/package.mjs --browser",
+    "cook:bc7": "node tools/cook-bc7.mjs"
   },
   "dependencies": {
     "steamworks.js": "^0.4.0",

@@ -5,6 +5,7 @@ import { sunDirection } from './sun.ts';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { MAP_SIZE, SEA_LEVEL } from '../config.ts';
 import { T } from './tsl.ts';
+import { bc7 } from './compressedTexture.ts';
 
 const { vec3, vec4, float, mix, pow, clamp, dot, normalize, cameraPosition, positionWorld, sRGBTransferEOTF, mx_noise_float, time, max, uniform, smoothstep } = T;
 
@@ -58,6 +59,7 @@ export async function createScene(canvas: HTMLCanvasElement): Promise<SceneParts
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = TONE_EXPOSURE;
   const isWebGPU = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend === true;
+  bc7.on = isWebGPU && renderer.hasFeature('texture-compression-bc');
   let maxLayers = 256;
   try {
     const be = renderer.backend as { device?: { limits: { maxTextureArrayLayers: number } }; gl?: WebGL2RenderingContext };
